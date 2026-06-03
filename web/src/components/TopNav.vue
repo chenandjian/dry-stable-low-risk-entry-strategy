@@ -12,13 +12,11 @@
     <div class="topnav-right">
       <span class="market-indicator">A股市场</span>
       <span class="last-scan">上次扫描: --</span>
-      <button class="btn-primary" @click="$emit('startScan')">开始扫描</button>
     </div>
   </nav>
 </template>
 
 <script setup>
-defineEmits(['startScan'])
 </script>
 
 <style scoped>
