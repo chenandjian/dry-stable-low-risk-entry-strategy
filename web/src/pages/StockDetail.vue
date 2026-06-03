@@ -1,10 +1,340 @@
 <template>
-  <div class="page-content">
-    <h2>个股详情</h2>
-    <p>Coming soon...</p>
+  <div class="detail-layout">
+    <!-- LEFT: Analysis Summary -->
+    <div class="left-panel">
+      <div class="stock-id">
+        <div class="name">{{ stock.name || '--' }}</div>
+        <div class="code">{{ stock.code }} · {{ stock.market || 'A股' }}</div>
+        <div class="price-row">
+          <span class="price" :class="priceColor">{{ stock.latest_close?.toFixed(2) || '--' }}</span>
+          <span class="change" :class="priceColor" v-if="stock.change">{{ stock.change }}</span>
+        </div>
+        <div class="tags">
+          <SignalBadge :type="score >= 80 ? 'strong' : score >= 70 ? 'medium' : 'weak'">
+            {{ score >= 80 ? '强候选' : score >= 70 ? '中等候选' : '弱候选' }} · {{ score }}分
+          </SignalBadge>
+          <SignalBadge type="breakout" v-if="stock.is_breakout">◉ 已突破</SignalBadge>
+          <SignalBadge type="volume" v-if="stock.is_volume_breakout">放量确认</SignalBadge>
+        </div>
+      </div>
+
+      <div class="section-label">形态评分</div>
+      <div class="score-section">
+        <ScoreBar label="杯体结构" :current="32" :max="35" />
+        <ScoreBar label="柄部结构" :current="22" :max="25" />
+        <ScoreBar label="成交量结构" :current="17" :max="20" />
+        <ScoreBar label="前置上涨趋势" :current="9" :max="10" />
+        <ScoreBar label="突破确认" :current="7" :max="10" />
+        <div class="score-total">
+          <span class="total-label">形态总分</span>
+          <span class="total-value">{{ score }}</span>
+        </div>
+      </div>
+
+      <div class="section-label">关键价格</div>
+      <div class="kv-list">
+        <div class="kv"><span class="k">突破位</span><span class="v red">{{ stock.breakout_price?.toFixed(2) || '--' }}</span></div>
+        <div class="kv"><span class="k">止损位</span><span class="v orange">{{ stopLoss?.toFixed(2) || '--' }}</span></div>
+        <div class="kv"><span class="k">第一止盈</span><span class="v blue">{{ target1?.toFixed(2) || '--' }}</span></div>
+        <div class="kv"><span class="k">止损距离</span><span class="v red">{{ riskPct?.toFixed(1) }}%</span></div>
+        <div class="kv"><span class="k">盈亏比</span><span class="v blue">{{ rr1?.toFixed(1) }} : 1</span></div>
+      </div>
+
+      <div class="section-label">关键日期</div>
+      <div class="kv-list">
+        <div class="kv"><span class="k">左杯口</span><span class="v">{{ stock.left_high_date || '--' }}</span></div>
+        <div class="kv"><span class="k">杯底</span><span class="v">{{ stock.cup_low_date || '--' }}</span></div>
+        <div class="kv"><span class="k">右杯口</span><span class="v">{{ stock.right_high_date || '--' }}</span></div>
+        <div class="kv"><span class="k">柄部低点</span><span class="v">{{ stock.handle_low_date || '--' }}</span></div>
+        <div class="kv"><span class="k">突破日</span><span class="v red">{{ stock.breakout_date || '--' }}</span></div>
+      </div>
+
+      <RiskBox>
+        本页面为技术形态筛选工具，不构成投资建议。形态识别存在假突破可能，请结合基本面和其他技术指标综合判断。
+      </RiskBox>
+    </div>
+
+    <!-- CENTER: K-line Chart -->
+    <div class="center-panel">
+      <div class="chart-toolbar">
+        <div class="chart-left">
+          <button class="ct" :class="{ active: period === 'day' }" @click="period = 'day'">日K</button>
+          <button class="ct" :class="{ active: period === 'week' }" @click="period = 'week'">周K</button>
+        </div>
+        <div class="chart-right">
+          <span>{{ stock.cup_duration || '--' }}d 杯体 · 深度 {{ stock.cup_depth_pct?.toFixed(1) }}%</span>
+        </div>
+      </div>
+      <div ref="chartRef" class="chart-body"></div>
+      <div class="structure-readout">
+        <div class="structure-title">杯柄结构时间线</div>
+        <div class="structure-grid">
+          <div class="sc"><div class="phase">① 前置上涨</div><div class="val">+30%+</div><div class="vrd blue">上涨趋势 ✓</div></div>
+          <div class="sc"><div class="phase">② 杯体下降</div><div class="val">{{ stock.cup_depth_pct?.toFixed(1) }}%</div><div class="vrd gold">深度合理 ✓</div></div>
+          <div class="sc"><div class="phase">③ 杯底整理</div><div class="val">{{ stock.cup_duration }}d</div><div class="vrd blue">圆滑 ✓</div></div>
+          <div class="sc"><div class="phase">④ 右侧回升</div><div class="val">{{ stock.right_high_price?.toFixed(2) }}</div><div class="vrd blue">回升 ✓</div></div>
+          <div class="sc"><div class="phase">⑤ 柄部收缩</div><div class="val">{{ stock.handle_depth_pct?.toFixed(1) }}%</div><div class="vrd blue">缩量 ✓</div></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- RIGHT: Watchlist -->
+    <div class="right-panel">
+      <div class="wl-header">
+        <span class="wl-title">候选观察列表</span>
+        <span class="wl-count">{{ watchlist.length }} 只</span>
+      </div>
+      <div class="wl-filters">
+        <button class="wlf" :class="{ active: wlFilter === 'all' }" @click="wlFilter = 'all'">全部</button>
+        <button class="wlf" :class="{ active: wlFilter === 'breakout' }" @click="wlFilter = 'breakout'">已突破</button>
+        <button class="wlf" :class="{ active: wlFilter === 'near' }" @click="wlFilter = 'near'">接近突破</button>
+      </div>
+      <div class="wl-list">
+        <div v-for="w in filteredWatchlist" :key="w.code"
+          class="wl-item" :class="{ active: w.code === stock.code }"
+          @click="goToStock(w.code)"
+        >
+          <div class="wl-bar" :class="w.is_breakout ? 'wl-red' : w.score >= 70 ? 'wl-orange' : 'wl-blue'"></div>
+          <div class="wl-info">
+            <span class="wl-code">{{ w.code }}</span>
+            <span class="wl-name">{{ w.name }}</span>
+            <div class="wl-detail" v-if="w.is_breakout">已突破 · 放量{{ w.vol_multiplier?.toFixed(1) }}×</div>
+            <div class="wl-detail" v-else>距突破 {{ distFromBreakout(w) }}</div>
+          </div>
+          <span class="wl-score" :class="w.score >= 80 ? 'gold' : w.score >= 70 ? '' : 'muted'">{{ w.score }}</span>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
+<script setup>
+import { ref, computed, onMounted, watch, nextTick } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
+import { useApi } from '../composables/useApi.js'
+import * as echarts from 'echarts'
+import SignalBadge from '../components/SignalBadge.vue'
+import ScoreBar from '../components/ScoreBar.vue'
+import RiskBox from '../components/RiskBox.vue'
+
+const route = useRoute()
+const router = useRouter()
+const { getCandidate, getCandidates } = useApi()
+
+const stock = ref({})
+const score = ref(0)
+const watchlist = ref([])
+const wlFilter = ref('all')
+const period = ref('day')
+const chartRef = ref(null)
+let chart = null
+
+const stopLoss = computed(() => stock.value.handle_low_price ? (stock.value.handle_low_price * 0.98) : null)
+const target1 = computed(() => {
+  const cp = stock.value.latest_close
+  const sl = parseFloat(stopLoss.value)
+  if (!cp || !sl) return null
+  return cp + 2 * (cp - sl)
+})
+const riskPct = computed(() => {
+  const cp = stock.value.latest_close
+  const sl = parseFloat(stopLoss.value)
+  if (!cp || !sl) return 0
+  return ((cp - sl) / cp * 100)
+})
+const rr1 = computed(() => {
+  const cp = stock.value.latest_close
+  const sl = parseFloat(stopLoss.value)
+  const t1 = parseFloat(target1.value)
+  if (!cp || !sl || !t1 || cp <= sl) return 0
+  return ((t1 - cp) / (cp - sl))
+})
+const priceColor = computed(() => stock.value.change?.startsWith('+') ? 'red' : 'green')
+
+const filteredWatchlist = computed(() => {
+  if (wlFilter.value === 'breakout') return watchlist.value.filter(w => w.is_breakout)
+  if (wlFilter.value === 'near') return watchlist.value.filter(w => !w.is_breakout && w.score >= 70)
+  return watchlist.value
+})
+
+function distFromBreakout(w) {
+  if (!w.breakout_price || !w.latest_close) return '--'
+  return ((w.latest_close - w.breakout_price) / w.breakout_price * 100).toFixed(1) + '%'
+}
+
+function goToStock(code) {
+  router.push(`/stock/${code}`)
+}
+
+function initChart() {
+  if (!chartRef.value) return
+  if (chart) chart.dispose()
+  chart = echarts.init(chartRef.value, 'dark')
+
+  // Generate sample candlestick data
+  const dates = []
+  const ohlc = []
+  const volumes = []
+  const basePrice = stock.value.latest_close || 42
+  const n = 200
+  for (let i = 0; i < n; i++) {
+    const d = new Date(2026, 0, 1)
+    d.setDate(d.getDate() + i)
+    dates.push(d.toISOString().slice(0, 10))
+    const open = basePrice * (0.85 + Math.random() * 0.3)
+    const close = open * (0.98 + Math.random() * 0.04)
+    const high = Math.max(open, close) * (1 + Math.random() * 0.02)
+    const low = Math.min(open, close) * (1 - Math.random() * 0.02)
+    ohlc.push([open, close, low, high])
+    volumes.push([i, Math.random() * 20_000_000 + 5_000_000, close >= open ? 1 : -1])
+  }
+
+  const option = {
+    backgroundColor: '#070B14',
+    grid: [
+      { left: '8%', right: '3%', top: '5%', height: '65%' },
+      { left: '8%', right: '3%', top: '78%', height: '15%' },
+    ],
+    xAxis: [
+      { type: 'category', data: dates, gridIndex: 0, axisLine: { lineStyle: { color: '#1F2A3A' } }, axisLabel: { color: '#5A6A7E', fontSize: 10 } },
+      { type: 'category', data: dates, gridIndex: 1, axisLine: { lineStyle: { color: '#1F2A3A' } }, axisLabel: { show: false } },
+    ],
+    yAxis: [
+      { type: 'value', gridIndex: 0, scale: true, splitLine: { lineStyle: { color: '#1F2A3A', type: 'dashed' } }, axisLabel: { color: '#5A6A7E', fontSize: 10 } },
+      { type: 'value', gridIndex: 1, splitLine: { show: false }, axisLabel: { color: '#5A6A7E', fontSize: 9 } },
+    ],
+    series: [
+      {
+        type: 'candlestick', data: ohlc,
+        itemStyle: { color: '#EF4444', color0: '#22C55E', borderColor: '#EF4444', borderColor0: '#22C55E' },
+      },
+      {
+        type: 'bar', data: volumes, xAxisIndex: 1, yAxisIndex: 1,
+        itemStyle: {
+          color: function (params) { return params.data[2] > 0 ? 'rgba(239,68,68,0.4)' : 'rgba(34,197,94,0.4)' }
+        },
+      },
+    ],
+    tooltip: { trigger: 'axis', axisPointer: { type: 'cross' } },
+  }
+  chart.setOption(option)
+}
+
+watch(period, () => { initChart() })
+
+onMounted(async () => {
+  const code = route.params.code
+  if (code) {
+    const data = await getCandidate(code)
+    if (data) {
+      stock.value = data
+      score.value = data.score || 0
+    }
+  }
+  // Load watchlist
+  const cands = await getCandidates()
+  watchlist.value = (cands.candidates || []).map(c => ({
+    code: c.code, name: c.name, score: c.score,
+    is_breakout: c.is_breakout, is_volume_breakout: c.is_volume_breakout,
+    breakout_price: c.breakout_price, latest_close: c.latest_close,
+    vol_multiplier: c.vol_multiplier,
+  }))
+  await nextTick()
+  initChart()
+  window.addEventListener('resize', () => chart?.resize())
+})
+</script>
+
 <style scoped>
-.page-content { padding: 20px 24px; max-width: 1440px; margin: 0 auto; }
+.detail-layout {
+  display: grid; grid-template-columns: 280px 1fr 280px; height: calc(100vh - 48px);
+}
+@media (max-width: 1280px) { .detail-layout { grid-template-columns: 260px 1fr 0; } .right-panel { display: none; } }
+.left-panel, .right-panel {
+  background: var(--bg-panel); overflow-y: auto;
+}
+.left-panel { border-right: 1px solid var(--border); }
+.right-panel { border-left: 1px solid var(--border); display: flex; flex-direction: column; }
+
+.stock-id { padding: 16px; border-bottom: 1px solid var(--border); }
+.name { font-size: 20px; font-weight: 700; }
+.code { font-size: 13px; color: var(--accent); font-family: var(--font-mono); margin-top: 2px; }
+.price-row { display: flex; align-items: baseline; gap: 10px; margin-top: 10px; }
+.price { font-size: 32px; font-weight: 700; font-family: var(--font-mono); }
+.red { color: var(--up-red); }
+.green { color: var(--down-green); }
+.change { font-size: 14px; }
+.tags { display: flex; gap: 6px; margin-top: 10px; flex-wrap: wrap; }
+
+.section-label {
+  font-size: 11px; font-weight: 600; color: var(--text-muted);
+  text-transform: uppercase; letter-spacing: 0.8px; padding: 14px 16px 6px;
+}
+.score-section { padding: 0 16px 12px; }
+.score-total {
+  display: flex; justify-content: space-between; align-items: center;
+  margin-top: 8px; padding-top: 12px; border-top: 1px solid var(--border);
+}
+.total-label { font-size: 13px; font-weight: 600; color: var(--text-primary); }
+.total-value { font-size: 32px; font-weight: 700; font-family: var(--font-mono); color: var(--gold); }
+
+.kv-list { padding: 0 16px 8px; }
+.kv { display: flex; justify-content: space-between; padding: 4px 0; font-size: 12px; }
+.k { color: var(--text-muted); }
+.v { color: var(--text-primary); font-family: var(--font-mono); font-size: 12px; }
+.v.red { color: var(--up-red); }
+.v.orange { color: var(--warn-orange); }
+.v.blue { color: var(--accent); }
+
+.center-panel { display: flex; flex-direction: column; overflow: hidden; }
+.chart-toolbar {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 8px 16px; background: var(--bg-panel); border-bottom: 1px solid var(--border);
+}
+.ct {
+  font-size: 11px; padding: 4px 10px; border-radius: 3px;
+  border: 1px solid transparent; background: transparent; color: var(--text-muted); cursor: pointer;
+}
+.ct.active { background: rgba(79,125,255,0.12); border-color: var(--accent); color: var(--accent); }
+.chart-right { font-size: 11px; color: var(--text-muted); }
+.chart-body { flex: 1; min-height: 400px; }
+.structure-readout { padding: 12px 16px; background: var(--bg-panel); border-top: 1px solid var(--border); }
+.structure-title { font-size: 12px; font-weight: 600; color: var(--text-secondary); margin-bottom: 8px; }
+.structure-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; }
+.sc { background: var(--bg-card); border: 1px solid var(--border); border-radius: 4px; padding: 8px; }
+.phase { font-size: 10px; color: var(--text-muted); margin-bottom: 2px; }
+.val { font-size: 12px; font-family: var(--font-mono); color: var(--text-primary); font-weight: 600; }
+.vrd { font-size: 10px; margin-top: 2px; }
+.vrd.blue { color: var(--accent); }
+.vrd.gold { color: var(--gold); }
+
+/* Watchlist */
+.wl-header { padding: 14px 16px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; }
+.wl-title { font-size: 12px; font-weight: 600; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.5px; }
+.wl-count { font-size: 12px; color: var(--accent); }
+.wl-filters { padding: 8px 16px; border-bottom: 1px solid var(--border); display: flex; gap: 5px; }
+.wlf {
+  font-size: 10px; padding: 3px 8px; border-radius: 3px;
+  border: 1px solid var(--border); background: transparent; color: var(--text-muted); cursor: pointer;
+}
+.wlf.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+.wl-list { flex: 1; overflow-y: auto; }
+.wl-item {
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 14px; border-bottom: 1px solid rgba(31,42,58,0.5);
+  cursor: pointer; transition: background 0.1s;
+}
+.wl-item:hover { background: rgba(79,125,255,0.03); }
+.wl-item.active { background: rgba(79,125,255,0.08); border-left: 3px solid var(--accent); padding-left: 11px; }
+.wl-bar { width: 3px; height: 28px; border-radius: 2px; flex-shrink: 0; }
+.wl-red { background: var(--up-red); }
+.wl-orange { background: var(--warn-orange); }
+.wl-blue { background: var(--accent); }
+.wl-info { flex: 1; min-width: 0; }
+.wl-code { font-family: var(--font-mono); font-size: 12px; color: var(--accent); font-weight: 600; }
+.wl-name { font-size: 12px; color: var(--text-primary); margin-left: 4px; }
+.wl-detail { font-size: 10px; color: var(--text-muted); margin-top: 1px; }
+.wl-score { font-size: 16px; font-weight: 700; font-family: var(--font-mono); flex-shrink: 0; color: var(--text-primary); }
+.wl-score.gold { color: var(--gold); }
+.wl-score.muted { color: var(--text-muted); }
 </style>
