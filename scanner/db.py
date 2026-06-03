@@ -356,7 +356,7 @@ def get_candidates(task_id: str = None) -> list[dict]:
             "SELECT * FROM candidates WHERE task_id = ? ORDER BY score DESC", (latest[0],)
         ).fetchall()
 
-    col_names = [d[0] for d in conn.execute("PRAGMA table_info(candidates)").fetchall()]
+    col_names = [d[1] for d in conn.execute("PRAGMA table_info(candidates)").fetchall()]
     return [dict(zip(col_names, r)) for r in rows]
 
 
