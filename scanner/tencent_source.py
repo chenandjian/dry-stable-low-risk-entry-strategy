@@ -8,7 +8,7 @@ logger = logging.getLogger(__name__)
 
 
 def fetch_tencent_daily(code: str, days: int = 250) -> list[dict] | None:
-    """从腾讯财经获取单只股票的日线数据。
+    """从腾讯财经获取单只股票的日线数据（内部回退到新浪API）。
 
     Args:
         code: 股票代码，如 '600036' 或 '000001'
@@ -17,65 +17,111 @@ def fetch_tencent_daily(code: str, days: int = 250) -> list[dict] | None:
     Returns:
         list[dict]: [{date, open, high, low, close, volume, turnover}, ...]
         按日期升序排列。失败返回 None。
-
-    Note:
-        腾讯日线数据格式: ["2026-06-03", "42.000(open)", "43.000(close)", "41.500(high)", "42.850(low)", "123456.00(volume)"]
-        注意字段顺序: date, open, close, high, low, volume
     """
     if code.startswith("6"):
         symbol = f"sh{code}"
     else:
         symbol = f"sz{code}"
 
-    url = "http://web.ifzq.gtimg.cn/appstock/app/fqkline/get"
+    # Try Tencent K-line API (may be unavailable)
+    data = _try_tencent_kline(symbol, days)
+    if data:
+        return data
+
+    # Fallback: use Sina API (same as sina_source but accessed here)
+    logger.debug(f"Tencent API unavailable for {code}, falling back to Sina")
+    data = _try_sina_kline(symbol, days)
+    if data:
+        return data
+
+    return None
+
+
+def _try_tencent_kline(symbol: str, days: int) -> list[dict] | None:
+    """Attempt Tencent K-line API."""
+    url = "https://web.ifzq.gtimg.cn/appstock/app/fqkline/get"
     params = {
         "param": f"{symbol},day,,,{days}",
         "_var": "kline_day",
     }
 
-    max_retries = 2
-    last_error = None
-    for attempt in range(max_retries + 1):
-        try:
-            resp = requests.get(url, params=params, timeout=5)
-            resp.raise_for_status()
-            text = resp.text
+    try:
+        resp = requests.get(url, params=params, timeout=5)
+        resp.raise_for_status()
+        text = resp.text
 
-            # 响应格式: kline_day={...json...}
-            json_str = text.split("=", 1)[1].strip() if "=" in text else text
-            data = json.loads(json_str)
+        json_str = text.split("=", 1)[1].strip() if "=" in text else text
+        data = json.loads(json_str)
 
-            stock_data = data.get("data", {}).get(symbol, {})
-            # 优先使用前复权数据
-            klines = stock_data.get("qfqday") or stock_data.get("day", [])
-
-            if not klines:
-                logger.warning(f"Tencent returned empty data for {code}")
-                return None
-
-            result = []
-            for item in klines:
-                # 腾讯格式: [date, open, close, high, low, volume]
-                result.append({
-                    "date": item[0],
-                    "open": float(item[1]),
-                    "close": float(item[2]),
-                    "high": float(item[3]),
-                    "low": float(item[4]),
-                    "volume": float(item[5]),
-                    "turnover": None,  # 腾讯日线不直接给成交额
-                })
-            return result
-
-        except (requests.Timeout, requests.ConnectionError) as e:
-            last_error = e
-            if attempt < max_retries:
-                delay = 2 ** attempt  # 1s, 2s
-                logger.debug(f"Tencent retry {attempt + 1}/{max_retries} for {code} after {delay}s")
-                time.sleep(delay)
-            else:
-                logger.warning(f"Tencent fetch failed for {code} after {max_retries} retries: {e}")
-                return None
-        except (requests.HTTPError, ValueError, KeyError, IndexError, json.JSONDecodeError, TypeError) as e:
-            logger.warning(f"Tencent fetch/parse error for {code}: {e}")
+        if data.get("code") != 0:
             return None
+
+        stock_data = data.get("data", {}).get(symbol, {})
+        klines = stock_data.get("qfqday") or stock_data.get("day", [])
+
+        if not klines:
+            return None
+
+        result = []
+        for item in klines:
+            result.append({
+                "date": item[0],
+                "open": float(item[1]),
+                "close": float(item[2]),
+                "high": float(item[3]),
+                "low": float(item[4]),
+                "volume": float(item[5]),
+                "turnover": float(item[2]) * float(item[5]),
+            })
+        return result
+
+    except Exception:
+        return None
+
+
+def _try_sina_kline(symbol: str, days: int) -> list[dict] | None:
+    """Use Sina API as fallback."""
+    url = "https://quotes.sina.cn/cn/api/jsonp_v2.php/data/CN_MarketDataService.getKLineData"
+    params = {
+        "symbol": symbol,
+        "scale": "240",
+        "datalen": str(days),
+    }
+
+    try:
+        resp = requests.get(url, params=params, timeout=5, headers={
+            "Referer": "https://finance.sina.com.cn",
+        })
+        resp.raise_for_status()
+        text = resp.text
+
+        # Parse JSONP: data([...]);
+        if text.startswith("data(") and text.endswith(");"):
+            text = text[5:-2]
+        elif "(" in text:
+            start = text.index("(") + 1
+            end = text.rindex(")")
+            text = text[start:end]
+
+        raw_data = json.loads(text)
+
+        if not raw_data or not isinstance(raw_data, list):
+            return None
+
+        result = []
+        for item in raw_data:
+            close_price = float(item["close"])
+            volume = float(item["volume"])
+            result.append({
+                "date": item["day"],
+                "open": float(item["open"]),
+                "high": float(item["high"]),
+                "low": float(item["low"]),
+                "close": close_price,
+                "volume": volume,
+                "turnover": volume * close_price,
+            })
+        return result
+
+    except Exception:
+        return None

@@ -23,11 +23,10 @@ def fetch_sina_daily(code: str, days: int = 250) -> list[dict] | None:
     else:
         symbol = f"sz{code}"
 
-    url = "https://money.finance.sina.com.cn/quotes_service/api/json_v2.php/CN_MarketData/getKLineData"
+    url = "https://quotes.sina.cn/cn/api/jsonp_v2.php/data/CN_MarketDataService.getKLineData"
     params = {
         "symbol": symbol,
         "scale": "240",  # 日线
-        "ma": "no",
         "datalen": str(days),
     }
 
@@ -35,9 +34,23 @@ def fetch_sina_daily(code: str, days: int = 250) -> list[dict] | None:
     last_error = None
     for attempt in range(max_retries + 1):
         try:
-            resp = requests.get(url, params=params, timeout=5)
+            resp = requests.get(url, params=params, timeout=5, headers={
+                "Referer": "https://finance.sina.com.cn",
+            })
             resp.raise_for_status()
-            raw_data = resp.json()
+            text = resp.text
+
+            # Parse JSONP: data([...]);
+            if text.startswith("data(") and text.endswith(");"):
+                text = text[5:-2]
+            elif "(" in text:
+                # Handle other JSONP variations
+                start = text.index("(") + 1
+                end = text.rindex(")")
+                text = text[start:end]
+
+            import json
+            raw_data = json.loads(text)
 
             if not raw_data or not isinstance(raw_data, list):
                 logger.warning(f"Sina returned empty/invalid data for {code}")
@@ -54,7 +67,7 @@ def fetch_sina_daily(code: str, days: int = 250) -> list[dict] | None:
                     "low": float(item["low"]),
                     "close": close_price,
                     "volume": volume,
-                    "turnover": volume * close_price / 10000,
+                    "turnover": volume * close_price,
                 })
             return result
 
@@ -67,6 +80,6 @@ def fetch_sina_daily(code: str, days: int = 250) -> list[dict] | None:
             else:
                 logger.warning(f"Sina fetch failed for {code} after {max_retries} retries: {e}")
                 return None
-        except (requests.HTTPError, ValueError, KeyError, TypeError) as e:
+        except (requests.HTTPError, ValueError, KeyError, TypeError, json.JSONDecodeError) as e:
             logger.warning(f"Sina fetch/parse error for {code}: {e}")
             return None
