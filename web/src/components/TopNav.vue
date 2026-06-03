@@ -25,10 +25,9 @@ onMounted(async () => {
     const res = await fetch('/api/scan/tasks')
     const data = await res.json()
     const tasks = data.tasks || []
-    const completed = tasks.filter(t => !t.running)
-    if (completed.length) {
+    if (tasks.length) {
       // Use the start of the date string (e.g. "2026-06-04 00:39" → "06-04 00:39")
-      const d = completed[0].date
+      const d = tasks[0].date
       lastScan.value = d ? d.slice(5, 16) : d
     }
   } catch {}

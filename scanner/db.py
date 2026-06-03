@@ -201,6 +201,15 @@ def finish_scan_task(task_id: str, finished_at: str, candidates_count: int,
     conn.commit()
 
 
+def mark_dead_tasks_as_failed():
+    """Mark any running tasks as failed — they were interrupted by server restart."""
+    conn = get_conn()
+    conn.execute(
+        "UPDATE scan_tasks SET status='failed', error='Server restarted' WHERE status='running'"
+    )
+    conn.commit()
+
+
 def get_scan_tasks() -> list[dict]:
     """Get all scan tasks, most recent first."""
     conn = get_conn()

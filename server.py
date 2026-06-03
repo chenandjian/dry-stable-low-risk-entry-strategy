@@ -19,6 +19,7 @@ async def lifespan(app: FastAPI):
     config = load_config()
     db_path = config.get("data", {}).get("database_path", "data/cuphandle.db")
     db.init_db(db_path)
+    db.mark_dead_tasks_as_failed()
     logger.info(f"Database initialized at {db_path}")
 
     if config.get("scheduler", {}).get("enabled", False):
