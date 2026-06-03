@@ -30,7 +30,9 @@ onMounted(async () => {
       const d = tasks[0].date
       lastScan.value = d ? d.slice(5, 16) : d
     }
-  } catch {}
+  } catch (e) {
+    console.error('Failed to fetch last scan:', e)
+  }
 })
 </script>
 

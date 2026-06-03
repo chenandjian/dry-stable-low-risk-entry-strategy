@@ -73,9 +73,9 @@
               <td class="num">{{ c.latest_close?.toFixed(2) || '--' }}</td>
               <td class="num muted">{{ c.breakout_price?.toFixed(2) || '--' }}</td>
               <td class="num" :class="distClass(c)">{{ distPct(c) }}</td>
-              <td class="center">{{ c.cup_depth_pct?.toFixed(1) }}%</td>
+              <td class="center">{{ c.cup_depth_pct != null ? c.cup_depth_pct.toFixed(1) + '%' : '--' }}</td>
               <td class="center" :class="c.handle_depth_pct < 8 ? 'green' : c.handle_depth_pct > 12 ? 'red' : ''">
-                {{ c.handle_depth_pct?.toFixed(1) }}%
+                {{ c.handle_depth_pct != null ? c.handle_depth_pct.toFixed(1) + '%' : '--' }}
               </td>
               <td class="num muted">{{ c.cup_duration }}</td>
               <td class="center">
@@ -84,7 +84,7 @@
                 </SignalBadge>
               </td>
               <td class="num" :class="c.vol_multiplier >= 1.5 ? 'red' : ''">
-                {{ c.vol_multiplier?.toFixed(1) }}×
+                {{ c.vol_multiplier != null ? c.vol_multiplier.toFixed(1) + '×' : '--' }}
               </td>
             </tr>
             <tr v-if="filteredCandidates.length === 0">
@@ -161,12 +161,33 @@ function distClass(c) {
   return d > 0 ? 'red' : d > -0.05 ? 'orange' : 'muted'
 }
 function exportCSV() {
-  window.open('/api/candidates', '_blank')
+  const header = '代码,名称,评分,等级,突破,放量,最新价,突破位,杯体深度,柄部回撤,杯体天数,放量倍数'
+  const rows = candidates.value.map(c => [
+    c.code, c.name, c.score,
+    c.score >= 80 ? '强候选' : c.score >= 70 ? '中等候选' : '弱候选',
+    c.is_breakout ? '是' : '否',
+    c.is_volume_breakout ? '是' : '否',
+    c.latest_close?.toFixed(2) || '',
+    c.breakout_price?.toFixed(2) || '',
+    c.cup_depth_pct?.toFixed(1) || '',
+    c.handle_depth_pct?.toFixed(1) || '',
+    c.cup_duration || '',
+    c.vol_multiplier?.toFixed(1) || '',
+  ].join(','))
+  const blob = new Blob(['﻿' + [header, ...rows].join('\n')], { type: 'text/csv;charset=utf-8' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url; a.download = 'candidates.csv'; a.click()
+  URL.revokeObjectURL(url)
 }
 
 onMounted(async () => {
-  const data = await getCandidates()
-  candidates.value = data.candidates || []
+  try {
+    const data = await getCandidates()
+    candidates.value = data.candidates || []
+  } catch (e) {
+    console.error('Failed to load candidates:', e)
+  }
 })
 </script>
 

@@ -46,7 +46,6 @@
         <div class="kv"><span class="k">杯底</span><span class="v">{{ stock.cup_low_date || '--' }}</span></div>
         <div class="kv"><span class="k">右杯口</span><span class="v">{{ stock.right_high_date || '--' }}</span></div>
         <div class="kv"><span class="k">柄部低点</span><span class="v">{{ stock.handle_low_date || '--' }}</span></div>
-        <div class="kv"><span class="k">突破日</span><span class="v red">{{ stock.breakout_date || '--' }}</span></div>
       </div>
 
       <RiskBox>
@@ -58,8 +57,6 @@
     <div class="center-panel">
       <div class="chart-toolbar">
         <div class="chart-left">
-          <button class="ct" :class="{ active: period === 'day' }" @click="period = 'day'">日K</button>
-          <button class="ct" :class="{ active: period === 'week' }" @click="period = 'week'">周K</button>
         </div>
         <div class="chart-right">
           <span>{{ stock.cup_duration || '--' }}d 杯体 · 深度 {{ stock.cup_depth_pct?.toFixed(1) }}%</span>
@@ -109,7 +106,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, watch, nextTick } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useApi } from '../composables/useApi.js'
 import * as echarts from 'echarts'
@@ -125,7 +122,6 @@ const stock = ref({})
 const score = ref(0)
 const watchlist = ref([])
 const wlFilter = ref('all')
-const period = ref('day')
 const chartRef = ref(null)
 let chart = null
 
@@ -171,7 +167,19 @@ const handleScore = computed(() => {
   return Math.min(v, 25)
 })
 const volScore = computed(() => stock.value.is_volume_breakout ? 17 : 10)
-const trendScore = computed(() => 6)
+const trendScore = computed(() => {
+  const s = stock.value
+  if (!s.left_high_price || !s.cup_low_price) return 6
+  const cupLow = s.cup_low_price
+  const cupDuration = s.cup_duration || 60
+  // Estimate: cup formed from ~half of cup_duration before left_high
+  const preLow = cupLow * 0.85  // rough estimate
+  const gain = (s.left_high_price - preLow) / preLow
+  if (gain >= 0.25) return 10
+  if (gain >= 0.15) return 7
+  if (gain >= 0.10) return 4
+  return 3
+})
 const breakoutScore = computed(() => {
   const s = stock.value
   if (s.is_breakout && s.is_volume_breakout) return 10
@@ -217,7 +225,7 @@ async function initChart() {
   chart = echarts.init(chartRef.value, 'dark')
 
   const dates = ohlcRaw.map(d => d.date)
-  const ohlc = ohlcRaw.map(d => [+d.open.toFixed(2), +d.close.toFixed(2), +d.low.toFixed(2), +d.high.toFixed(2)])
+  const ohlc = ohlcRaw.map(d => [+(d.open ?? 0).toFixed(2), +(d.close ?? 0).toFixed(2), +(d.low ?? 0).toFixed(2), +(d.high ?? 0).toFixed(2)])
   const volumes = ohlcRaw.map((d, i) => [i, Math.round(d.volume || 0), d.close >= d.open ? 1 : -1])
 
   // Mark key pattern dates on chart
@@ -259,28 +267,36 @@ async function initChart() {
   chart.setOption(option)
 }
 
-watch(period, () => { initChart() })
+let resizeHandler = null
 
 onMounted(async () => {
-  const code = route.params.code
-  if (code) {
-    const data = await getCandidate(code)
-    if (data) {
-      stock.value = data
-      score.value = data.score || 0
+  try {
+    const code = route.params.code
+    if (code) {
+      const data = await getCandidate(code)
+      if (data) {
+        stock.value = data
+        score.value = data.score || 0
+      }
     }
+    // Load watchlist
+    const cands = await getCandidates()
+    watchlist.value = (cands.candidates || []).map(c => ({
+      code: c.code, name: c.name, score: c.score,
+      is_breakout: c.is_breakout, is_volume_breakout: c.is_volume_breakout,
+      breakout_price: c.breakout_price, latest_close: c.latest_close,
+      vol_multiplier: c.vol_multiplier,
+    }))
+    await nextTick()
+    initChart()
+    resizeHandler = () => chart?.resize()
+    window.addEventListener('resize', resizeHandler)
+  } catch (e) {
+    console.error('Failed to load stock detail:', e)
   }
-  // Load watchlist
-  const cands = await getCandidates()
-  watchlist.value = (cands.candidates || []).map(c => ({
-    code: c.code, name: c.name, score: c.score,
-    is_breakout: c.is_breakout, is_volume_breakout: c.is_volume_breakout,
-    breakout_price: c.breakout_price, latest_close: c.latest_close,
-    vol_multiplier: c.vol_multiplier,
-  }))
-  await nextTick()
-  initChart()
-  window.addEventListener('resize', () => chart?.resize())
+})
+onUnmounted(() => {
+  if (resizeHandler) window.removeEventListener('resize', resizeHandler)
 })
 </script>
 

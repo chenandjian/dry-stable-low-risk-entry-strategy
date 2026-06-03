@@ -228,6 +228,14 @@ async def list_tasks():
     db_tasks = db.get_scan_tasks()
     for t in db_tasks:
         if t["id"] != running_id:
+            # Compute stats from candidates
+            c = db.get_candidates(t["id"])
+            if c:
+                scores = [x["score"] for x in c]
+                t["topScore"] = max(scores)
+                t["avgScore"] = round(sum(scores)/len(scores), 1)
+                t["aGrade"] = sum(1 for x in c if x["score"] >= 80)
+                t["breakout"] = sum(1 for x in c if x.get("is_breakout"))
             tasks.append(t)
     return {"tasks": tasks}
 
@@ -295,6 +303,7 @@ async def get_candidate(code: str):
         "vol_multiplier": c.get("vol_multiplier", 0),
         "latest_close": c.get("latest_close", 0),
         "latest_turnover": c.get("latest_turnover", 0),
+        "lip_deviation_pct": c.get("lip_deviation_pct", 0),
     }
 
 

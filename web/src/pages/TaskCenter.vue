@@ -55,8 +55,12 @@ function viewResults(id) { /* TODO Phase 3: filter by task id */ router.push('/r
 function exportResults(id) { /* TODO Phase 3: filter by task id */ window.open('/api/candidates', '_blank') }
 
 async function loadTasks() {
-  const data = await getScanTasks()
-  tasks.value = (data.tasks || [])
+  try {
+    const data = await getScanTasks()
+    tasks.value = (data.tasks || [])
+  } catch (e) {
+    console.error('Failed to load tasks:', e)
+  }
 }
 
 onMounted(() => {

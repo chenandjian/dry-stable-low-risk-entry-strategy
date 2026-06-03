@@ -134,14 +134,15 @@ async function pollStatus() {
             score: d.score,
             rating: d.score >= 80 ? 'strong' : d.score >= 70 ? 'medium' : 'weak',
             status: d.is_breakout ? 'breakout' : d.score >= 70 ? 'near' : 'watch',
-            detail: d.detail || '',
+            detail: d.detail || [d.cup_duration && `杯体${d.cup_duration}d`, d.cup_depth_pct && `回撤${d.cup_depth_pct}%`].filter(Boolean).join(' · ') || '',
           })
         }
       })
       updateMetrics()
     }
   } catch (e) {
-    // ignore
+    scanError.value = '状态查询失败'
+    console.error(e)
   }
 }
 
@@ -158,7 +159,7 @@ async function loadResults() {
     }))
     updateMetrics()
   } catch (e) {
-    // ignore
+    console.error('Load results failed:', e)
   }
 }
 
@@ -183,17 +184,19 @@ function updateMetrics() {
 onMounted(async () => {
   await loadResults()
   // Check if a scan is already running
-  const status = await getScanStatus()
-  if (status.running) {
-    scanning.value = true
-    if (status.stats) {
-      scanProgress.scanned = status.stats.scanned || 0
-      scanProgress.total = status.stats.total_stocks || 5128
-      scanProgress.currentCode = status.stats.current_code || '--'
-      scanProgress.currentName = status.stats.current_name || '--'
+  try {
+    const status = await getScanStatus()
+    if (status.running) {
+      scanning.value = true
+      if (status.stats) {
+        scanProgress.scanned = status.stats.scanned || 0
+        scanProgress.total = status.stats.total_stocks || 5128
+        scanProgress.currentCode = status.stats.current_code || '--'
+        scanProgress.currentName = status.stats.current_name || '--'
+      }
+      pollTimer = setInterval(pollStatus, 1000)
     }
-    pollTimer = setInterval(pollStatus, 1000)
-  }
+  } catch (e) { console.error('Check status on mount failed:', e) }
 })
 onUnmounted(() => { if (pollTimer) clearInterval(pollTimer) })
 </script>
