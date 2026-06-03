@@ -11,12 +11,28 @@
     </div>
     <div class="topnav-right">
       <span class="market-indicator">A股市场</span>
-      <span class="last-scan">上次扫描: --</span>
+      <span class="last-scan">上次扫描: {{ lastScan || '--' }}</span>
     </div>
   </nav>
 </template>
 
 <script setup>
+import { ref, onMounted } from 'vue'
+const lastScan = ref('')
+
+onMounted(async () => {
+  try {
+    const res = await fetch('/api/scan/tasks')
+    const data = await res.json()
+    const tasks = data.tasks || []
+    const completed = tasks.filter(t => !t.running)
+    if (completed.length) {
+      // Use the start of the date string (e.g. "2026-06-04 00:39" → "06-04 00:39")
+      const d = completed[0].date
+      lastScan.value = d ? d.slice(5, 16) : d
+    }
+  } catch {}
+})
 </script>
 
 <style scoped>
