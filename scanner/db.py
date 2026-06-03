@@ -210,6 +210,39 @@ def mark_dead_tasks_as_failed():
     conn.commit()
 
 
+def get_interrupted_task() -> dict | None:
+    """Get the most recent interrupted task for resume."""
+    conn = get_conn()
+    row = conn.execute(
+        "SELECT id, scanned, total_stocks FROM scan_tasks WHERE status='failed' "
+        "AND error='Server restarted' ORDER BY started_at DESC LIMIT 1"
+    ).fetchone()
+    if not row or row[1] >= row[2]:
+        return None
+    return {"id": row[0], "scanned": row[1], "total_stocks": row[2]}
+
+
+def save_task_stocks(task_id: str, stocks: list):
+    """Save stock pool for a task (for resume support)."""
+    conn = get_conn()
+    conn.execute("DELETE FROM task_stocks WHERE task_id = ?", (task_id,))
+    conn.executemany(
+        "INSERT INTO task_stocks (task_id, idx, code, name, scanned) VALUES (?, ?, ?, ?, 0)",
+        [(task_id, i, s["code"], s["name"]) for i, s in enumerate(stocks)]
+    )
+    conn.commit()
+
+
+def get_pending_stocks(task_id: str, from_idx: int = 0) -> list[dict]:
+    """Get remaining stocks to scan for a resumed task."""
+    conn = get_conn()
+    rows = conn.execute(
+        "SELECT code, name FROM task_stocks WHERE task_id = ? AND idx >= ? ORDER BY idx",
+        (task_id, from_idx)
+    ).fetchall()
+    return [{"code": r[0], "name": r[1]} for r in rows]
+
+
 def get_scan_tasks() -> list[dict]:
     """Get all scan tasks, most recent first."""
     conn = get_conn()

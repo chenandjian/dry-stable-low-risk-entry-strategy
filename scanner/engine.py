@@ -15,12 +15,13 @@ from scanner.scorer import score_cup_handle
 logger = logging.getLogger(__name__)
 
 
-def scan_all(config: dict, progress_callback=None) -> dict:
+def scan_all(config: dict, progress_callback=None, resume_task_id: str = None) -> dict:
     """双线程全市场扫描。
 
     Args:
         config: 完整配置
         progress_callback: 可选进度回调 fn(stage, current, total, detail)
+        resume_task_id: 中断任务 ID，恢复时跳过已扫股票
 
     Returns:
         {"candidates": [...], "stats": {...}, "task_id": "..."}
@@ -31,10 +32,21 @@ def scan_all(config: dict, progress_callback=None) -> dict:
     db_path = config.get("data", {}).get("database_path", "data/cuphandle.db")
     db.init_db(db_path)
 
-    stocks = get_a_stock_pool(config)
+    # 股票池加载（支持恢复模式）
+    start_offset = 0
+    stocks = None
+    if resume_task_id:
+        info = db.get_interrupted_task()
+        if info:
+            start_offset = info.get("scanned", 0)
+            stocks = db.get_pending_stocks(resume_task_id, from_idx=start_offset)
     if not stocks:
-        logger.error("Empty stock pool, aborting")
-        return {"candidates": [], "stats": {"error": "empty_pool"}}
+        stocks = get_a_stock_pool(config)
+        start_offset = 0
+        # 保存股票列表供续扫
+        if not resume_task_id:
+            task_id = __import__('time').strftime("%Y%m%d-%H%M%S")
+            db.save_task_stocks(task_id, stocks)
 
     stock_queue = Queue()
     for s in stocks:

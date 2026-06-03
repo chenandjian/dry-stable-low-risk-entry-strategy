@@ -20,6 +20,20 @@ async def lifespan(app: FastAPI):
     db_path = config.get("data", {}).get("database_path", "data/cuphandle.db")
     db.init_db(db_path)
     db.mark_dead_tasks_as_failed()
+    # 自动恢复中断的扫描
+    interrupted = db.get_interrupted_task()
+    if interrupted:
+        logger.info(f"Resuming interrupted scan: {interrupted['id']} at {interrupted['scanned']}/{interrupted['total_stocks']}")
+        import threading
+        def resume_scan():
+            _running["running"] = True
+            _running["task_id"] = interrupted["id"]
+            result = scan_all(config, resume_task_id=interrupted["id"])
+            _running["running"] = False
+            _running["stats"] = result["stats"]
+            _running["candidates"] = result["candidates"]
+        t = threading.Thread(target=resume_scan, daemon=True)
+        t.start()
     logger.info(f"Database initialized at {db_path}")
 
     if config.get("scheduler", {}).get("enabled", False):
