@@ -20,11 +20,11 @@
 
       <div class="section-label">形态评分</div>
       <div class="score-section">
-        <ScoreBar label="杯体结构" :current="32" :max="35" />
-        <ScoreBar label="柄部结构" :current="22" :max="25" />
-        <ScoreBar label="成交量结构" :current="17" :max="20" />
-        <ScoreBar label="前置上涨趋势" :current="9" :max="10" />
-        <ScoreBar label="突破确认" :current="7" :max="10" />
+        <ScoreBar label="杯体结构" :current="cupScore" :max="35" />
+        <ScoreBar label="柄部结构" :current="handleScore" :max="25" />
+        <ScoreBar label="成交量结构" :current="volScore" :max="20" />
+        <ScoreBar label="前置上涨趋势" :current="trendScore" :max="10" />
+        <ScoreBar label="突破确认" :current="breakoutScore" :max="10" />
         <div class="score-total">
           <span class="total-label">形态总分</span>
           <span class="total-value">{{ score }}</span>
@@ -69,11 +69,11 @@
       <div class="structure-readout">
         <div class="structure-title">杯柄结构时间线</div>
         <div class="structure-grid">
-          <div class="sc"><div class="phase">① 前置上涨</div><div class="val">+30%+</div><div class="vrd blue">上涨趋势 ✓</div></div>
-          <div class="sc"><div class="phase">② 杯体下降</div><div class="val">{{ stock.cup_depth_pct?.toFixed(1) }}%</div><div class="vrd gold">深度合理 ✓</div></div>
-          <div class="sc"><div class="phase">③ 杯底整理</div><div class="val">{{ stock.cup_duration }}d</div><div class="vrd blue">圆滑 ✓</div></div>
-          <div class="sc"><div class="phase">④ 右侧回升</div><div class="val">{{ stock.right_high_price?.toFixed(2) }}</div><div class="vrd blue">回升 ✓</div></div>
-          <div class="sc"><div class="phase">⑤ 柄部收缩</div><div class="val">{{ stock.handle_depth_pct?.toFixed(1) }}%</div><div class="vrd blue">缩量 ✓</div></div>
+          <div class="sc"><div class="phase">① 前置上涨</div><div class="val">{{ stock.left_high_price?.toFixed(2) }}</div><div class="vrd blue">左杯口高点</div></div>
+          <div class="sc"><div class="phase">② 杯体下降</div><div class="val">{{ stock.cup_depth_pct?.toFixed(1) }}%</div><div class="vrd gold">深度{{ stock.cup_depth_pct >= 12 && stock.cup_depth_pct <= 33 ? '合理' : '偏离' }}</div></div>
+          <div class="sc"><div class="phase">③ 杯底整理</div><div class="val">{{ stock.cup_duration }}d</div><div class="vrd blue">杯体{{ stock.cup_duration >= 50 ? '成熟' : '偏短' }}</div></div>
+          <div class="sc"><div class="phase">④ 右侧回升</div><div class="val">{{ stock.right_high_price?.toFixed(2) }}</div><div class="vrd blue">右杯口高点</div></div>
+          <div class="sc"><div class="phase">⑤ 柄部收缩</div><div class="val">{{ stock.handle_depth_pct?.toFixed(1) }}%</div><div class="vrd" :class="stock.handle_depth_pct <= 12 ? 'gold' : 'blue'">{{ stock.handle_depth_pct <= 12 ? '回撤合理' : '回撤偏深' }}</div></div>
         </div>
       </div>
     </div>
@@ -150,6 +150,34 @@ const rr1 = computed(() => {
   return ((t1 - cp) / (cp - sl))
 })
 const priceColor = computed(() => stock.value.change?.startsWith('+') ? 'red' : 'green')
+
+// Dynamic sub-scores based on cup/handle data
+const cupScore = computed(() => {
+  const s = stock.value; let v = 0
+  const d = s.cup_depth_pct || 0
+  if (d >= 12 && d <= 33) v += 10; else if (d > 33 && d <= 45) v += 5; else v += 3
+  const dur = s.cup_duration || 0
+  if (dur >= 50 && dur <= 120) v += 8; else if (dur >= 35 && dur <= 180) v += 4
+  const dev = s.lip_deviation_pct || 0
+  if (dev <= 5) v += 7; else if (dev <= 8) v += 5; else if (dev <= 12) v += 3
+  v += 6; return Math.min(v, 35)
+})
+const handleScore = computed(() => {
+  const s = stock.value; let v = 0
+  const d = s.handle_depth_pct || 0; const dur = s.handle_duration || 0
+  if (dur >= 5 && dur <= 20) v += 8; else if (dur > 20 && dur <= 30) v += 5
+  if (d <= 8) v += 10; else if (d <= 12) v += 7; else if (d <= 18) v += 3
+  if (d <= 10) v += 7; else if (d <= 15) v += 4
+  return Math.min(v, 25)
+})
+const volScore = computed(() => stock.value.is_volume_breakout ? 17 : 10)
+const trendScore = computed(() => 6)
+const breakoutScore = computed(() => {
+  const s = stock.value
+  if (s.is_breakout && s.is_volume_breakout) return 10
+  if (s.is_breakout) return 7
+  return 3
+})
 
 const filteredWatchlist = computed(() => {
   if (wlFilter.value === 'breakout') return watchlist.value.filter(w => w.is_breakout)

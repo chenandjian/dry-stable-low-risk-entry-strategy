@@ -101,8 +101,15 @@ async def start_scan():
                         "code": discovery["code"],
                         "name": discovery["name"],
                         "score": discovery["score"],
+                        "rating": "强候选" if discovery["score"] >= 80 else "中等候选" if discovery["score"] >= 70 else "弱候选",
                         "is_breakout": discovery["is_breakout"],
-                        "detail": f"杯体{discovery['cup_duration']}d · 回撤{discovery['cup_depth_pct']}%"
+                        "is_volume_breakout": discovery.get("is_volume_breakout", False),
+                        "cup_depth_pct": discovery["cup_depth_pct"],
+                        "cup_duration": discovery["cup_duration"],
+                        "handle_depth_pct": discovery["handle_depth_pct"],
+                        "vol_multiplier": discovery["vol_multiplier"],
+                        "breakout_price": discovery.get("breakout_price", 0),
+                        "latest_close": discovery.get("latest_close", 0),
                     })
                     _running["stats"] = {
                         **stats,
@@ -211,10 +218,10 @@ async def list_tasks():
 
 @app.get("/api/candidates")
 async def get_candidates():
-    # If a scan just completed, prefer its results via DB
+    # During scan, return real-time discoveries
     if _running["running"]:
-        # During scan, return empty — candidates are finalized after scan
-        return {"candidates": [], "total": 0}
+        ds = _running.get("stats", {}).get("discoveries") or []
+        return {"candidates": ds, "total": len(ds)}
 
     cands = db.get_candidates()
     result = []

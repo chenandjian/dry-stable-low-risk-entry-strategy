@@ -113,10 +113,13 @@ def scan_all(config: dict, progress_callback=None) -> dict:
                                               {"code": code, "name": stock.get("name", ""),
                                                "score": result.score,
                                                "is_breakout": result.is_breakout,
+                                               "is_volume_breakout": result.is_volume_breakout,
+                                               "breakout_price": result.breakout_price,
                                                "cup_depth_pct": result.cup_depth_pct,
                                                "cup_duration": result.cup_duration,
                                                "handle_depth_pct": result.handle_depth_pct,
-                                               "vol_multiplier": result.vol_multiplier})
+                                               "vol_multiplier": result.vol_multiplier,
+                                               "latest_close": stock.get("latest_close", 0)})
 
                 with stats_lock:
                     scanned_count[0] += 1
