@@ -1,6 +1,7 @@
 # server.py
 import logging
 import threading
+from contextlib import asynccontextmanager
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse
 import yaml
@@ -9,7 +10,22 @@ from scanner.engine import scan_all
 
 logger = logging.getLogger(__name__)
 
-app = FastAPI(title="CupHandleScan API")
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Startup: load config, start scheduler if enabled."""
+    config = load_config()
+    if config.get("scheduler", {}).get("enabled", False):
+        from scheduler.scheduler import start_scheduler
+        start_scheduler(config)
+        logger.info("Scheduler auto-started on server launch")
+    yield
+    # Shutdown
+    from scheduler.scheduler import stop_scheduler
+    stop_scheduler()
+    logger.info("Server shutting down")
+
+
+app = FastAPI(title="CupHandleScan API", lifespan=lifespan)
 
 _scan_status = {
     "running": False,
@@ -112,6 +128,13 @@ async def get_candidate(code: str):
                 "vol_multiplier": r.vol_multiplier,
             }
     return JSONResponse({"error": "Not found"}, status_code=404)
+
+
+@app.get("/api/config")
+async def get_config():
+    """Return current configuration (excluding sensitive fields)."""
+    config = load_config()
+    return {"config": config}
 
 
 @app.websocket("/ws/scan")
