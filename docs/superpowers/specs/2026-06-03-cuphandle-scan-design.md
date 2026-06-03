@@ -73,6 +73,10 @@ cuphandle-scan/
 ├── README.md
 ├── server.py                  # FastAPI Web 服务入口
 │
+├── scheduler/                 # 定时任务
+│   ├── __init__.py
+│   └── scheduler.py           # 每日 15:30 自动扫描调度
+│
 ├── scanner/                   # 杯柄扫描引擎
 │   ├── __init__.py
 │   ├── engine.py              # 扫描引擎主控（双线程调度）
@@ -152,7 +156,37 @@ cuphandle-scan/
     └── test_data_source.py
 ```
 
-### 2.3 数据源互斥锁 + 回退设计
+### 2.3 定时任务调度
+
+使用 APScheduler 实现每日定时扫描。A股收盘时间为 15:00，留 30 分钟缓冲确保数据已更新。
+
+```
+scheduler.py:
+  - 每日 15:30 触发全市场扫描
+  - 支持 cron 表达式配置
+  - 扫描任务异步执行，不阻塞调度器
+  - 如果上一次扫描仍未完成，跳过本次（防止堆积）
+  - 扫描完成后可选发送通知（日志/WebSocket/Webhook）
+  - 支持手动触发（不影响定时规则）
+  - 可通过配置文件开关
+```
+
+**调度器配置（config.yaml 新增）:**
+```yaml
+scheduler:
+  enabled: false          # 默认关闭，需手动开启
+  cron: "30 15 * * 1-5"  # 每周一到周五 15:30
+  skip_if_running: true   # 上次未完成则跳过
+  on_complete: log        # log | webhook
+  webhook_url: null
+```
+
+**调度器生命周期:**
+- `python main.py serve` 启动 Web 服务时，调度器随 FastAPI 一起启动
+- `python main.py schedule` 仅启动调度器（无 Web 服务），适合轻量部署
+- 调度器在应用 shutdown 时优雅关闭，等待当前任务完成
+
+### 2.4 数据源互斥锁 + 回退设计
 
 ```
 ┌──────────────────────────────────────────────────────────┐
@@ -387,8 +421,11 @@ python main.py scan --charts
 # 使用指定配置
 python main.py scan --config my_config.yaml
 
-# 启动 Web 服务
+# 启动 Web 服务（含调度器）
 python main.py serve --port 8080
+
+# 仅启动调度器（无 Web 服务）
+python main.py schedule
 
 # 历史任务查看
 python main.py tasks
