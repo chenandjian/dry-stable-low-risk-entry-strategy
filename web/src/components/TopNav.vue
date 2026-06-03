@@ -7,6 +7,7 @@
       <router-link to="/" class="topnav-tab" active-class="active">机会雷达</router-link>
       <router-link to="/results" class="topnav-tab" active-class="active">候选列表</router-link>
       <router-link to="/tasks" class="topnav-tab" active-class="active">任务中心</router-link>
+      <router-link to="/config" class="topnav-tab" active-class="active">策略配置</router-link>
     </div>
     <div class="topnav-right">
       <span class="market-indicator">A股市场</span>

@@ -28,5 +28,23 @@ export function useApi() {
     return res.json()
   }
 
-  return { startScan, getScanStatus, getCandidates, getCandidate, getScanTasks }
+  async function getConfig() {
+    try {
+      const res = await fetch(`${API_BASE}/config`)
+      return res.json()
+    } catch { return { config: {} } }
+  }
+
+  async function updateConfig(data) {
+    try {
+      const res = await fetch(`${API_BASE}/config`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data),
+      })
+      return res.json()
+    } catch { return { status: 'error', message: '保存失败' } }
+  }
+
+  return { startScan, getScanStatus, getCandidates, getCandidate, getScanTasks, getConfig, updateConfig }
 }

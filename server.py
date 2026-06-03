@@ -56,6 +56,15 @@ def load_config(path: str = "config.yaml") -> dict:
         return yaml.safe_load(f)
 
 
+def _deep_merge(base: dict, update: dict):
+    """Recursively merge update into base. Only updates provided keys."""
+    for key, value in update.items():
+        if key in base and isinstance(base[key], dict) and isinstance(value, dict):
+            _deep_merge(base[key], value)
+        else:
+            base[key] = value
+
+
 @app.get("/api/scan/start")
 async def start_scan():
     global _running
@@ -108,20 +117,6 @@ async def start_scan():
             # Update final stats
             s = result["stats"]
             _running["stats"] = s
-
-            # Mark scan as completed in DB
-            db.finish_scan_task(
-                task_id,
-                finished_at=datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                candidates_count=s.get("candidates_found", 0),
-                elapsed_seconds=s.get("elapsed_seconds", 0),
-                scanned=s.get("scanned", 0),
-                skipped=s.get("skipped", 0),
-            )
-
-            # Save candidates to DB
-            if result["candidates"]:
-                db.save_candidates(task_id, result["candidates"])
 
             # Mark scan as completed in DB
             db.finish_scan_task(
@@ -251,6 +246,25 @@ async def get_config():
     """Return current configuration (excluding sensitive fields)."""
     config = load_config()
     return {"config": config}
+
+
+@app.put("/api/config")
+async def update_config(data: dict):
+    """Update configuration and write to config.yaml.
+
+    Accepts partial config updates. Only specified fields are changed.
+    """
+    config = load_config()
+
+    # Deep merge: only update provided keys
+    _deep_merge(config, data)
+
+    # Write back to config.yaml
+    with open("config.yaml", "w", encoding="utf-8") as f:
+        yaml.dump(config, f, allow_unicode=True, default_flow_style=False, sort_keys=False)
+
+    logger.info("Configuration updated")
+    return {"status": "ok", "message": "配置已保存"}
 
 
 @app.websocket("/ws/scan")
