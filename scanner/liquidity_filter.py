@@ -44,6 +44,12 @@ def passes_liquidity_filter(data: list[dict], config: dict) -> bool:
         logger.debug(f"  liquidity fail: latest_turnover={latest_turnover:,.0f} < {config['min_latest_turnover']:,.0f}")
         return False
 
+    # 4. 最低股价过滤
+    min_price = config.get("min_stock_price", 10)
+    if latest["close"] < min_price:
+        logger.debug(f"  liquidity fail: close={latest['close']:.2f} < {min_price}")
+        return False
+
     return True
 
 

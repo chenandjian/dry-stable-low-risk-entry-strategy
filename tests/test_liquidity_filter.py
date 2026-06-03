@@ -47,6 +47,28 @@ def test_empty_data_fails():
     assert passes_liquidity_filter([], {"enabled": True}) is False
 
 
+def test_low_price_filtered():
+    """股价低于阈值的股票被过滤"""
+    data = _make_data(close=8.0, volume=10_000_000, count=30)
+    config = {
+        "enabled": True, "min_stock_price": 10,
+        "min_avg_turnover": 50_000_000, "min_avg_volume": 1_000_000,
+        "min_latest_turnover": 50_000_000, "avg_turnover_days": 20,
+    }
+    assert passes_liquidity_filter(data, config) is False
+
+
+def test_high_price_passes():
+    """股价高于阈值的股票通过"""
+    data = _make_data(close=25.0, volume=10_000_000, count=30)
+    config = {
+        "enabled": True, "min_stock_price": 10,
+        "min_avg_turnover": 50_000_000, "min_avg_volume": 1_000_000,
+        "min_latest_turnover": 50_000_000, "avg_turnover_days": 20,
+    }
+    assert passes_liquidity_filter(data, config) is True
+
+
 def test_insufficient_days():
     """数据天数不足时不通过"""
     data = _make_data(close=40.0, volume=10_000_000, count=5)

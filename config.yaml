@@ -21,6 +21,7 @@ liquidity:
   min_avg_turnover: 100000000    # 1亿
   min_avg_volume: 5000000        # 500万股
   min_latest_turnover: 80000000  # 8000万
+  min_stock_price: 10           # 最低股价 10元
 
 cup:
   min_duration: 35

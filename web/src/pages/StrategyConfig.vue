@@ -37,6 +37,12 @@
             @input="markDirty" step="1000000" />
           <span class="default">默认 8000万</span>
         </div>
+        <div class="param">
+          <label>最低股价 <span class="unit">元</span></label>
+          <input type="number" v-model.number="config.liquidity.min_stock_price"
+            @input="markDirty" step="1" min="0" />
+          <span class="default">默认 10元</span>
+        </div>
       </div>
     </section>
 
