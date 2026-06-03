@@ -20,6 +20,12 @@ python -m pytest tests/test_data_source.py::test_acquire_release_single_source -
 
 # 安装依赖
 pip install -r requirements.txt
+
+# 前端开发
+cd web && npm install && npm run dev
+
+# 前端构建
+cd web && npm run build
 ```
 
 ## Architecture
@@ -27,13 +33,20 @@ pip install -r requirements.txt
 ```
 入口层:    main.py (CLI)  /  server.py (FastAPI)  /  scheduler/scheduler.py
 引擎层:    scanner/engine.py (双线程扫描调度)
-数据层:    scanner/data_source.py (互斥锁管理)
+数据层:    scanner/db.py (SQLite 持久化)
+           scanner/data_source.py (互斥锁管理)
            scanner/sina_source.py / tencent_source.py (HTTP抓取)
            scanner/stock_pool.py (股票池)
 算法层:    scanner/pattern_detector.py (杯柄识别)
            scanner/liquidity_filter.py (流动性过滤)
            scanner/scorer.py (评分 0-100)
-输出层:    output/csv_writer.py
+分析层:    analyzer/volume_dry.py (量干评分 0-10)
+           analyzer/price_stable.py (价稳评分 0-10)
+           analyzer/pattern_score.py (形态评分 0-20)
+           analyzer/key_prices.py + risk_reward.py (关键价格/仓位)
+回测层:    scanner/backtester.py (历史回测)
+输出层:    output/csv_writer.py / json_writer.py
+前端:      web/ (Vue 3 + ECharts · 深色金融终端风格)
 ```
 
 **核心设计决策:**
@@ -45,18 +58,27 @@ pip install -r requirements.txt
 - **配置文件驱动：** 所有阈值（杯体深度、柄部回撤、流动性等）在 `config.yaml` 中可调。
 - **形态评分维度：** 杯体结构 35 + 柄部结构 25 + 成交量结构 20 + 前置趋势 10 + 突破确认 10 = 100 分。
 - **A股配色：** 红涨绿跌。金色仅用于 ≥80 分 A 级信号。
+- **SQLite 持久化：** 数据存储于 `data/cuphandle.db`（stock_pool, daily_ohlc, scan_tasks, candidates）。线程级连接 + WAL 模式。
+- **新浪 API：** `quotes.sina.cn/cn/api/jsonp_v2.php/data/CN_MarketDataService.getKLineData` — 返回 JSONP 需手动解析。腾讯 API 不可用时内部回退到新浪。
 
 ## Key Files
 
 | File | Purpose |
 |---|---|
-| `config.yaml` | 所有可调参数（市场/流动性/杯体/柄部/突破/评分/输出/调度） |
+| `config.yaml` | 所有可调参数（市场/流动性/杯体/柄部/突破/评分/输出/调度/数据库） |
+| `scanner/db.py` | SQLite 数据库层 — 连接管理 + 5 表 CRUD |
 | `scanner/data_source.py` | `DataSourceManager` — 新浪+腾讯双源互斥锁 |
 | `scanner/sina_source.py` | `fetch_sina_daily(code, days)` → `list[dict] \| None` |
-| `scanner/tencent_source.py` | `fetch_tencent_daily(code, days)` → `list[dict] \| None` |
+| `scanner/tencent_source.py` | `fetch_tencent_daily(code, days)` → `list[dict] \| None`（内部回退新浪） |
 | `scanner/pattern_detector.py` | `detect_cup_handle(data, config)` → `CupHandleResult` |
-| `scanner/scorer.py` | `score_cup_handle(result)` → `int` (0-100) |
+| `scanner/scorer.py` | `score_cup_handle(result)` / `score_cup_handle_advanced(result, data)` → `int` (0-100) |
 | `scanner/engine.py` | `scan_all(config)` — 双线程全市场扫描主循环 |
+| `scanner/backtester.py` | `run_backtest(stocks, fetch_fn, config)` — 历史回测 |
+| `analyzer/volume_dry.py` | `score_volume_dry(data)` → `VolumeDryResult` (0-10) |
+| `analyzer/price_stable.py` | `score_price_stable(data)` → `PriceStableResult` (0-10) |
+| `analyzer/risk_reward.py` | `calculate_risk_reward(...)` → `RiskRewardResult` |
+| `server.py` | FastAPI 服务 — CORS + lifespan + 历史持久化 |
+| `web/src/pages/ScannerConsole.vue` | 前端首页 — 机会雷达控制台 |
 
 ## Design Specs
 
@@ -65,18 +87,9 @@ pip install -r requirements.txt
 - 原始开发需求: `docs/DEVELOPMENT_DOC.md` (杯柄扫描) + `docs/dry-stable-low-risk-entry-strategy.md` (干稳低吸策略)
 - 前端设计需求: `docs/art.md`
 
-## Implementation Status
-
-Phase 1 进行中。已完成:
-- `config.yaml`, `requirements.txt`, package 骨架
-- `scanner/data_source.py` — DataSourceManager 互斥锁 (5 tests passing)
-- `scanner/sina_source.py` / `scanner/tencent_source.py` — 日线数据获取
-
-待完成 (Tasks 4-12): stock_pool, liquidity_filter, pattern_detector, scorer, csv_writer, engine + main.py, server.py, scheduler, README
-
 ## .gitignore Policy
 
-向 `.gitignore` 新增条目前，先告知用户确认。当前已忽略: Python 产物、虚拟环境、IDE 配置、`output_data/`、`logs/`、`cache/`、`.superpowers/`。
+向 `.gitignore` 新增条目前，先告知用户确认。当前已忽略: Python 产物、虚拟环境、IDE 配置、`output_data/`、`logs/`、`cache/`、`data/`、`node_modules/`、`.superpowers/`。
 
 # Git Safety Rules
 
