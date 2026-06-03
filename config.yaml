@@ -1,0 +1,69 @@
+market:
+  include_sh: true       # 沪市主板
+  include_sz: true       # 深市主板
+  include_cyb: true      # 创业板
+  include_kcb: true      # 科创板
+  exclude_bj: true       # 排除北交所
+  exclude_st: true       # 排除 ST/*ST
+  min_listing_days: 120  # 新股最短上市天数
+
+data:
+  cache_enabled: true
+  cache_dir: ./cache/daily
+  start_date: "2025-01-01"
+  end_date: null         # null = 最近交易日
+  use_fq: true           # 前复权
+
+liquidity:
+  enabled: true
+  avg_turnover_days: 20
+  min_avg_turnover: 100000000    # 1亿
+  min_avg_volume: 5000000        # 500万股
+  min_latest_turnover: 80000000  # 8000万
+
+cup:
+  min_duration: 35
+  max_duration: 180
+  min_depth: 0.12
+  max_depth: 0.45
+  max_lip_deviation: 0.12
+  min_bottom_roundness: 0.15
+  filter_v_shape: true
+
+handle:
+  min_duration: 5
+  max_duration: 30
+  max_depth: 0.18
+  max_vs_right_rally: 0.50
+
+breakout:
+  buffer_pct: 0.02       # 突破缓冲 2%
+  volume_multiplier: 1.5 # 放量倍数
+  use_volume_confirm: true
+
+scoring:
+  cup_weight: 35
+  handle_weight: 25
+  volume_weight: 20
+  trend_weight: 10
+  breakout_weight: 10
+  strong_threshold: 80
+  medium_threshold: 70
+
+output:
+  csv: true
+  json: true
+  charts: false
+  output_dir: ./output_data
+  log_dir: ./logs
+
+server:
+  host: 127.0.0.1
+  port: 8080
+
+scheduler:
+  enabled: false          # 默认关闭，需手动开启
+  cron: "30 15 * * 1-5"  # 每周一到周五 15:30
+  skip_if_running: true   # 上次未完成则跳过
+  on_complete: log        # log | webhook
+  webhook_url: null
