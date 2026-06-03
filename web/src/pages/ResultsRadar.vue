@@ -130,8 +130,11 @@ const filteredCandidates = computed(() => {
   else if (activeFilter.value === 'volume') list = list.filter(c => c.is_volume_breakout)
 
   list.sort((a, b) => {
-    if (sortBy.value === 'score') return b.score - a.score
-    return (b[sortBy.value] || 0) - (a[sortBy.value] || 0)
+    const field = sortBy.value
+    const va = a[field]
+    const vb = b[field]
+    if (typeof va === 'string') return va.localeCompare(vb)
+    return (vb || 0) - (va || 0)
   })
   return list
 })
@@ -157,7 +160,9 @@ function distClass(c) {
   const d = (c.latest_close - c.breakout_price) / c.breakout_price
   return d > 0 ? 'red' : d > -0.05 ? 'orange' : 'muted'
 }
-function exportCSV() { window.open('/api/candidates?format=csv') }
+function exportCSV() {
+  window.open('/api/candidates', '_blank')
+}
 
 onMounted(async () => {
   const data = await getCandidates()

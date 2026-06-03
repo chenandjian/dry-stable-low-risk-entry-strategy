@@ -2,7 +2,7 @@
   <div class="score-bar-item">
     <div class="score-row">
       <span class="score-label">{{ label }}</span>
-      <span class="score-value" :class="valueColor">{{ current }} / {{ max }} </span>
+      <span class="score-value" :style="valueColor">{{ current }} / {{ max }} </span>
     </div>
     <div class="score-track">
       <div class="score-fill" :class="barColor" :style="{ width: pct + '%' }"></div>

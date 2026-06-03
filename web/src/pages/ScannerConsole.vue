@@ -10,6 +10,11 @@
       <MetricCard label="最高评分" :value="metrics.topScore" :sub="topScoreSub" color="gold" />
     </div>
 
+    <!-- Error message -->
+    <div v-if="scanError" class="error-banner">
+      ⚠ {{ scanError }}
+    </div>
+
     <!-- Two Column -->
     <div class="two-col">
       <!-- Discovery Panel -->
@@ -62,6 +67,7 @@ const router = useRouter()
 const { startScan, getScanStatus, getCandidates } = useApi()
 
 const scanning = ref(false)
+const scanError = ref('')
 const scanProgress = reactive({ scanned: 0, total: 5128, currentCode: '--', currentName: '--', skipped: 0 })
 const logLines = ref([])
 const discoveries = ref([])
@@ -80,12 +86,21 @@ function goToStock(code) {
 }
 
 async function handleStartScan() {
-  scanning.value = true
+  scanError.value = ''
   try {
     const res = await startScan()
+    if (res.error) {
+      const messages = {
+        'Scan already running': '扫描已在运行中，请等待当前扫描完成',
+      }
+      scanError.value = messages[res.error] || res.error
+      return
+    }
+    scanning.value = true
     pollTimer = setInterval(pollStatus, 1000)
   } catch (e) {
-    scanning.value = false
+    scanError.value = '无法连接到后端服务，请确认 python main.py serve 已启动'
+    console.error('Start scan failed:', e)
   }
 }
 
@@ -106,6 +121,8 @@ async function pollStatus() {
       scanProgress.scanned = status.stats.scanned || 0
       scanProgress.total = status.stats.total_stocks || 5128
       scanProgress.skipped = status.stats.skipped || 0
+      scanProgress.currentCode = status.stats.current_code || '--'
+      scanProgress.currentName = status.stats.current_name || '--'
     }
   } catch (e) {
     // ignore
@@ -147,7 +164,21 @@ function updateMetrics() {
   metrics.topScore = list.reduce((max, d) => Math.max(max, d.score), 0)
 }
 
-onMounted(loadResults)
+onMounted(async () => {
+  await loadResults()
+  // Check if a scan is already running
+  const status = await getScanStatus()
+  if (status.running) {
+    scanning.value = true
+    if (status.stats) {
+      scanProgress.scanned = status.stats.scanned || 0
+      scanProgress.total = status.stats.total_stocks || 5128
+      scanProgress.currentCode = status.stats.current_code || '--'
+      scanProgress.currentName = status.stats.current_name || '--'
+    }
+    pollTimer = setInterval(pollStatus, 1000)
+  }
+})
 onUnmounted(() => { if (pollTimer) clearInterval(pollTimer) })
 </script>
 
@@ -170,5 +201,10 @@ onUnmounted(() => { if (pollTimer) clearInterval(pollTimer) })
 .sub-title { font-weight: 400; font-size: 11px; }
 .empty-state {
   padding: 40px 16px; text-align: center; color: var(--text-muted); font-size: 13px;
+}
+.error-banner {
+  background: rgba(239,68,68,0.1); border: 1px solid rgba(239,68,68,0.3);
+  border-radius: 6px; padding: 12px 16px; margin-bottom: 12px;
+  color: var(--up-red); font-size: 13px;
 }
 </style>

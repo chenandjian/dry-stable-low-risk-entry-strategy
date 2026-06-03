@@ -171,23 +171,83 @@ function initChart() {
   if (chart) chart.dispose()
   chart = echarts.init(chartRef.value, 'dark')
 
-  // Generate sample candlestick data
+  const s = stock.value
+  const basePrice = s.latest_close || 10
+  const cupDuration = Math.max(s.cup_duration || 120, 30)
+  const n = Math.min(cupDuration + 40, 250)
+
+  // Build a price curve that approximates the cup & handle pattern
+  const leftHigh = s.left_high_price || basePrice * 1.15
+  const cupLow = s.cup_low_price || basePrice * 0.75
+  const rightHigh = s.right_high_price || basePrice * 1.08
+  const handleLow = s.handle_low_price || basePrice * 0.92
+
+  // Phase boundaries (indices): pre-trend -> cup down -> cup base -> cup up -> handle -> near current
+  const preEnd = Math.floor(n * 0.08)
+  const downEnd = Math.floor(n * 0.30)
+  const baseEnd = Math.floor(n * 0.48)
+  const rightEnd = Math.floor(n * 0.75)
+  const handleEnd = Math.floor(n * 0.88)
+
+  function cupPrice(i) {
+    if (i <= preEnd) {
+      const t = i / preEnd
+      return basePrice * 0.7 + (leftHigh - basePrice * 0.7) * t
+    }
+    if (i <= downEnd) {
+      const t = (i - preEnd) / (downEnd - preEnd)
+      return leftHigh + (cupLow - leftHigh) * (t * t)
+    }
+    if (i <= baseEnd) {
+      const t = (i - downEnd) / (baseEnd - downEnd)
+      return cupLow + (cupLow * 0.03) * Math.sin(t * Math.PI)
+    }
+    if (i <= rightEnd) {
+      const t = (i - baseEnd) / (rightEnd - baseEnd)
+      return cupLow + (rightHigh - cupLow) * (t * t * (3 - 2 * t))
+    }
+    if (i <= handleEnd) {
+      const t = (i - rightEnd) / (handleEnd - rightEnd)
+      return rightHigh + (handleLow - rightHigh) * (t * t)
+    }
+    const t = (i - handleEnd) / (n - handleEnd)
+    return handleLow + (basePrice - handleLow) * t
+  }
+
   const dates = []
   const ohlc = []
   const volumes = []
-  const basePrice = stock.value.latest_close || 42
-  const n = 200
+  // Start date — anchor from cup duration days ago
+  const endDate = new Date()
+  const startDate = new Date(endDate)
+  startDate.setDate(startDate.getDate() - n)
+
   for (let i = 0; i < n; i++) {
-    const d = new Date(2026, 0, 1)
+    const d = new Date(startDate)
     d.setDate(d.getDate() + i)
     dates.push(d.toISOString().slice(0, 10))
-    const open = basePrice * (0.85 + Math.random() * 0.3)
-    const close = open * (0.98 + Math.random() * 0.04)
-    const high = Math.max(open, close) * (1 + Math.random() * 0.02)
-    const low = Math.min(open, close) * (1 - Math.random() * 0.02)
-    ohlc.push([open, close, low, high])
-    volumes.push([i, Math.random() * 20_000_000 + 5_000_000, close >= open ? 1 : -1])
+
+    const center = cupPrice(i)
+    const wiggle = 1 + (Math.random() - 0.5) * 0.04
+    const open = center * (0.99 + Math.random() * 0.02) * wiggle
+    const close = center * (0.99 + Math.random() * 0.02) * wiggle
+    const high = Math.max(open, close) * (1 + Math.random() * 0.015)
+    const low = Math.min(open, close) * (1 - Math.random() * 0.015)
+    ohlc.push([+open.toFixed(2), +close.toFixed(2), +low.toFixed(2), +high.toFixed(2)])
+
+    // Lower volume in the handle zone, higher near breakout
+    const baseVol = Math.random() * 15_000_000 + 5_000_000
+    const handleFactor = (i >= rightEnd && i <= handleEnd) ? 0.5 : 1.0
+    const breakoutFactor = i > handleEnd ? 1.8 : 1.0
+    volumes.push([i, Math.round(baseVol * handleFactor * breakoutFactor), close >= open ? 1 : -1])
   }
+
+  // Mark key pattern dates
+  const markPoints = []
+  if (s.left_high_date) markPoints.push({ name: '左杯口', coord: [s.left_high_date, leftHigh], value: '左杯口', symbol: 'pin', symbolSize: 30, itemStyle: { color: '#F59E0B' }, label: { show: true, color: '#F59E0B', fontSize: 10 } })
+  if (s.cup_low_date) markPoints.push({ name: '杯底', coord: [s.cup_low_date, cupLow], value: '杯底', symbol: 'pin', symbolSize: 30, itemStyle: { color: '#EF4444' }, label: { show: true, color: '#EF4444', fontSize: 10 } })
+  if (s.right_high_date) markPoints.push({ name: '右杯口', coord: [s.right_high_date, rightHigh], value: '右杯口', symbol: 'pin', symbolSize: 30, itemStyle: { color: '#F59E0B' }, label: { show: true, color: '#F59E0B', fontSize: 10 } })
+  if (s.handle_low_date) markPoints.push({ name: '柄部低点', coord: [s.handle_low_date, handleLow], value: '柄部低点', symbol: 'pin', symbolSize: 30, itemStyle: { color: '#4F7DFF' }, label: { show: true, color: '#4F7DFF', fontSize: 10 } })
 
   const option = {
     backgroundColor: '#070B14',
@@ -207,6 +267,7 @@ function initChart() {
       {
         type: 'candlestick', data: ohlc,
         itemStyle: { color: '#EF4444', color0: '#22C55E', borderColor: '#EF4444', borderColor0: '#22C55E' },
+        markPoint: markPoints.length ? { data: markPoints, symbol: 'circle', symbolSize: 6, label: { fontSize: 9, color: '#fff' } } : undefined,
       },
       {
         type: 'bar', data: volumes, xAxisIndex: 1, yAxisIndex: 1,

@@ -42,28 +42,28 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useApi } from '../composables/useApi.js'
 
 const router = useRouter()
 const { getScanTasks } = useApi()
 const tasks = ref([])
+let pollTimer = null
 
-function viewResults(id) { router.push('/results') }
-function exportResults(id) { window.open(`/api/candidates?format=csv`) }
+function viewResults(id) { /* TODO Phase 3: filter by task id */ router.push('/results') }
+function exportResults(id) { /* TODO Phase 3: filter by task id */ window.open('/api/candidates', '_blank') }
 
-onMounted(async () => {
+async function loadTasks() {
   const data = await getScanTasks()
-  tasks.value = (data.tasks || []).map(t => ({ ...t, running: false }))
-  // Add demo tasks if empty
-  if (!tasks.value.length) {
-    tasks.value = [
-      { id: 'task-1', date: '2026-06-03 14:30', scope: '全市场 · 5,128只', running: false, duration: '8m 42s', candidates: 12, topScore: 87, avgScore: 73.5, aGrade: 3, breakout: 2 },
-      { id: 'task-2', date: '2026-06-02 09:45', scope: '全市场 · 5,126只', running: false, duration: '9m 15s', candidates: 9, topScore: 84, avgScore: 72.1, aGrade: 2, breakout: 3 },
-    ]
-  }
+  tasks.value = (data.tasks || [])
+}
+
+onMounted(() => {
+  loadTasks()
+  pollTimer = setInterval(loadTasks, 2000)
 })
+onUnmounted(() => { if (pollTimer) clearInterval(pollTimer) })
 </script>
 
 <style scoped>

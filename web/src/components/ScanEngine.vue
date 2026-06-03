@@ -28,7 +28,7 @@
 
     <div class="panel-header sub">
       <span>扫描日志</span>
-      <span class="toggle" @click="$emit('toggleLog')">{{ logExpanded ? '收起' : '展开' }}</span>
+      <span class="toggle" @click="logExpanded = !logExpanded">{{ logExpanded ? '收起' : '展开' }}</span>
     </div>
     <div v-if="logExpanded" class="log-lines">
       <div v-for="(line, i) in logLines" :key="i" class="log-line">
@@ -57,7 +57,7 @@ const props = defineProps({
   skipped: Number,
   logLines: { type: Array, default: () => [] },
 })
-defineEmits(['start', 'pause', 'stop', 'toggleLog'])
+defineEmits(['start', 'pause', 'stop'])
 
 const logExpanded = ref(true)
 const progressPct = computed(() => props.total > 0 ? Math.round(props.scanned / props.total * 100) : 0)

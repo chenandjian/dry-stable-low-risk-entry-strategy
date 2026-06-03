@@ -4,7 +4,7 @@
       CupHandle<span class="accent">Scan</span>
     </div>
     <div class="topnav-tabs">
-      <router-link to="/" class="topnav-tab" active-class="active" exact>机会雷达</router-link>
+      <router-link to="/" class="topnav-tab" active-class="active">机会雷达</router-link>
       <router-link to="/results" class="topnav-tab" active-class="active">候选列表</router-link>
       <router-link to="/tasks" class="topnav-tab" active-class="active">任务中心</router-link>
     </div>
