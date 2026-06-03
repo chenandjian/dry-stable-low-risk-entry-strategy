@@ -234,10 +234,17 @@ async def list_tasks():
             c = db.get_candidates(t["id"])
             if c:
                 scores = [x["score"] for x in c]
+                t["candidates"] = len(c)
                 t["topScore"] = max(scores)
                 t["avgScore"] = round(sum(scores)/len(scores), 1)
                 t["aGrade"] = sum(1 for x in c if x["score"] >= 80)
                 t["breakout"] = sum(1 for x in c if x.get("is_breakout"))
+            else:
+                t["candidates"] = 0
+                t["topScore"] = 0
+                t["avgScore"] = 0
+                t["aGrade"] = 0
+                t["breakout"] = 0
             tasks.append(t)
     return {"tasks": tasks}
 
