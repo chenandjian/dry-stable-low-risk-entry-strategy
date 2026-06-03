@@ -91,20 +91,39 @@ async def start_scan():
 
     def run():
         try:
-            def on_progress(stage, current, total, detail):
+            def on_progress(stage, current, total, detail, discovery=None):
                 """实时更新扫描进度到内存状态和数据库。"""
-                code = detail.split()[0] if detail else ""
-                _running["stats"] = {
-                    "scanned": current,
-                    "total_stocks": total,
-                    "skipped": _running.get("stats", {}).get("skipped", 0),
-                    "candidates_found": _running.get("stats", {}).get("candidates_found", 0),
-                    "current_code": code,
-                    "current_name": detail[len(code):].strip() if len(detail) > len(code) else detail,
-                }
+                stats = _running.get("stats", {})
+                if stage == "discovery" and discovery:
+                    found = stats.get("candidates_found", 0) + 1
+                    discoveries = list(stats.get("discoveries") or [])
+                    discoveries.insert(0, {
+                        "code": discovery["code"],
+                        "name": discovery["name"],
+                        "score": discovery["score"],
+                        "is_breakout": discovery["is_breakout"],
+                        "detail": f"杯体{discovery['cup_duration']}d · 回撤{discovery['cup_depth_pct']}%"
+                    })
+                    _running["stats"] = {
+                        **stats,
+                        "discoveries": discoveries[:20],
+                        "candidates_found": found,
+                    }
+                else:
+                    code = detail.split()[0] if detail else ""
+                    s = stats.copy()
+                    s.update({
+                        "scanned": current,
+                        "total_stocks": total,
+                        "current_code": code,
+                        "current_name": detail[len(code):].strip() if len(detail) > len(code) else detail,
+                    })
+                    s.setdefault("candidates_found", 0)
+                    s.setdefault("skipped", 0)
+                    _running["stats"] = s
                 db.update_scan_progress(
                     task_id,
-                    scanned=current,
+                    scanned=_running["stats"].get("scanned", 0),
                     skipped=_running["stats"].get("skipped", 0),
                     candidates_count=_running["stats"].get("candidates_found", 0),
                 )

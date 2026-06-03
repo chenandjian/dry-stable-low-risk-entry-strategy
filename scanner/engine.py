@@ -106,6 +106,17 @@ def scan_all(config: dict, progress_callback=None) -> dict:
                     if result.score >= scoring_cfg.get("medium_threshold", 70) - 10:
                         with candidate_lock:
                             candidates.append((stock, result))
+                        # 通知发现新候选
+                        if progress_callback:
+                            progress_callback("discovery", len(candidates), len(stocks),
+                                              f"{code} {stock.get('name','')}",
+                                              {"code": code, "name": stock.get("name", ""),
+                                               "score": result.score,
+                                               "is_breakout": result.is_breakout,
+                                               "cup_depth_pct": result.cup_depth_pct,
+                                               "cup_duration": result.cup_duration,
+                                               "handle_depth_pct": result.handle_depth_pct,
+                                               "vol_multiplier": result.vol_multiplier})
 
                 with stats_lock:
                     scanned_count[0] += 1

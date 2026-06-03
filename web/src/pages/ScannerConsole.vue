@@ -124,6 +124,22 @@ async function pollStatus() {
       scanProgress.currentCode = status.stats.current_code || '--'
       scanProgress.currentName = status.stats.current_name || '--'
     }
+    // 实时更新候选发现
+    if (status.stats.discoveries) {
+      status.stats.discoveries.forEach(d => {
+        if (!discoveries.value.find(e => e.code === d.code)) {
+          discoveries.value.unshift({
+            code: d.code,
+            name: d.name,
+            score: d.score,
+            rating: d.score >= 80 ? 'strong' : d.score >= 70 ? 'medium' : 'weak',
+            status: d.is_breakout ? 'breakout' : d.score >= 70 ? 'near' : 'watch',
+            detail: d.detail || '',
+          })
+        }
+      })
+      updateMetrics()
+    }
   } catch (e) {
     // ignore
   }
