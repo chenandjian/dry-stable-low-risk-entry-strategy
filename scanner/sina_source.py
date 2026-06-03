@@ -1,6 +1,7 @@
 # scanner/sina_source.py
 import requests
 import logging
+import time
 
 logger = logging.getLogger(__name__)
 
@@ -30,33 +31,42 @@ def fetch_sina_daily(code: str, days: int = 250) -> list[dict] | None:
         "datalen": str(days),
     }
 
-    try:
-        resp = requests.get(url, params=params, timeout=5)
-        resp.raise_for_status()
-        raw_data = resp.json()
+    max_retries = 2
+    last_error = None
+    for attempt in range(max_retries + 1):
+        try:
+            resp = requests.get(url, params=params, timeout=5)
+            resp.raise_for_status()
+            raw_data = resp.json()
 
-        if not raw_data or not isinstance(raw_data, list):
-            logger.warning(f"Sina returned empty/invalid data for {code}")
+            if not raw_data or not isinstance(raw_data, list):
+                logger.warning(f"Sina returned empty/invalid data for {code}")
+                return None
+
+            result = []
+            for item in raw_data:
+                close_price = float(item["close"])
+                volume = float(item["volume"])
+                result.append({
+                    "date": item["day"],
+                    "open": float(item["open"]),
+                    "high": float(item["high"]),
+                    "low": float(item["low"]),
+                    "close": close_price,
+                    "volume": volume,
+                    "turnover": volume * close_price / 10000,
+                })
+            return result
+
+        except (requests.Timeout, requests.ConnectionError) as e:
+            last_error = e
+            if attempt < max_retries:
+                delay = 2 ** attempt  # 1s, 2s
+                logger.debug(f"Sina retry {attempt + 1}/{max_retries} for {code} after {delay}s")
+                time.sleep(delay)
+            else:
+                logger.warning(f"Sina fetch failed for {code} after {max_retries} retries: {e}")
+                return None
+        except (requests.HTTPError, ValueError, KeyError, TypeError) as e:
+            logger.warning(f"Sina fetch/parse error for {code}: {e}")
             return None
-
-        result = []
-        for item in raw_data:
-            close_price = float(item["close"])
-            volume = float(item["volume"])
-            result.append({
-                "date": item["day"],
-                "open": float(item["open"]),
-                "high": float(item["high"]),
-                "low": float(item["low"]),
-                "close": close_price,
-                "volume": volume,
-                "turnover": volume * close_price / 10000,
-            })
-        return result
-
-    except (requests.Timeout, requests.ConnectionError, requests.HTTPError) as e:
-        logger.warning(f"Sina fetch failed for {code}: {e}")
-        return None
-    except (ValueError, KeyError, TypeError) as e:
-        logger.warning(f"Sina parse error for {code}: {e}")
-        return None

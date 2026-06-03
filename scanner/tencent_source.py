@@ -2,6 +2,7 @@
 import requests
 import json
 import logging
+import time
 
 logger = logging.getLogger(__name__)
 
@@ -32,40 +33,49 @@ def fetch_tencent_daily(code: str, days: int = 250) -> list[dict] | None:
         "_var": "kline_day",
     }
 
-    try:
-        resp = requests.get(url, params=params, timeout=5)
-        resp.raise_for_status()
-        text = resp.text
+    max_retries = 2
+    last_error = None
+    for attempt in range(max_retries + 1):
+        try:
+            resp = requests.get(url, params=params, timeout=5)
+            resp.raise_for_status()
+            text = resp.text
 
-        # 响应格式: kline_day={...json...}
-        json_str = text.split("=", 1)[1].strip() if "=" in text else text
-        data = json.loads(json_str)
+            # 响应格式: kline_day={...json...}
+            json_str = text.split("=", 1)[1].strip() if "=" in text else text
+            data = json.loads(json_str)
 
-        stock_data = data.get("data", {}).get(symbol, {})
-        # 优先使用前复权数据
-        klines = stock_data.get("qfqday") or stock_data.get("day", [])
+            stock_data = data.get("data", {}).get(symbol, {})
+            # 优先使用前复权数据
+            klines = stock_data.get("qfqday") or stock_data.get("day", [])
 
-        if not klines:
-            logger.warning(f"Tencent returned empty data for {code}")
+            if not klines:
+                logger.warning(f"Tencent returned empty data for {code}")
+                return None
+
+            result = []
+            for item in klines:
+                # 腾讯格式: [date, open, close, high, low, volume]
+                result.append({
+                    "date": item[0],
+                    "open": float(item[1]),
+                    "close": float(item[2]),
+                    "high": float(item[3]),
+                    "low": float(item[4]),
+                    "volume": float(item[5]),
+                    "turnover": None,  # 腾讯日线不直接给成交额
+                })
+            return result
+
+        except (requests.Timeout, requests.ConnectionError) as e:
+            last_error = e
+            if attempt < max_retries:
+                delay = 2 ** attempt  # 1s, 2s
+                logger.debug(f"Tencent retry {attempt + 1}/{max_retries} for {code} after {delay}s")
+                time.sleep(delay)
+            else:
+                logger.warning(f"Tencent fetch failed for {code} after {max_retries} retries: {e}")
+                return None
+        except (requests.HTTPError, ValueError, KeyError, IndexError, json.JSONDecodeError, TypeError) as e:
+            logger.warning(f"Tencent fetch/parse error for {code}: {e}")
             return None
-
-        result = []
-        for item in klines:
-            # 腾讯格式: [date, open, close, high, low, volume]
-            result.append({
-                "date": item[0],
-                "open": float(item[1]),
-                "close": float(item[2]),
-                "high": float(item[3]),
-                "low": float(item[4]),
-                "volume": float(item[5]),
-                "turnover": None,  # 腾讯日线不直接给成交额
-            })
-        return result
-
-    except (requests.Timeout, requests.ConnectionError, requests.HTTPError) as e:
-        logger.warning(f"Tencent fetch failed for {code}: {e}")
-        return None
-    except (ValueError, KeyError, IndexError, json.JSONDecodeError) as e:
-        logger.warning(f"Tencent parse error for {code}: {e}")
-        return None

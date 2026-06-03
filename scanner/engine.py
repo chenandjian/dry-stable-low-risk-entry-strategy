@@ -138,37 +138,82 @@ def scan_all(config: dict, progress_callback=None) -> dict:
 
 
 def _fetch_with_fallback(code: str, primary_ds: str, mgr: DataSourceManager):
-    """三级回退：主源 → 备用源 → 缓存。"""
+    """三级回退：缓存 → 主源 → 备用源。
+
+    优化：先检查本地缓存是否覆盖最近交易日。
+    """
+    from datetime import datetime, timedelta
+
+    # 1. 先尝试本地缓存
+    cached = _load_from_cache(code)
+    if cached and _is_cache_fresh(cached):
+        return cached
+
+    # 2. 主数据源
     fetch_fn = fetch_sina_daily if primary_ds == "sina" else fetch_tencent_daily
     data = fetch_fn(code)
 
     if data:
-        # Save to cache
+        if cached:
+            data = _merge_data(cached, data)
         _save_to_cache(code, data)
         return data
 
-    # 回退另一个数据源
+    # 3. 回退另一个数据源
     other = "tencent" if primary_ds == "sina" else "sina"
     if mgr.acquire(other):
         try:
             fetch_fn2 = fetch_tencent_daily if other == "tencent" else fetch_sina_daily
             data = fetch_fn2(code)
             if data:
+                if cached:
+                    data = _merge_data(cached, data)
                 _save_to_cache(code, data)
                 return data
         finally:
             mgr.release(other)
 
-    # 回退本地缓存
-    cache_path = f"cache/daily/{code}.json"
-    if os.path.exists(cache_path):
-        try:
-            with open(cache_path, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except Exception:
-            pass
+    # 4. 如果有过期缓存也返回
+    if cached:
+        return cached
 
     return None
+
+
+def _is_cache_fresh(data: list[dict]) -> bool:
+    """检查缓存是否覆盖最近一个交易日。"""
+    if not data:
+        return False
+    from datetime import datetime, timedelta
+    latest_date = data[-1]["date"]
+    today = datetime.now()
+    # 如果最新日期在最近2天内，认为缓存新鲜
+    try:
+        latest = datetime.strptime(latest_date, "%Y-%m-%d")
+        return (today - latest).days <= 2
+    except (ValueError, TypeError):
+        return False
+
+
+def _merge_data(cached: list[dict], fresh: list[dict]) -> list[dict]:
+    """合并缓存和新数据，去重按日期排序。"""
+    seen = {d["date"]: d for d in cached}
+    for d in fresh:
+        seen[d["date"]] = d
+    merged = sorted(seen.values(), key=lambda x: x["date"])
+    return merged
+
+
+def _load_from_cache(code: str) -> list[dict] | None:
+    """从本地缓存加载数据。"""
+    cache_path = f"cache/daily/{code}.json"
+    if not os.path.exists(cache_path):
+        return None
+    try:
+        with open(cache_path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return None
 
 
 def _save_to_cache(code: str, data: list[dict]):
