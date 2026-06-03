@@ -74,8 +74,12 @@ async def start_scan():
     db_path = config.get("data", {}).get("database_path", "data/cuphandle.db")
     db.init_db(db_path)
 
+    # Generate task_id BEFORE starting scan so progress can be tracked
+    task_id = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+    _running["task_id"] = task_id
+    db.create_scan_task(task_id, started_at, total_stocks=0)
+
     def run():
-        task_id = None
         try:
             def on_progress(stage, current, total, detail):
                 """实时更新扫描进度到内存状态和数据库。"""
@@ -88,28 +92,36 @@ async def start_scan():
                     "current_code": code,
                     "current_name": detail[len(code):].strip() if len(detail) > len(code) else detail,
                 }
-                if task_id:
-                    db.update_scan_progress(
-                        task_id,
-                        scanned=current,
-                        skipped=_running["stats"].get("skipped", 0),
-                        candidates_count=_running["stats"].get("candidates_found", 0),
-                    )
+                db.update_scan_progress(
+                    task_id,
+                    scanned=current,
+                    skipped=_running["stats"].get("skipped", 0),
+                    candidates_count=_running["stats"].get("candidates_found", 0),
+                )
 
             result = scan_all(config, progress_callback=on_progress)
-            task_id = result["task_id"]
-            _running["task_id"] = task_id
-
-            # Create scan task in DB
-            s = result["stats"]
-            db.create_scan_task(task_id, started_at, total_stocks=s.get("total_stocks", 0))
 
             # Save candidates to DB
             if result["candidates"]:
                 db.save_candidates(task_id, result["candidates"])
 
-            # Update final stats in memory
+            # Update final stats
+            s = result["stats"]
             _running["stats"] = s
+
+            # Mark scan as completed in DB
+            db.finish_scan_task(
+                task_id,
+                finished_at=datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                candidates_count=s.get("candidates_found", 0),
+                elapsed_seconds=s.get("elapsed_seconds", 0),
+                scanned=s.get("scanned", 0),
+                skipped=s.get("skipped", 0),
+            )
+
+            # Save candidates to DB
+            if result["candidates"]:
+                db.save_candidates(task_id, result["candidates"])
 
             # Mark scan as completed in DB
             db.finish_scan_task(
@@ -123,21 +135,19 @@ async def start_scan():
 
         except Exception as e:
             logger.error(f"Scan failed: {e}")
-            if task_id:
-                db.finish_scan_task(
-                    task_id,
-                    finished_at=datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                    candidates_count=0,
-                    elapsed_seconds=0,
-                )
+            db.finish_scan_task(
+                task_id,
+                finished_at=datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                candidates_count=0,
+                elapsed_seconds=0,
+            )
         finally:
             _running["running"] = False
 
     t = threading.Thread(target=run, daemon=True)
     t.start()
-    _running["task_id"] = "pending"
 
-    return {"task_id": _running["task_id"], "status": "started"}
+    return {"task_id": task_id, "status": "started"}
 
 
 @app.get("/api/scan/status")
@@ -170,10 +180,12 @@ async def list_tasks():
             "scanned": s.get("scanned", 0),
             "total": s.get("total_stocks", 0),
         })
-    # Add completed scans from DB
+    # Add completed scans from DB (skip the running one already added above)
+    running_id = _running.get("task_id")
     db_tasks = db.get_scan_tasks()
     for t in db_tasks:
-        tasks.append(t)
+        if t["id"] != running_id:
+            tasks.append(t)
     return {"tasks": tasks}
 
 
