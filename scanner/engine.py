@@ -80,7 +80,7 @@ def scan_all(config: dict, progress_callback=None) -> dict:
                     continue
 
                 # 上市天数过滤（日线数据不足即视为新股）
-                min_listing = config.get("market", {}).get("min_listing_days", 120)
+                min_listing = liquidity_cfg.get("min_listing_days", 250)
                 if len(data) < min_listing:
                     with stats_lock:
                         skip_count[0] += 1

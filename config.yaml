@@ -5,7 +5,6 @@ market:
   include_kcb: true      # 科创板
   exclude_bj: true       # 排除北交所
   exclude_st: true       # 排除 ST/*ST
-  min_listing_days: 120  # 新股最短上市天数
 
 data:
   cache_enabled: true
@@ -22,6 +21,7 @@ liquidity:
   min_avg_volume: 5000000        # 500万股
   min_latest_turnover: 80000000  # 8000万
   min_stock_price: 10           # 最低股价 10元
+  min_listing_days: 250         # 新股最短上市天数
 
 cup:
   min_duration: 35
