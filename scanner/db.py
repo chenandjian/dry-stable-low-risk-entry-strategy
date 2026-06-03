@@ -373,5 +373,5 @@ def get_candidate(code: str, task_id: str = None) -> dict | None:
         ).fetchone()
     if not row:
         return None
-    col_names = [d[0] for d in conn.execute("PRAGMA table_info(candidates)").fetchall()]
+    col_names = [d[1] for d in conn.execute("PRAGMA table_info(candidates)").fetchall()]
     return dict(zip(col_names, row))
