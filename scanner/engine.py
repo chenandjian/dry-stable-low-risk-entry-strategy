@@ -1,11 +1,10 @@
 # scanner/engine.py
-import json
 import logging
-import os
 import threading
 import time
 from queue import Queue
 
+import scanner.db as db
 from scanner.data_source import DataSourceManager
 from scanner.sina_source import fetch_sina_daily
 from scanner.tencent_source import fetch_tencent_daily
@@ -27,6 +26,10 @@ def scan_all(config: dict, progress_callback=None) -> dict:
         {"candidates": [...], "stats": {...}, "task_id": "..."}
     """
     from scanner.stock_pool import get_a_stock_pool
+
+    # Initialize database
+    db_path = config.get("data", {}).get("database_path", "data/cuphandle.db")
+    db.init_db(db_path)
 
     stocks = get_a_stock_pool(config)
     if not stocks:
@@ -138,14 +141,14 @@ def scan_all(config: dict, progress_callback=None) -> dict:
 
 
 def _fetch_with_fallback(code: str, primary_ds: str, mgr: DataSourceManager):
-    """三级回退：缓存 → 主源 → 备用源。
+    """三级回退：数据库缓存 → 主源 → 备用源。
 
-    优化：先检查本地缓存是否覆盖最近交易日。
+    优化：先检查数据库缓存是否覆盖最近交易日。
     """
     from datetime import datetime, timedelta
 
-    # 1. 先尝试本地缓存
-    cached = _load_from_cache(code)
+    # 1. 先尝试数据库缓存
+    cached = db.get_ohlc(code)
     if cached and _is_cache_fresh(cached):
         return cached
 
@@ -156,7 +159,7 @@ def _fetch_with_fallback(code: str, primary_ds: str, mgr: DataSourceManager):
     if data:
         if cached:
             data = _merge_data(cached, data)
-        _save_to_cache(code, data)
+        db.save_ohlc(code, data)
         return data
 
     # 3. 回退另一个数据源
@@ -168,7 +171,7 @@ def _fetch_with_fallback(code: str, primary_ds: str, mgr: DataSourceManager):
             if data:
                 if cached:
                     data = _merge_data(cached, data)
-                _save_to_cache(code, data)
+                db.save_ohlc(code, data)
                 return data
         finally:
             mgr.release(other)
@@ -202,26 +205,3 @@ def _merge_data(cached: list[dict], fresh: list[dict]) -> list[dict]:
         seen[d["date"]] = d
     merged = sorted(seen.values(), key=lambda x: x["date"])
     return merged
-
-
-def _load_from_cache(code: str) -> list[dict] | None:
-    """从本地缓存加载数据。"""
-    cache_path = f"cache/daily/{code}.json"
-    if not os.path.exists(cache_path):
-        return None
-    try:
-        with open(cache_path, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except Exception:
-        return None
-
-
-def _save_to_cache(code: str, data: list[dict]):
-    """保存日线数据到本地缓存。"""
-    os.makedirs("cache/daily", exist_ok=True)
-    cache_path = f"cache/daily/{code}.json"
-    try:
-        with open(cache_path, "w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False)
-    except Exception:
-        pass  # 缓存失败不影响主流程

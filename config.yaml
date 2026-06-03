@@ -10,6 +10,7 @@ market:
 data:
   cache_enabled: true
   cache_dir: ./cache/daily
+  database_path: ./data/cuphandle.db
   start_date: "2025-01-01"
   end_date: null         # null = 最近交易日
   use_fq: true           # 前复权

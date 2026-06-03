@@ -80,3 +80,64 @@ def write_candidates_csv(
 
     logger.info(f"CSV written: {filepath} ({len(candidates)} candidates)")
     return filepath
+
+
+def write_candidates_csv_from_db(
+    task_id: str,
+    output_dir: str = "./output_data",
+) -> str:
+    """从数据库读取候选股票并写入 CSV 文件。
+
+    Args:
+        task_id: 扫描任务 ID
+        output_dir: 输出目录
+
+    Returns:
+        CSV 文件路径
+    """
+    from scanner import db as scanner_db
+
+    cands = scanner_db.get_candidates(task_id)
+    if not cands:
+        logger.warning(f"No candidates found for task {task_id}")
+        return ""
+
+    os.makedirs(output_dir, exist_ok=True)
+    date_str = datetime.now().strftime("%Y-%m-%d")
+    filename = f"candidates_{date_str}.csv"
+    filepath = os.path.join(output_dir, filename)
+
+    with open(filepath, "w", newline="", encoding="utf-8-sig") as f:
+        writer = csv.writer(f)
+        writer.writerow(CSV_HEADER)
+
+        for c in cands:
+            latest_close = c.get("latest_close", 0) or 0
+            bp = c.get("breakout_price", 0) or 0
+            dist_pct = f"{(latest_close - bp) / bp * 100:+.1f}%" if bp > 0 else "N/A"
+
+            writer.writerow([
+                c.get("code", ""),
+                c.get("name", ""),
+                c.get("score", 0),
+                c.get("rating", ""),
+                "已突破" if c.get("is_breakout") else "未突破",
+                "是" if c.get("is_volume_breakout") else "否",
+                f"{latest_close:.2f}",
+                f"{bp:.2f}",
+                dist_pct,
+                f"{c.get('cup_depth_pct', 0):.1f}%",
+                c.get("cup_duration", 0),
+                f"{c.get('handle_depth_pct', 0):.1f}%",
+                c.get("handle_duration", 0),
+                c.get("left_high_date", ""),
+                c.get("cup_low_date", ""),
+                c.get("right_high_date", ""),
+                c.get("handle_low_date", ""),
+                c.get("avg_turnover_20", "N/A"),
+                c.get("latest_turnover", "N/A"),
+                f"{c.get('vol_multiplier', 0):.1f}×",
+            ])
+
+    logger.info(f"CSV written from DB: {filepath} ({len(cands)} candidates)")
+    return filepath

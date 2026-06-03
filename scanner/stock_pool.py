@@ -1,11 +1,8 @@
 # scanner/stock_pool.py
 import logging
-import json
-import os
+from scanner.db import save_stock_pool, get_stock_pool, get_stock_pool_count
 
 logger = logging.getLogger(__name__)
-
-CACHE_FILE = "cache/stock_pool.json"
 
 
 def get_a_stock_pool(config: dict) -> list[dict]:
@@ -25,13 +22,13 @@ def get_a_stock_pool(config: dict) -> list[dict]:
             stocks.append({"code": code, "name": name})
         logger.info(f"AKShare: got {len(stocks)} stocks")
         if stocks:
-            _save_cache(stocks)
+            save_stock_pool(stocks)
             return _filter_stocks(stocks, config)
     except Exception as e:
         logger.warning(f"AKShare stock pool failed: {e}")
 
-    # 2. 回退本地缓存
-    cached = _load_cache()
+    # 2. 回退本地数据库缓存
+    cached = get_stock_pool()
     if cached:
         logger.info(f"Using cached stock pool: {len(cached)} stocks")
         return _filter_stocks(cached, config)
@@ -82,19 +79,3 @@ def _filter_stocks(stocks: list[dict], config: dict) -> list[dict]:
 
     logger.info(f"Stock pool after filter: {len(result)} (from {len(stocks)})")
     return result
-
-
-def _save_cache(stocks: list[dict]):
-    os.makedirs(os.path.dirname(CACHE_FILE), exist_ok=True)
-    with open(CACHE_FILE, "w", encoding="utf-8") as f:
-        json.dump(stocks, f, ensure_ascii=False)
-
-
-def _load_cache() -> list[dict] | None:
-    if not os.path.exists(CACHE_FILE):
-        return None
-    try:
-        with open(CACHE_FILE, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except Exception:
-        return None
