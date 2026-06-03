@@ -236,6 +236,15 @@ async def get_candidates():
     return {"candidates": result, "total": len(result)}
 
 
+@app.get("/api/stock/{code}/ohlc")
+async def get_stock_ohlc(code: str):
+    """Return full OHLC history for a stock from the database."""
+    data = db.get_ohlc(code)
+    if not data:
+        return JSONResponse({"error": "No data"}, status_code=404)
+    return {"code": code, "data": data}
+
+
 @app.get("/api/candidate/{code}")
 async def get_candidate(code: str):
     c = db.get_candidate(code)

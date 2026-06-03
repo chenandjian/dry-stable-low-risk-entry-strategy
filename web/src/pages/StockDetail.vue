@@ -166,88 +166,38 @@ function goToStock(code) {
   router.push(`/stock/${code}`)
 }
 
-function initChart() {
+async function initChart() {
   if (!chartRef.value) return
   if (chart) chart.dispose()
-  chart = echarts.init(chartRef.value, 'dark')
 
   const s = stock.value
-  const basePrice = s.latest_close || 10
-  const cupDuration = Math.max(s.cup_duration || 120, 30)
-  const n = Math.min(cupDuration + 40, 250)
+  const code = s.code
+  if (!code) return
 
-  // Build a price curve that approximates the cup & handle pattern
-  const leftHigh = s.left_high_price || basePrice * 1.15
-  const cupLow = s.cup_low_price || basePrice * 0.75
-  const rightHigh = s.right_high_price || basePrice * 1.08
-  const handleLow = s.handle_low_price || basePrice * 0.92
-
-  // Phase boundaries (indices): pre-trend -> cup down -> cup base -> cup up -> handle -> near current
-  const preEnd = Math.floor(n * 0.08)
-  const downEnd = Math.floor(n * 0.30)
-  const baseEnd = Math.floor(n * 0.48)
-  const rightEnd = Math.floor(n * 0.75)
-  const handleEnd = Math.floor(n * 0.88)
-
-  function cupPrice(i) {
-    if (i <= preEnd) {
-      const t = i / preEnd
-      return basePrice * 0.7 + (leftHigh - basePrice * 0.7) * t
-    }
-    if (i <= downEnd) {
-      const t = (i - preEnd) / (downEnd - preEnd)
-      return leftHigh + (cupLow - leftHigh) * (t * t)
-    }
-    if (i <= baseEnd) {
-      const t = (i - downEnd) / (baseEnd - downEnd)
-      return cupLow + (cupLow * 0.03) * Math.sin(t * Math.PI)
-    }
-    if (i <= rightEnd) {
-      const t = (i - baseEnd) / (rightEnd - baseEnd)
-      return cupLow + (rightHigh - cupLow) * (t * t * (3 - 2 * t))
-    }
-    if (i <= handleEnd) {
-      const t = (i - rightEnd) / (handleEnd - rightEnd)
-      return rightHigh + (handleLow - rightHigh) * (t * t)
-    }
-    const t = (i - handleEnd) / (n - handleEnd)
-    return handleLow + (basePrice - handleLow) * t
+  // Fetch real OHLC data from API
+  let ohlcRaw = []
+  try {
+    const res = await fetch(`/api/stock/${code}/ohlc`)
+    const json = await res.json()
+    ohlcRaw = json.data || []
+  } catch (e) {
+    return
   }
 
-  const dates = []
-  const ohlc = []
-  const volumes = []
-  // Start date — anchor from cup duration days ago
-  const endDate = new Date()
-  const startDate = new Date(endDate)
-  startDate.setDate(startDate.getDate() - n)
+  if (!ohlcRaw.length) return
 
-  for (let i = 0; i < n; i++) {
-    const d = new Date(startDate)
-    d.setDate(d.getDate() + i)
-    dates.push(d.toISOString().slice(0, 10))
+  chart = echarts.init(chartRef.value, 'dark')
 
-    const center = cupPrice(i)
-    const wiggle = 1 + (Math.random() - 0.5) * 0.04
-    const open = center * (0.99 + Math.random() * 0.02) * wiggle
-    const close = center * (0.99 + Math.random() * 0.02) * wiggle
-    const high = Math.max(open, close) * (1 + Math.random() * 0.015)
-    const low = Math.min(open, close) * (1 - Math.random() * 0.015)
-    ohlc.push([+open.toFixed(2), +close.toFixed(2), +low.toFixed(2), +high.toFixed(2)])
+  const dates = ohlcRaw.map(d => d.date)
+  const ohlc = ohlcRaw.map(d => [+d.open.toFixed(2), +d.close.toFixed(2), +d.low.toFixed(2), +d.high.toFixed(2)])
+  const volumes = ohlcRaw.map((d, i) => [i, Math.round(d.volume || 0), d.close >= d.open ? 1 : -1])
 
-    // Lower volume in the handle zone, higher near breakout
-    const baseVol = Math.random() * 15_000_000 + 5_000_000
-    const handleFactor = (i >= rightEnd && i <= handleEnd) ? 0.5 : 1.0
-    const breakoutFactor = i > handleEnd ? 1.8 : 1.0
-    volumes.push([i, Math.round(baseVol * handleFactor * breakoutFactor), close >= open ? 1 : -1])
-  }
-
-  // Mark key pattern dates
+  // Mark key pattern dates on chart
   const markPoints = []
-  if (s.left_high_date) markPoints.push({ name: '左杯口', coord: [s.left_high_date, leftHigh], value: '左杯口', symbol: 'pin', symbolSize: 30, itemStyle: { color: '#F59E0B' }, label: { show: true, color: '#F59E0B', fontSize: 10 } })
-  if (s.cup_low_date) markPoints.push({ name: '杯底', coord: [s.cup_low_date, cupLow], value: '杯底', symbol: 'pin', symbolSize: 30, itemStyle: { color: '#EF4444' }, label: { show: true, color: '#EF4444', fontSize: 10 } })
-  if (s.right_high_date) markPoints.push({ name: '右杯口', coord: [s.right_high_date, rightHigh], value: '右杯口', symbol: 'pin', symbolSize: 30, itemStyle: { color: '#F59E0B' }, label: { show: true, color: '#F59E0B', fontSize: 10 } })
-  if (s.handle_low_date) markPoints.push({ name: '柄部低点', coord: [s.handle_low_date, handleLow], value: '柄部低点', symbol: 'pin', symbolSize: 30, itemStyle: { color: '#4F7DFF' }, label: { show: true, color: '#4F7DFF', fontSize: 10 } })
+  if (s.left_high_date) markPoints.push({ name: '左杯口', coord: [s.left_high_date, s.left_high_price], value: '左杯口', symbol: 'pin', symbolSize: 30, itemStyle: { color: '#F59E0B' }, label: { show: true, color: '#F59E0B', fontSize: 10 } })
+  if (s.cup_low_date) markPoints.push({ name: '杯底', coord: [s.cup_low_date, s.cup_low_price], value: '杯底', symbol: 'pin', symbolSize: 30, itemStyle: { color: '#EF4444' }, label: { show: true, color: '#EF4444', fontSize: 10 } })
+  if (s.right_high_date) markPoints.push({ name: '右杯口', coord: [s.right_high_date, s.right_high_price], value: '右杯口', symbol: 'pin', symbolSize: 30, itemStyle: { color: '#F59E0B' }, label: { show: true, color: '#F59E0B', fontSize: 10 } })
+  if (s.handle_low_date) markPoints.push({ name: '柄部低点', coord: [s.handle_low_date, s.handle_low_price], value: '柄部低点', symbol: 'pin', symbolSize: 30, itemStyle: { color: '#4F7DFF' }, label: { show: true, color: '#4F7DFF', fontSize: 10 } })
 
   const option = {
     backgroundColor: '#070B14',
