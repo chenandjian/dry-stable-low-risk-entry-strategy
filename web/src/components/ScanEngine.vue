@@ -36,6 +36,9 @@
         <span :class="line.type">{{ line.text }}</span>
       </div>
     </div>
+    <div v-if="!running" class="scan-controls">
+      <button class="btn-primary" @click="$emit('start')">开始扫描</button>
+    </div>
     <div v-if="running" class="scan-controls">
       <button class="btn-secondary" @click="$emit('pause')">暂停</button>
       <button class="btn-secondary" @click="$emit('stop')">停止</button>
@@ -54,7 +57,7 @@ const props = defineProps({
   skipped: Number,
   logLines: { type: Array, default: () => [] },
 })
-defineEmits(['pause', 'stop', 'toggleLog'])
+defineEmits(['start', 'pause', 'stop', 'toggleLog'])
 
 const logExpanded = ref(true)
 const progressPct = computed(() => props.total > 0 ? Math.round(props.scanned / props.total * 100) : 0)
@@ -103,6 +106,12 @@ const skipText = computed(() => `跳过 ${props.skipped || 0} 只`)
 .log-line .skip { color: var(--down-green); }
 .log-line .error { color: var(--up-red); }
 .scan-controls { padding: 10px 16px; display: flex; gap: 8px; }
+.btn-primary {
+  background: var(--accent); color: #fff; border: none;
+  padding: 8px 20px; border-radius: 4px; font-size: 13px; font-weight: 600; cursor: pointer;
+  transition: background 0.15s;
+}
+.btn-primary:hover { background: #3D6BEE; }
 .btn-secondary {
   background: transparent; color: var(--text-secondary); border: 1px solid var(--border);
   padding: 6px 14px; border-radius: 4px; font-size: 12px; cursor: pointer;
