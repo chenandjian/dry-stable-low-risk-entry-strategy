@@ -177,7 +177,9 @@ async def start_scan():
             )
 
         except Exception as e:
-            logger.error(f"Scan failed: {e}")
+            import traceback
+            logger.error(f"Scan failed: {e}\n{traceback.format_exc()}")
+            _running["stats"] = {"error": str(e)}
             db.finish_scan_task(
                 task_id,
                 finished_at=datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
