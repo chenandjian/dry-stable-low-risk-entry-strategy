@@ -112,7 +112,12 @@ async def start_scan():
 
             # Save candidates to DB
             if result["candidates"]:
-                db.save_candidates(task_id, result["candidates"])
+                sc = config.get("scoring", {})
+                db.save_candidates(
+                    task_id, result["candidates"],
+                    strong=sc.get("strong_threshold", 80),
+                    medium=sc.get("medium_threshold", 70),
+                )
 
             # Update final stats
             s = result["stats"]

@@ -1,8 +1,15 @@
 # scanner/scorer.py
 from scanner.pattern_detector import CupHandleResult
 
+# 默认评分权重和阈值（被 config.yaml scoring 段覆盖）
+DEFAULT_SCORING = {
+    "cup_weight": 35, "handle_weight": 25, "volume_weight": 20,
+    "trend_weight": 10, "breakout_weight": 10,
+    "strong_threshold": 80, "medium_threshold": 70,
+}
 
-def score_cup_handle(result: CupHandleResult) -> int:
+
+def score_cup_handle(result: CupHandleResult, scoring: dict = None) -> int:
     """计算杯柄形态综合评分 (0-100)。
 
     评分维度:
@@ -12,12 +19,14 @@ def score_cup_handle(result: CupHandleResult) -> int:
       - 前置上涨趋势: 10 分 (Phase 2 完善)
       - 突破确认: 10 分
     """
+    if scoring is None:
+        scoring = DEFAULT_SCORING
     if not result.found:
         return 0
 
     score = 0
 
-    # 1. 杯体结构 (35 分)
+    # 1. 杯体结构
     depth = result.cup_depth_pct
     if 12 <= depth <= 33:
         score += 10
@@ -185,16 +194,19 @@ def _score_pre_trend(data: list[dict], result: CupHandleResult) -> int:
     return 0
 
 
-def score_cup_handle_advanced(result: CupHandleResult, data: list[dict]) -> int:
+def score_cup_handle_advanced(result: CupHandleResult, data: list[dict], scoring: dict = None) -> int:
     """Enhanced scoring with volume structure and pre-trend analysis.
 
     Args:
         result: CupHandleResult from pattern detector
         data: full OHLC data (list of dicts with date/open/high/low/close/volume)
+        scoring: config scoring dict (cup_weight, handle_weight, ...)
 
     Returns:
         score 0-100
     """
+    if scoring is None:
+        scoring = DEFAULT_SCORING
     if not result.found:
         return 0
 

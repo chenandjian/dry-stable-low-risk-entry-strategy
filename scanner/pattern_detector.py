@@ -234,9 +234,11 @@ def _find_handle(data, config, right_high_idx, cup_low_idx, right_high, cup_low)
 
     quality = max(0, (max_depth - depth) / max_depth)
 
-    # 检查突破
+    # 检查突破（从配置读取阈值）
+    buffer = 1 + config.get("buffer_pct", 0.02)
+    vol_threshold = config.get("volume_multiplier", 1.5)
     latest = data[-1]
-    is_breakout = latest["close"] > right_high * 1.02
+    is_breakout = latest["close"] > right_high * buffer
     is_vol_breakout = False
     vol_mult = 0.0
 
@@ -245,7 +247,7 @@ def _find_handle(data, config, right_high_idx, cup_low_idx, right_high, cup_low)
         avg_vol = sum(recent_vols) / len(recent_vols) if recent_vols else 0
         if avg_vol > 0:
             vol_mult = latest["volume"] / avg_vol
-            is_vol_breakout = vol_mult >= 1.5
+            is_vol_breakout = vol_mult >= vol_threshold
 
     return {
         "low_idx": low_idx,

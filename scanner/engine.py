@@ -54,6 +54,7 @@ def scan_all(config: dict, progress_callback=None) -> dict:
     handle_prefixed = {f"handle_{k}": v for k, v in handle_cfg.items()}
     pattern_cfg = {**cup_cfg, **handle_prefixed, **breakout_cfg}
     liquidity_cfg = config.get("liquidity", {})
+    scoring_cfg = config.get("scoring", {})
 
     start_time = time.time()
 
@@ -101,8 +102,8 @@ def scan_all(config: dict, progress_callback=None) -> dict:
                 if result.found:
                     result.code = code
                     result.name = stock.get("name", "")
-                    result.score = score_cup_handle(result)
-                    if result.score >= 60:
+                    result.score = score_cup_handle(result, scoring_cfg)
+                    if result.score >= scoring_cfg.get("medium_threshold", 70) - 10:
                         with candidate_lock:
                             candidates.append((stock, result))
 

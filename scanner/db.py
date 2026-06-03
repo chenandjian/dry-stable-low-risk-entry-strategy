@@ -228,20 +228,22 @@ def get_running_task_id() -> str | None:
 
 # ====== Candidates ======
 
-def save_candidates(task_id: str, candidates: list):
+def save_candidates(task_id: str, candidates: list, strong: int = 80, medium: int = 70):
     """Save candidate results for a scan task.
 
     Args:
         task_id: scan task id
         candidates: list of (stock_dict, CupHandleResult) tuples
+        strong: threshold for 强候选 (default 80)
+        medium: threshold for 中等候选 (default 70)
     """
     conn = get_conn()
     conn.execute("DELETE FROM candidates WHERE task_id = ?", (task_id,))
     rows = []
     for stock, r in candidates:
+        rating = "强候选" if r.score >= strong else "中等候选" if r.score >= medium else "弱候选"
         rows.append((
-            task_id, r.code, r.name, r.score,
-            "强候选" if r.score >= 80 else "中等候选" if r.score >= 70 else "弱候选",
+            task_id, r.code, r.name, r.score, rating,
             1 if r.is_breakout else 0,
             1 if r.is_volume_breakout else 0,
             r.breakout_price, r.vol_multiplier,
