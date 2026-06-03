@@ -237,6 +237,31 @@ def get_running_task_id() -> str | None:
 
 # ====== Candidates ======
 
+def upsert_candidate(task_id: str, d: dict):
+    """Insert or update a single candidate (for real-time discovery)."""
+    conn = get_conn()
+    rating = "强候选" if d["score"] >= 80 else "中等候选" if d["score"] >= 70 else "弱候选"
+    conn.execute("""
+        INSERT OR REPLACE INTO candidates (
+            task_id, code, name, score, rating,
+            is_breakout, is_volume_breakout, breakout_price, vol_multiplier,
+            cup_depth_pct, cup_duration, handle_depth_pct, handle_duration,
+            lip_deviation_pct,
+            left_high_price, cup_low_price, right_high_price, handle_low_price,
+            left_high_date, cup_low_date, right_high_date, handle_low_date,
+            latest_close, latest_turnover
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 0, 0, 0, 0, '', '', '', '', ?, 0)
+    """, (
+        task_id, d["code"], d["name"], d["score"], rating,
+        d.get("is_breakout", 0), d.get("is_volume_breakout", 0),
+        d.get("breakout_price", 0), d.get("vol_multiplier", 0),
+        d.get("cup_depth_pct", 0), d.get("cup_duration", 0),
+        d.get("handle_depth_pct", 0),
+        d.get("latest_close", 0),
+    ))
+    conn.commit()
+
+
 def save_candidates(task_id: str, candidates: list, strong: int = 80, medium: int = 70):
     """Save candidate results for a scan task.
 
@@ -247,7 +272,6 @@ def save_candidates(task_id: str, candidates: list, strong: int = 80, medium: in
         medium: threshold for 中等候选 (default 70)
     """
     conn = get_conn()
-    conn.execute("DELETE FROM candidates WHERE task_id = ?", (task_id,))
     rows = []
     for stock, r in candidates:
         rating = "强候选" if r.score >= strong else "中等候选" if r.score >= medium else "弱候选"
@@ -267,7 +291,7 @@ def save_candidates(task_id: str, candidates: list, strong: int = 80, medium: in
             stock.get("latest_turnover", 0),
         ))
     conn.executemany(
-        """INSERT INTO candidates (
+        """INSERT OR REPLACE INTO candidates (
             task_id, code, name, score, rating,
             is_breakout, is_volume_breakout, breakout_price, vol_multiplier,
             cup_depth_pct, cup_duration, handle_depth_pct, handle_duration,

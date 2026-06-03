@@ -96,6 +96,8 @@ async def start_scan():
                 stats = _running.get("stats", {})
                 if stage == "discovery" and discovery:
                     found = stats.get("candidates_found", 0) + 1
+                    # 立即写入 DB，保证个股详情可查询
+                    db.upsert_candidate(task_id, discovery)
                     discoveries = list(stats.get("discoveries") or [])
                     discoveries.insert(0, {
                         "code": discovery["code"],
