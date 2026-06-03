@@ -255,7 +255,7 @@ def get_scan_tasks() -> list[dict]:
          "running": r[3] == 'running', "scope": f"全市场 · {r[4]}只",
          "total_stocks": r[4], "scanned": r[5], "total": r[4],
          "candidates": r[7], "elapsed_seconds": r[8],
-         "duration": f"{r[8]:.0f}s" if r[8] else None}
+         "duration": f"{r[8]:.0f}s" if r[8] is not None else None}
         for r in rows
     ]
 
