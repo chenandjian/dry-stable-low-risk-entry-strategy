@@ -104,3 +104,28 @@ def _rating(score: int) -> str:
     elif score >= 60:
         return "弱候选"
     return "不推荐"
+
+
+def write_backtest_report(report: dict, output_dir: str = "./output_data") -> str:
+    """Write backtest report to JSON file."""
+    import os
+    from datetime import datetime
+    os.makedirs(output_dir, exist_ok=True)
+    date_str = datetime.now().strftime("%Y-%m-%d")
+    filepath = os.path.join(output_dir, f"backtest_report_{date_str}.json")
+
+    # Strip individual results for the main report (they can be large)
+    summary = {k: v for k, v in report.items() if k != "results"}
+    summary["individual_results_count"] = len(report.get("results", []))
+
+    with open(filepath, "w", encoding="utf-8") as f:
+        json.dump(summary, f, ensure_ascii=False, indent=2)
+
+    # Also write full results separately
+    if report.get("results"):
+        detail_path = os.path.join(output_dir, f"backtest_details_{date_str}.json")
+        with open(detail_path, "w", encoding="utf-8") as f:
+            json.dump(report["results"], f, ensure_ascii=False, indent=2,
+                      default=lambda x: x.__dict__ if hasattr(x, '__dict__') else str(x))
+
+    return filepath

@@ -247,6 +247,76 @@ def cmd_schedule(args):
         logger.info("Scheduler stopped")
 
 
+def cmd_backtest(args):
+    """运行历史回测。"""
+    config = load_config(args.config)
+    setup_logging(config)
+    logger = logging.getLogger("main")
+
+    from scanner.stock_pool import get_a_stock_pool
+    from scanner.sina_source import fetch_sina_daily
+    from scanner.backtester import run_backtest, backtest_report_to_dict
+    from output.json_writer import write_backtest_report
+
+    logger.info("=" * 60)
+    logger.info("CupHandleScan - 历史回测")
+    logger.info("=" * 60)
+
+    # Get stock pool (sample if --sample specified)
+    stocks = get_a_stock_pool(config)
+    if args.sample:
+        sample_n = int(args.sample)
+        stocks = stocks[:sample_n]
+        logger.info(f"Sampling first {sample_n} stocks")
+
+    logger.info(f"Testing {len(stocks)} stocks...")
+
+    result = run_backtest(
+        stocks=stocks,
+        fetch_fn=fetch_sina_daily,
+        config=config,
+        max_stocks=args.max_stocks,
+        min_score=args.min_score,
+    )
+
+    # Output
+    report_dict = backtest_report_to_dict(result)
+    output_dir = config.get("output", {}).get("output_dir", "./output_data")
+
+    # Print summary
+    print(f"\n{'='*60}")
+    print(f"  回测结果")
+    print(f"  {'='*60}")
+    print(f"  测试股票: {result.total_stocks_tested}")
+    print(f"  发现形态: {result.total_patterns}")
+    print(f"  ")
+    print(f"  命中率 (正收益比例):")
+    print(f"    5日:  {result.hit_rate_5d}%  平均收益: {result.avg_return_5d}%")
+    print(f"    10日: {result.hit_rate_10d}%  平均收益: {result.avg_return_10d}%")
+    print(f"    20日: {result.hit_rate_20d}%  平均收益: {result.avg_return_20d}%")
+    print(f"    60日: {result.hit_rate_60d}%  平均收益: {result.avg_return_60d}%")
+    print(f"  ")
+    print(f"  假突破率:")
+    print(f"    5日:  {result.false_breakout_rate_5d}%")
+    print(f"    10日: {result.false_breakout_rate_10d}%")
+    print(f"    20日: {result.false_breakout_rate_20d}%")
+    print(f"  ")
+    if result.by_score_range:
+        print(f"  按评分分层 (10日):")
+        for s in result.by_score_range:
+            print(f"    {s['range']}: {s['count']}个 命中率{s['hit_rate_10d']}% 均收益{s['avg_return_10d']}%")
+    print(f"  ")
+    if result.parameter_suggestions:
+        print(f"  参数优化建议:")
+        for k, v in result.parameter_suggestions.items():
+            print(f"    {k}: {v}")
+    print(f"{'='*60}\n")
+
+    # Write report
+    report_path = write_backtest_report(report_dict, output_dir)
+    logger.info(f"Backtest report: {report_path}")
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="CupHandleScan - A股杯柄结构自动扫描系统"
@@ -270,6 +340,13 @@ def main():
     p_sched = sub.add_parser("schedule", help="仅启动定时调度器")
     p_sched.add_argument("--config", default="config.yaml")
     p_sched.set_defaults(func=cmd_schedule)
+
+    p_backtest = sub.add_parser("backtest", help="历史回测")
+    p_backtest.add_argument("--config", default="config.yaml", help="配置文件路径")
+    p_backtest.add_argument("--sample", default=None, help="采样前N只股票（用于快速测试）")
+    p_backtest.add_argument("--max-stocks", type=int, default=None, help="最多测试股票数")
+    p_backtest.add_argument("--min-score", type=int, default=60, help="最低形态评分")
+    p_backtest.set_defaults(func=cmd_backtest)
 
     args = parser.parse_args()
     if args.command is None:
