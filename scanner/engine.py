@@ -79,6 +79,13 @@ def scan_all(config: dict, progress_callback=None) -> dict:
                         skip_count[0] += 1
                     continue
 
+                # 上市天数过滤（日线数据不足即视为新股）
+                min_listing = config.get("market", {}).get("min_listing_days", 120)
+                if len(data) < min_listing:
+                    with stats_lock:
+                        skip_count[0] += 1
+                    continue
+
                 # 存储最新价等元数据
                 stock["latest_close"] = data[-1]["close"]
                 stock["latest_turnover"] = data[-1].get("turnover") or (data[-1]["volume"] * data[-1]["close"])

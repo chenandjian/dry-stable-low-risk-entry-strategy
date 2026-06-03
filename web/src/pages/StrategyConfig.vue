@@ -13,6 +13,14 @@
             @click="toggle('market', m.key)">{{ config.market?.[m.key] ? '开' : '关' }}</button>
         </label>
       </div>
+      <div class="param-grid" style="margin-top:12px">
+        <div class="param">
+          <label>新股最短上市天数 <span class="unit">交易日</span></label>
+          <input type="number" v-model.number="config.market.min_listing_days"
+            @input="markDirty" step="10" min="30" />
+          <span class="default">默认 120天</span>
+        </div>
+      </div>
     </section>
 
     <!-- 流动性过滤 -->
