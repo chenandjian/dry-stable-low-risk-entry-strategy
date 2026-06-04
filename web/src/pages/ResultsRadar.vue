@@ -10,6 +10,17 @@
       <MetricCard label="最高评分" :value="maxScore" color="gold" />
     </div>
 
+    <!-- Task Selector -->
+    <div class="task-selector-bar">
+      <label class="ts-label">扫描任务</label>
+      <select v-model="selectedTaskId" @change="onTaskChange" class="ts-select">
+        <option :value="null">-- 选择任务 --</option>
+        <option v-for="t in tasks" :key="t.id" :value="t.id">
+          {{ t.date }} · {{ t.candidates || 0 }}候选 · {{ t.status || '--' }}
+        </option>
+      </select>
+    </div>
+
     <!-- Toolbar -->
     <div class="panel" style="border-radius: 6px 6px 0 0;">
       <div class="toolbar">
@@ -115,9 +126,11 @@ import MetricCard from '../components/MetricCard.vue'
 import SignalBadge from '../components/SignalBadge.vue'
 
 const router = useRouter()
-const { getCandidates } = useApi()
+const { getCandidates, getScanTasks } = useApi()
 
 const candidates = ref([])
+const tasks = ref([])
+const selectedTaskId = ref(null)
 const selectedCode = ref('')
 const activeFilter = ref('all')
 const sortBy = ref('score')
@@ -214,17 +227,55 @@ function exportCSV() {
   URL.revokeObjectURL(url)
 }
 
-onMounted(async () => {
+// 加载任务列表
+async function loadTasks() {
   try {
-    const data = await getCandidates()
+    const data = await getScanTasks()
+    tasks.value = (data.tasks || []).filter(t => !t.running)
+    // 默认选中最近一次已完成的
+    if (!selectedTaskId.value && tasks.value.length) {
+      const completed = tasks.value.find(t => t.status === 'completed')
+      if (completed) {
+        selectedTaskId.value = completed.id
+        await loadCandidates()
+      }
+    }
+  } catch (e) { console.error('Failed to load tasks:', e) }
+}
+
+// 任务切换时重新加载候选
+async function onTaskChange() {
+  await loadCandidates()
+}
+
+// 加载候选列表
+async function loadCandidates() {
+  try {
+    const params = selectedTaskId.value ? { task_id: selectedTaskId.value } : {}
+    const data = await getCandidates(params)
     candidates.value = data.candidates || []
   } catch (e) {
     console.error('Failed to load candidates:', e)
   }
+}
+
+onMounted(async () => {
+  await loadTasks()
 })
 </script>
 
 <style scoped>
+.task-selector-bar {
+  display: flex; align-items: center; gap: 10px;
+  padding: 12px 16px; background: var(--bg-panel); border: 1px solid var(--border);
+  border-radius: 6px; margin-bottom: 12px;
+}
+.ts-label { font-size: 13px; color: var(--text-muted); white-space: nowrap; }
+.ts-select {
+  flex: 1; max-width: 400px;
+  padding: 6px 10px; border-radius: 4px; border: 1px solid var(--border);
+  background: var(--bg-card); color: var(--text-primary); font-size: 13px;
+}
 .page-content { padding: 20px 24px; max-width: 1600px; margin: 0 auto; }
 .metrics-row {
   display: grid; grid-template-columns: repeat(6, 1fr); gap: 10px; margin-bottom: 16px;
