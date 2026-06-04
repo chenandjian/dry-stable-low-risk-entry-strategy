@@ -42,6 +42,12 @@ export function useApi() {
     return res.json()
   }
 
+  async function resumeTask(taskId) {
+    const res = await fetch(`${API_BASE}/scan/tasks/${taskId}/resume`, { method: 'POST' })
+    const body = await res.json()
+    return { ...body, ok: res.ok, statusCode: res.status }
+  }
+
   async function retryFailedStocks(taskId) {
     const res = await fetch(`${API_BASE}/scan/tasks/${taskId}/retry-failed`, { method: 'POST' })
     const body = await res.json()
@@ -68,6 +74,6 @@ export function useApi() {
 
   return {
     startScan, stopScan, getScanStatus, getCandidates, getCandidate, getScanTasks,
-    getTaskStocks, retryFailedStocks, getConfig, updateConfig,
+    getTaskStocks, retryFailedStocks, resumeTask, getConfig, updateConfig,
   }
 }

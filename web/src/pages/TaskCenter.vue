@@ -30,7 +30,8 @@
         <span class="muted">{{ t.stock_pool_source || '--' }}</span>
         <span class="muted">{{ t.latest_trade_date || '--' }}</span>
         <span class="actions">
-          <button class="action-btn" @click="viewResults(t.id)" v-if="!t.running">查看结果</button>
+          <button class="action-btn primary" @click="handleResume(t.id)" v-if="t.status === 'cancelled'">继续</button>
+          <button class="action-btn" @click="viewResults(t.id)" v-if="!t.running && t.status !== 'cancelled'">查看结果</button>
           <button class="action-btn" @click="viewFailures(t.id)" v-if="!t.running && t.failed">失败列表</button>
           <button class="action-btn" @click="exportResults(t.id)" v-if="!t.running">导出</button>
           <span v-if="t.running" class="st-running">实时查看 →</span>
@@ -46,14 +47,20 @@ import { useRouter } from 'vue-router'
 import { useApi } from '../composables/useApi.js'
 
 const router = useRouter()
-const { getScanTasks } = useApi()
+const { getScanTasks, resumeTask } = useApi()
 const tasks = ref([])
 let pollTimer = null
 
 function statusText(status) {
   if (status === 'failed') return '失败'
-  if (status === 'cancelled') return '已取消'
+  if (status === 'cancelled') return '已停止'
   return '已完成'
+}
+async function handleResume(id) {
+  const res = await resumeTask(id)
+  if (res.status === 'resumed') {
+    router.push('/')
+  }
 }
 function viewResults(id) { router.push('/results') }
 function viewFailures(id) { router.push(`/?task=${id}&status=failed`) }
@@ -106,5 +113,6 @@ onUnmounted(() => { if (pollTimer) clearInterval(pollTimer) })
   border: 1px solid var(--border); background: transparent; color: var(--text-secondary); cursor: pointer;
 }
 .action-btn:hover { border-color: var(--accent); color: var(--accent); }
+.action-btn.primary { border-color: var(--accent); color: var(--accent); }
 .empty-state { padding: 40px; text-align: center; color: var(--text-muted); }
 </style>

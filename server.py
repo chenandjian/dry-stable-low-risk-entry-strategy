@@ -429,6 +429,86 @@ async def retry_failed_stocks(task_id: str):
     return {"task_id": task_id, "status": "retry_started", "retry_count": len(stocks)}
 
 
+@app.post("/api/scan/tasks/{task_id}/resume")
+async def resume_task(task_id: str):
+    """Resume a stopped/cancelled scan task from where it left off."""
+    config = load_config()
+    db_path = config.get("data", {}).get("database_path", "data/cuphandle.db")
+    db.init_db(db_path)
+
+    conflict = _scan_conflict_response()
+    if conflict:
+        return conflict
+
+    # Reset fetching stocks to pending
+    conn = db.get_conn()
+    conn.execute(
+        "UPDATE task_stocks SET status='pending', status_reason=NULL WHERE task_id=? AND status IN ('fetching','pending')",
+        (task_id,),
+    )
+    conn.execute("UPDATE scan_tasks SET status='running' WHERE id=?", (task_id,))
+    conn.commit()
+
+    # Get remaining stocks
+    stocks = db.get_pending_stocks(task_id)
+    if not stocks:
+        return JSONResponse({"error": "No pending stocks to resume"}, status_code=400)
+
+    total = db.summarize_task_stocks(task_id)["total_stocks"]
+    scanned = total - len(stocks)
+    _set_running(task_id, "resume")
+    _running["started_at"] = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    _running["stats"] = {
+        "total_stocks": total,
+        "processed": scanned,
+        "scanned": scanned,
+        "stock_pool_source": "",
+        "current_code": "--",
+        "current_name": "恢复扫描中",
+    }
+
+    def run():
+        try:
+            def on_progress(stage, current, total_p, detail, discovery=None):
+                stats = _running.get("stats", {})
+                if stage == "discovery" and discovery:
+                    found = stats.get("candidates_found", 0) + 1
+                    ds = list(stats.get("discoveries") or [])
+                    ds.insert(0, {"code": discovery["code"], "name": discovery["name"], "score": discovery["score"]})
+                    _running["stats"] = {**stats, "discoveries": ds[:20], "candidates_found": found}
+                else:
+                    code = detail.split()[0] if detail else ""
+                    nm = detail[len(code):].strip() if len(detail) > len(code) else detail
+                    _running["stats"] = {**stats, "scanned": current, "processed": current, "total_stocks": total_p, "current_code": code, "current_name": nm}
+            result = scan_all(config, progress_callback=on_progress, resume_task_id=task_id)
+            _running["running"] = False
+            _running["stats"] = result["stats"]
+            if result["candidates"]:
+                sc = config.get("scoring", {})
+                db.save_candidates(task_id, result["candidates"], strong=sc.get("strong_threshold", 80), medium=sc.get("medium_threshold", 70))
+            s = result["stats"]
+            db.finish_scan_task(
+                task_id,
+                finished_at=datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                candidates_count=s.get("candidates_found", 0),
+                elapsed_seconds=s.get("elapsed_seconds", 0),
+                scanned=s.get("scanned", 0),
+                skipped=s.get("skipped", 0),
+            )
+            db.refresh_scan_task_counts(task_id)
+        except Exception as e:
+            import traceback
+            logger.error(f"Resume failed: {e}\n{traceback.format_exc()}")
+            conn = db.get_conn()
+            conn.execute("UPDATE scan_tasks SET status='failed', error=? WHERE id=?", (str(e), task_id))
+            conn.commit()
+        finally:
+            _clear_running()
+
+    threading.Thread(target=run, daemon=True).start()
+    return {"task_id": task_id, "status": "resumed", "remaining": len(stocks)}
+
+
 @app.get("/api/candidates")
 async def get_candidates(task_id: str = None):
     # If a specific task is requested, always query DB
