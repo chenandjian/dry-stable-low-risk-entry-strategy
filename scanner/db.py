@@ -505,6 +505,9 @@ def refresh_scan_task_counts(task_id: str) -> dict:
         ),
     )
     conn.commit()
+    stock_pool_source = get_conn().execute(
+        "SELECT stock_pool_source FROM scan_tasks WHERE id=?", (task_id,)
+    ).fetchone()
     return {
         **s,
         "processed": processed,
@@ -512,6 +515,7 @@ def refresh_scan_task_counts(task_id: str) -> dict:
         "failed_count": s["failed"],
         "candidates_count": candidates_count,
         "latest_trade_date": latest_trade_date,
+        "stock_pool_source": stock_pool_source[0] if stock_pool_source else "",
     }
 
 

@@ -149,6 +149,12 @@ async def start_scan():
     db.save_task_stocks(task_id, stocks)
     _set_running(task_id, "full")
     _running["started_at"] = started_at
+    _running["stats"] = {
+        "total_stocks": len(stocks),
+        "stock_pool_source": pool_result["source"],
+        "current_code": "--",
+        "current_name": "初始化中",
+    }
 
     def run():
         try:
