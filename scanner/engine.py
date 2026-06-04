@@ -40,6 +40,7 @@ def scan_all(
     stocks: list[dict] = None,
     retry_policy: str = "normal",
     worker_count: int = 2,
+    stop_event: threading.Event | None = None,
 ) -> dict:
     """双线程全市场扫描。"""
     from scanner.stock_pool import get_a_stock_pool
@@ -104,10 +105,13 @@ def scan_all(
         return time.strftime("%Y-%m-%d %H:%M:%S")
 
     def worker(thread_name: str):
-        while not stock_queue.empty():
+        while not stock_queue.empty() and (stop_event is None or not stop_event.is_set()):
             try:
                 stock = stock_queue.get_nowait()
             except Exception:
+                break
+
+            if stop_event and stop_event.is_set():
                 break
 
             ds = mgr.try_acquire_any()

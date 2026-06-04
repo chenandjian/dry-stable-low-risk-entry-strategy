@@ -48,7 +48,7 @@ async def lifespan(app: FastAPI):
                 else:
                     code = detail.split()[0] if detail else ""
                     _running["stats"] = {**stats, "scanned": current, "processed": current, "total_stocks": total, "current_code": code, "current_name": detail[len(code):].strip() if len(detail) > len(code) else detail}
-            result = scan_all(config, progress_callback=on_progress, resume_task_id=interrupted["id"])
+            result = scan_all(config, progress_callback=on_progress, resume_task_id=interrupted["id"], stop_event=_stop_event)
             _running["running"] = False
             _running["stats"] = result["stats"]
             _running["candidates"] = result["candidates"]
@@ -84,6 +84,7 @@ _running = {
     "task_id": None,
     "stats": {},
 }
+_stop_event = threading.Event()
 
 
 def _get_running_task_id() -> str | None:
@@ -108,6 +109,7 @@ def _scan_conflict_response():
 
 
 def _set_running(task_id: str, mode: str):
+    _stop_event.clear()
     _running["running"] = True
     _running["task_id"] = task_id
     _running["mode"] = mode
@@ -246,6 +248,7 @@ async def start_scan():
                 task_id=task_id,
                 stocks=stocks,
                 retry_policy="normal",
+                stop_event=_stop_event,
             )
 
             if result["candidates"]:
@@ -258,15 +261,16 @@ async def start_scan():
 
             s = result["stats"]
             _running["stats"] = s
-            db.finish_scan_task(
-                task_id,
-                finished_at=datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                candidates_count=s.get("candidates_found", 0),
-                elapsed_seconds=s.get("elapsed_seconds", 0),
-                scanned=s.get("scanned", 0),
-                skipped=s.get("skipped", 0),
-            )
-            db.refresh_scan_task_counts(task_id)
+            if not _stop_event.is_set():
+                db.finish_scan_task(
+                    task_id,
+                    finished_at=datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    candidates_count=s.get("candidates_found", 0),
+                    elapsed_seconds=s.get("elapsed_seconds", 0),
+                    scanned=s.get("scanned", 0),
+                    skipped=s.get("skipped", 0),
+                )
+                db.refresh_scan_task_counts(task_id)
 
         except Exception as e:
             import traceback
@@ -294,8 +298,7 @@ async def stop_scan():
     """Stop the currently running scan."""
     if not _running["running"]:
         return {"status": "no_scan_running"}
-    _running["stop_requested"] = True
-    # Mark task as cancelled
+    _stop_event.set()
     task_id = _running.get("task_id")
     if task_id:
         conn = db.get_conn()
@@ -303,8 +306,11 @@ async def stop_scan():
             "UPDATE scan_tasks SET status='cancelled', error='User stopped' WHERE id=?",
             (task_id,),
         )
+        conn.execute(
+            "UPDATE task_stocks SET status='pending', status_reason='scan stopped' WHERE task_id=? AND status='fetching'",
+            (task_id,),
+        )
         conn.commit()
-    _clear_running()
     return {"status": "stopped", "task_id": task_id}
 
 
@@ -405,7 +411,7 @@ async def retry_failed_stocks(task_id: str):
     def run_retry():
         import datetime
         try:
-            result = scan_all(config, task_id=task_id, stocks=stocks, retry_policy="failed_only")
+            result = scan_all(config, task_id=task_id, stocks=stocks, retry_policy="failed_only", stop_event=_stop_event)
             s = result["stats"]
             db.finish_scan_task(
                 task_id,
@@ -480,7 +486,7 @@ async def resume_task(task_id: str):
                     code = detail.split()[0] if detail else ""
                     nm = detail[len(code):].strip() if len(detail) > len(code) else detail
                     _running["stats"] = {**stats, "scanned": current, "processed": current, "total_stocks": total_p, "current_code": code, "current_name": nm}
-            result = scan_all(config, progress_callback=on_progress, resume_task_id=task_id)
+            result = scan_all(config, progress_callback=on_progress, resume_task_id=task_id, stop_event=_stop_event)
             _running["running"] = False
             _running["stats"] = result["stats"]
             if result["candidates"]:
