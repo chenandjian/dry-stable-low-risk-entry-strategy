@@ -11,10 +11,9 @@
         <span>状态</span>
         <span>耗时</span>
         <span>候选</span>
-        <span>最高</span>
-        <span>平均</span>
-        <span>A级</span>
-        <span>突破</span>
+        <span>失败</span>
+        <span>来源</span>
+        <span>最新日</span>
         <span>操作</span>
       </div>
       <div v-if="tasks.length === 0" class="empty-state">
@@ -24,15 +23,15 @@
         <span class="task-dot" :class="t.running ? 'running' : 'done'"></span>
         <span class="task-date">{{ t.date }}</span>
         <span>{{ t.scope || '全市场' }}</span>
-        <span :class="t.running ? 'st-running' : 'st-done'">{{ t.running ? '扫描中' : '已完成' }}</span>
+        <span :class="t.running ? 'st-running' : 'st-done'">{{ t.running ? '扫描中' : statusText(t.status) }}</span>
         <span class="muted">{{ t.duration || '--' }}</span>
         <span class="blue">{{ t.candidates || 0 }}</span>
-        <span class="gold">{{ t.topScore || '--' }}</span>
-        <span class="muted">{{ t.avgScore || '--' }}</span>
-        <span class="gold">{{ t.aGrade || 0 }}</span>
-        <span class="red">{{ t.breakout || 0 }}</span>
+        <span class="red">{{ t.failed || 0 }}</span>
+        <span class="muted">{{ t.stock_pool_source || '--' }}</span>
+        <span class="muted">{{ t.latest_trade_date || '--' }}</span>
         <span class="actions">
           <button class="action-btn" @click="viewResults(t.id)" v-if="!t.running">查看结果</button>
+          <button class="action-btn" @click="viewFailures(t.id)" v-if="!t.running && t.failed">失败列表</button>
           <button class="action-btn" @click="exportResults(t.id)" v-if="!t.running">导出</button>
           <span v-if="t.running" class="st-running">实时查看 →</span>
         </span>
@@ -51,8 +50,14 @@ const { getScanTasks } = useApi()
 const tasks = ref([])
 let pollTimer = null
 
-function viewResults(id) { /* TODO Phase 3: filter by task id */ router.push('/results') }
-function exportResults(id) { /* TODO Phase 3: filter by task id */ window.open('/api/candidates', '_blank') }
+function statusText(status) {
+  if (status === 'failed') return '失败'
+  if (status === 'cancelled') return '已取消'
+  return '已完成'
+}
+function viewResults(id) { router.push('/results') }
+function viewFailures(id) { router.push(`/?task=${id}&status=failed`) }
+function exportResults(id) { window.open('/api/candidates', '_blank') }
 
 async function loadTasks() {
   try {
@@ -76,12 +81,12 @@ onUnmounted(() => { if (pollTimer) clearInterval(pollTimer) })
 .page-sub { font-size: 13px; color: var(--text-muted); margin-bottom: 20px; }
 .panel { background: var(--bg-panel); border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
 .task-header {
-  display: grid; grid-template-columns: 20px 180px 140px 80px 80px 60px 60px 60px 50px 50px 140px;
+  display: grid; grid-template-columns: 20px 180px 130px 80px 70px 60px 60px 80px 90px 180px;
   align-items: center; padding: 10px 16px; border-bottom: 2px solid var(--border-light);
   font-size: 11px; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px;
 }
 .task-row {
-  display: grid; grid-template-columns: 20px 180px 140px 80px 80px 60px 60px 60px 50px 50px 140px;
+  display: grid; grid-template-columns: 20px 180px 130px 80px 70px 60px 60px 80px 90px 180px;
   align-items: center; padding: 12px 16px; border-bottom: 1px solid var(--border); font-size: 13px;
 }
 .task-row:hover { background: rgba(79,125,255,0.03); }
