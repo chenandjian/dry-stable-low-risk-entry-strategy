@@ -52,6 +52,19 @@
         <div class="kv"><span class="k">盈亏比</span><span class="v blue">{{ rr1?.toFixed(1) }} : 1</span></div>
       </div>
 
+      <div class="section-label">技术指标</div>
+      <div class="kv-list">
+        <div class="kv"><span class="k">MA5</span><span class="v" :class="maColor(0)">{{ fmtVal(latestMA[0]) }}</span></div>
+        <div class="kv"><span class="k">MA10</span><span class="v" :class="maColor(1)">{{ fmtVal(latestMA[1]) }}</span></div>
+        <div class="kv"><span class="k">MA20</span><span class="v" :class="maColor(2)">{{ fmtVal(latestMA[2]) }}</span></div>
+        <div class="kv"><span class="k">MA50</span><span class="v" :class="maColor(3)">{{ fmtVal(latestMA[3]) }}</span></div>
+        <div class="kv"><span class="k">MA100</span><span class="v" :class="maColor(4)">{{ fmtVal(latestMA[4]) }}</span></div>
+        <div class="kv"><span class="k">MA200</span><span class="v" :class="maColor(5)">{{ fmtVal(latestMA[5]) }}</span></div>
+        <div class="kv"><span class="k">RSI6</span><span class="v" :class="rsiClass(0)">{{ fmtVal(latestRSI[0]) }}</span></div>
+        <div class="kv"><span class="k">RSI12</span><span class="v" :class="rsiClass(1)">{{ fmtVal(latestRSI[1]) }}</span></div>
+        <div class="kv"><span class="k">RSI24</span><span class="v" :class="rsiClass(2)">{{ fmtVal(latestRSI[2]) }}</span></div>
+      </div>
+
       <div class="section-label" v-if="tradePlan">交易计划</div>
       <div class="plan-list" v-if="tradePlan">
         <div class="plan-row">
@@ -220,6 +233,37 @@ const score = ref(0)
 const watchlist = ref([])
 const wlFilter = ref('all')
 const chartRef = ref(null)
+const candleDataRef = ref([])
+
+// Latest indicator values
+const maPeriods = [5, 10, 20, 50, 100, 200]
+const maColors = ['#F59E0B', '#EF4444', '#4F7DFF', '#22C55E', '#A855F7', '#EC4899']
+const rsiPeriodsVals = [6, 12, 24]
+const rsiColors = ['#4F7DFF', '#F59E0B', '#EF4444']
+
+const latestMA = computed(() => maPeriods.map(p => {
+  const data = calcMA(candleDataRef.value, p)
+  return data.length ? data[data.length - 1].value : null
+}))
+const latestRSI = computed(() => rsiPeriodsVals.map(p => {
+  const data = calcRSI(candleDataRef.value, p)
+  return data.length ? data[data.length - 1].value : null
+}))
+
+function fmtVal(v) { return v != null ? v.toFixed(2) : '--' }
+function maColor(i) {
+  const v = latestMA.value[i]
+  const close = stock.value.latest_close
+  if (v == null || close == null) return ''
+  return v > close ? 'red' : 'green'
+}
+function rsiClass(i) {
+  const v = latestRSI.value[i]
+  if (v == null) return ''
+  if (v >= 70) return 'red'
+  if (v <= 30) return 'green'
+  return 'blue'
+}
 
 async function loadStock(code) {
   try {
@@ -432,6 +476,7 @@ async function initChart() {
     wickDownColor: '#22C55E',
   })
   candleSeries.setData(candleData)
+  candleDataRef.value = candleData
   // Reserve bottom 35% for volume + RSI panes
   candleSeries.priceScale().applyOptions({
     scaleMargins: { top: 0, bottom: 0.35 },
@@ -456,9 +501,6 @@ async function initChart() {
   volumeSeries.setData(volumeData)
 
   // MA lines (5, 10, 20, 50, 100, 200)
-  const maPeriods = [5, 10, 20, 50, 100, 200]
-  const maColors = ['#F59E0B', '#EF4444', '#4F7DFF', '#22C55E', '#A855F7', '#EC4899']
-
   maPeriods.forEach((period, i) => {
     const maData = calcMA(candleData, period)
     const maSeries = chart.addSeries(LineSeries, {
@@ -471,10 +513,7 @@ async function initChart() {
   })
 
   // RSI pane (bottom ~15%)
-  const rsiPeriods = [6, 12, 24]
-  const rsiColors = ['#4F7DFF', '#F59E0B', '#EF4444']
-
-  rsiPeriods.forEach((period, i) => {
+  rsiPeriodsVals.forEach((period, i) => {
     const rsiData = calcRSI(candleData, period)
     const rsiSeries = chart.addSeries(LineSeries, {
       color: rsiColors[i],
