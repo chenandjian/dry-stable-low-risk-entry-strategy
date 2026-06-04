@@ -2,7 +2,9 @@
 import logging
 import threading
 import time
+from dataclasses import dataclass
 from queue import Queue
+from typing import Callable
 
 import scanner.db as db
 from scanner.data_source import DataSourceManager
@@ -16,6 +18,18 @@ from scanner.scorer import score_cup_handle_advanced
 from analyzer.dry_stable import analyze_dry_stable
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class FetchResult:
+    data: list[dict] | None
+    primary_source: str
+    fallback_source: str
+    primary_attempts: int = 0
+    fallback_attempts: int = 0
+    primary_error: str | None = None
+    fallback_error: str | None = None
+    from_cache: bool = False
 
 
 def scan_all(config: dict, progress_callback=None, resume_task_id: str = None) -> dict:
@@ -89,8 +103,9 @@ def scan_all(config: dict, progress_callback=None, resume_task_id: str = None) -
 
             code = stock["code"]
             try:
-                # 三级回退获取数据
-                data = _fetch_with_fallback(code, ds, mgr)
+                # 优先拉取新鲜数据，缓存仅用于补齐历史
+                fetch_result = _fetch_with_retry(code, ds, mgr=mgr)
+                data = fetch_result.data
                 if data is None:
                     with stats_lock:
                         skip_count[0] += 1
@@ -209,62 +224,69 @@ def scan_all(config: dict, progress_callback=None, resume_task_id: str = None) -
     }
 
 
-def _fetch_with_fallback(code: str, primary_ds: str, mgr: DataSourceManager):
-    """三级回退：数据库缓存 → 主源 → 备用源。
-
-    优化：先检查数据库缓存是否覆盖最近交易日。
-    """
-    from datetime import datetime, timedelta
-
-    # 1. 先尝试数据库缓存
+def _fetch_with_retry(
+    code: str,
+    primary_ds: str,
+    retry_attempts: int = 2,
+    fallback_attempts: int = 2,
+    sleep_fn: Callable[[float], None] = time.sleep,
+    mgr: DataSourceManager | None = None,
+) -> FetchResult:
+    """Fetch fresh K-line data first; cache is only used to merge history."""
+    fallback_ds = "tencent" if primary_ds == "sina" else "sina"
     cached = db.get_ohlc(code)
-    if cached and _is_cache_fresh(cached):
-        return cached
+    result = FetchResult(data=None, primary_source=primary_ds, fallback_source=fallback_ds)
 
-    # 2. 主数据源
-    fetch_fn = fetch_sina_daily if primary_ds == "sina" else fetch_tencent_daily
-    data = fetch_fn(code)
-
+    data, attempts, error = _try_fetch_source(code, primary_ds, retry_attempts, sleep_fn)
+    result.primary_attempts = attempts
+    result.primary_error = error
     if data:
-        if cached:
-            data = _merge_data(cached, data)
-        db.save_ohlc(code, data)
-        return data
+        merged = _merge_data(cached or [], data)
+        db.save_ohlc(code, merged)
+        result.data = merged
+        return result
 
-    # 3. 回退另一个数据源
-    other = "tencent" if primary_ds == "sina" else "sina"
-    if mgr.acquire(other):
+    if mgr is not None:
+        if not mgr.acquire(fallback_ds):
+            result.fallback_attempts = 0
+            result.fallback_error = "data source busy"
+            return result
         try:
-            fetch_fn2 = fetch_tencent_daily if other == "tencent" else fetch_sina_daily
-            data = fetch_fn2(code)
-            if data:
-                if cached:
-                    data = _merge_data(cached, data)
-                db.save_ohlc(code, data)
-                return data
+            data, attempts, error = _try_fetch_source(code, fallback_ds, fallback_attempts, sleep_fn)
         finally:
-            mgr.release(other)
+            mgr.release(fallback_ds)
+    else:
+        data, attempts, error = _try_fetch_source(code, fallback_ds, fallback_attempts, sleep_fn)
+    result.fallback_attempts = attempts
+    result.fallback_error = error
+    if data:
+        merged = _merge_data(cached or [], data)
+        db.save_ohlc(code, merged)
+        result.data = merged
+        return result
 
-    # 4. 如果有过期缓存也返回
-    if cached:
-        return cached
-
-    return None
+    return result
 
 
-def _is_cache_fresh(data: list[dict]) -> bool:
-    """检查缓存是否覆盖最近一个交易日。"""
-    if not data:
-        return False
-    from datetime import datetime, timedelta
-    latest_date = data[-1]["date"]
-    today = datetime.now()
-    # 如果最新日期在最近2天内，认为缓存新鲜
-    try:
-        latest = datetime.strptime(latest_date, "%Y-%m-%d")
-        return (today - latest).days <= 2
-    except (ValueError, TypeError):
-        return False
+def _try_fetch_source(
+    code: str,
+    ds_name: str,
+    attempts: int,
+    sleep_fn: Callable[[float], None],
+) -> tuple[list[dict] | None, int, str | None]:
+    fetch_fn = fetch_sina_daily if ds_name == "sina" else fetch_tencent_daily
+    last_error = None
+    for attempt in range(1, attempts + 1):
+        try:
+            data = fetch_fn(code)
+            if data:
+                return data, attempt, None
+            last_error = "empty response"
+        except Exception as exc:
+            last_error = str(exc)
+        if attempt < attempts:
+            sleep_fn(min(0.5 * attempt, 2.0))
+    return None, attempts, last_error
 
 
 def _merge_data(cached: list[dict], fresh: list[dict]) -> list[dict]:
