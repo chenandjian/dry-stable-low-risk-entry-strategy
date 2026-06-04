@@ -78,7 +78,7 @@ def test_scan_all_requeues_stock_after_transient_source_busy(monkeypatch, tmp_pa
     sleep_calls = []
     FakeScanManager.events = []
 
-    def fake_fetch_with_retry(code, ds, mgr=None):
+    def fake_fetch_with_retry(code, ds, *args, mgr=None, **kwargs):
         attempts['count'] += 1
         FakeScanManager.events.append(f"fetch:{attempts['count']}")
         if attempts['count'] == 1:
@@ -145,7 +145,7 @@ def test_scan_all_stops_requeue_after_busy_retry_budget(monkeypatch, tmp_path):
     db.init_db(str(db_path))
     db.create_scan_task('task-1', '2026-06-04 09:30:00', total_stocks=0)
 
-    def fake_fetch_with_retry(code, ds, mgr=None):
+    def fake_fetch_with_retry(code, ds, *args, mgr=None, **kwargs):
         attempts['count'] += 1
         FakeScanManager.events.append(f"fetch:{attempts['count']}")
         return engine.FetchResult(
@@ -171,8 +171,9 @@ def test_scan_all_stops_requeue_after_busy_retry_budget(monkeypatch, tmp_path):
 
     assert attempts['count'] == 2
     assert result['task_id'] == 'task-1'
-    assert result['stats']['scanned'] == 0
-    assert result['stats']['skipped'] == 1
+    assert result['stats']['total'] == 1
+    assert result['stats']['scanned'] == 1
+    assert result['stats']['skipped'] == 0
     assert result['stats']['failed'] == 1
     assert result['stats']['candidates_found'] == 0
     assert len(failed_rows) == 1
@@ -194,6 +195,142 @@ def test_scan_all_stops_requeue_after_busy_retry_budget(monkeypatch, tmp_path):
         'fetch:2',
         'release:tencent',
     ]
+
+
+def test_scan_all_records_failed_stock_when_fetch_fails(monkeypatch, tmp_path):
+    db_path = tmp_path / 'cuphandle.db'
+    config = {'data': {'database_path': str(db_path)}, 'liquidity': {'enabled': False}}
+    stocks = [{'code': '600000', 'name': 'PF Bank', 'market': 'SSE'}]
+
+    db.init_db(str(db_path))
+    db.create_scan_task('task-1', '2026-06-04 09:30:00', total_stocks=1)
+    db.save_task_stocks('task-1', stocks)
+
+    monkeypatch.setattr(engine, 'DataSourceManager', FakeScanManager)
+    monkeypatch.setattr(engine.threading, 'Thread', ImmediateThread)
+    monkeypatch.setattr(engine, 'fetch_market_index_daily', lambda: [])
+    monkeypatch.setattr(
+        engine,
+        '_fetch_with_retry',
+        lambda *args, **kwargs: engine.FetchResult(
+            data=None,
+            primary_source='tencent',
+            fallback_source='sina',
+            primary_attempts=2,
+            fallback_attempts=2,
+            primary_error='timeout',
+            fallback_error='empty response',
+        ),
+    )
+
+    result = engine.scan_all(config, task_id='task-1', stocks=stocks, worker_count=1)
+    rows = db.get_task_stocks('task-1', status='failed')
+
+    assert result['stats']['skipped'] == 0
+    assert result['stats']['failed'] == 1
+    assert len(rows) == 1
+    assert rows[0]['code'] == '600000'
+    assert rows[0]['status_reason'] == '数据源全部失败，未使用旧缓存扫描'
+    assert rows[0]['primary_error'] == 'timeout'
+    assert rows[0]['fallback_error'] == 'empty response'
+    assert rows[0]['finished_at']
+
+
+def test_scan_all_marks_skipped_for_insufficient_listing_days(monkeypatch, tmp_path):
+    db_path = tmp_path / 'cuphandle.db'
+    config = {
+        'data': {'database_path': str(db_path)},
+        'liquidity': {'enabled': False, 'min_listing_days': 250},
+    }
+    stocks = [{'code': '600000', 'name': 'PF Bank', 'market': 'SSE'}]
+
+    db.init_db(str(db_path))
+    db.create_scan_task('task-1', '2026-06-04 09:30:00', total_stocks=1)
+    db.save_task_stocks('task-1', stocks)
+
+    monkeypatch.setattr(engine, 'DataSourceManager', FakeScanManager)
+    monkeypatch.setattr(engine.threading, 'Thread', ImmediateThread)
+    monkeypatch.setattr(engine, 'fetch_market_index_daily', lambda: [])
+    monkeypatch.setattr(
+        engine,
+        '_fetch_with_retry',
+        lambda *args, **kwargs: engine.FetchResult(
+            data=[_row('2026-06-04')],
+            primary_source='tencent',
+            fallback_source='sina',
+            primary_attempts=1,
+        ),
+    )
+
+    result = engine.scan_all(config, task_id='task-1', stocks=stocks, worker_count=1)
+    rows = db.get_task_stocks('task-1', status='skipped')
+
+    assert result['stats']['skipped'] == 1
+    assert len(rows) == 1
+    assert rows[0]['status_reason'] == '上市天数不足'
+    assert rows[0]['kline_latest_date'] == '2026-06-04'
+    assert rows[0]['finished_at']
+
+
+def test_scan_all_deduplicates_candidates(monkeypatch, tmp_path):
+    db_path = tmp_path / 'cuphandle.db'
+    config = {
+        'data': {'database_path': str(db_path)},
+        'liquidity': {'enabled': False, 'min_listing_days': 250},
+        'scoring': {'medium_threshold': 70},
+    }
+    unique_stock = {'code': '600000', 'name': 'PF Bank', 'market': 'SSE'}
+    stocks = [unique_stock.copy(), unique_stock.copy()]
+
+    db.init_db(str(db_path))
+    db.create_scan_task('task-1', '2026-06-04 09:30:00', total_stocks=1)
+    db.save_task_stocks('task-1', [unique_stock])
+
+    monkeypatch.setattr(engine, 'DataSourceManager', FakeScanManager)
+    monkeypatch.setattr(engine.threading, 'Thread', ImmediateThread)
+    monkeypatch.setattr(engine, 'fetch_market_index_daily', lambda: [])
+    monkeypatch.setattr(
+        engine,
+        '_fetch_with_retry',
+        lambda *args, **kwargs: engine.FetchResult(
+            data=_rows(260, close=20.0),
+            primary_source='tencent',
+            fallback_source='sina',
+            primary_attempts=1,
+        ),
+    )
+    monkeypatch.setattr(engine, 'passes_liquidity_filter', lambda data, cfg: True)
+    monkeypatch.setattr(engine, 'detect_cup_handle', lambda data, cfg: engine.CupHandleResult(found=True, score=0))
+    monkeypatch.setattr(engine, 'score_cup_handle_advanced', lambda result, data, scoring_cfg=None: 80)
+    monkeypatch.setattr(
+        engine,
+        'analyze_dry_stable',
+        lambda result, data, market_data=None: {
+            'decision': {'verdict': '可低吸', 'summary': '测试'},
+            'volume_dry': {'score': 8},
+            'price_stable': {'score': 8},
+            'pattern_score': {'score': 16, 'type': '杯柄', 'key_pattern_type': 'cup_handle'},
+            'risk_reward': {'risk_percent': 4.0, 'rr1': 2.0, 'position_advice': '30%'},
+            'key_prices': {
+                'entry_zone_low': 19,
+                'entry_zone_high': 20,
+                'pivot': 21,
+                'stop_loss': 18,
+                'target_1': 24,
+                'target_2': 26,
+            },
+            'market_environment': {'status': '一般', 'position_advice': '轻仓'},
+        },
+    )
+
+    result = engine.scan_all(config, task_id='task-1', stocks=stocks, worker_count=1)
+    candidate_rows = db.get_task_stocks('task-1', status='candidate')
+
+    assert result['stats']['candidates_found'] == 1
+    assert len(result['candidates']) == 1
+    assert result['candidates'][0][0]['code'] == '600000'
+    assert len(candidate_rows) == 1
+    assert candidate_rows[0]['code'] == '600000'
 
 
 def test_fetch_with_retry_ignores_fresh_cache_when_source_succeeds(monkeypatch, tmp_path):

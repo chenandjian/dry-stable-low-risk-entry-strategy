@@ -32,48 +32,54 @@ class FetchResult:
     from_cache: bool = False
 
 
-def scan_all(config: dict, progress_callback=None, resume_task_id: str = None, task_id: str = None) -> dict:
-    """双线程全市场扫描。
-
-    Args:
-        config: 完整配置
-        progress_callback: 可选进度回调 fn(stage, current, total, detail)
-        resume_task_id: 中断任务 ID，恢复时跳过已扫股票
-        task_id: 扫描任务 ID，用于更新 task_stocks 跟踪
-
-    Returns:
-        {"candidates": [...], "stats": {...}, "task_id": "..."}
-    """
+def scan_all(
+    config: dict,
+    progress_callback=None,
+    resume_task_id: str = None,
+    task_id: str = None,
+    stocks: list[dict] = None,
+    retry_policy: str = "normal",
+    worker_count: int = 2,
+) -> dict:
+    """双线程全市场扫描。"""
     from scanner.stock_pool import get_a_stock_pool
 
-    # Initialize database
     db_path = config.get("data", {}).get("database_path", "data/cuphandle.db")
     db.init_db(db_path)
 
-    # 股票池加载（支持恢复模式）
+    if task_id is None:
+        task_id = resume_task_id or time.strftime("%Y%m%d-%H%M%S")
+
     start_offset = 0
-    stocks = None
-    if resume_task_id:
+    if stocks is None and resume_task_id:
         info = db.get_interrupted_task()
         if info:
             start_offset = info.get("scanned", 0)
             stocks = db.get_pending_stocks(resume_task_id, from_idx=start_offset)
-    if task_id is None:
-        task_id = resume_task_id or __import__('time').strftime("%Y%m%d-%H%M%S")
 
-    if not stocks:
+    if stocks is None:
         stocks = get_a_stock_pool(config)
-        start_offset = 0
-        # 保存股票列表供续扫
         if not resume_task_id:
             db.save_task_stocks(task_id, stocks)
 
+    if retry_policy == "failed_only":
+        primary_attempts = 3
+        fallback_attempts = 3
+    else:
+        primary_attempts = 2
+        fallback_attempts = 2
+
+    configured_workers = config.get("data", {}).get("worker_count")
+    if configured_workers is not None and worker_count == 2:
+        worker_count = configured_workers
+    worker_count = max(1, worker_count)
+
     stock_queue = Queue()
-    for s in stocks:
-        stock_queue.put(s)
+    for stock in stocks:
+        stock_queue.put(stock)
 
     mgr = DataSourceManager()
-    candidates = []
+    candidate_by_code = {}
     candidate_lock = threading.Lock()
     scanned_count = [0]
     skip_count = [0]
@@ -82,7 +88,6 @@ def scan_all(config: dict, progress_callback=None, resume_task_id: str = None, t
     busy_retries_by_code = {}
     busy_retry_lock = threading.Lock()
 
-    # Merge config sections with handle key prefixing
     cup_cfg = config.get("cup", {})
     handle_cfg = config.get("handle", {})
     breakout_cfg = config.get("breakout", {})
@@ -91,10 +96,12 @@ def scan_all(config: dict, progress_callback=None, resume_task_id: str = None, t
     liquidity_cfg = config.get("liquidity", {})
     scoring_cfg = config.get("scoring", {})
     max_busy_retries = config.get("data", {}).get("source_busy_max_retries", 3)
-    worker_count = config.get("data", {}).get("worker_count", 2)
     market_data = fetch_market_index_daily()
 
     start_time = time.time()
+
+    def _now() -> str:
+        return time.strftime("%Y-%m-%d %H:%M:%S")
 
     def worker(thread_name: str):
         while not stock_queue.empty():
@@ -110,9 +117,23 @@ def scan_all(config: dict, progress_callback=None, resume_task_id: str = None, t
                 continue
 
             code = stock["code"]
+            fallback_ds = "tencent" if ds == "sina" else "sina"
             try:
-                # 优先拉取新鲜数据，缓存仅用于补齐历史
-                fetch_result = _fetch_with_retry(code, ds, mgr=mgr)
+                db.update_task_stock(
+                    task_id,
+                    code,
+                    status="fetching",
+                    primary_source=ds,
+                    fallback_source=fallback_ds,
+                    started_at=_now(),
+                )
+                fetch_result = _fetch_with_retry(
+                    code,
+                    ds,
+                    retry_attempts=primary_attempts,
+                    fallback_attempts=fallback_attempts,
+                    mgr=mgr,
+                )
                 data = fetch_result.data
                 if data is None:
                     if _is_transient_source_busy(fetch_result):
@@ -134,6 +155,7 @@ def scan_all(config: dict, progress_callback=None, resume_task_id: str = None, t
                             fallback_attempts=fetch_result.fallback_attempts,
                             primary_error=fetch_result.primary_error,
                             fallback_error=fetch_result.fallback_error,
+                            finished_at=_now(),
                         )
                         db.refresh_scan_task_counts(task_id)
                         with stats_lock:
@@ -142,30 +164,64 @@ def scan_all(config: dict, progress_callback=None, resume_task_id: str = None, t
                         with busy_retry_lock:
                             busy_retries_by_code.pop(code, None)
                         continue
+                    db.update_task_stock(
+                        task_id,
+                        code,
+                        status="failed",
+                        status_reason="数据源全部失败，未使用旧缓存扫描",
+                        primary_source=fetch_result.primary_source,
+                        fallback_source=fetch_result.fallback_source,
+                        primary_attempts=fetch_result.primary_attempts,
+                        fallback_attempts=fetch_result.fallback_attempts,
+                        primary_error=fetch_result.primary_error,
+                        fallback_error=fetch_result.fallback_error,
+                        finished_at=_now(),
+                    )
+                    db.refresh_scan_task_counts(task_id)
+                    with stats_lock:
+                        failed_count[0] += 1
+                        skip_count[0] += 1
+                    with busy_retry_lock:
+                        busy_retries_by_code.pop(code, None)
+                    continue
+
+                latest_trade_date = data[-1].get("date") if data else None
+                min_listing = liquidity_cfg.get("min_listing_days", 250)
+                if len(data) < min_listing:
+                    db.update_task_stock(
+                        task_id,
+                        code,
+                        status="skipped",
+                        status_reason="上市天数不足",
+                        kline_latest_date=latest_trade_date,
+                        finished_at=_now(),
+                    )
+                    db.refresh_scan_task_counts(task_id)
                     with stats_lock:
                         skip_count[0] += 1
                     with busy_retry_lock:
                         busy_retries_by_code.pop(code, None)
                     continue
 
-                # 上市天数过滤（日线数据不足即视为新股）
-                min_listing = liquidity_cfg.get("min_listing_days", 250)
-                if len(data) < min_listing:
-                    with stats_lock:
-                        skip_count[0] += 1
-                    continue
-
-                # 存储最新价等元数据
                 stock["latest_close"] = data[-1]["close"]
                 stock["latest_turnover"] = data[-1].get("turnover") or (data[-1]["volume"] * data[-1]["close"])
 
-                # 流动性过滤
                 if not passes_liquidity_filter(data, liquidity_cfg):
+                    db.update_task_stock(
+                        task_id,
+                        code,
+                        status="skipped",
+                        status_reason="流动性过滤未通过",
+                        kline_latest_date=latest_trade_date,
+                        finished_at=_now(),
+                    )
+                    db.refresh_scan_task_counts(task_id)
                     with stats_lock:
                         skip_count[0] += 1
+                    with busy_retry_lock:
+                        busy_retries_by_code.pop(code, None)
                     continue
 
-                # 杯柄检测
                 result = detect_cup_handle(data, pattern_cfg)
                 if result.found:
                     result.code = code
@@ -179,6 +235,7 @@ def scan_all(config: dict, progress_callback=None, resume_task_id: str = None, t
                     if dry_stable["pattern_score"].get("key_pattern_type") != "vcp" or pattern20 < 13:
                         dry_stable = None
 
+                is_candidate = False
                 if dry_stable:
                     if result.score == 0:
                         result.score = min(100, dry_stable["pattern_score"]["score"] * 5)
@@ -186,87 +243,121 @@ def scan_all(config: dict, progress_callback=None, resume_task_id: str = None, t
                     strategy_verdict = dry_stable["decision"]["verdict"]
                     if result.score >= scoring_cfg.get("medium_threshold", 70) - 10 and strategy_verdict != "不建议买入":
                         with candidate_lock:
-                            candidates.append((stock, result))
-                        # 通知发现新候选
+                            candidate_by_code[code] = (stock, result)
+                            unique_candidates = len(candidate_by_code)
+                        is_candidate = True
+                        db.update_task_stock(
+                            task_id,
+                            code,
+                            status="candidate",
+                            kline_latest_date=latest_trade_date,
+                            quote_status="not_requested",
+                            finished_at=_now(),
+                        )
                         if progress_callback:
-                            progress_callback("discovery", len(candidates), len(stocks),
-                                              f"{code} {stock.get('name','')}",
-                                              {"code": code, "name": stock.get("name", ""),
-                                               "score": result.score,
-                                               "is_breakout": result.is_breakout,
-                                               "is_volume_breakout": result.is_volume_breakout,
-                                               "breakout_price": result.breakout_price,
-                                               "cup_depth_pct": result.cup_depth_pct,
-                                               "cup_duration": result.cup_duration,
-                                               "handle_depth_pct": result.handle_depth_pct,
-                                               "vol_multiplier": result.vol_multiplier,
-                                               "latest_close": stock.get("latest_close", 0),
-                                               "dry_stable_verdict": strategy_verdict,
-                                               "dry_stable_summary": dry_stable["decision"]["summary"],
-                                               "volume_dry_score": dry_stable["volume_dry"]["score"],
-                                               "price_stable_score": dry_stable["price_stable"]["score"],
-                                               "pattern_score_20": dry_stable["pattern_score"]["score"],
-                                               "pattern_type": dry_stable["pattern_score"]["type"],
-                                               "key_pattern_type": dry_stable["pattern_score"]["key_pattern_type"],
-                                               "risk_percent": dry_stable["risk_reward"]["risk_percent"],
-                                               "rr1": dry_stable["risk_reward"]["rr1"],
-                                               "position_advice": dry_stable["risk_reward"]["position_advice"],
-                                               "entry_zone_low": dry_stable["key_prices"]["entry_zone_low"],
-                                               "entry_zone_high": dry_stable["key_prices"]["entry_zone_high"],
-                                               "pivot": dry_stable["key_prices"]["pivot"],
-                                               "stop_loss": dry_stable["key_prices"]["stop_loss"],
-                                               "target_1": dry_stable["key_prices"]["target_1"],
-                                               "target_2": dry_stable["key_prices"]["target_2"],
-                                               "market_status": dry_stable["market_environment"]["status"],
-                                               "market_position_advice": dry_stable["market_environment"]["position_advice"]})
+                            progress_callback(
+                                "discovery",
+                                unique_candidates,
+                                len(stocks),
+                                f"{code} {stock.get('name', '')}",
+                                {
+                                    "code": code,
+                                    "name": stock.get("name", ""),
+                                    "score": result.score,
+                                    "is_breakout": result.is_breakout,
+                                    "is_volume_breakout": result.is_volume_breakout,
+                                    "breakout_price": result.breakout_price,
+                                    "cup_depth_pct": result.cup_depth_pct,
+                                    "cup_duration": result.cup_duration,
+                                    "handle_depth_pct": result.handle_depth_pct,
+                                    "vol_multiplier": result.vol_multiplier,
+                                    "latest_close": stock.get("latest_close", 0),
+                                    "dry_stable_verdict": strategy_verdict,
+                                    "dry_stable_summary": dry_stable["decision"]["summary"],
+                                    "volume_dry_score": dry_stable["volume_dry"]["score"],
+                                    "price_stable_score": dry_stable["price_stable"]["score"],
+                                    "pattern_score_20": dry_stable["pattern_score"]["score"],
+                                    "pattern_type": dry_stable["pattern_score"]["type"],
+                                    "key_pattern_type": dry_stable["pattern_score"]["key_pattern_type"],
+                                    "risk_percent": dry_stable["risk_reward"]["risk_percent"],
+                                    "rr1": dry_stable["risk_reward"]["rr1"],
+                                    "position_advice": dry_stable["risk_reward"]["position_advice"],
+                                    "entry_zone_low": dry_stable["key_prices"]["entry_zone_low"],
+                                    "entry_zone_high": dry_stable["key_prices"]["entry_zone_high"],
+                                    "pivot": dry_stable["key_prices"]["pivot"],
+                                    "stop_loss": dry_stable["key_prices"]["stop_loss"],
+                                    "target_1": dry_stable["key_prices"]["target_1"],
+                                    "target_2": dry_stable["key_prices"]["target_2"],
+                                    "market_status": dry_stable["market_environment"]["status"],
+                                    "market_position_advice": dry_stable["market_environment"]["position_advice"],
+                                },
+                            )
 
+                if not is_candidate:
+                    db.update_task_stock(
+                        task_id,
+                        code,
+                        status="scanned",
+                        kline_latest_date=latest_trade_date,
+                        quote_status="not_requested",
+                        finished_at=_now(),
+                    )
+
+                db.refresh_scan_task_counts(task_id)
                 with stats_lock:
                     scanned_count[0] += 1
                 with busy_retry_lock:
                     busy_retries_by_code.pop(code, None)
 
                 if progress_callback:
-                    progress_callback("scanning", scanned_count[0], len(stocks),
-                                      f"{code} {stock.get('name','')}")
+                    progress_callback("scanning", scanned_count[0], len(stocks), f"{code} {stock.get('name', '')}")
 
             except Exception as e:
                 logger.error(f"Error scanning {code}: {e}")
+                db.update_task_stock(
+                    task_id,
+                    code,
+                    status="failed",
+                    status_reason="扫描异常",
+                    error_detail=str(e),
+                    finished_at=_now(),
+                )
+                db.refresh_scan_task_counts(task_id)
                 with stats_lock:
+                    failed_count[0] += 1
                     skip_count[0] += 1
                 with busy_retry_lock:
                     busy_retries_by_code.pop(code, None)
             finally:
                 mgr.release(ds)
 
-    # 启动扫描线程
-    threads = [
-        threading.Thread(target=worker, args=(f"t{i+1}",), daemon=True)
-        for i in range(max(1, worker_count))
-    ]
+    threads = [threading.Thread(target=worker, args=(f"t{i+1}",), daemon=True) for i in range(worker_count)]
     for thread in threads:
         thread.start()
     for thread in threads:
         thread.join()
 
     elapsed = time.time() - start_time
-
-    # 按评分排序
+    candidates = list(candidate_by_code.values())
     candidates.sort(key=lambda x: x[1].score, reverse=True)
+    summary = db.refresh_scan_task_counts(task_id)
 
     return {
         "candidates": candidates,
         "stats": {
-            "total_stocks": len(stocks),
-            "scanned": scanned_count[0],
-            "skipped": skip_count[0],
-            "failed": failed_count[0],
+            "total": summary["total_stocks"],
+            "total_stocks": summary["total_stocks"],
+            "scanned": summary["processed"],
+            "processed": summary["processed"],
+            "skipped": summary["skipped"],
+            "failed": summary["failed"],
             "candidates_found": len(candidates),
+            "latest_trade_date": summary.get("latest_trade_date"),
             "elapsed_seconds": round(elapsed, 1),
-            "speed": round(scanned_count[0] / elapsed, 1) if elapsed > 0 else 0,
+            "speed": round(summary["processed"] / elapsed, 1) if elapsed > 0 else 0,
         },
         "task_id": task_id,
     }
-
 
 def _fetch_with_retry(
     code: str,
