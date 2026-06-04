@@ -33,7 +33,14 @@
           <span class="sub-title">按发现时间排序</span>
         </div>
         <div v-if="discoveries.length === 0" class="empty-state">
-          暂无候选发现 · 点击右上角"开始扫描"
+          <template v-if="scanning">
+            扫描进行中，当前暂未发现符合条件的杯柄结构候选<br/>
+            <span class="empty-sub">系统将持续识别形态评分、突破位与量能确认信号</span>
+          </template>
+          <template v-else>
+            暂无扫描结果<br/>
+            <span class="empty-sub">点击右侧「开始扫描」，启动全市场杯柄结构识别</span>
+          </template>
         </div>
         <DiscoveryItem
           v-for="d in discoveries"
@@ -66,12 +73,11 @@
       />
     </div>
 
-    <div class="panel failure-panel" v-if="scanProgress.taskId">
+    <div class="panel failure-panel" v-if="scanProgress.taskId && failures.length > 0">
       <div class="panel-header">
-        <span>失败股票 · {{ scanProgress.failed || 0 }}</span>
-        <button class="retry-btn" :disabled="scanning || !scanProgress.failed" @click="handleRetryFailed">重新拉取失败股票</button>
+        <span>失败股票 · {{ failures.length }}</span>
+        <button class="retry-btn" :disabled="scanning" @click="handleRetryFailed">重新拉取</button>
       </div>
-      <div v-if="failures.length === 0" class="empty-state">暂无失败股票</div>
       <div v-for="f in failures" :key="f.code" class="failure-row">
         <span class="code">{{ f.code }}</span>
         <span>{{ f.name }}</span>
@@ -157,6 +163,14 @@ const topScoreSub = computed(() => {
 
 let pollTimer = null
 let clockTimer = null
+let lastLogScanned = 0
+
+function addLog(type, text) {
+  const now = new Date()
+  const ts = `${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}:${String(now.getSeconds()).padStart(2,'0')}`
+  logLines.value.push({ time: ts, type, text })
+  if (logLines.value.length > 50) logLines.value.shift()
+}
 
 function goToStock(code) {
   router.push(`/stock/${code}`)
@@ -178,7 +192,10 @@ async function handleStartScan() {
     scanProgress.total = res.total_stocks || 0
     scanProgress.stockPoolSource = res.stock_pool_source || ''
     failures.value = []
+    logLines.value = []
+    lastLogScanned = 0
     scanning.value = true
+    addLog('info', `扫描启动 · 全市场 ${scanProgress.total} 只 · 数据源 ${scanProgress.stockPoolSource || '--'}`)
     if (pollTimer) clearInterval(pollTimer)
     pollTimer = setInterval(pollStatus, 1000)
   } catch (e) {
@@ -210,9 +227,16 @@ async function pollStatus() {
   try {
     const status = await getScanStatus()
     applyStats(status)
+    // Progress log every ~50 stocks
+    if (scanProgress.scanned - lastLogScanned >= 50) {
+      lastLogScanned = scanProgress.scanned
+      const pct = scanProgress.total > 0 ? Math.round(scanProgress.scanned / scanProgress.total * 100) : 0
+      addLog('info', `进度 ${pct}% · 已处理 ${scanProgress.scanned} / ${scanProgress.total} · 候选 ${scanProgress.candidates}`)
+    }
     if (!status.running && scanning.value) {
       scanning.value = false
       if (pollTimer) clearInterval(pollTimer)
+      addLog('found', `扫描完成 · 发现 ${scanProgress.candidates} 个候选 · 跳过 ${scanProgress.skipped} · 失败 ${scanProgress.failed}`)
       await loadResults()
       await loadFailures()
     }
@@ -359,7 +383,9 @@ onUnmounted(() => {
 .sub-title { font-weight: 400; font-size: 11px; }
 .empty-state {
   padding: 40px 16px; text-align: center; color: var(--text-muted); font-size: 13px;
+  line-height: 1.8;
 }
+.empty-sub { font-size: 12px; color: #3A4A5E; }
 .error-banner {
   background: rgba(239,68,68,0.1); border: 1px solid rgba(239,68,68,0.3);
   border-radius: 6px; padding: 12px 16px; margin-bottom: 12px;

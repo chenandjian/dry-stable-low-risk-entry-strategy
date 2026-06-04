@@ -15,8 +15,11 @@
           <div class="sub">{{ progressText }}</div>
         </div>
       </div>
-      <div class="progress-bar">
-        <div class="progress-fill" :style="{ width: progressPct + '%' }"></div>
+      <div class="progress-row">
+        <div class="progress-bar">
+          <div class="progress-fill" :style="{ width: progressPct + '%' }"></div>
+        </div>
+        <span class="progress-pct">{{ progressPct }}%</span>
       </div>
       <div class="current-stock">
         <span class="label">当前扫描</span>
@@ -102,7 +105,9 @@ const sourceText = computed(() => props.stockPoolSource ? `股票池 ${props.sto
 @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.3; } }
 .title { font-size: 14px; font-weight: 600; color: var(--text-primary); }
 .sub { font-size: 12px; color: var(--text-muted); }
-.progress-bar { height: 4px; background: var(--border); border-radius: 2px; margin: 12px 0; overflow: hidden; }
+.progress-row { display: flex; align-items: center; gap: 10px; margin: 12px 0; }
+.progress-bar { flex: 1; height: 4px; background: var(--border); border-radius: 2px; overflow: hidden; }
+.progress-pct { font-family: var(--font-mono); font-size: 11px; color: var(--accent); min-width: 32px; text-align: right; }
 .progress-fill { height: 100%; background: linear-gradient(90deg, var(--accent), #79A0FF); border-radius: 2px; transition: width 0.3s; }
 .current-stock { display: flex; align-items: center; gap: 8px; font-size: 13px; }
 .scan-meta { display: flex; justify-content: space-between; margin-top: 8px; font-size: 11px; color: var(--text-muted); }
