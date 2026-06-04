@@ -36,7 +36,7 @@
 - Test: `tests/test_market_env.py`
 - Test: `tests/test_index_source.py`
 
-- [ ] **Step 1: Add index source tests**
+- [x] **Step 1: Add index source tests**
 
 Add `tests/test_index_source.py`:
 
@@ -57,7 +57,7 @@ def test_normalize_index_ohlc_sorts_and_keeps_required_fields():
     assert result[1]["volume"] == 20
 ```
 
-- [ ] **Step 2: Run failing index source test**
+- [x] **Step 2: Run failing index source test**
 
 Run:
 
@@ -67,7 +67,7 @@ python -m pytest tests/test_index_source.py -q
 
 Expected: fail because `scanner.index_source` does not exist.
 
-- [ ] **Step 3: Implement index source normalization and fetch fallback**
+- [x] **Step 3: Implement index source normalization and fetch fallback**
 
 Create `scanner/index_source.py`:
 
@@ -103,7 +103,7 @@ def normalize_index_ohlc(raw: list[dict]) -> list[dict]:
     return sorted(required, key=lambda x: x["date"])
 ```
 
-- [ ] **Step 4: Pass market index data into scan pipeline**
+- [x] **Step 4: Pass market index data into scan pipeline**
 
 Modify `scanner/engine.py` near scan startup:
 
@@ -115,7 +115,7 @@ market_data = fetch_market_index_daily()
 
 Then pass it into every `analyze_dry_stable(result, data, market_data=market_data)` call.
 
-- [ ] **Step 5: Pass market data into single-stock analysis**
+- [x] **Step 5: Pass market data into single-stock analysis**
 
 Modify `main.py` in `cmd_analyze()`:
 
@@ -126,7 +126,7 @@ market_data = fetch_market_index_daily()
 dry_stable = analyze_dry_stable(result, data, market_data=market_data)
 ```
 
-- [ ] **Step 6: Verify**
+- [x] **Step 6: Verify**
 
 Run:
 
@@ -137,7 +137,7 @@ python -m pytest tests/ -q
 
 Expected: all tests pass.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add scanner/index_source.py scanner/engine.py main.py tests/test_index_source.py tests/test_market_env.py tests/test_dry_stable.py

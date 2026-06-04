@@ -8,6 +8,7 @@ import scanner.db as db
 from scanner.data_source import DataSourceManager
 from scanner.sina_source import fetch_sina_daily
 from scanner.tencent_source import fetch_tencent_daily
+from scanner.index_source import fetch_market_index_daily
 from scanner.liquidity_filter import passes_liquidity_filter
 from scanner.pattern_detector import detect_cup_handle
 from scanner.pattern_detector import CupHandleResult
@@ -69,6 +70,7 @@ def scan_all(config: dict, progress_callback=None, resume_task_id: str = None) -
     pattern_cfg = {**cup_cfg, **handle_prefixed, **breakout_cfg}
     liquidity_cfg = config.get("liquidity", {})
     scoring_cfg = config.get("scoring", {})
+    market_data = fetch_market_index_daily()
 
     start_time = time.time()
 
@@ -117,10 +119,10 @@ def scan_all(config: dict, progress_callback=None, resume_task_id: str = None) -
                     result.code = code
                     result.name = stock.get("name", "")
                     result.score = score_cup_handle_advanced(result, data, scoring_cfg)
-                    dry_stable = analyze_dry_stable(result, data)
+                    dry_stable = analyze_dry_stable(result, data, market_data=market_data)
                 else:
                     result = CupHandleResult(found=False, code=code, name=stock.get("name", ""))
-                    dry_stable = analyze_dry_stable(result, data)
+                    dry_stable = analyze_dry_stable(result, data, market_data=market_data)
                     pattern20 = dry_stable["pattern_score"]["score"]
                     if dry_stable["pattern_score"].get("key_pattern_type") != "vcp" or pattern20 < 13:
                         dry_stable = None

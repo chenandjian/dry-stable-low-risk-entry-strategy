@@ -76,6 +76,7 @@ def cmd_analyze(args):
     from scanner.tencent_source import fetch_tencent_daily
     from scanner.pattern_detector import detect_cup_handle
     from scanner.scorer import score_cup_handle_advanced
+    from scanner.index_source import fetch_market_index_daily
     from analyzer.dry_stable import analyze_dry_stable
     from output.json_writer import write_single_analysis_json
 
@@ -109,7 +110,8 @@ def cmd_analyze(args):
     result.score = score
 
     # Dry-stable analysis
-    dry_stable = analyze_dry_stable(result, data)
+    market_data = fetch_market_index_daily()
+    dry_stable = analyze_dry_stable(result, data, market_data=market_data)
 
     # Build analysis output
     analysis = {
