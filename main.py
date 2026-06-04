@@ -249,6 +249,11 @@ def cmd_backtest(args):
         for s in result.by_score_range:
             print(f"    {s['range']}: {s['count']}个 命中率{s['hit_rate_10d']}% 均收益{s['avg_return_10d']}%")
     print(f"  ")
+    if result.by_dry_stable_verdict:
+        print(f"  按干稳结论分层 (10日):")
+        for verdict, s in result.by_dry_stable_verdict.items():
+            print(f"    {verdict}: {s['count']}个 均收益{s['avg_ret_10d']}%")
+    print(f"  ")
     if result.parameter_suggestions:
         print(f"  参数优化建议:")
         for k, v in result.parameter_suggestions.items():

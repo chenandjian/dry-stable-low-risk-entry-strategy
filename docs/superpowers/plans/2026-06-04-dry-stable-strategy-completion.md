@@ -238,7 +238,7 @@ git commit -m "Expose VCP pattern type in UI"
 - Modify: `main.py`
 - Modify: `output/json_writer.py`
 
-- [ ] **Step 1: Add dry-stable backtest test**
+- [x] **Step 1: Add dry-stable backtest test**
 
 Create `tests/test_dry_stable_backtester.py`:
 
@@ -260,7 +260,7 @@ def test_summarize_by_verdict_groups_results():
     assert result["突破确认"]["count"] == 1
 ```
 
-- [ ] **Step 2: Run failing test**
+- [x] **Step 2: Run failing test**
 
 ```bash
 python -m pytest tests/test_dry_stable_backtester.py -q
@@ -268,7 +268,7 @@ python -m pytest tests/test_dry_stable_backtester.py -q
 
 Expected: fail because `summarize_by_verdict` does not exist.
 
-- [ ] **Step 3: Implement verdict grouping**
+- [x] **Step 3: Implement verdict grouping**
 
 Add to `scanner/backtester.py`:
 
@@ -289,7 +289,7 @@ def summarize_by_verdict(rows: list[dict]) -> dict:
     }
 ```
 
-- [ ] **Step 4: Add dry-stable decision to each backtest row**
+- [x] **Step 4: Add dry-stable decision to each backtest row**
 
 Inside `run_backtest()`, call:
 
@@ -300,7 +300,7 @@ verdict = dry["decision"]["verdict"]
 
 Store `verdict`, `volume_dry_score`, `price_stable_score`, `pattern_score_20`, `risk_percent`, and `rr1` in each backtest result dict/report row.
 
-- [ ] **Step 5: Add report field**
+- [x] **Step 5: Add report field**
 
 In `backtest_report_to_dict()`, include:
 
@@ -308,7 +308,7 @@ In `backtest_report_to_dict()`, include:
 "by_dry_stable_verdict": summarize_by_verdict(rows)
 ```
 
-- [ ] **Step 6: Verify**
+- [x] **Step 6: Verify**
 
 Run:
 
@@ -319,7 +319,7 @@ python -m pytest tests/ -q
 
 Expected: all tests pass.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add scanner/backtester.py output/json_writer.py main.py tests/test_dry_stable_backtester.py

@@ -15,6 +15,7 @@ import logging
 from dataclasses import dataclass, field
 from scanner.pattern_detector import detect_cup_handle
 from scanner.scorer import score_cup_handle
+from analyzer.dry_stable import analyze_dry_stable
 
 logger = logging.getLogger(__name__)
 
@@ -32,6 +33,12 @@ class BacktestResult:
     handle_duration: int = 0
     breakout_price: float = 0.0
     detect_close: float = 0.0     # 检测时收盘价
+    verdict: str = ""
+    volume_dry_score: int = 0
+    price_stable_score: int = 0
+    pattern_score_20: int = 0
+    risk_percent: float = 0.0
+    rr1: float = 0.0
 
     # Forward returns (%)
     ret_5d: float | None = None
@@ -100,6 +107,7 @@ class BacktestReport:
 
     # Score-stratified results
     by_score_range: list = field(default_factory=list)  # [{range, count, hit_rate_10d, avg_ret_10d}, ...]
+    by_dry_stable_verdict: dict = field(default_factory=dict)
 
     # Individual results
     results: list = field(default_factory=list)  # list of BacktestResult
@@ -175,6 +183,9 @@ def run_backtest(
                 continue
 
             stock_has_pattern = True
+            result.code = code
+            result.name = name
+            dry = analyze_dry_stable(result, window_data)
 
             br = BacktestResult(
                 code=code,
@@ -187,6 +198,12 @@ def run_backtest(
                 handle_duration=result.handle_duration,
                 breakout_price=result.breakout_price,
                 detect_close=window_data[-1]["close"],
+                verdict=dry["decision"]["verdict"],
+                volume_dry_score=dry["volume_dry"]["score"],
+                price_stable_score=dry["price_stable"]["score"],
+                pattern_score_20=dry["pattern_score"]["score"],
+                risk_percent=dry["risk_reward"]["risk_percent"],
+                rr1=dry["risk_reward"]["rr1"],
             )
 
             # Calculate forward returns
@@ -211,6 +228,7 @@ def run_backtest(
     if all_results:
         _aggregate(report, all_results)
         _score_stratify(report, all_results)
+        report.by_dry_stable_verdict = summarize_by_verdict(all_results)
         _suggest_parameters(report, all_results)
 
     logger.info(f"Backtest complete: {stocks_tested} stocks, {len(all_results)} patterns")
@@ -290,6 +308,24 @@ def _score_stratify(report: BacktestReport, results: list[BacktestResult]):
         })
 
 
+def summarize_by_verdict(rows: list) -> dict:
+    """Group backtest rows by dry-stable verdict."""
+    grouped = {}
+    for row in rows:
+        verdict = row.get("verdict", "未知") if isinstance(row, dict) else getattr(row, "verdict", "未知")
+        ret_10d = row.get("ret_10d", 0.0) if isinstance(row, dict) else getattr(row, "ret_10d", 0.0)
+        grouped.setdefault(verdict or "未知", {"count": 0, "returns": []})
+        grouped[verdict or "未知"]["count"] += 1
+        grouped[verdict or "未知"]["returns"].append(ret_10d or 0.0)
+    return {
+        k: {
+            "count": v["count"],
+            "avg_ret_10d": round(sum(v["returns"]) / len(v["returns"]), 2) if v["returns"] else 0.0,
+        }
+        for k, v in grouped.items()
+    }
+
+
 def _suggest_parameters(report: BacktestReport, results: list[BacktestResult]):
     """Suggest optimal parameters based on backtest results."""
     suggestions = {}
@@ -355,5 +391,12 @@ def backtest_report_to_dict(report: BacktestReport) -> dict:
             "20d": report.stop_loss_hit_rate_20d,
         },
         "by_score_range": report.by_score_range,
+        "by_dry_stable_verdict": report.by_dry_stable_verdict,
+        "results": [_backtest_result_to_dict(r) for r in report.results],
         "parameter_suggestions": report.parameter_suggestions,
     }
+
+
+def _backtest_result_to_dict(result: BacktestResult) -> dict:
+    """Convert one result to a JSON-serializable dict."""
+    return result.__dict__.copy()

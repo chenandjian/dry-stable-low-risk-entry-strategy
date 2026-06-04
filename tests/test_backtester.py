@@ -43,11 +43,15 @@ def test_backtest_report_to_dict():
         total_stocks_tested=100,
         hit_rate_10d=65.5,
         avg_return_10d=3.2,
+        by_dry_stable_verdict={"可低吸": {"count": 2, "avg_ret_10d": 2.0}},
+        results=[BacktestResult(code="600000", verdict="可低吸", ret_10d=2.0)],
     )
     d = backtest_report_to_dict(report)
     assert d["total_patterns"] == 10
     assert d["hit_rates"]["10d"] == 65.5
     assert d["avg_returns"]["10d"] == 3.2
+    assert d["by_dry_stable_verdict"]["可低吸"]["count"] == 2
+    assert d["results"][0]["verdict"] == "可低吸"
 
 
 def test_empty_backtest():
