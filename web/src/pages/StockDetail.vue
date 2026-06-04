@@ -399,7 +399,14 @@ async function initChart() {
     height: h,
   })
 
-  console.log('[StockDetail] candleData sample:', JSON.stringify(candleData.slice(0, 2)))
+  // Build candle data
+  const candleData = ohlcRaw.map(d => ({
+    time: d.date,
+    open: +(d.open ?? 0),
+    high: +(d.high ?? 0),
+    low: +(d.low ?? 0),
+    close: +(d.close ?? 0),
+  }))
 
   // Candlestick series
   const candleSeries = chart.addCandlestickSeries({
@@ -410,15 +417,8 @@ async function initChart() {
     wickUpColor: '#EF4444',
     wickDownColor: '#22C55E',
   })
-
-  const candleData = ohlcRaw.map(d => ({
-    time: d.date,
-    open: +(d.open ?? 0),
-    high: +(d.high ?? 0),
-    low: +(d.low ?? 0),
-    close: +(d.close ?? 0),
-  }))
   candleSeries.setData(candleData)
+  console.log('[StockDetail] chart ready, candles:', candleData.length)
 
   // Volume series (overlay on bottom)
   const volumeSeries = chart.addHistogramSeries({
