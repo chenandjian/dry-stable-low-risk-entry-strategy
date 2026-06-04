@@ -241,14 +241,20 @@ const maColors = ['#F59E0B', '#EF4444', '#4F7DFF', '#22C55E', '#A855F7', '#EC489
 const rsiPeriodsVals = [6, 12, 24]
 const rsiColors = ['#4F7DFF', '#F59E0B', '#EF4444']
 
-const latestMA = computed(() => maPeriods.map(p => {
-  const data = calcMA(candleDataRef.value, p)
-  return data.length ? data[data.length - 1].value : null
-}))
-const latestRSI = computed(() => rsiPeriodsVals.map(p => {
-  const data = calcRSI(candleDataRef.value, p)
-  return data.length ? data[data.length - 1].value : null
-}))
+const latestMA = computed(() => {
+  if (!candleDataRef.value.length) return maPeriods.map(() => null)
+  return maPeriods.map(p => {
+    const data = calcMA(candleDataRef.value, p)
+    return data.length ? data[data.length - 1].value : null
+  })
+})
+const latestRSI = computed(() => {
+  if (candleDataRef.value.length < 25) return rsiPeriodsVals.map(() => null)
+  return rsiPeriodsVals.map(p => {
+    const data = calcRSI(candleDataRef.value, p)
+    return data.length ? data[data.length - 1].value : null
+  })
+})
 
 function fmtVal(v) { return v != null ? v.toFixed(2) : '--' }
 function maColor(i) {
