@@ -6,6 +6,7 @@
     <div class="panel">
       <div class="task-header">
         <span style="width:20px"></span>
+        <span>任务ID</span>
         <span>扫描日期</span>
         <span>状态</span>
         <span>耗时</span>
@@ -20,6 +21,7 @@
       </div>
       <div v-for="t in tasks" :key="t.id" class="task-row">
         <span class="task-dot" :class="t.running ? 'running' : 'done'"></span>
+        <span class="task-id">{{ t.id }}</span>
         <span class="task-date">{{ t.date }}</span>
         <span :class="t.running ? 'st-running' : 'st-done'">{{ t.running ? '扫描中' : statusText(t.status) }}</span>
         <span class="muted">{{ t.duration || '--' }}</span>
@@ -79,15 +81,16 @@ onUnmounted(() => { if (pollTimer) clearInterval(pollTimer) })
 .page-sub { font-size: 13px; color: var(--text-muted); margin-bottom: 20px; }
 .panel { background: var(--bg-panel); border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
 .task-header {
-  display: grid; grid-template-columns: 20px 180px 80px 70px 60px 60px 80px 90px 180px;
+  display: grid; grid-template-columns: 20px 140px 150px 80px 70px 60px 60px 80px 90px 180px;
   align-items: center; padding: 10px 16px; border-bottom: 2px solid var(--border-light);
   font-size: 11px; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px;
 }
 .task-row {
-  display: grid; grid-template-columns: 20px 180px 80px 70px 60px 60px 80px 90px 180px;
+  display: grid; grid-template-columns: 20px 140px 150px 80px 70px 60px 60px 80px 90px 180px;
   align-items: center; padding: 12px 16px; border-bottom: 1px solid var(--border); font-size: 13px;
 }
 .task-row:hover { background: rgba(79,125,255,0.03); }
+.task-id { font-family: var(--font-mono); font-size: 12px; color: var(--accent); }
 .task-dot { width: 8px; height: 8px; border-radius: 50%; }
 .task-dot.running { background: var(--warn-orange); box-shadow: 0 0 6px rgba(249,115,22,0.3); }
 .task-dot.done { background: var(--down-green); }
