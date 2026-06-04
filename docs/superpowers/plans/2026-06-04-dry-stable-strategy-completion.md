@@ -406,7 +406,7 @@ git commit -m "Add dry-stable trade plan output"
 - Modify: `web/src/pages/StockDetail.vue`
 - Modify: `web/vite.config.js`
 
-- [ ] **Step 1: Replace static ECharts import**
+- [x] **Step 1: Replace static ECharts import**
 
 In `web/src/pages/StockDetail.vue`, replace:
 
@@ -420,7 +420,7 @@ with lazy import inside `initChart()`:
 const echarts = await import('echarts')
 ```
 
-- [ ] **Step 2: Verify build chunk split**
+- [x] **Step 2: Verify build chunk split**
 
 Run:
 
@@ -430,7 +430,7 @@ npm.cmd run build
 
 Expected: build succeeds; initial route chunks are smaller. If warning remains only for lazy chart chunk, accept it.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add web/src/pages/StockDetail.vue web/vite.config.js

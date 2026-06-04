@@ -148,7 +148,6 @@
 import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useApi } from '../composables/useApi.js'
-import * as echarts from 'echarts'
 import SignalBadge from '../components/SignalBadge.vue'
 import ScoreBar from '../components/ScoreBar.vue'
 import RiskBox from '../components/RiskBox.vue'
@@ -163,6 +162,7 @@ const watchlist = ref([])
 const wlFilter = ref('all')
 const chartRef = ref(null)
 let chart = null
+let echarts = null
 
 const stopLoss = computed(() => stock.value.stop_loss || (stock.value.handle_low_price ? (stock.value.handle_low_price * 0.98) : null))
 const target1 = computed(() => {
@@ -293,6 +293,7 @@ async function initChart() {
 
   if (!ohlcRaw.length) return
 
+  if (!echarts) echarts = await import('echarts')
   chart = echarts.init(chartRef.value, 'dark')
 
   const dates = ohlcRaw.map(d => d.date)
