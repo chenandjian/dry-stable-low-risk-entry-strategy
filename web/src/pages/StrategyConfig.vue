@@ -86,8 +86,8 @@
           </div>
           <div class="param">
             <label title="左右杯口价格的最大偏差比例">杯口最大偏差 <span class="unit">%</span></label>
-            <input type="range" min="5" max="20" step="1" v-model.number="config.cup.max_lip_deviation" @input="markDirty" />
-            <div class="range-val">{{ config.cup.max_lip_deviation }}%</div>
+            <input type="range" min="5" max="20" step="1" v-model.number="cupLipDeviation" @input="markDirty" />
+            <div class="range-val">{{ cupLipDeviation }}%</div>
           </div>
           <div class="param">
             <label title="杯底附近价格在杯底8%范围内的比例阈值">杯底圆滑度 <span class="unit">%</span></label>
@@ -177,6 +177,10 @@ const cupMaxDepth = computed({
 const cupRoundness = computed({
   get: () => Math.round((config.cup.min_bottom_roundness || 0.15) * 100),
   set: (v) => { config.cup.min_bottom_roundness = v / 100 },
+})
+const cupLipDeviation = computed({
+  get: () => Math.round((config.cup.max_lip_deviation || 0.12) * 100),
+  set: (v) => { config.cup.max_lip_deviation = v / 100 },
 })
 const handleMinDur = computed({
   get: () => config.handle?.min_duration || 5,
