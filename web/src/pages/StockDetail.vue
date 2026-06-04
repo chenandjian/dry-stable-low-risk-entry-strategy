@@ -199,7 +199,7 @@ function calcRSI(data, period) {
 
 const route = useRoute()
 const router = useRouter()
-const { getCandidate, getCandidates } = useApi()
+const { getCandidate, getCandidates, getScanTasks } = useApi()
 
 const stock = ref({})
 const score = ref(0)
@@ -224,7 +224,7 @@ watch(() => route.params.code, async (newCode) => {
   if (newCode) {
     await loadStock(newCode)
     await nextTick()
-    initChart()
+    await initChart()
   }
 })
 
@@ -338,21 +338,23 @@ function goToStock(code) {
 }
 
 async function initChart() {
-  if (!chartRef.value) return
-  // Clear previous chart
+  if (!chartRef.value) { console.warn('[StockDetail] chartRef not ready'); return }
+  // Dispose previous chart
+  if (chartRef.value._chart) { chartRef.value._chart.remove(); chartRef.value._chart = null }
   chartRef.value.innerHTML = ''
 
   const s = stock.value
   const code = s.code
-  if (!code) return
+  if (!code) { console.warn('[StockDetail] no stock code'); return }
 
   let ohlcRaw = []
   try {
     const res = await fetch(`/api/stock/${code}/ohlc`)
+    if (!res.ok) { console.warn(`[StockDetail] OHLC fetch ${res.status}`); return }
     const json = await res.json()
     ohlcRaw = json.data || []
-  } catch (e) { return }
-  if (!ohlcRaw.length) return
+  } catch (e) { console.error('[StockDetail] OHLC fetch error:', e); return }
+  if (!ohlcRaw.length) { console.warn('[StockDetail] OHLC data empty'); return }
 
   const chart = createChart(chartRef.value, {
     layout: {
@@ -467,18 +469,27 @@ onMounted(async () => {
   const code = route.params.code
   if (code) await loadStock(code)
 
-  // Load watchlist
-  const cands = await getCandidates()
-  watchlist.value = (cands.candidates || []).map(c => ({
-    code: c.code, name: c.name, score: c.score,
-    is_breakout: c.is_breakout, is_volume_breakout: c.is_volume_breakout,
-    breakout_price: c.breakout_price, latest_close: c.latest_close,
-    vol_multiplier: c.vol_multiplier,
-    dry_stable_verdict: c.dry_stable_verdict,
-  }))
+  // Load watchlist from latest completed task
+  try {
+    const taskData = await getScanTasks()
+    const tasks = (taskData.tasks || []).filter(t => !t.running)
+    const latestCompleted = tasks.find(t => t.status === 'completed')
+    const cands = latestCompleted
+      ? await getCandidates({ task_id: latestCompleted.id })
+      : await getCandidates()
+    watchlist.value = (cands.candidates || []).map(c => ({
+      code: c.code, name: c.name, score: c.score,
+      is_breakout: c.is_breakout, is_volume_breakout: c.is_volume_breakout,
+      breakout_price: c.breakout_price, latest_close: c.latest_close,
+      vol_multiplier: c.vol_multiplier,
+      dry_stable_verdict: c.dry_stable_verdict,
+    }))
+  } catch (e) {
+    console.error('[StockDetail] Failed to load watchlist:', e)
+  }
 
   await nextTick()
-  initChart()
+  await initChart()
   resizeHandler = () => {
     const c = chartRef.value?._chart
     if (c) {

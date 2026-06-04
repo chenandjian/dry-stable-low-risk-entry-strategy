@@ -14,7 +14,8 @@ export function useApi() {
 
   async function getCandidates(params = {}) {
     const qs = new URLSearchParams(params).toString()
-    const res = await fetch(`${API_BASE}/candidates?${qs}`)
+    const url = `${API_BASE}/candidates${qs ? '?' + qs : ''}`
+    const res = await fetch(url)
     return res.json()
   }
 
@@ -31,7 +32,8 @@ export function useApi() {
 
   async function getTaskStocks(taskId, params = {}) {
     const qs = new URLSearchParams(params).toString()
-    const res = await fetch(`${API_BASE}/scan/tasks/${taskId}/stocks?${qs}`)
+    const url = `${API_BASE}/scan/tasks/${taskId}/stocks${qs ? '?' + qs : ''}`
+    const res = await fetch(url)
     return res.json()
   }
 
