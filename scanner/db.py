@@ -371,11 +371,13 @@ def mark_dead_tasks_as_failed():
 
 
 def get_interrupted_task() -> dict | None:
-    """Get the most recent interrupted task for resume."""
+    """Get the most recent interrupted task for resume (server restart or user stop)."""
     conn = get_conn()
     row = conn.execute(
-        "SELECT id, scanned, total_stocks FROM scan_tasks WHERE status='failed' "
-        "AND error='Server restarted' ORDER BY started_at DESC LIMIT 1"
+        "SELECT id, scanned, total_stocks FROM scan_tasks "
+        "WHERE (status='failed' AND error='Server restarted') "
+        "   OR (status='cancelled' AND error='User stopped') "
+        "ORDER BY started_at DESC LIMIT 1"
     ).fetchone()
     if not row or row[1] >= row[2]:
         return None
