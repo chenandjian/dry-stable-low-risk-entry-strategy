@@ -151,6 +151,51 @@ import { useApi } from '../composables/useApi.js'
 import SignalBadge from '../components/SignalBadge.vue'
 import ScoreBar from '../components/ScoreBar.vue'
 import RiskBox from '../components/RiskBox.vue'
+import { createChart } from 'lightweight-charts'
+
+// --- Helper: MA calculation ---
+function calcMA(data, period) {
+  const result = []
+  for (let i = period - 1; i < data.length; i++) {
+    let sum = 0
+    for (let j = i - period + 1; j <= i; j++) {
+      sum += data[j].close
+    }
+    result.push({ time: data[i].time, value: sum / period })
+  }
+  return result
+}
+
+// --- Helper: RSI calculation ---
+function calcRSI(data, period) {
+  const result = []
+  let gains = 0, losses = 0
+
+  // First average
+  for (let i = 1; i <= period; i++) {
+    const change = data[i].close - data[i - 1].close
+    if (change > 0) gains += change
+    else losses -= change
+  }
+
+  let avgGain = gains / period
+  let avgLoss = losses / period
+
+  for (let i = period + 1; i < data.length; i++) {
+    const change = data[i].close - data[i - 1].close
+    const gain = change > 0 ? change : 0
+    const loss = change < 0 ? -change : 0
+
+    avgGain = (avgGain * (period - 1) + gain) / period
+    avgLoss = (avgLoss * (period - 1) + loss) / period
+
+    const rs = avgLoss === 0 ? 100 : avgGain / avgLoss
+    const rsi = 100 - (100 / (1 + rs))
+    result.push({ time: data[i].time, value: rsi })
+  }
+
+  return result
+}
 
 const route = useRoute()
 const router = useRouter()
@@ -161,8 +206,27 @@ const score = ref(0)
 const watchlist = ref([])
 const wlFilter = ref('all')
 const chartRef = ref(null)
-let chart = null
-let echarts = null
+
+async function loadStock(code) {
+  try {
+    const data = await getCandidate(code)
+    if (data) {
+      stock.value = data
+      score.value = data.score || 0
+    }
+  } catch (e) {
+    console.error('Failed to load stock detail:', e)
+  }
+}
+
+// Watch for route param changes (e.g., /stock/000001 -> /stock/000002)
+watch(() => route.params.code, async (newCode) => {
+  if (newCode) {
+    await loadStock(newCode)
+    await nextTick()
+    initChart()
+  }
+})
 
 const stopLoss = computed(() => stock.value.stop_loss || (stock.value.handle_low_price ? (stock.value.handle_low_price * 0.98) : null))
 const target1 = computed(() => {
@@ -275,101 +339,160 @@ function goToStock(code) {
 
 async function initChart() {
   if (!chartRef.value) return
-  if (chart) chart.dispose()
+  // Clear previous chart
+  chartRef.value.innerHTML = ''
 
   const s = stock.value
   const code = s.code
   if (!code) return
 
-  // Fetch real OHLC data from API
   let ohlcRaw = []
   try {
     const res = await fetch(`/api/stock/${code}/ohlc`)
     const json = await res.json()
     ohlcRaw = json.data || []
-  } catch (e) {
-    return
-  }
-
+  } catch (e) { return }
   if (!ohlcRaw.length) return
 
-  if (!echarts) echarts = await import('echarts')
-  chart = echarts.init(chartRef.value, 'dark')
+  const chart = createChart(chartRef.value, {
+    layout: {
+      background: { color: '#070B14' },
+      textColor: '#5A6A7E',
+    },
+    grid: {
+      vertLines: { color: '#1F2A3A' },
+      horzLines: { color: '#1F2A3A' },
+    },
+    crosshair: { mode: 0 },
+    timeScale: {
+      borderColor: '#1F2A3A',
+      timeVisible: true,
+    },
+    rightPriceScale: {
+      borderColor: '#1F2A3A',
+    },
+    width: chartRef.value.clientWidth,
+    height: chartRef.value.clientHeight || 500,
+  })
 
-  const dates = ohlcRaw.map(d => d.date)
-  const ohlc = ohlcRaw.map(d => [+(d.open ?? 0).toFixed(2), +(d.close ?? 0).toFixed(2), +(d.low ?? 0).toFixed(2), +(d.high ?? 0).toFixed(2)])
-  const volumes = ohlcRaw.map((d, i) => [i, Math.round(d.volume || 0), d.close >= d.open ? 1 : -1])
+  // Candlestick series
+  const candleSeries = chart.addCandlestickSeries({
+    upColor: '#EF4444',
+    downColor: '#22C55E',
+    borderUpColor: '#EF4444',
+    borderDownColor: '#22C55E',
+    wickUpColor: '#EF4444',
+    wickDownColor: '#22C55E',
+  })
 
-  // Mark key pattern dates on chart
-  const markPoints = []
-  if (s.left_high_date) markPoints.push({ name: '左杯口', coord: [s.left_high_date, s.left_high_price], value: '左杯口', symbol: 'pin', symbolSize: 30, itemStyle: { color: '#F59E0B' }, label: { show: true, color: '#F59E0B', fontSize: 10 } })
-  if (s.cup_low_date) markPoints.push({ name: '杯底', coord: [s.cup_low_date, s.cup_low_price], value: '杯底', symbol: 'pin', symbolSize: 30, itemStyle: { color: '#EF4444' }, label: { show: true, color: '#EF4444', fontSize: 10 } })
-  if (s.right_high_date) markPoints.push({ name: '右杯口', coord: [s.right_high_date, s.right_high_price], value: '右杯口', symbol: 'pin', symbolSize: 30, itemStyle: { color: '#F59E0B' }, label: { show: true, color: '#F59E0B', fontSize: 10 } })
-  if (s.handle_low_date) markPoints.push({ name: '柄部低点', coord: [s.handle_low_date, s.handle_low_price], value: '柄部低点', symbol: 'pin', symbolSize: 30, itemStyle: { color: '#4F7DFF' }, label: { show: true, color: '#4F7DFF', fontSize: 10 } })
+  const candleData = ohlcRaw.map(d => ({
+    time: d.date,
+    open: +(d.open ?? 0),
+    high: +(d.high ?? 0),
+    low: +(d.low ?? 0),
+    close: +(d.close ?? 0),
+  }))
+  candleSeries.setData(candleData)
 
-  const option = {
-    backgroundColor: '#070B14',
-    grid: [
-      { left: '8%', right: '3%', top: '5%', height: '65%' },
-      { left: '8%', right: '3%', top: '78%', height: '15%' },
-    ],
-    xAxis: [
-      { type: 'category', data: dates, gridIndex: 0, axisLine: { lineStyle: { color: '#1F2A3A' } }, axisLabel: { color: '#5A6A7E', fontSize: 10 } },
-      { type: 'category', data: dates, gridIndex: 1, axisLine: { lineStyle: { color: '#1F2A3A' } }, axisLabel: { show: false } },
-    ],
-    yAxis: [
-      { type: 'value', gridIndex: 0, scale: true, splitLine: { lineStyle: { color: '#1F2A3A', type: 'dashed' } }, axisLabel: { color: '#5A6A7E', fontSize: 10 } },
-      { type: 'value', gridIndex: 1, splitLine: { show: false }, axisLabel: { color: '#5A6A7E', fontSize: 9 } },
-    ],
-    series: [
-      {
-        type: 'candlestick', data: ohlc,
-        itemStyle: { color: '#EF4444', color0: '#22C55E', borderColor: '#EF4444', borderColor0: '#22C55E' },
-        markPoint: markPoints.length ? { data: markPoints, symbol: 'circle', symbolSize: 6, label: { fontSize: 9, color: '#fff' } } : undefined,
-      },
-      {
-        type: 'bar', data: volumes, xAxisIndex: 1, yAxisIndex: 1,
-        itemStyle: {
-          color: function (params) { return params.data[2] > 0 ? 'rgba(239,68,68,0.4)' : 'rgba(34,197,94,0.4)' }
-        },
-      },
-    ],
-    tooltip: { trigger: 'axis', axisPointer: { type: 'cross' } },
-  }
-  chart.setOption(option)
+  // Volume series (overlay on bottom)
+  const volumeSeries = chart.addHistogramSeries({
+    color: 'rgba(239,68,68,0.4)',
+    priceFormat: { type: 'volume' },
+    priceScaleId: '',
+  })
+  volumeSeries.priceScale().applyOptions({
+    scaleMargins: { top: 0.8, bottom: 0 },
+  })
+
+  const volumeData = ohlcRaw.map(d => ({
+    time: d.date,
+    value: Math.round(d.volume || 0),
+    color: d.close >= d.open ? 'rgba(239,68,68,0.4)' : 'rgba(34,197,94,0.4)',
+  }))
+  volumeSeries.setData(volumeData)
+
+  // MA lines (5, 10, 20, 50, 100, 200)
+  const maPeriods = [5, 10, 20, 50, 100, 200]
+  const maColors = ['#F59E0B', '#EF4444', '#4F7DFF', '#22C55E', '#A855F7', '#EC4899']
+
+  maPeriods.forEach((period, i) => {
+    const maData = calcMA(candleData, period)
+    const maSeries = chart.addLineSeries({
+      color: maColors[i],
+      lineWidth: 1,
+      priceLineVisible: false,
+      lastValueVisible: false,
+    })
+    maSeries.setData(maData)
+  })
+
+  // RSI pane (overlaid in main chart, bottom-margin)
+  const rsiPeriods = [6, 12, 24]
+  const rsiColors = ['#4F7DFF', '#F59E0B', '#EF4444']
+
+  rsiPeriods.forEach((period, i) => {
+    const rsiData = calcRSI(candleData, period)
+    const rsiSeries = chart.addLineSeries({
+      color: rsiColors[i],
+      lineWidth: 1,
+      priceLineVisible: false,
+      lastValueVisible: false,
+      priceScaleId: 'rsi',
+    })
+    rsiSeries.setData(rsiData)
+  })
+
+  // Configure RSI price scale
+  chart.priceScale('rsi').applyOptions({
+    scaleMargins: { top: 0.85, bottom: 0 },
+  })
+
+  // Store chart reference for resize
+  chartRef.value._chart = chart
+
+  // Add markers for key pattern dates
+  const markers = []
+  if (s.left_high_date) markers.push({ time: s.left_high_date, position: 'aboveBar', color: '#F59E0B', shape: 'arrowDown', text: '左杯口' })
+  if (s.cup_low_date) markers.push({ time: s.cup_low_date, position: 'belowBar', color: '#EF4444', shape: 'arrowUp', text: '杯底' })
+  if (s.right_high_date) markers.push({ time: s.right_high_date, position: 'aboveBar', color: '#F59E0B', shape: 'arrowDown', text: '右杯口' })
+  if (s.handle_low_date) markers.push({ time: s.handle_low_date, position: 'belowBar', color: '#4F7DFF', shape: 'arrowUp', text: '柄低' })
+  candleSeries.setMarkers(markers.filter(m => m.time))
+
+  chart.timeScale().fitContent()
 }
 
 let resizeHandler = null
 
 onMounted(async () => {
-  try {
-    const code = route.params.code
-    if (code) {
-      const data = await getCandidate(code)
-      if (data) {
-        stock.value = data
-        score.value = data.score || 0
-      }
+  const code = route.params.code
+  if (code) await loadStock(code)
+
+  // Load watchlist
+  const cands = await getCandidates()
+  watchlist.value = (cands.candidates || []).map(c => ({
+    code: c.code, name: c.name, score: c.score,
+    is_breakout: c.is_breakout, is_volume_breakout: c.is_volume_breakout,
+    breakout_price: c.breakout_price, latest_close: c.latest_close,
+    vol_multiplier: c.vol_multiplier,
+    dry_stable_verdict: c.dry_stable_verdict,
+  }))
+
+  await nextTick()
+  initChart()
+  resizeHandler = () => {
+    const c = chartRef.value?._chart
+    if (c) {
+      c.applyOptions({
+        width: chartRef.value.clientWidth,
+        height: chartRef.value.clientHeight || 500
+      })
     }
-    // Load watchlist
-    const cands = await getCandidates()
-    watchlist.value = (cands.candidates || []).map(c => ({
-      code: c.code, name: c.name, score: c.score,
-      is_breakout: c.is_breakout, is_volume_breakout: c.is_volume_breakout,
-      breakout_price: c.breakout_price, latest_close: c.latest_close,
-      vol_multiplier: c.vol_multiplier,
-      dry_stable_verdict: c.dry_stable_verdict,
-    }))
-    await nextTick()
-    initChart()
-    resizeHandler = () => chart?.resize()
-    window.addEventListener('resize', resizeHandler)
-  } catch (e) {
-    console.error('Failed to load stock detail:', e)
   }
+  window.addEventListener('resize', resizeHandler)
 })
 onUnmounted(() => {
   if (resizeHandler) window.removeEventListener('resize', resizeHandler)
+  chartRef.value?._chart?.remove()
 })
 </script>
 
@@ -459,7 +582,9 @@ onUnmounted(() => {
   cursor: pointer; transition: background 0.1s;
 }
 .wl-item:hover { background: rgba(79,125,255,0.03); }
-.wl-item.active { background: rgba(79,125,255,0.08); border-left: 3px solid var(--accent); padding-left: 11px; }
+.wl-item.active { background: rgba(79,125,255,0.12); border-left: 3px solid var(--accent); padding-left: 11px; }
+.wl-item.active .wl-code { color: #fff; }
+.wl-item.active .wl-score { color: var(--gold); }
 .wl-bar { width: 3px; height: 28px; border-radius: 2px; flex-shrink: 0; }
 .wl-red { background: var(--up-red); }
 .wl-orange { background: var(--warn-orange); }
