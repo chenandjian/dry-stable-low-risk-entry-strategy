@@ -1,5 +1,14 @@
 <template>
   <div class="page-content">
+    <!-- Market Status Bar -->
+    <div class="status-bar">
+      <span class="market-status">
+        <span class="status-dot" :class="marketStatusClass"></span>
+        {{ marketStatusText }}
+      </span>
+      <span class="status-sep">|</span>
+      <span class="current-time">{{ currentTime }}</span>
+    </div>
     <!-- Metrics Row -->
     <div class="metrics-row">
       <MetricCard label="今日候选" :value="metrics.candidates" sub="扫描结果" color="blue" />
@@ -84,6 +93,43 @@ import ScanEngine from '../components/ScanEngine.vue'
 const router = useRouter()
 const { startScan, getScanStatus, getCandidates, getTaskStocks, retryFailedStocks } = useApi()
 
+// Market status & clock
+const currentTime = ref('')
+const marketStatusText = ref('')
+const marketStatusClass = ref('')
+
+function updateTime() {
+  const now = new Date()
+  const hh = String(now.getHours()).padStart(2, '0')
+  const mm = String(now.getMinutes()).padStart(2, '0')
+  const ss = String(now.getSeconds()).padStart(2, '0')
+  currentTime.value = `${hh}:${mm}:${ss}`
+
+  const day = now.getDay()
+  const totalMinutes = now.getHours() * 60 + now.getMinutes()
+  const isWeekday = day >= 1 && day <= 5
+
+  // Trading sessions in minutes: 9:30-11:30, 13:00-15:00
+  const MORNING_OPEN  = 9 * 60 + 30   // 570
+  const MORNING_CLOSE = 11 * 60 + 30  // 690
+  const AFTERNOON_OPEN  = 13 * 60     // 780
+  const AFTERNOON_CLOSE = 15 * 60     // 900
+
+  const inSession = (totalMinutes >= MORNING_OPEN && totalMinutes <= MORNING_CLOSE)
+                 || (totalMinutes >= AFTERNOON_OPEN && totalMinutes <= AFTERNOON_CLOSE)
+
+  if (isWeekday && inSession) {
+    marketStatusText.value = '开盘中'
+    marketStatusClass.value = 'open'
+  } else if (isWeekday && totalMinutes > AFTERNOON_CLOSE) {
+    marketStatusText.value = '已收盘'
+    marketStatusClass.value = 'closed'
+  } else {
+    marketStatusText.value = '未开盘'
+    marketStatusClass.value = 'pre'
+  }
+}
+
 const scanning = ref(false)
 const scanError = ref('')
 const scanProgress = reactive({
@@ -110,6 +156,7 @@ const topScoreSub = computed(() => {
 })
 
 let pollTimer = null
+let clockTimer = null
 
 function goToStock(code) {
   router.push(`/stock/${code}`)
@@ -284,8 +331,13 @@ onMounted(async () => {
     }
     await loadFailures()
   } catch (e) { console.error('Check status on mount failed:', e) }
+  updateTime()
+  clockTimer = setInterval(updateTime, 1000)
 })
-onUnmounted(() => { if (pollTimer) clearInterval(pollTimer) })
+onUnmounted(() => {
+  if (pollTimer) clearInterval(pollTimer)
+  if (clockTimer) clearInterval(clockTimer)
+})
 </script>
 
 <style scoped>
@@ -319,4 +371,16 @@ onUnmounted(() => { if (pollTimer) clearInterval(pollTimer) })
 .failure-row { display: grid; grid-template-columns: 90px 120px 1fr 140px; gap: 8px; padding: 8px 16px; border-top: 1px solid var(--border); font-size: 12px; }
 .failure-row .code { color: var(--accent); font-family: var(--font-mono); }
 .muted { color: var(--text-muted); }
+.status-bar {
+  display: flex; align-items: center; justify-content: flex-end; gap: 10px;
+  margin-bottom: 12px; font-size: 13px;
+}
+.status-dot {
+  display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px;
+}
+.status-dot.open { background: var(--down-green); box-shadow: 0 0 6px rgba(34,197,94,0.4); }
+.status-dot.closed { background: var(--gold); }
+.status-dot.pre { background: var(--text-muted); }
+.status-sep { color: var(--border); }
+.current-time { color: var(--text-primary); font-family: var(--font-mono); font-size: 14px; }
 </style>
