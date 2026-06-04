@@ -1,5 +1,6 @@
 from scanner import db
 from scanner import engine
+from scanner import stock_pool
 
 
 class FakeManager:
@@ -16,8 +17,117 @@ class FakeManager:
         self.release_calls.append(ds_name)
 
 
+class FakeScanManager:
+    events = []
+
+    def try_acquire_any(self):
+        self.events.append('acquire')
+        return 'tencent'
+
+    def release(self, ds_name):
+        self.events.append(f'release:{ds_name}')
+
+
+class ImmediateThread:
+    def __init__(self, target=None, args=(), daemon=None):
+        self.target = target
+        self.args = args
+        self.daemon = daemon
+
+    def start(self):
+        if self.target:
+            self.target(*self.args)
+
+    def join(self):
+        return None
+
+
 def _row(day, close=10.0):
     return {"date": day, "open": close, "high": close, "low": close, "close": close, "volume": 10_000_000, "turnover": close * 10_000_000}
+
+
+def _rows(count, close=10.0):
+    rows = []
+    for day in range(1, count + 1):
+        month = ((day - 1) // 28) + 1
+        dom = ((day - 1) % 28) + 1
+        rows.append(_row(f'2026-{month:02d}-{dom:02d}', close=close))
+    return rows
+
+
+def test_fetch_result_reports_transient_source_busy_only_for_busy_failures():
+    busy_primary = engine.FetchResult(data=None, primary_source='tencent', fallback_source='sina', primary_error='data source busy')
+    busy_fallback = engine.FetchResult(data=None, primary_source='sina', fallback_source='tencent', fallback_error='data source busy')
+    not_busy = engine.FetchResult(data=None, primary_source='sina', fallback_source='tencent', primary_error='empty response', fallback_error='empty response')
+    with_data = engine.FetchResult(data=[_row('2026-06-04')], primary_source='sina', fallback_source='tencent', fallback_error='data source busy')
+
+    assert engine._is_transient_source_busy(busy_primary) is True
+    assert engine._is_transient_source_busy(busy_fallback) is True
+    assert engine._is_transient_source_busy(not_busy) is False
+    assert engine._is_transient_source_busy(with_data) is False
+
+
+def test_scan_all_requeues_stock_after_transient_source_busy(monkeypatch, tmp_path):
+    config = {
+        'data': {'database_path': str(tmp_path / 'cuphandle.db')},
+        'liquidity': {'min_listing_days': 250},
+        'scoring': {'medium_threshold': 70},
+    }
+    stock = {'code': '600000', 'name': 'PF Bank'}
+    attempts = {'count': 0}
+    sleep_calls = []
+    FakeScanManager.events = []
+
+    def fake_fetch_with_retry(code, ds, mgr=None):
+        attempts['count'] += 1
+        FakeScanManager.events.append(f'fetch:{attempts['count']}')
+        if attempts['count'] == 1:
+            return engine.FetchResult(
+                data=None,
+                primary_source=ds,
+                fallback_source='sina' if ds == 'tencent' else 'tencent',
+                primary_error='data source busy',
+                fallback_error='data source busy',
+            )
+        return engine.FetchResult(
+            data=_rows(260),
+            primary_source=ds,
+            fallback_source='sina' if ds == 'tencent' else 'tencent',
+            primary_attempts=1,
+        )
+
+    monkeypatch.setattr(engine, 'DataSourceManager', FakeScanManager)
+    monkeypatch.setattr(engine, '_fetch_with_retry', fake_fetch_with_retry)
+    monkeypatch.setattr(engine.threading, 'Thread', ImmediateThread)
+    monkeypatch.setattr(engine.time, 'sleep', lambda seconds: sleep_calls.append(seconds))
+    monkeypatch.setattr(stock_pool, 'get_a_stock_pool', lambda config: [stock.copy()])
+    monkeypatch.setattr(engine, 'fetch_market_index_daily', lambda: [])
+    monkeypatch.setattr(engine, 'passes_liquidity_filter', lambda data, cfg: True)
+    monkeypatch.setattr(engine, 'detect_cup_handle', lambda data, cfg: engine.CupHandleResult(found=False))
+    monkeypatch.setattr(
+        engine,
+        'analyze_dry_stable',
+        lambda result, data, market_data=None: {
+            'pattern_score': {'score': 0, 'key_pattern_type': 'other', 'type': 'other'},
+            'decision': {'verdict': '不建议买入', 'summary': ''},
+        },
+    )
+
+    result = engine.scan_all(config)
+
+    assert attempts['count'] == 2
+    assert result['stats']['scanned'] == 1
+    assert result['stats']['skipped'] == 0
+    assert result['stats']['candidates_found'] == 0
+    assert sleep_calls == [0.1]
+    assert FakeScanManager.events == [
+        'acquire',
+        'fetch:1',
+        'release:tencent',
+        'acquire',
+        'fetch:2',
+        'release:tencent',
+    ]
 
 
 def test_fetch_with_retry_ignores_fresh_cache_when_source_succeeds(monkeypatch, tmp_path):

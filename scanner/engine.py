@@ -107,6 +107,10 @@ def scan_all(config: dict, progress_callback=None, resume_task_id: str = None) -
                 fetch_result = _fetch_with_retry(code, ds, mgr=mgr)
                 data = fetch_result.data
                 if data is None:
+                    if _is_transient_source_busy(fetch_result):
+                        stock_queue.put(stock)
+                        time.sleep(0.1)
+                        continue
                     with stats_lock:
                         skip_count[0] += 1
                     continue
@@ -281,6 +285,12 @@ def _fetch_with_retry(
         return result
 
     return result
+
+
+def _is_transient_source_busy(fetch_result: FetchResult) -> bool:
+    if fetch_result.data is not None:
+        return False
+    return fetch_result.primary_error == "data source busy" or fetch_result.fallback_error == "data source busy"
 
 
 def _try_fetch_source(
