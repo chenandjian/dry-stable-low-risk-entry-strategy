@@ -30,6 +30,12 @@ def start_scheduler(config: dict):
             return
         try:
             _running[0] = True
+            import scanner.db as db
+            db_path = config.get("data", {}).get("database_path", "data/cuphandle.db")
+            db.init_db(db_path)
+            if skip_if_running and db.get_running_task_id():
+                logger.info("Scheduled scan skipped because another scan is running")
+                return
             logger.info("Scheduled scan started")
             result = scan_all(config)
             stats = result["stats"]

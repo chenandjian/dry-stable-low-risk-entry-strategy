@@ -69,6 +69,38 @@ _running = {
 }
 
 
+def _get_running_task_id() -> str | None:
+    """Return the active scan task id from memory or DB."""
+    if _running.get("running") and _running.get("task_id"):
+        return _running["task_id"]
+    try:
+        return db.get_running_task_id()
+    except RuntimeError:
+        return None
+
+
+def _scan_conflict_response():
+    """Return a 409 response if any scan process is already running."""
+    running_id = _get_running_task_id()
+    if running_id:
+        return JSONResponse(
+            {"error": "Scan already running", "running_task_id": running_id},
+            status_code=409,
+        )
+    return None
+
+
+def _set_running(task_id: str, mode: str):
+    _running["running"] = True
+    _running["task_id"] = task_id
+    _running["mode"] = mode
+    _running["stats"] = {}
+
+
+def _clear_running():
+    _running["running"] = False
+
+
 def load_config(path: str = "config.yaml") -> dict:
     with open(path, "r", encoding="utf-8") as f:
         return yaml.safe_load(f)
@@ -85,26 +117,38 @@ def _deep_merge(base: dict, update: dict):
 
 @app.get("/api/scan/start")
 async def start_scan():
-    global _running
-    if _running["running"]:
-        return JSONResponse({"error": "Scan already running"}, status_code=409)
-
     import datetime
-    _running["running"] = True
-    _running["stats"] = {}
-    started_at = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    _running["started_at"] = started_at
+    from scanner.stock_pool import get_a_stock_pool_result
 
     config = load_config()
-
-    # Ensure DB is initialized
     db_path = config.get("data", {}).get("database_path", "data/cuphandle.db")
     db.init_db(db_path)
 
-    # Generate task_id BEFORE starting scan so progress can be tracked
+    conflict = _scan_conflict_response()
+    if conflict:
+        return conflict
+
+    pool_result = get_a_stock_pool_result(config)
+    stocks = pool_result["stocks"]
+    if not stocks:
+        return JSONResponse(
+            {"error": "No stock pool available", "detail": pool_result.get("error")},
+            status_code=503,
+        )
+
     task_id = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
-    _running["task_id"] = task_id
-    db.create_scan_task(task_id, started_at, total_stocks=0)
+    started_at = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    db.create_scan_task(
+        task_id,
+        started_at,
+        total_stocks=len(stocks),
+        stock_pool_source=pool_result["source"],
+        stock_pool_error=pool_result.get("error"),
+        retry_mode="full",
+    )
+    db.save_task_stocks(task_id, stocks)
+    _set_running(task_id, "full")
+    _running["started_at"] = started_at
 
     def run():
         try:
@@ -113,7 +157,6 @@ async def start_scan():
                 stats = _running.get("stats", {})
                 if stage == "discovery" and discovery:
                     found = stats.get("candidates_found", 0) + 1
-                    # 立即写入 DB，保证个股详情可查询
                     db.upsert_candidate(task_id, discovery)
                     discoveries = list(stats.get("discoveries") or [])
                     discoveries.insert(0, {
@@ -158,12 +201,14 @@ async def start_scan():
                     s = stats.copy()
                     s.update({
                         "scanned": current,
+                        "processed": current,
                         "total_stocks": total,
                         "current_code": code,
                         "current_name": detail[len(code):].strip() if len(detail) > len(code) else detail,
                     })
                     s.setdefault("candidates_found", 0)
                     s.setdefault("skipped", 0)
+                    s.setdefault("failed", 0)
                     _running["stats"] = s
                 db.update_scan_progress(
                     task_id,
@@ -172,9 +217,14 @@ async def start_scan():
                     candidates_count=_running["stats"].get("candidates_found", 0),
                 )
 
-            result = scan_all(config, progress_callback=on_progress)
+            result = scan_all(
+                config,
+                progress_callback=on_progress,
+                task_id=task_id,
+                stocks=stocks,
+                retry_policy="normal",
+            )
 
-            # Save candidates to DB
             if result["candidates"]:
                 sc = config.get("scoring", {})
                 db.save_candidates(
@@ -183,11 +233,8 @@ async def start_scan():
                     medium=sc.get("medium_threshold", 70),
                 )
 
-            # Update final stats
             s = result["stats"]
             _running["stats"] = s
-
-            # Mark scan as completed in DB
             db.finish_scan_task(
                 task_id,
                 finished_at=datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
@@ -196,38 +243,42 @@ async def start_scan():
                 scanned=s.get("scanned", 0),
                 skipped=s.get("skipped", 0),
             )
+            db.refresh_scan_task_counts(task_id)
 
         except Exception as e:
             import traceback
             logger.error(f"Scan failed: {e}\n{traceback.format_exc()}")
             _running["stats"] = {"error": str(e)}
-            db.finish_scan_task(
-                task_id,
-                finished_at=datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                candidates_count=0,
-                elapsed_seconds=0,
-            )
+            conn = db.get_conn()
+            conn.execute("UPDATE scan_tasks SET status='failed', error=? WHERE id=?", (str(e), task_id))
+            conn.commit()
         finally:
-            _running["running"] = False
+            _clear_running()
 
     t = threading.Thread(target=run, daemon=True)
     t.start()
 
-    return {"task_id": task_id, "status": "started"}
+    return {
+        "task_id": task_id,
+        "status": "started",
+        "total_stocks": len(stocks),
+        "stock_pool_source": pool_result["source"],
+    }
 
 
 @app.get("/api/scan/status")
 async def scan_status():
     if _running["running"]:
+        summary = db.refresh_scan_task_counts(_running["task_id"]) if _running.get("task_id") else {}
         return {
             "running": True,
             "task_id": _running["task_id"],
-            "stats": _running["stats"],
+            "mode": _running.get("mode", "full"),
+            "stats": {**summary, **_running.get("stats", {})},
         }
-    # Check DB for any running task (recovery after restart)
     running_id = db.get_running_task_id()
     if running_id:
-        return {"running": True, "task_id": running_id, "stats": {}}
+        return {"running": True, "task_id": running_id, "mode": "unknown", "stats": {}}
     return {"running": False, "task_id": None, "stats": {}}
 
 
@@ -268,6 +319,66 @@ async def list_tasks():
                 t["breakout"] = 0
             tasks.append(t)
     return {"tasks": tasks}
+
+
+@app.get("/api/scan/tasks/{task_id}/stocks")
+async def get_task_stocks(task_id: str, status: str = None, page: int = 1, page_size: int = 100):
+    page = max(page, 1)
+    page_size = min(max(page_size, 1), 500)
+    offset = (page - 1) * page_size
+    stocks = db.get_task_stocks(task_id, status=status, limit=page_size, offset=offset)
+    total = db.summarize_task_stocks(task_id)
+    count = total.get(status, 0) if status else total["total_stocks"]
+    return {"task_id": task_id, "stocks": stocks, "total": count, "page": page, "page_size": page_size}
+
+
+@app.post("/api/scan/tasks/{task_id}/retry-failed")
+async def retry_failed_stocks(task_id: str):
+    config = load_config()
+    db_path = config.get("data", {}).get("database_path", "data/cuphandle.db")
+    db.init_db(db_path)
+
+    conflict = _scan_conflict_response()
+    if conflict:
+        return conflict
+
+    failed = db.get_failed_task_stocks(task_id)
+    if not failed:
+        return {"task_id": task_id, "status": "no_failed_stocks", "retry_count": 0}
+
+    db.reset_failed_task_stocks(task_id)
+    conn = db.get_conn()
+    conn.execute("UPDATE scan_tasks SET status='running', retry_mode='failed_only' WHERE id=?", (task_id,))
+    conn.commit()
+    _set_running(task_id, "failed_only")
+
+    stocks = [{"code": s["code"], "name": s["name"], "market": s.get("market", "")} for s in failed]
+
+    def run_retry():
+        import datetime
+        try:
+            result = scan_all(config, task_id=task_id, stocks=stocks, retry_policy="failed_only")
+            s = result["stats"]
+            db.finish_scan_task(
+                task_id,
+                finished_at=datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                candidates_count=s.get("candidates_found", 0),
+                elapsed_seconds=s.get("elapsed_seconds", 0),
+                scanned=s.get("scanned", 0),
+                skipped=s.get("skipped", 0),
+            )
+            db.refresh_scan_task_counts(task_id)
+        except Exception as e:
+            import traceback
+            logger.error(f"Retry failed stocks failed: {e}\n{traceback.format_exc()}")
+            conn = db.get_conn()
+            conn.execute("UPDATE scan_tasks SET status='failed', error=? WHERE id=?", (str(e), task_id))
+            conn.commit()
+        finally:
+            _clear_running()
+
+    threading.Thread(target=run_retry, daemon=True).start()
+    return {"task_id": task_id, "status": "retry_started", "retry_count": len(stocks)}
 
 
 @app.get("/api/candidates")
