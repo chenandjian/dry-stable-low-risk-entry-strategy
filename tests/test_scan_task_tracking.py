@@ -160,3 +160,48 @@ def test_candidates_are_unique_per_task_and_code(tmp_path):
     assert len(rows) == 1
     assert rows[0]["code"] == "600000"
     assert rows[0]["score"] == 90
+
+
+
+def test_get_a_stock_pool_result_uses_akshare_when_available(monkeypatch, tmp_path):
+    import types
+    from scanner import stock_pool
+
+    db.init_db(str(tmp_path / "cuphandle.db"))
+
+    class FakeDataFrame:
+        def iterrows(self):
+            return iter([
+                (0, {"code": "600000", "name": "浦发银行"}),
+                (1, {"code": "000001", "name": "平安银行"}),
+            ])
+
+    fake_ak = types.SimpleNamespace(stock_info_a_code_name=lambda: FakeDataFrame())
+    monkeypatch.setitem(__import__("sys").modules, "akshare", fake_ak)
+
+    result = stock_pool.get_a_stock_pool_result({"market": {}})
+
+    assert result["source"] == "akshare"
+    assert result["error"] is None
+    assert [s["code"] for s in result["stocks"]] == ["600000", "000001"]
+
+
+
+def test_get_a_stock_pool_result_falls_back_to_cached_pool(monkeypatch, tmp_path):
+    import types
+    from scanner import stock_pool
+
+    db.init_db(str(tmp_path / "cuphandle.db"))
+    db.save_stock_pool([{"code": "600000", "name": "浦发银行", "market": "上证主板"}])
+
+    def fail():
+        raise RuntimeError("akshare down")
+
+    fake_ak = types.SimpleNamespace(stock_info_a_code_name=fail)
+    monkeypatch.setitem(__import__("sys").modules, "akshare", fake_ak)
+
+    result = stock_pool.get_a_stock_pool_result({"market": {}})
+
+    assert result["source"] == "cached"
+    assert "akshare down" in result["error"]
+    assert result["stocks"][0]["code"] == "600000"

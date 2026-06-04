@@ -5,13 +5,9 @@ from scanner.db import save_stock_pool, get_stock_pool, get_stock_pool_count
 logger = logging.getLogger(__name__)
 
 
-def get_a_stock_pool(config: dict) -> list[dict]:
-    """获取 A 股股票池，过滤 ST/新股/北交所。
-
-    Returns:
-        list[dict]: [{code, name, market, listing_date}, ...]
-    """
-    # 1. 尝试 AKShare
+def get_a_stock_pool_result(config: dict) -> dict:
+    """Get A-share stock pool with source/error metadata for scan tasks."""
+    error = None
     try:
         import akshare as ak
         df = ak.stock_info_a_code_name()
@@ -23,19 +19,23 @@ def get_a_stock_pool(config: dict) -> list[dict]:
         logger.info(f"AKShare: got {len(stocks)} stocks")
         if stocks:
             save_stock_pool(stocks)
-            return _filter_stocks(stocks, config)
+            return {"stocks": _filter_stocks(stocks, config), "source": "akshare", "error": None}
     except Exception as e:
+        error = str(e)
         logger.warning(f"AKShare stock pool failed: {e}")
 
-    # 2. 回退本地数据库缓存
     cached = get_stock_pool()
     if cached:
         logger.info(f"Using cached stock pool: {len(cached)} stocks")
-        return _filter_stocks(cached, config)
+        return {"stocks": _filter_stocks(cached, config), "source": "cached", "error": error}
 
-    # 3. Last resort
     logger.error("Cannot get stock pool from any source")
-    return []
+    return {"stocks": [], "source": "none", "error": error or "No stock pool available"}
+
+
+def get_a_stock_pool(config: dict) -> list[dict]:
+    """获取 A 股股票池，过滤 ST/新股/北交所。"""
+    return get_a_stock_pool_result(config)["stocks"]
 
 
 def _filter_stocks(stocks: list[dict], config: dict) -> list[dict]:
