@@ -95,6 +95,20 @@
         </div>
       </div>
       <div ref="chartRef" class="chart-body"></div>
+      <div class="chart-legend">
+        <span class="legend-group">MA</span>
+        <span class="legend-item"><i style="background:#F59E0B"></i>5</span>
+        <span class="legend-item"><i style="background:#EF4444"></i>10</span>
+        <span class="legend-item"><i style="background:#4F7DFF"></i>20</span>
+        <span class="legend-item"><i style="background:#22C55E"></i>50</span>
+        <span class="legend-item"><i style="background:#A855F7"></i>100</span>
+        <span class="legend-item"><i style="background:#EC4899"></i>200</span>
+        <span class="legend-sep">|</span>
+        <span class="legend-group">RSI</span>
+        <span class="legend-item"><i style="background:#4F7DFF"></i>6</span>
+        <span class="legend-item"><i style="background:#F59E0B"></i>12</span>
+        <span class="legend-item"><i style="background:#EF4444"></i>24</span>
+      </div>
       <div class="structure-readout">
         <div class="structure-title">{{ isVcp ? 'VCP 收缩结构' : '杯柄结构时间线' }}</div>
         <div class="structure-grid" v-if="isVcp">
@@ -578,6 +592,15 @@ onUnmounted(() => {
 .ct.active { background: rgba(79,125,255,0.12); border-color: var(--accent); color: var(--accent); }
 .chart-right { font-size: 11px; color: var(--text-muted); }
 .chart-body { flex: 1; min-height: 400px; }
+.chart-legend {
+  display: flex; align-items: center; gap: 6px; padding: 6px 16px;
+  background: var(--bg-panel); border-top: 1px solid var(--border);
+  font-size: 11px; color: var(--text-muted); flex-wrap: wrap;
+}
+.legend-group { font-weight: 600; color: var(--text-secondary); margin-right: 4px; }
+.legend-item { display: flex; align-items: center; gap: 3px; margin-right: 2px; }
+.legend-item i { display: inline-block; width: 12px; height: 2px; border-radius: 1px; }
+.legend-sep { color: var(--border); margin: 0 4px; }
 .structure-readout { padding: 12px 16px; background: var(--bg-panel); border-top: 1px solid var(--border); }
 .structure-title { font-size: 12px; font-weight: 600; color: var(--text-secondary); margin-bottom: 8px; }
 .structure-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; }
