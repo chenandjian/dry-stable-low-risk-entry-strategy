@@ -352,7 +352,7 @@ async def list_tasks():
             "duration": "",
         })
     # Add completed scans from DB (skip the running one already added above)
-    running_id = _running.get("task_id")
+    running_id = _running.get("task_id") if _running["running"] else None
     db_tasks = db.get_scan_tasks()
     for t in db_tasks:
         if t["id"] != running_id:
