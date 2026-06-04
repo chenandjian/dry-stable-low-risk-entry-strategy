@@ -27,10 +27,11 @@ async def lifespan(app: FastAPI):
     interrupted = db.get_interrupted_task()
     if interrupted:
         logger.info(f"Resuming interrupted scan: {interrupted['id']} at {interrupted['scanned']}/{interrupted['total_stocks']}")
-        import threading
+        import threading, datetime
         _running["running"] = True
         _running["task_id"] = interrupted["id"]
         _running["mode"] = "resume"
+        _running["started_at"] = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         _running["stats"] = {
             "total_stocks": interrupted["total_stocks"],
             "current_code": "--",
@@ -315,9 +316,15 @@ async def list_tasks():
             "date": _running.get("started_at", ""),
             "scope": f"全市场 · {s.get('total_stocks', '--')}只",
             "running": True,
+            "status": "running",
             "candidates": s.get("candidates_found", 0),
+            "failed": s.get("failed", 0),
+            "skipped": s.get("skipped", 0),
             "scanned": s.get("scanned", 0),
             "total": s.get("total_stocks", 0),
+            "stock_pool_source": s.get("stock_pool_source", ""),
+            "latest_trade_date": s.get("latest_trade_date", ""),
+            "duration": "",
         })
     # Add completed scans from DB (skip the running one already added above)
     running_id = _running.get("task_id")
