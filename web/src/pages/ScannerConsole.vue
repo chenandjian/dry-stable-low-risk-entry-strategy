@@ -47,10 +47,28 @@
         :currentCode="scanProgress.currentCode"
         :currentName="scanProgress.currentName"
         :skipped="scanProgress.skipped"
+        :failed="scanProgress.failed"
+        :candidates="scanProgress.candidates"
+        :latestTradeDate="scanProgress.latestTradeDate"
+        :stockPoolSource="scanProgress.stockPoolSource"
         :logLines="logLines"
         @start="handleStartScan"
         @stop="handleStopScan"
       />
+    </div>
+
+    <div class="panel failure-panel" v-if="scanProgress.taskId">
+      <div class="panel-header">
+        <span>失败股票 · {{ scanProgress.failed || 0 }}</span>
+        <button class="retry-btn" :disabled="scanning || !scanProgress.failed" @click="handleRetryFailed">重新拉取失败股票</button>
+      </div>
+      <div v-if="failures.length === 0" class="empty-state">暂无失败股票</div>
+      <div v-for="f in failures" :key="f.code" class="failure-row">
+        <span class="code">{{ f.code }}</span>
+        <span>{{ f.name }}</span>
+        <span class="muted">{{ f.status_reason || f.error_detail || '--' }}</span>
+        <span class="muted">主源 {{ f.primary_attempts || 0 }} · 备源 {{ f.fallback_attempts || 0 }}</span>
+      </div>
     </div>
   </div>
 </template>
@@ -64,13 +82,25 @@ import DiscoveryItem from '../components/DiscoveryItem.vue'
 import ScanEngine from '../components/ScanEngine.vue'
 
 const router = useRouter()
-const { startScan, getScanStatus, getCandidates } = useApi()
+const { startScan, getScanStatus, getCandidates, getTaskStocks, retryFailedStocks } = useApi()
 
 const scanning = ref(false)
 const scanError = ref('')
-const scanProgress = reactive({ scanned: 0, total: 5128, currentCode: '--', currentName: '--', skipped: 0 })
+const scanProgress = reactive({
+  taskId: '',
+  scanned: 0,
+  total: 0,
+  currentCode: '--',
+  currentName: '--',
+  skipped: 0,
+  failed: 0,
+  candidates: 0,
+  latestTradeDate: '',
+  stockPoolSource: '',
+})
 const logLines = ref([])
 const discoveries = ref([])
+const failures = ref([])
 const metrics = reactive({ candidates: 0, aGrade: 0, breakout: 0, nearBreakout: 0, volumeOk: 0, topScore: 0 })
 
 const topSignalSub = computed(() => discoveries.value.filter(d => d.score >= 80).map(d => d.name).slice(0, 3).join(' · ') || '--')
@@ -89,14 +119,20 @@ async function handleStartScan() {
   scanError.value = ''
   try {
     const res = await startScan()
-    if (res.error) {
-      const messages = {
-        'Scan already running': '扫描已在运行中，请等待当前扫描完成',
+    if (!res.ok || res.error) {
+      if (res.statusCode === 409) {
+        scanError.value = `扫描已在运行中：${res.running_task_id || '--'}`
+      } else {
+        scanError.value = res.error || '启动扫描失败'
       }
-      scanError.value = messages[res.error] || res.error
       return
     }
+    scanProgress.taskId = res.task_id
+    scanProgress.total = res.total_stocks || 0
+    scanProgress.stockPoolSource = res.stock_pool_source || ''
+    failures.value = []
     scanning.value = true
+    if (pollTimer) clearInterval(pollTimer)
     pollTimer = setInterval(pollStatus, 1000)
   } catch (e) {
     scanError.value = '无法连接到后端服务，请确认 python main.py serve 已启动'
@@ -109,23 +145,32 @@ async function handleStopScan() {
   if (pollTimer) clearInterval(pollTimer)
 }
 
+function applyStats(status) {
+  const stats = status.stats || {}
+  scanProgress.taskId = status.task_id || scanProgress.taskId
+  scanProgress.scanned = stats.processed || stats.scanned || 0
+  scanProgress.total = stats.total_stocks || scanProgress.total || 0
+  scanProgress.skipped = stats.skipped || 0
+  scanProgress.failed = stats.failed || stats.failed_count || 0
+  scanProgress.candidates = stats.candidates_found || stats.candidates_count || 0
+  scanProgress.currentCode = stats.current_code || '--'
+  scanProgress.currentName = stats.current_name || '--'
+  scanProgress.latestTradeDate = stats.latest_trade_date || ''
+  scanProgress.stockPoolSource = stats.stock_pool_source || scanProgress.stockPoolSource || ''
+}
+
 async function pollStatus() {
   try {
     const status = await getScanStatus()
+    applyStats(status)
     if (!status.running && scanning.value) {
       scanning.value = false
       if (pollTimer) clearInterval(pollTimer)
-      loadResults()
-    }
-    if (status.stats) {
-      scanProgress.scanned = status.stats.scanned || 0
-      scanProgress.total = status.stats.total_stocks || 5128
-      scanProgress.skipped = status.stats.skipped || 0
-      scanProgress.currentCode = status.stats.current_code || '--'
-      scanProgress.currentName = status.stats.current_name || '--'
+      await loadResults()
+      await loadFailures()
     }
     // 实时更新候选发现
-    if (status.stats.discoveries) {
+    if (status.stats?.discoveries) {
       status.stats.discoveries.forEach(d => {
         if (!discoveries.value.find(e => e.code === d.code)) {
           discoveries.value.unshift({
@@ -138,8 +183,10 @@ async function pollStatus() {
           })
         }
       })
+      discoveries.value = dedupeDiscoveries(discoveries.value)
       updateMetrics()
     }
+    if (scanProgress.failed) await loadFailures()
   } catch (e) {
     scanError.value = '状态查询失败'
     console.error(e)
@@ -149,18 +196,50 @@ async function pollStatus() {
 async function loadResults() {
   try {
     const data = await getCandidates()
-    discoveries.value = (data.candidates || []).map(c => ({
+    discoveries.value = dedupeDiscoveries((data.candidates || []).map(c => ({
       code: c.code,
       name: c.name,
       score: c.score,
       rating: c.score >= 80 ? 'strong' : c.score >= 70 ? 'medium' : 'weak',
       status: statusFor(c),
       detail: formatDetail(c),
-    }))
+    })))
     updateMetrics()
   } catch (e) {
     console.error('Load results failed:', e)
   }
+}
+
+async function loadFailures() {
+  if (!scanProgress.taskId) return
+  try {
+    const data = await getTaskStocks(scanProgress.taskId, { status: 'failed', page_size: 20 })
+    failures.value = data.stocks || []
+  } catch (e) {
+    console.error('Load failures failed:', e)
+  }
+}
+
+async function handleRetryFailed() {
+  if (!scanProgress.taskId) return
+  const res = await retryFailedStocks(scanProgress.taskId)
+  if (!res.ok || res.error) {
+    scanError.value = res.statusCode === 409 ? `扫描已在运行中：${res.running_task_id || '--'}` : (res.error || '重拉失败股票失败')
+    return
+  }
+  if (res.retry_count === 0) {
+    scanError.value = '没有需要重拉的失败股票'
+    return
+  }
+  scanning.value = true
+  if (pollTimer) clearInterval(pollTimer)
+  pollTimer = setInterval(pollStatus, 1000)
+}
+
+function dedupeDiscoveries(list) {
+  const byCode = new Map()
+  list.forEach(item => byCode.set(item.code, item))
+  return Array.from(byCode.values())
 }
 
 function formatDetail(c) {
@@ -198,16 +277,12 @@ onMounted(async () => {
   // Check if a scan is already running
   try {
     const status = await getScanStatus()
+    applyStats(status)
     if (status.running) {
       scanning.value = true
-      if (status.stats) {
-        scanProgress.scanned = status.stats.scanned || 0
-        scanProgress.total = status.stats.total_stocks || 5128
-        scanProgress.currentCode = status.stats.current_code || '--'
-        scanProgress.currentName = status.stats.current_name || '--'
-      }
       pollTimer = setInterval(pollStatus, 1000)
     }
+    await loadFailures()
   } catch (e) { console.error('Check status on mount failed:', e) }
 })
 onUnmounted(() => { if (pollTimer) clearInterval(pollTimer) })
@@ -238,4 +313,10 @@ onUnmounted(() => { if (pollTimer) clearInterval(pollTimer) })
   border-radius: 6px; padding: 12px 16px; margin-bottom: 12px;
   color: var(--up-red); font-size: 13px;
 }
+.failure-panel { margin-top: 12px; }
+.retry-btn { background: transparent; color: var(--accent); border: 1px solid var(--accent); border-radius: 4px; padding: 4px 10px; cursor: pointer; }
+.retry-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.failure-row { display: grid; grid-template-columns: 90px 120px 1fr 140px; gap: 8px; padding: 8px 16px; border-top: 1px solid var(--border); font-size: 12px; }
+.failure-row .code { color: var(--accent); font-family: var(--font-mono); }
+.muted { color: var(--text-muted); }
 </style>

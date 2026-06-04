@@ -24,6 +24,10 @@
         <span class="name">{{ currentName }}</span>
         <span class="speed">{{ skipText }}</span>
       </div>
+      <div class="scan-meta">
+        <span>{{ sourceText }}</span>
+        <span>最新交易日 {{ latestTradeDate || '--' }}</span>
+      </div>
     </div>
 
     <div class="panel-header sub">
@@ -54,17 +58,24 @@ const props = defineProps({
   currentCode: String,
   currentName: String,
   skipped: Number,
+  failed: Number,
+  candidates: Number,
+  latestTradeDate: String,
+  stockPoolSource: String,
   logLines: { type: Array, default: () => [] },
 })
 defineEmits(['start', 'stop'])
 
 const logExpanded = ref(true)
 const progressPct = computed(() => props.total > 0 ? Math.round(props.scanned / props.total * 100) : 0)
-const progressText = computed(() =>
-  `已扫描 ${props.scanned} / ${props.total} · 预计剩余 ${Math.max(0, props.total - props.scanned)}只`
-)
-const statusText = computed(() => props.running ? '全市场扫描进行中' : '')
-const skipText = computed(() => `跳过 ${props.skipped || 0} 只`)
+const progressText = computed(() => {
+  const total = props.total || 0
+  const scanned = props.scanned || 0
+  return `已处理 ${scanned} / ${total || '--'} · 剩余 ${Math.max(0, total - scanned)}只`
+})
+const statusText = computed(() => props.running ? '扫描任务进行中' : '')
+const skipText = computed(() => `跳过 ${props.skipped || 0} · 失败 ${props.failed || 0} · 候选 ${props.candidates || 0}`)
+const sourceText = computed(() => props.stockPoolSource ? `股票池 ${props.stockPoolSource}` : '股票池 --')
 </script>
 
 <style scoped>
@@ -94,6 +105,7 @@ const skipText = computed(() => `跳过 ${props.skipped || 0} 只`)
 .progress-bar { height: 4px; background: var(--border); border-radius: 2px; margin: 12px 0; overflow: hidden; }
 .progress-fill { height: 100%; background: linear-gradient(90deg, var(--accent), #79A0FF); border-radius: 2px; transition: width 0.3s; }
 .current-stock { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+.scan-meta { display: flex; justify-content: space-between; margin-top: 8px; font-size: 11px; color: var(--text-muted); }
 .label { color: var(--text-muted); }
 .code { color: var(--accent); font-family: var(--font-mono); }
 .name { color: var(--text-primary); }

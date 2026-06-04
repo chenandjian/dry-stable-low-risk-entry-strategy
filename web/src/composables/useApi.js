@@ -3,7 +3,8 @@ const API_BASE = '/api'
 export function useApi() {
   async function startScan() {
     const res = await fetch(`${API_BASE}/scan/start`)
-    return res.json()
+    const body = await res.json()
+    return { ...body, ok: res.ok, statusCode: res.status }
   }
 
   async function getScanStatus() {
@@ -28,6 +29,18 @@ export function useApi() {
     return res.json()
   }
 
+  async function getTaskStocks(taskId, params = {}) {
+    const qs = new URLSearchParams(params).toString()
+    const res = await fetch(`${API_BASE}/scan/tasks/${taskId}/stocks?${qs}`)
+    return res.json()
+  }
+
+  async function retryFailedStocks(taskId) {
+    const res = await fetch(`${API_BASE}/scan/tasks/${taskId}/retry-failed`, { method: 'POST' })
+    const body = await res.json()
+    return { ...body, ok: res.ok, statusCode: res.status }
+  }
+
   async function getConfig() {
     try {
       const res = await fetch(`${API_BASE}/config`)
@@ -46,5 +59,8 @@ export function useApi() {
     } catch { return { status: 'error', message: '保存失败' } }
   }
 
-  return { startScan, getScanStatus, getCandidates, getCandidate, getScanTasks, getConfig, updateConfig }
+  return {
+    startScan, getScanStatus, getCandidates, getCandidate, getScanTasks,
+    getTaskStocks, retryFailedStocks, getConfig, updateConfig,
+  }
 }
