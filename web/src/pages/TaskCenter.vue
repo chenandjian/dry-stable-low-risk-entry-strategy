@@ -30,7 +30,7 @@
         <span class="muted">{{ t.stock_pool_source || '--' }}</span>
         <span class="muted">{{ t.latest_trade_date || '--' }}</span>
         <span class="actions">
-          <button class="action-btn primary" @click="handleResume(t.id)" v-if="t.status === 'cancelled'">继续</button>
+          <button class="action-btn primary" @click="handleResume(t.id)" v-if="t.status === 'cancelled' || t.status === 'failed'">继续</button>
           <button class="action-btn" @click="viewResults(t.id)" v-if="!t.running && t.status !== 'cancelled'">查看结果</button>
           <button class="action-btn" @click="viewFailures(t.id)" v-if="!t.running && t.failed">失败列表</button>
           <button class="action-btn" @click="exportResults(t.id)" v-if="!t.running">导出</button>
