@@ -52,6 +52,26 @@
         <div class="kv"><span class="k">盈亏比</span><span class="v blue">{{ rr1?.toFixed(1) }} : 1</span></div>
       </div>
 
+      <div class="section-label" v-if="tradePlan">交易计划</div>
+      <div class="plan-list" v-if="tradePlan">
+        <div class="plan-row">
+          <span class="plan-k">买入依据</span>
+          <span class="plan-v">{{ listText(tradePlan.buy_reasons) }}</span>
+        </div>
+        <div class="plan-row">
+          <span class="plan-k">止损逻辑</span>
+          <span class="plan-v">{{ listText(tradePlan.stop_reasons) }}</span>
+        </div>
+        <div class="plan-row">
+          <span class="plan-k">目标逻辑</span>
+          <span class="plan-v">{{ listText(tradePlan.target_reasons) }}</span>
+        </div>
+        <div class="plan-row" v-if="tradePlan.invalid_conditions?.length">
+          <span class="plan-k">失效条件</span>
+          <span class="plan-v orange">{{ listText(tradePlan.invalid_conditions) }}</span>
+        </div>
+      </div>
+
       <div class="section-label">关键日期</div>
       <div class="kv-list">
         <div class="kv"><span class="k">左杯口</span><span class="v">{{ stock.left_high_date || '--' }}</span></div>
@@ -182,6 +202,7 @@ const marketClass = computed(() => {
   if (stock.value.market_status === '较差') return 'green'
   return 'orange'
 })
+const tradePlan = computed(() => stock.value.trade_plan || null)
 const isVcp = computed(() => stock.value.key_pattern_type === 'vcp')
 const structureSummary = computed(() => {
   if (isVcp.value) return `VCP · ${stock.value.pattern_type || '收缩结构'}`
@@ -192,6 +213,9 @@ const structureSummary = computed(() => {
 
 function price(v) {
   return v ? Number(v).toFixed(2) : '--'
+}
+function listText(list) {
+  return list?.length ? list.join('；') : '--'
 }
 
 // Dynamic sub-scores based on cup/handle data
@@ -388,6 +412,12 @@ onUnmounted(() => {
 .v.red { color: var(--up-red); }
 .v.orange { color: var(--warn-orange); }
 .v.blue { color: var(--accent); }
+.plan-list { padding: 0 16px 8px; }
+.plan-row { padding: 6px 0; border-bottom: 1px solid rgba(31,42,58,0.45); }
+.plan-row:last-child { border-bottom: none; }
+.plan-k { display: block; color: var(--text-muted); font-size: 11px; margin-bottom: 3px; }
+.plan-v { display: block; color: var(--text-secondary); font-size: 12px; line-height: 1.45; }
+.plan-v.orange { color: var(--warn-orange); }
 
 .center-panel { display: flex; flex-direction: column; overflow: hidden; }
 .chart-toolbar {

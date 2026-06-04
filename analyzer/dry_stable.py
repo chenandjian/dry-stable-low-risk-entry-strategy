@@ -90,4 +90,17 @@ def analyze_dry_stable(result, data: list[dict], market_data: list[dict] | None 
             "score": market_env.score,
             "reasons": market_env.reasons,
         },
+        "trade_plan": {
+            "can_act": decision.verdict in ("可低吸", "突破确认"),
+            "buy_reasons": decision.reasons,
+            "stop_reasons": [
+                "止损价低于关键支撑或最后收缩低点",
+                "跌破止损说明低风险结构失效",
+            ],
+            "target_reasons": [
+                "第一目标按2R计算",
+                "第二目标按3R或形态量度目标约束",
+            ],
+            "invalid_conditions": decision.invalid_conditions,
+        },
     }

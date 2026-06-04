@@ -9,6 +9,9 @@ import yaml
 
 import scanner.db as db
 from scanner.engine import scan_all
+from analyzer.dry_stable import analyze_dry_stable
+from scanner.index_source import fetch_market_index_daily
+from scanner.pattern_detector import CupHandleResult
 
 logger = logging.getLogger(__name__)
 
@@ -326,6 +329,12 @@ async def get_candidate(code: str):
     c = db.get_candidate(code)
     if not c:
         return JSONResponse({"error": "Not found"}, status_code=404)
+    trade_plan = {}
+    ohlc = db.get_ohlc(code)
+    if ohlc:
+        pattern_result = _candidate_to_pattern_result(c)
+        dry = analyze_dry_stable(pattern_result, ohlc, market_data=fetch_market_index_daily())
+        trade_plan = dry.get("trade_plan", {})
 
     return {
         "code": c.get("code", ""),
@@ -367,7 +376,35 @@ async def get_candidate(code: str):
         "latest_close": c.get("latest_close", 0),
         "latest_turnover": c.get("latest_turnover", 0),
         "lip_deviation_pct": c.get("lip_deviation_pct", 0),
+        "trade_plan": trade_plan,
     }
+
+
+def _candidate_to_pattern_result(c: dict) -> CupHandleResult:
+    """Rebuild a pattern result from persisted candidate fields for detail analysis."""
+    return CupHandleResult(
+        found=c.get("key_pattern_type") != "vcp",
+        code=c.get("code", ""),
+        name=c.get("name", ""),
+        score=c.get("score", 0),
+        cup_depth_pct=c.get("cup_depth_pct", 0) or 0,
+        cup_duration=c.get("cup_duration", 0) or 0,
+        handle_depth_pct=c.get("handle_depth_pct", 0) or 0,
+        handle_duration=c.get("handle_duration", 0) or 0,
+        lip_deviation_pct=c.get("lip_deviation_pct", 0) or 0,
+        left_high_price=c.get("left_high_price", 0) or 0,
+        cup_low_price=c.get("cup_low_price", 0) or 0,
+        right_high_price=c.get("right_high_price", 0) or 0,
+        handle_low_price=c.get("handle_low_price", 0) or 0,
+        left_high_date=c.get("left_high_date", "") or "",
+        cup_low_date=c.get("cup_low_date", "") or "",
+        right_high_date=c.get("right_high_date", "") or "",
+        handle_low_date=c.get("handle_low_date", "") or "",
+        is_breakout=bool(c.get("is_breakout", 0)),
+        is_volume_breakout=bool(c.get("is_volume_breakout", 0)),
+        breakout_price=c.get("breakout_price", 0) or 0,
+        vol_multiplier=c.get("vol_multiplier", 0) or 0,
+    )
 
 
 @app.get("/api/config")

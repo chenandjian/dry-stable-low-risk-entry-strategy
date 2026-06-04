@@ -337,7 +337,7 @@ git commit -m "Backtest dry-stable strategy verdicts"
 - Modify: `web/src/pages/StockDetail.vue`
 - Test: `tests/test_dry_stable.py`
 
-- [ ] **Step 1: Add explanation test**
+- [x] **Step 1: Add explanation test**
 
 Update `tests/test_dry_stable.py`:
 
@@ -352,7 +352,7 @@ def test_dry_stable_outputs_trade_plan_sections():
     assert "invalid_conditions" in analysis["trade_plan"]
 ```
 
-- [ ] **Step 2: Implement trade plan payload**
+- [x] **Step 2: Implement trade plan payload**
 
 In `analyzer/dry_stable.py`, add:
 
@@ -372,15 +372,15 @@ In `analyzer/dry_stable.py`, add:
 }
 ```
 
-- [ ] **Step 3: Expose trade plan in API detail**
+- [x] **Step 3: Expose trade plan in API detail**
 
 Persist summary fields only in DB; for full detail, compute on demand in `/api/candidate/{code}` by loading OHLC and calling `analyze_dry_stable()` again.
 
-- [ ] **Step 4: Display trade plan**
+- [x] **Step 4: Display trade plan**
 
 In `web/src/pages/StockDetail.vue`, add a compact “交易计划” section with buy, stop, target, invalid condition rows.
 
-- [ ] **Step 5: Verify**
+- [x] **Step 5: Verify**
 
 Run:
 
@@ -391,7 +391,7 @@ npm.cmd run build
 
 Expected: tests pass; build succeeds.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add analyzer/dry_stable.py analyzer/decision.py server.py web/src/pages/StockDetail.vue tests/test_dry_stable.py
