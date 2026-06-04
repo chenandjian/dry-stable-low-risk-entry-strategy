@@ -236,8 +236,16 @@ def _fetch_with_retry(
     fallback_ds = "tencent" if primary_ds == "sina" else "sina"
     cached = db.get_ohlc(code)
     result = FetchResult(data=None, primary_source=primary_ds, fallback_source=fallback_ds)
+    held_sources = {primary_ds} if mgr is not None else None
 
-    data, attempts, error = _try_fetch_source(code, primary_ds, retry_attempts, sleep_fn)
+    data, attempts, error = _try_fetch_source(
+        code,
+        primary_ds,
+        retry_attempts,
+        sleep_fn,
+        mgr=mgr,
+        held_sources=held_sources,
+    )
     result.primary_attempts = attempts
     result.primary_error = error
     if data:
@@ -252,7 +260,14 @@ def _fetch_with_retry(
             result.fallback_error = "data source busy"
             return result
         try:
-            data, attempts, error = _try_fetch_source(code, fallback_ds, fallback_attempts, sleep_fn)
+            data, attempts, error = _try_fetch_source(
+                code,
+                fallback_ds,
+                fallback_attempts,
+                sleep_fn,
+                mgr=mgr,
+                held_sources={primary_ds, fallback_ds},
+            )
         finally:
             mgr.release(fallback_ds)
     else:
@@ -273,20 +288,34 @@ def _try_fetch_source(
     ds_name: str,
     attempts: int,
     sleep_fn: Callable[[float], None],
+    mgr: DataSourceManager | None = None,
+    held_sources: set[str] | None = None,
 ) -> tuple[list[dict] | None, int, str | None]:
     fetch_fn = fetch_sina_daily if ds_name == "sina" else fetch_tencent_daily
+    extra_sina_lock = False
+    held_sources = held_sources or set()
+
+    if mgr is not None and ds_name == "tencent" and "sina" not in held_sources:
+        if not mgr.acquire("sina"):
+            return None, 0, "data source busy"
+        extra_sina_lock = True
+
     last_error = None
-    for attempt in range(1, attempts + 1):
-        try:
-            data = fetch_fn(code)
-            if data:
-                return data, attempt, None
-            last_error = "empty response"
-        except Exception as exc:
-            last_error = str(exc)
-        if attempt < attempts:
-            sleep_fn(min(0.5 * attempt, 2.0))
-    return None, attempts, last_error
+    try:
+        for attempt in range(1, attempts + 1):
+            try:
+                data = fetch_fn(code)
+                if data:
+                    return data, attempt, None
+                last_error = "empty response"
+            except Exception as exc:
+                last_error = str(exc)
+            if attempt < attempts:
+                sleep_fn(min(0.5 * attempt, 2.0))
+        return None, attempts, last_error
+    finally:
+        if extra_sina_lock:
+            mgr.release("sina")
 
 
 def _merge_data(cached: list[dict], fresh: list[dict]) -> list[dict]:

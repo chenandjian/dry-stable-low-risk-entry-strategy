@@ -65,6 +65,63 @@ def test_fetch_with_retry_uses_fallback_after_primary_failures(monkeypatch, tmp_
     assert result.fallback_error is None
 
 
+def test_fetch_with_retry_skips_primary_tencent_when_sina_lock_is_busy(monkeypatch, tmp_path):
+    db.init_db(str(tmp_path / "cuphandle.db"))
+    tencent_calls = []
+    mgr = FakeManager({"sina": False})
+
+    monkeypatch.setattr(engine, "fetch_tencent_daily", lambda code: tencent_calls.append(code) or [_row("2026-06-04", close=10.0)])
+    monkeypatch.setattr(engine, "fetch_sina_daily", lambda code: [_row("2026-06-04", close=10.0)])
+
+    result = engine._fetch_with_retry(
+        "600000",
+        "tencent",
+        retry_attempts=2,
+        fallback_attempts=2,
+        sleep_fn=lambda _: None,
+        mgr=mgr,
+    )
+
+    assert result.data is None
+    assert result.primary_attempts == 0
+    assert result.primary_error == "data source busy"
+    assert tencent_calls == []
+    assert mgr.acquire_calls[0] == "sina"
+    assert mgr.release_calls == []
+
+
+def test_fetch_with_retry_passes_held_sources_to_fallback_tencent(monkeypatch, tmp_path):
+    db.init_db(str(tmp_path / "cuphandle.db"))
+    calls = []
+    mgr = FakeManager({"tencent": True})
+
+    def fake_try_fetch_source(code, ds_name, attempts, sleep_fn, mgr=None, held_sources=None):
+        calls.append((ds_name, held_sources.copy() if held_sources else held_sources))
+        if ds_name == "sina":
+            assert held_sources == {"sina"}
+            return None, 2, "empty response"
+        assert held_sources == {"sina", "tencent"}
+        return [_row("2026-06-04", close=10.0)], 1, None
+
+    monkeypatch.setattr(engine, "_try_fetch_source", fake_try_fetch_source)
+
+    result = engine._fetch_with_retry(
+        "600000",
+        "sina",
+        retry_attempts=2,
+        fallback_attempts=2,
+        sleep_fn=lambda _: None,
+        mgr=mgr,
+    )
+
+    assert result.data[-1]["date"] == "2026-06-04"
+    assert result.primary_attempts == 2
+    assert result.fallback_attempts == 1
+    assert calls == [("sina", {"sina"}), ("tencent", {"sina", "tencent"})]
+    assert mgr.acquire_calls == ["tencent"]
+    assert mgr.release_calls == ["tencent"]
+
+
 def test_fetch_with_retry_skips_fallback_when_manager_reports_source_busy(monkeypatch, tmp_path):
     db.init_db(str(tmp_path / "cuphandle.db"))
     fallback_calls = []
