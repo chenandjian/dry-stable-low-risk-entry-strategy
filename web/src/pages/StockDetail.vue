@@ -371,6 +371,13 @@ async function initChart() {
   } catch (e) { console.error('[StockDetail] OHLC fetch error:', e); return }
   if (!ohlcRaw.length) { console.warn('[StockDetail] OHLC data empty'); return }
 
+  // Ensure container has dimensions after clear
+  await new Promise(r => requestAnimationFrame(r))
+
+  const w = chartRef.value.clientWidth || 800
+  const h = chartRef.value.clientHeight || 500
+  console.log('[StockDetail] creating chart', { w, h, dataPoints: ohlcRaw.length })
+
   const chart = createChart(chartRef.value, {
     layout: {
       background: { color: '#070B14' },
@@ -388,9 +395,11 @@ async function initChart() {
     rightPriceScale: {
       borderColor: '#1F2A3A',
     },
-    width: chartRef.value.clientWidth,
-    height: chartRef.value.clientHeight || 500,
+    width: w,
+    height: h,
   })
+
+  console.log('[StockDetail] candleData sample:', JSON.stringify(candleData.slice(0, 2)))
 
   // Candlestick series
   const candleSeries = chart.addCandlestickSeries({
