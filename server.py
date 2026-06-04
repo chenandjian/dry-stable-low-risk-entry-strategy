@@ -28,10 +28,26 @@ async def lifespan(app: FastAPI):
     if interrupted:
         logger.info(f"Resuming interrupted scan: {interrupted['id']} at {interrupted['scanned']}/{interrupted['total_stocks']}")
         import threading
+        _running["running"] = True
+        _running["task_id"] = interrupted["id"]
+        _running["mode"] = "resume"
+        _running["stats"] = {
+            "total_stocks": interrupted["total_stocks"],
+            "current_code": "--",
+            "current_name": "恢复扫描中",
+        }
         def resume_scan():
-            _running["running"] = True
-            _running["task_id"] = interrupted["id"]
-            result = scan_all(config, resume_task_id=interrupted["id"])
+            def on_progress(stage, current, total, detail, discovery=None):
+                stats = _running.get("stats", {})
+                if stage == "discovery" and discovery:
+                    found = stats.get("candidates_found", 0) + 1
+                    discoveries = list(stats.get("discoveries") or [])
+                    discoveries.insert(0, {"code": discovery["code"], "name": discovery["name"], "score": discovery["score"]})
+                    _running["stats"] = {**stats, "discoveries": discoveries[:20], "candidates_found": found}
+                else:
+                    code = detail.split()[0] if detail else ""
+                    _running["stats"] = {**stats, "scanned": current, "processed": current, "total_stocks": total, "current_code": code, "current_name": detail[len(code):].strip() if len(detail) > len(code) else detail}
+            result = scan_all(config, progress_callback=on_progress, resume_task_id=interrupted["id"])
             _running["running"] = False
             _running["stats"] = result["stats"]
             _running["candidates"] = result["candidates"]
