@@ -445,7 +445,7 @@ git commit -m "Lazy load chart dependency"
 - Modify: `README.md`
 - Modify: `operations-log.md`
 
-- [ ] **Step 1: Update README strategy section**
+- [x] **Step 1: Update README strategy section**
 
 Document:
 
@@ -459,7 +459,7 @@ The scanner now filters candidates through dry-stable low-risk rules:
 - Final verdict: 可低吸 / 突破确认 / 观察 / 不建议买入
 ```
 
-- [ ] **Step 2: Final full verification**
+- [x] **Step 2: Final full verification**
 
 Run:
 
@@ -474,7 +474,7 @@ Expected:
 - compileall passes
 - Vite build succeeds
 
-- [ ] **Step 3: Record verification**
+- [x] **Step 3: Record verification**
 
 Append to `operations-log.md`:
 
@@ -482,7 +482,7 @@ Append to `operations-log.md`:
 - Final verification passed after strategy completion: pytest, compileall, and web build.
 ```
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add README.md operations-log.md

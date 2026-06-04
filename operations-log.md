@@ -6,3 +6,4 @@
 - Verification issue found: `tests/test_db_strategy_fields.py` exposed a `save_candidates()` SQL placeholder mismatch after adding market environment columns.
 - Fix applied: corrected `scanner/db.py` candidate insert placeholders to match the 40 persisted columns.
 - Final verification: `python -m pytest tests/ -q` passed with 62 tests; `python -m compileall analyzer scanner main.py server.py output tests` passed; `npm.cmd run build` passed with existing Vite chunk-size warnings.
+- Strategy completion verification: `python -m pytest tests/ -q` passed with 66 tests; `python -m compileall analyzer scanner main.py server.py output tests` passed; `npm.cmd run build` passed. Remaining build notices are the Vite CJS Node API deprecation and the intentionally lazy-loaded `echarts` chunk exceeding 500 kB.
