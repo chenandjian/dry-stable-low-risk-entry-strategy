@@ -463,16 +463,20 @@ async def resume_task(task_id: str):
 
     total = db.summarize_task_stocks(task_id)["total_stocks"]
     scanned = total - len(stocks)
-    _set_running(task_id, "resume")
-    _running["started_at"] = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    _running["stats"] = {
-        "total_stocks": total,
-        "processed": scanned,
-        "scanned": scanned,
-        "stock_pool_source": "",
-        "current_code": "--",
-        "current_name": "恢复扫描中",
-    }
+    try:
+        _set_running(task_id, "resume")
+        _running["started_at"] = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        _running["stats"] = {
+            "total_stocks": total,
+            "processed": scanned,
+            "scanned": scanned,
+            "stock_pool_source": "",
+            "current_code": "--",
+            "current_name": "恢复扫描中",
+        }
+    except Exception:
+        _clear_running()
+        raise
 
     def run():
         try:
