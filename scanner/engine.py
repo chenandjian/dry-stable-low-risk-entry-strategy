@@ -257,8 +257,8 @@ def scan_all(
                         if progress_callback:
                             progress_callback(
                                 "discovery",
-                                unique_candidates,
-                                len(stocks),
+                                start_offset + unique_candidates,
+                                start_offset + len(stocks),
                                 f"{code} {stock.get('name', '')}",
                                 {
                                     "code": code,
@@ -310,7 +310,7 @@ def scan_all(
                     busy_retries_by_code.pop(code, None)
 
                 if progress_callback:
-                    progress_callback("scanning", scanned_count[0], len(stocks), f"{code} {stock.get('name', '')}")
+                    progress_callback("scanning", start_offset + scanned_count[0], start_offset + len(stocks), f"{code} {stock.get('name', '')}")
 
             except Exception as e:
                 logger.error(f"Error scanning {code}: {e}")
