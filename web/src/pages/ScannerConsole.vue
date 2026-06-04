@@ -69,7 +69,6 @@
         :stockPoolSource="scanProgress.stockPoolSource"
         :logLines="logLines"
         @start="handleStartScan"
-        @stop="handleStopScan"
       />
     </div>
 
@@ -97,7 +96,7 @@ import DiscoveryItem from '../components/DiscoveryItem.vue'
 import ScanEngine from '../components/ScanEngine.vue'
 
 const router = useRouter()
-const { startScan, stopScan, getScanStatus, getCandidates, getTaskStocks, retryFailedStocks } = useApi()
+const { startScan, getScanStatus, getCandidates, getTaskStocks, retryFailedStocks } = useApi()
 
 // Market status & clock
 const currentTime = ref('')
@@ -202,13 +201,6 @@ async function handleStartScan() {
     scanError.value = '无法连接到后端服务，请确认 python main.py serve 已启动'
     console.error('Start scan failed:', e)
   }
-}
-
-async function handleStopScan() {
-  await stopScan()
-  scanning.value = false
-  if (pollTimer) clearInterval(pollTimer)
-  addLog('info', '扫描已停止')
 }
 
 function applyStats(status) {

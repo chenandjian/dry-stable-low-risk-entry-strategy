@@ -7,11 +7,6 @@ export function useApi() {
     return { ...body, ok: res.ok, statusCode: res.status }
   }
 
-  async function stopScan() {
-    const res = await fetch(`${API_BASE}/scan/stop`, { method: 'POST' })
-    return res.json()
-  }
-
   async function getScanStatus() {
     const res = await fetch(`${API_BASE}/scan/status`)
     return res.json()
@@ -42,12 +37,6 @@ export function useApi() {
     return res.json()
   }
 
-  async function resumeTask(taskId) {
-    const res = await fetch(`${API_BASE}/scan/tasks/${taskId}/resume`, { method: 'POST' })
-    const body = await res.json()
-    return { ...body, ok: res.ok, statusCode: res.status }
-  }
-
   async function retryFailedStocks(taskId) {
     const res = await fetch(`${API_BASE}/scan/tasks/${taskId}/retry-failed`, { method: 'POST' })
     const body = await res.json()
@@ -73,7 +62,7 @@ export function useApi() {
   }
 
   return {
-    startScan, stopScan, getScanStatus, getCandidates, getCandidate, getScanTasks,
-    getTaskStocks, retryFailedStocks, resumeTask, getConfig, updateConfig,
+    startScan, getScanStatus, getCandidates, getCandidate, getScanTasks,
+    getTaskStocks, retryFailedStocks, getConfig, updateConfig,
   }
 }

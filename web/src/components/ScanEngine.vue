@@ -46,9 +46,6 @@
     <div v-if="!running" class="scan-controls">
       <button class="btn-primary" @click="$emit('start')">开始扫描</button>
     </div>
-    <div v-if="running" class="scan-controls">
-      <button class="btn-secondary" @click="$emit('stop')">停止</button>
-    </div>
   </div>
 </template>
 
@@ -67,7 +64,7 @@ const props = defineProps({
   stockPoolSource: String,
   logLines: { type: Array, default: () => [] },
 })
-defineEmits(['start', 'stop'])
+defineEmits(['start'])
 
 const logExpanded = ref(true)
 const progressPct = computed(() => props.total > 0 ? Math.round(props.scanned / props.total * 100) : 0)
