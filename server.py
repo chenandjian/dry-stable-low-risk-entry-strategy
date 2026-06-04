@@ -383,12 +383,15 @@ async def retry_failed_stocks(task_id: str):
 
 @app.get("/api/candidates")
 async def get_candidates(task_id: str = None):
-    # During scan, return real-time discoveries
-    if _running["running"]:
+    # If a specific task is requested, always query DB
+    if task_id:
+        cands = db.get_candidates(task_id=task_id)
+    elif _running["running"]:
+        # Return real-time discoveries during active scan
         ds = _running.get("stats", {}).get("discoveries") or []
         return {"candidates": ds, "total": len(ds)}
-
-    cands = db.get_candidates(task_id=task_id)
+    else:
+        cands = db.get_candidates()
     result = []
     for c in cands:
         result.append({
