@@ -2,13 +2,12 @@
 import requests
 import json
 import logging
-import time
 
 logger = logging.getLogger(__name__)
 
 
 def fetch_tencent_daily(code: str, days: int = 250) -> list[dict] | None:
-    """从腾讯财经获取单只股票的日线数据（内部回退到新浪API）。
+    """从腾讯财经获取单只股票的日线数据。
 
     Args:
         code: 股票代码，如 '600036' 或 '000001'
@@ -23,18 +22,7 @@ def fetch_tencent_daily(code: str, days: int = 250) -> list[dict] | None:
     else:
         symbol = f"sz{code}"
 
-    # Try Tencent K-line API (may be unavailable)
-    data = _try_tencent_kline(symbol, days)
-    if data:
-        return data
-
-    # Fallback: use Sina API (same as sina_source but accessed here)
-    logger.debug(f"Tencent API unavailable for {code}, falling back to Sina")
-    data = _try_sina_kline(symbol, days)
-    if data:
-        return data
-
-    return None
+    return _try_tencent_kline(symbol, days)
 
 
 def _try_tencent_kline(symbol: str, days: int) -> list[dict] | None:
@@ -72,54 +60,6 @@ def _try_tencent_kline(symbol: str, days: int) -> list[dict] | None:
                 "low": float(item[4]),
                 "volume": float(item[5]),
                 "turnover": float(item[2]) * float(item[5]),
-            })
-        return result
-
-    except Exception:
-        return None
-
-
-def _try_sina_kline(symbol: str, days: int) -> list[dict] | None:
-    """Use Sina API as fallback."""
-    url = "https://quotes.sina.cn/cn/api/jsonp_v2.php/data/CN_MarketDataService.getKLineData"
-    params = {
-        "symbol": symbol,
-        "scale": "240",
-        "datalen": str(days),
-    }
-
-    try:
-        resp = requests.get(url, params=params, timeout=5, headers={
-            "Referer": "https://finance.sina.com.cn",
-        })
-        resp.raise_for_status()
-        text = resp.text
-
-        # Parse JSONP: data([...]);
-        if text.startswith("data(") and text.endswith(");"):
-            text = text[5:-2]
-        elif "(" in text:
-            start = text.index("(") + 1
-            end = text.rindex(")")
-            text = text[start:end]
-
-        raw_data = json.loads(text)
-
-        if not raw_data or not isinstance(raw_data, list):
-            return None
-
-        result = []
-        for item in raw_data:
-            close_price = float(item["close"])
-            volume = float(item["volume"])
-            result.append({
-                "date": item["day"],
-                "open": float(item["open"]),
-                "high": float(item["high"]),
-                "low": float(item["low"]),
-                "close": close_price,
-                "volume": volume,
-                "turnover": volume * close_price,
             })
         return result
 
