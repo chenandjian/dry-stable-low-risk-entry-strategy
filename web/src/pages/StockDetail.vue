@@ -15,7 +15,16 @@
           </SignalBadge>
           <SignalBadge type="breakout" v-if="stock.is_breakout">◉ 已突破</SignalBadge>
           <SignalBadge type="volume" v-if="stock.is_volume_breakout">放量确认</SignalBadge>
+          <SignalBadge :type="dryVerdictType" v-if="stock.dry_stable_verdict">{{ stock.dry_stable_verdict }}</SignalBadge>
         </div>
+      </div>
+
+      <div class="section-label">干稳低吸</div>
+      <div class="kv-list">
+        <div class="kv"><span class="k">量干 / 价稳</span><span class="v blue">{{ stock.volume_dry_score ?? '--' }} / {{ stock.price_stable_score ?? '--' }}</span></div>
+        <div class="kv"><span class="k">形态分</span><span class="v">{{ stock.pattern_score_20 ?? '--' }} / 20</span></div>
+        <div class="kv"><span class="k">大盘环境</span><span class="v" :class="marketClass">{{ stock.market_status || '一般' }}</span></div>
+        <div class="kv"><span class="k">建议仓位</span><span class="v">{{ stock.position_advice || '--' }}</span></div>
       </div>
 
       <div class="section-label">形态评分</div>
@@ -33,9 +42,10 @@
 
       <div class="section-label">关键价格</div>
       <div class="kv-list">
-        <div class="kv"><span class="k">突破位</span><span class="v red">{{ stock.breakout_price?.toFixed(2) || '--' }}</span></div>
-        <div class="kv"><span class="k">止损位</span><span class="v orange">{{ stopLoss?.toFixed(2) || '--' }}</span></div>
-        <div class="kv"><span class="k">第一止盈</span><span class="v blue">{{ target1?.toFixed(2) || '--' }}</span></div>
+        <div class="kv"><span class="k">低吸区间</span><span class="v blue">{{ entryZone }}</span></div>
+        <div class="kv"><span class="k">Pivot</span><span class="v red">{{ price(stock.pivot || stock.breakout_price) }}</span></div>
+        <div class="kv"><span class="k">止损位</span><span class="v orange">{{ price(stopLoss) }}</span></div>
+        <div class="kv"><span class="k">第一止盈</span><span class="v blue">{{ price(target1) }}</span></div>
         <div class="kv"><span class="k">止损距离</span><span class="v red">{{ riskPct?.toFixed(1) }}%</span></div>
         <div class="kv"><span class="k">盈亏比</span><span class="v blue">{{ rr1?.toFixed(1) }} : 1</span></div>
       </div>
@@ -125,20 +135,23 @@ const wlFilter = ref('all')
 const chartRef = ref(null)
 let chart = null
 
-const stopLoss = computed(() => stock.value.handle_low_price ? (stock.value.handle_low_price * 0.98) : null)
+const stopLoss = computed(() => stock.value.stop_loss || (stock.value.handle_low_price ? (stock.value.handle_low_price * 0.98) : null))
 const target1 = computed(() => {
+  if (stock.value.target_1) return stock.value.target_1
   const cp = stock.value.latest_close
   const sl = parseFloat(stopLoss.value)
   if (!cp || !sl) return null
   return cp + 2 * (cp - sl)
 })
 const riskPct = computed(() => {
+  if (stock.value.risk_percent != null) return Number(stock.value.risk_percent)
   const cp = stock.value.latest_close
   const sl = parseFloat(stopLoss.value)
   if (!cp || !sl) return 0
   return ((cp - sl) / cp * 100)
 })
 const rr1 = computed(() => {
+  if (stock.value.rr1 != null) return Number(stock.value.rr1)
   const cp = stock.value.latest_close
   const sl = parseFloat(stopLoss.value)
   const t1 = parseFloat(target1.value)
@@ -146,6 +159,24 @@ const rr1 = computed(() => {
   return ((t1 - cp) / (cp - sl))
 })
 const priceColor = computed(() => stock.value.change?.startsWith('+') ? 'red' : 'green')
+const entryZone = computed(() => {
+  if (!stock.value.entry_zone_low || !stock.value.entry_zone_high) return '--'
+  return `${price(stock.value.entry_zone_low)} - ${price(stock.value.entry_zone_high)}`
+})
+const dryVerdictType = computed(() => {
+  if (stock.value.dry_stable_verdict === '可低吸') return 'strong'
+  if (stock.value.dry_stable_verdict === '突破确认') return 'breakout'
+  return 'medium'
+})
+const marketClass = computed(() => {
+  if (stock.value.market_status === '良好') return 'red'
+  if (stock.value.market_status === '较差') return 'green'
+  return 'orange'
+})
+
+function price(v) {
+  return v ? Number(v).toFixed(2) : '--'
+}
 
 // Dynamic sub-scores based on cup/handle data
 const cupScore = computed(() => {
@@ -286,6 +317,7 @@ onMounted(async () => {
       is_breakout: c.is_breakout, is_volume_breakout: c.is_volume_breakout,
       breakout_price: c.breakout_price, latest_close: c.latest_close,
       vol_multiplier: c.vol_multiplier,
+      dry_stable_verdict: c.dry_stable_verdict,
     }))
     await nextTick()
     initChart()

@@ -67,7 +67,7 @@ def calculate_risk_reward(key_prices, volume_dry_score: int = 0, price_stable_sc
         r.can_buy = True
     elif volume_dry_score >= 6 and price_stable_score >= 6 and pattern_score >= 13:
         r.risk_level = "中"
-        r.can_buy = True
+        r.can_buy = False
     else:
         r.risk_level = "高"
         r.can_buy = False

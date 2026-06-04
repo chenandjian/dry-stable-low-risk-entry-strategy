@@ -81,12 +81,55 @@ def init_db(path: str = "data/cuphandle.db"):
                 handle_low_date     TEXT,
                 latest_close        REAL,
                 latest_turnover     REAL,
+                dry_stable_verdict  TEXT,
+                dry_stable_summary  TEXT,
+                volume_dry_score    INTEGER,
+                price_stable_score  INTEGER,
+                pattern_score_20    INTEGER,
+                risk_percent        REAL,
+                rr1                 REAL,
+                position_advice     TEXT,
+                entry_zone_low      REAL,
+                entry_zone_high     REAL,
+                pivot               REAL,
+                stop_loss           REAL,
+                target_1            REAL,
+                target_2            REAL,
+                market_status       TEXT,
+                market_position_advice TEXT,
                 FOREIGN KEY (task_id) REFERENCES scan_tasks(id)
             );
             CREATE INDEX IF NOT EXISTS idx_candidates_task ON candidates(task_id);
             CREATE INDEX IF NOT EXISTS idx_candidates_score ON candidates(score DESC);
         ''')
+        _ensure_candidate_columns(conn)
         conn.commit()
+
+
+def _ensure_candidate_columns(conn: sqlite3.Connection):
+    """Add strategy columns for databases created by older versions."""
+    existing = {d[1] for d in conn.execute("PRAGMA table_info(candidates)").fetchall()}
+    columns = {
+        "dry_stable_verdict": "TEXT",
+        "dry_stable_summary": "TEXT",
+        "volume_dry_score": "INTEGER",
+        "price_stable_score": "INTEGER",
+        "pattern_score_20": "INTEGER",
+        "risk_percent": "REAL",
+        "rr1": "REAL",
+        "position_advice": "TEXT",
+        "entry_zone_low": "REAL",
+        "entry_zone_high": "REAL",
+        "pivot": "REAL",
+        "stop_loss": "REAL",
+        "target_1": "REAL",
+        "target_2": "REAL",
+        "market_status": "TEXT",
+        "market_position_advice": "TEXT",
+    }
+    for name, typ in columns.items():
+        if name not in existing:
+            conn.execute(f"ALTER TABLE candidates ADD COLUMN {name} {typ}")
 
 
 def get_conn() -> sqlite3.Connection:
@@ -283,8 +326,14 @@ def upsert_candidate(task_id: str, d: dict):
             lip_deviation_pct,
             left_high_price, cup_low_price, right_high_price, handle_low_price,
             left_high_date, cup_low_date, right_high_date, handle_low_date,
-            latest_close, latest_turnover
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 0, 0, 0, 0, '', '', '', '', ?, 0)
+            latest_close, latest_turnover,
+            dry_stable_verdict, dry_stable_summary,
+            volume_dry_score, price_stable_score, pattern_score_20,
+            risk_percent, rr1, position_advice,
+            entry_zone_low, entry_zone_high, pivot, stop_loss, target_1, target_2
+            , market_status, market_position_advice
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 0, 0, 0, 0, '', '', '', '', ?, 0,
+                  ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """, (
         task_id, d["code"], d["name"], d["score"], rating,
         d.get("is_breakout", 0), d.get("is_volume_breakout", 0),
@@ -292,6 +341,22 @@ def upsert_candidate(task_id: str, d: dict):
         d.get("cup_depth_pct", 0), d.get("cup_duration", 0),
         d.get("handle_depth_pct", 0),
         d.get("latest_close", 0),
+        d.get("dry_stable_verdict", ""),
+        d.get("dry_stable_summary", ""),
+        d.get("volume_dry_score", 0),
+        d.get("price_stable_score", 0),
+        d.get("pattern_score_20", 0),
+        d.get("risk_percent", 0),
+        d.get("rr1", 0),
+        d.get("position_advice", ""),
+        d.get("entry_zone_low", 0),
+        d.get("entry_zone_high", 0),
+        d.get("pivot", 0),
+        d.get("stop_loss", 0),
+        d.get("target_1", 0),
+        d.get("target_2", 0),
+        d.get("market_status", ""),
+        d.get("market_position_advice", ""),
     ))
     conn.commit()
 
@@ -309,6 +374,14 @@ def save_candidates(task_id: str, candidates: list, strong: int = 80, medium: in
     rows = []
     for stock, r in candidates:
         rating = "强候选" if r.score >= strong else "中等候选" if r.score >= medium else "弱候选"
+        dry = stock.get("dry_stable", {})
+        decision = dry.get("decision", {})
+        volume_dry = dry.get("volume_dry", {})
+        price_stable = dry.get("price_stable", {})
+        pattern = dry.get("pattern_score", {})
+        rr = dry.get("risk_reward", {})
+        key = dry.get("key_prices", {})
+        market = dry.get("market_environment", {})
         rows.append((
             task_id, r.code, r.name, r.score, rating,
             1 if r.is_breakout else 0,
@@ -323,6 +396,22 @@ def save_candidates(task_id: str, candidates: list, strong: int = 80, medium: in
             r.right_high_date, r.handle_low_date,
             stock.get("latest_close", 0),
             stock.get("latest_turnover", 0),
+            decision.get("verdict", ""),
+            decision.get("summary", ""),
+            volume_dry.get("score", 0),
+            price_stable.get("score", 0),
+            pattern.get("score", 0),
+            rr.get("risk_percent", 0),
+            rr.get("rr1", 0),
+            rr.get("position_advice", ""),
+            key.get("entry_zone_low", 0),
+            key.get("entry_zone_high", 0),
+            key.get("pivot", 0),
+            key.get("stop_loss", 0),
+            key.get("target_1", 0),
+            key.get("target_2", 0),
+            market.get("status", ""),
+            market.get("position_advice", ""),
         ))
     conn.executemany(
         """INSERT OR REPLACE INTO candidates (
@@ -332,8 +421,16 @@ def save_candidates(task_id: str, candidates: list, strong: int = 80, medium: in
             lip_deviation_pct,
             left_high_price, cup_low_price, right_high_price, handle_low_price,
             left_high_date, cup_low_date, right_high_date, handle_low_date,
-            latest_close, latest_turnover
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            latest_close, latest_turnover,
+            dry_stable_verdict, dry_stable_summary,
+            volume_dry_score, price_stable_score, pattern_score_20,
+            risk_percent, rr1, position_advice,
+            entry_zone_low, entry_zone_high, pivot, stop_loss, target_1, target_2
+            , market_status, market_position_advice
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                  ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                  ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                  ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         rows
     )
     conn.commit()

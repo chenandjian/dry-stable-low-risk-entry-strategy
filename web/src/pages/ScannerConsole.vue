@@ -133,8 +133,8 @@ async function pollStatus() {
             name: d.name,
             score: d.score,
             rating: d.score >= 80 ? 'strong' : d.score >= 70 ? 'medium' : 'weak',
-            status: d.is_breakout ? 'breakout' : d.score >= 70 ? 'near' : 'watch',
-            detail: d.detail || [d.cup_duration && `杯体${d.cup_duration}d`, d.cup_depth_pct && `回撤${d.cup_depth_pct}%`].filter(Boolean).join(' · ') || '',
+            status: statusFor(d),
+            detail: formatDetail(d),
           })
         }
       })
@@ -154,7 +154,7 @@ async function loadResults() {
       name: c.name,
       score: c.score,
       rating: c.score >= 80 ? 'strong' : c.score >= 70 ? 'medium' : 'weak',
-      status: c.is_breakout ? 'breakout' : c.score >= 70 ? 'near' : 'watch',
+      status: statusFor(c),
       detail: formatDetail(c),
     }))
     updateMetrics()
@@ -165,10 +165,22 @@ async function loadResults() {
 
 function formatDetail(c) {
   const parts = []
+  if (c.dry_stable_verdict) parts.push(c.dry_stable_verdict)
+  if (c.volume_dry_score != null) parts.push(`量干${c.volume_dry_score}/10`)
+  if (c.price_stable_score != null) parts.push(`价稳${c.price_stable_score}/10`)
+  if (c.rr1) parts.push(`RR${Number(c.rr1).toFixed(1)}`)
+  if (c.position_advice) parts.push(`仓位${c.position_advice}`)
+  if (c.market_status) parts.push(`大盘${c.market_status}`)
   if (c.cup_duration) parts.push(`杯体${c.cup_duration}d`)
   if (c.cup_depth_pct) parts.push(`回撤${c.cup_depth_pct}%`)
-  if (c.vol_multiplier) parts.push(`放量${c.vol_multiplier}×`)
+  if (c.vol_multiplier) parts.push(`放量${Number(c.vol_multiplier).toFixed(1)}×`)
   return parts.join(' · ') || '--'
+}
+
+function statusFor(c) {
+  if (c.dry_stable_verdict === '可低吸') return 'near'
+  if (c.dry_stable_verdict === '突破确认' || c.is_breakout) return 'breakout'
+  return c.score >= 70 ? 'near' : 'watch'
 }
 
 function updateMetrics() {
@@ -177,7 +189,7 @@ function updateMetrics() {
   metrics.aGrade = list.filter(d => d.score >= 80).length
   metrics.breakout = list.filter(d => d.status === 'breakout').length
   metrics.nearBreakout = list.filter(d => d.status === 'near').length
-  metrics.volumeOk = list.filter(d => d.score >= 70).length
+  metrics.volumeOk = list.filter(d => d.detail.includes('量干7') || d.detail.includes('量干8') || d.detail.includes('量干9') || d.detail.includes('量干10')).length
   metrics.topScore = list.reduce((max, d) => Math.max(max, d.score), 0)
 }
 

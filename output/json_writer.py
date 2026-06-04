@@ -30,7 +30,7 @@ def write_candidates_json(
             stock, result, analysis = item
         else:
             stock, result = item
-            analysis = {}
+            analysis = stock.get("dry_stable", {})
 
         entry = {
             "code": result.code,

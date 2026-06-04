@@ -123,9 +123,6 @@ def detect_cup_handle(data: list[dict], config: dict) -> CupHandleResult:
             cup_low = lows_px[cl_idx]
             if cl_idx <= lh_idx:
                 continue
-            cup_dur = cl_idx - lh_idx
-            if cup_dur < cup_min_dur or cup_dur > cup_max_dur:
-                continue
             depth = (left_high - cup_low) / left_high
             if depth < min_depth or depth > max_depth:
                 continue
@@ -133,11 +130,17 @@ def detect_cup_handle(data: list[dict], config: dict) -> CupHandleResult:
             for rh_idx in sw_highs:
                 if rh_idx <= cl_idx:
                     continue
+                cup_dur = rh_idx - lh_idx
+                if cup_dur < cup_min_dur or cup_dur > cup_max_dur:
+                    continue
                 right_high = closes[rh_idx]
                 lip_dev = abs(right_high - left_high) / left_high
                 if lip_dev > max_lip_dev:
                     continue
+                left_dur = cl_idx - lh_idx
                 right_dur = rh_idx - cl_idx
+                if left_dur < cup_dur * 0.25:
+                    continue
                 if right_dur < cup_dur * 0.25:
                     continue
 
@@ -153,6 +156,7 @@ def detect_cup_handle(data: list[dict], config: dict) -> CupHandleResult:
                     data, config,
                     right_high_idx=rh_idx,
                     cup_low_idx=cl_idx,
+                    breakout_price=max(left_high, right_high),
                     right_high=right_high,
                     cup_low=cup_low,
                 )
@@ -200,7 +204,7 @@ def detect_cup_handle(data: list[dict], config: dict) -> CupHandleResult:
     return result
 
 
-def _find_handle(data, config, right_high_idx, cup_low_idx, right_high, cup_low):
+def _find_handle(data, config, right_high_idx, cup_low_idx, breakout_price, right_high, cup_low):
     """在右杯口之后寻找柄部结构。"""
     n = len(data)
     min_dur = config.get("handle_min_duration", 5)
@@ -238,7 +242,7 @@ def _find_handle(data, config, right_high_idx, cup_low_idx, right_high, cup_low)
     buffer = 1 + config.get("buffer_pct", 0.02)
     vol_threshold = config.get("volume_multiplier", 1.5)
     latest = data[-1]
-    is_breakout = latest["close"] > right_high * buffer
+    is_breakout = latest["close"] > breakout_price * buffer
     is_vol_breakout = False
     vol_mult = 0.0
 

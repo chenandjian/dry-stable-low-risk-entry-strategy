@@ -10,7 +10,9 @@ from scanner.sina_source import fetch_sina_daily
 from scanner.tencent_source import fetch_tencent_daily
 from scanner.liquidity_filter import passes_liquidity_filter
 from scanner.pattern_detector import detect_cup_handle
-from scanner.scorer import score_cup_handle
+from scanner.pattern_detector import CupHandleResult
+from scanner.scorer import score_cup_handle_advanced
+from analyzer.dry_stable import analyze_dry_stable
 
 logger = logging.getLogger(__name__)
 
@@ -114,8 +116,21 @@ def scan_all(config: dict, progress_callback=None, resume_task_id: str = None) -
                 if result.found:
                     result.code = code
                     result.name = stock.get("name", "")
-                    result.score = score_cup_handle(result, scoring_cfg)
-                    if result.score >= scoring_cfg.get("medium_threshold", 70) - 10:
+                    result.score = score_cup_handle_advanced(result, data, scoring_cfg)
+                    dry_stable = analyze_dry_stable(result, data)
+                else:
+                    result = CupHandleResult(found=False, code=code, name=stock.get("name", ""))
+                    dry_stable = analyze_dry_stable(result, data)
+                    pattern20 = dry_stable["pattern_score"]["score"]
+                    if dry_stable["pattern_score"].get("key_pattern_type") != "vcp" or pattern20 < 13:
+                        dry_stable = None
+
+                if dry_stable:
+                    if result.score == 0:
+                        result.score = min(100, dry_stable["pattern_score"]["score"] * 5)
+                    stock["dry_stable"] = dry_stable
+                    strategy_verdict = dry_stable["decision"]["verdict"]
+                    if result.score >= scoring_cfg.get("medium_threshold", 70) - 10 and strategy_verdict != "不建议买入":
                         with candidate_lock:
                             candidates.append((stock, result))
                         # 通知发现新候选
@@ -131,7 +146,23 @@ def scan_all(config: dict, progress_callback=None, resume_task_id: str = None) -
                                                "cup_duration": result.cup_duration,
                                                "handle_depth_pct": result.handle_depth_pct,
                                                "vol_multiplier": result.vol_multiplier,
-                                               "latest_close": stock.get("latest_close", 0)})
+                                               "latest_close": stock.get("latest_close", 0),
+                                               "dry_stable_verdict": strategy_verdict,
+                                               "dry_stable_summary": dry_stable["decision"]["summary"],
+                                               "volume_dry_score": dry_stable["volume_dry"]["score"],
+                                               "price_stable_score": dry_stable["price_stable"]["score"],
+                                               "pattern_score_20": dry_stable["pattern_score"]["score"],
+                                               "risk_percent": dry_stable["risk_reward"]["risk_percent"],
+                                               "rr1": dry_stable["risk_reward"]["rr1"],
+                                               "position_advice": dry_stable["risk_reward"]["position_advice"],
+                                               "entry_zone_low": dry_stable["key_prices"]["entry_zone_low"],
+                                               "entry_zone_high": dry_stable["key_prices"]["entry_zone_high"],
+                                               "pivot": dry_stable["key_prices"]["pivot"],
+                                               "stop_loss": dry_stable["key_prices"]["stop_loss"],
+                                               "target_1": dry_stable["key_prices"]["target_1"],
+                                               "target_2": dry_stable["key_prices"]["target_2"],
+                                               "market_status": dry_stable["market_environment"]["status"],
+                                               "market_position_advice": dry_stable["market_environment"]["position_advice"]})
 
                 with stats_lock:
                     scanned_count[0] += 1

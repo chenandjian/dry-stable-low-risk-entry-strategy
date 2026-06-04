@@ -21,21 +21,18 @@ class PatternScoreResult:
 
 
 def score_pattern(result: CupHandleResult, data: list[dict]) -> PatternScoreResult:
-    """Calculate pattern score (0-20).
-
-    Currently supports cup handle scoring. VCP scoring is Phase 3.
-    """
+    """Calculate pattern score (0-20)."""
     r = PatternScoreResult()
 
-    if not result.found:
+    if not data:
         return r
 
     # Cup Handle Score (0-20)
-    ch_score = _score_cup_handle_pattern(result, data)
+    ch_score = _score_cup_handle_pattern(result, data) if result.found else 0
     r.cup_handle_score = ch_score
 
-    # VCP Score (0-20) — Phase 3
-    r.vcp_score = 0
+    # VCP Score (0-20)
+    r.vcp_score = _score_vcp_pattern(data)
 
     r.total_score = max(ch_score, r.vcp_score)
 
@@ -49,6 +46,146 @@ def score_pattern(result: CupHandleResult, data: list[dict]) -> PatternScoreResu
         r.pattern_type = "无有效形态"
 
     return r
+
+
+def _score_vcp_pattern(data: list[dict]) -> int:
+    """VCP score (0-20) per dry-stable strategy section 10."""
+    if not data or len(data) < 60:
+        return 0
+
+    closes = [d["close"] for d in data]
+    lows = [d["low"] for d in data]
+    volumes = [d["volume"] for d in data]
+    contractions = _find_vcp_contractions(data)
+    if not contractions:
+        return 0
+
+    score = 0
+    first_high_idx = contractions[0]["high_idx"]
+    first_high = contractions[0]["high"]
+
+    # A. Prior uptrend (max 3 pts)
+    if first_high_idx >= 20:
+        start = max(0, first_high_idx - 60)
+        pre_low = min(lows[start:first_high_idx])
+        if pre_low > 0:
+            gain = (first_high - pre_low) / pre_low
+            if gain >= 0.30:
+                score += 3
+            elif gain >= 0.20:
+                score += 2
+            elif gain >= 0.10:
+                score += 1
+
+    # B. Number of contractions (max 4 pts)
+    if len(contractions) >= 3:
+        score += 4
+    elif len(contractions) >= 2:
+        score += 3
+    elif len(contractions) == 1:
+        score += 1
+
+    # C. Pullback amplitude decreasing (max 4 pts)
+    depths = [c["depth"] for c in contractions[-4:]]
+    decreasing_pairs = sum(1 for a, b in zip(depths, depths[1:]) if b < a)
+    if len(depths) >= 2 and decreasing_pairs == len(depths) - 1:
+        score += 4
+    elif len(depths) >= 2 and decreasing_pairs >= max(1, len(depths) - 2):
+        score += 2
+
+    # D. Volume decreases across contractions (max 4 pts)
+    avg_vols = [c["avg_volume"] for c in contractions[-4:]]
+    vol_decreasing_pairs = sum(1 for a, b in zip(avg_vols, avg_vols[1:]) if b < a)
+    if len(avg_vols) >= 2 and vol_decreasing_pairs == len(avg_vols) - 1:
+        score += 4
+    elif len(avg_vols) >= 2 and avg_vols[-1] < avg_vols[-2]:
+        score += 2
+
+    # E. Pivot clarity and distance (max 3 pts)
+    pivot = _vcp_pivot(data, contractions)
+    current = closes[-1]
+    if pivot > 0:
+        dist = abs(pivot - current) / pivot
+        if dist <= 0.05:
+            score += 3
+        elif dist <= 0.10:
+            score += 1
+
+    # F. Small stop distance (max 2 pts)
+    last_low = contractions[-1]["low"]
+    if current > 0 and last_low > 0:
+        risk = (current - last_low) / current
+        if 0 <= risk <= 0.06:
+            score += 2
+        elif 0 <= risk <= 0.08:
+            score += 1
+
+    return min(score, 20)
+
+
+def _find_vcp_contractions(data: list[dict]) -> list[dict]:
+    """Find recent high-to-low contractions using local extrema."""
+    closes = [d["close"] for d in data]
+    lows = [d["low"] for d in data]
+    volumes = [d["volume"] for d in data]
+    start_idx = max(0, len(data) - 120)
+    highs = _local_extrema(closes, start_idx, is_high=True)
+    lows_idx = _local_extrema(lows, start_idx, is_high=False)
+
+    contractions = []
+    for hi in highs:
+        next_lows = [lo for lo in lows_idx if hi < lo <= hi + 35]
+        if not next_lows:
+            continue
+        lo = next_lows[0]
+        high = closes[hi]
+        low = lows[lo]
+        if high <= 0 or low <= 0 or low >= high:
+            continue
+        depth = (high - low) / high
+        if depth < 0.03 or depth > 0.40:
+            continue
+        avg_volume = sum(volumes[hi:lo + 1]) / (lo - hi + 1)
+        contractions.append({
+            "high_idx": hi,
+            "low_idx": lo,
+            "high": high,
+            "low": low,
+            "depth": depth,
+            "avg_volume": avg_volume,
+        })
+
+    # Remove overlapping contractions and keep the most recent 4.
+    filtered = []
+    last_low_idx = -1
+    for c in contractions:
+        if c["high_idx"] > last_low_idx:
+            filtered.append(c)
+            last_low_idx = c["low_idx"]
+    return filtered[-4:]
+
+
+def _local_extrema(values: list[float], start_idx: int, is_high: bool, window: int = 2) -> list[int]:
+    result = []
+    end = len(values) - window
+    for i in range(max(window, start_idx), end):
+        left = values[i - window:i]
+        right = values[i + 1:i + window + 1]
+        if is_high and values[i] >= max(left) and values[i] >= max(right):
+            result.append(i)
+        elif not is_high and values[i] <= min(left) and values[i] <= min(right):
+            result.append(i)
+    return result
+
+
+def _vcp_pivot(data: list[dict], contractions: list[dict]) -> float:
+    if contractions:
+        last_low_idx = contractions[-1]["low_idx"]
+        prior_highs = [c["high"] for c in contractions if c["high_idx"] < last_low_idx]
+        if prior_highs:
+            recent_platform = max(d["close"] for d in data[-20:])
+            return min(max(prior_highs[-1], recent_platform), max(prior_highs))
+    return max(d["close"] for d in data[-20:]) if len(data) >= 20 else 0.0
 
 
 def _score_cup_handle_pattern(result: CupHandleResult, data: list[dict]) -> int:

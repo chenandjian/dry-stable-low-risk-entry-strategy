@@ -4,8 +4,8 @@
     <div class="metrics-row">
       <MetricCard label="总候选" :value="candidates.length" color="blue" />
       <MetricCard label="A级 ≥80" :value="aCount" color="gold" />
-      <MetricCard label="已突破" :value="breakoutCount" color="red" />
-      <MetricCard label="接近突破" :value="nearCount" color="orange" />
+      <MetricCard label="可低吸" :value="lowBuyCount" color="gold" />
+      <MetricCard label="突破确认" :value="confirmCount" color="red" />
       <MetricCard label="平均评分" :value="avgScore" />
       <MetricCard label="最高评分" :value="maxScore" color="gold" />
     </div>
@@ -37,11 +37,15 @@
               <th @click="sortBy = 'code'" class="sortable">代码</th>
               <th @click="sortBy = 'name'" class="sortable">名称</th>
               <th @click="sortBy = 'score'" class="sortable center">形态评分</th>
-              <th class="center">信号等级</th>
+              <th class="center">干稳结论</th>
+              <th class="center">量干/价稳</th>
+              <th class="right">RR</th>
+              <th class="center">仓位</th>
+              <th class="center">大盘</th>
               <th class="center">突破状态</th>
               <th @click="sortBy = 'latest_close'" class="sortable right">最新价</th>
-              <th @click="sortBy = 'breakout_price'" class="sortable right">突破位</th>
-              <th class="right">距突破位</th>
+              <th @click="sortBy = 'pivot'" class="sortable right">Pivot</th>
+              <th class="right">距Pivot</th>
               <th class="center">杯体回撤深度</th>
               <th class="center">柄部回撤幅度</th>
               <th class="center">杯体周期</th>
@@ -61,17 +65,21 @@
                 <span class="score-num" :class="scoreColorClass(c.score)">{{ c.score }}</span>
               </td>
               <td class="center">
-                <SignalBadge :type="c.score >= 80 ? 'strong' : c.score >= 70 ? 'medium' : 'weak'">
-                  {{ c.score >= 80 ? '强候选' : c.score >= 70 ? '中等候选' : '弱候选' }}
+                <SignalBadge :type="verdictType(c)">
+                  {{ c.dry_stable_verdict || c.rating || '观察' }}
                 </SignalBadge>
               </td>
+              <td class="center">{{ c.volume_dry_score ?? '--' }}/{{ c.price_stable_score ?? '--' }}</td>
+              <td class="num blue">{{ c.rr1 != null ? Number(c.rr1).toFixed(1) : '--' }}</td>
+              <td class="center">{{ c.position_advice || '--' }}</td>
+              <td class="center" :class="marketClass(c.market_status)">{{ c.market_status || '一般' }}</td>
               <td class="center">
                 <span :class="c.is_breakout ? 'st-breakout' : c.score >= 70 ? 'st-near' : 'st-watch'">
                   {{ c.is_breakout ? '◉ 已突破' : c.score >= 70 ? '● 接近突破' : '○ 观察' }}
                 </span>
               </td>
               <td class="num">{{ c.latest_close?.toFixed(2) || '--' }}</td>
-              <td class="num muted">{{ c.breakout_price?.toFixed(2) || '--' }}</td>
+              <td class="num muted">{{ price(c.pivot || c.breakout_price) }}</td>
               <td class="num" :class="distClass(c)">{{ distPct(c) }}</td>
               <td class="center">{{ c.cup_depth_pct != null ? c.cup_depth_pct.toFixed(1) + '%' : '--' }}</td>
               <td class="center" :class="c.handle_depth_pct < 8 ? 'green' : c.handle_depth_pct > 12 ? 'red' : ''">
@@ -88,7 +96,7 @@
               </td>
             </tr>
             <tr v-if="filteredCandidates.length === 0">
-              <td colspan="14" class="empty-row">无符合条件的候选</td>
+              <td colspan="18" class="empty-row">无符合条件的候选</td>
             </tr>
           </tbody>
         </table>
@@ -116,6 +124,8 @@ const filters = [
   { key: 'all', label: '全部' },
   { key: 'aGrade', label: 'A级 ≥80' },
   { key: 'medium', label: '中等 70-79' },
+  { key: 'lowBuy', label: '可低吸' },
+  { key: 'confirm', label: '突破确认' },
   { key: 'breakout', label: '已突破' },
   { key: 'near', label: '接近突破' },
   { key: 'volume', label: '放量确认' },
@@ -125,6 +135,8 @@ const filteredCandidates = computed(() => {
   let list = [...candidates.value]
   if (activeFilter.value === 'aGrade') list = list.filter(c => c.score >= 80)
   else if (activeFilter.value === 'medium') list = list.filter(c => c.score >= 70 && c.score < 80)
+  else if (activeFilter.value === 'lowBuy') list = list.filter(c => c.dry_stable_verdict === '可低吸')
+  else if (activeFilter.value === 'confirm') list = list.filter(c => c.dry_stable_verdict === '突破确认')
   else if (activeFilter.value === 'breakout') list = list.filter(c => c.is_breakout)
   else if (activeFilter.value === 'near') list = list.filter(c => !c.is_breakout && c.score >= 70)
   else if (activeFilter.value === 'volume') list = list.filter(c => c.is_volume_breakout)
@@ -140,8 +152,8 @@ const filteredCandidates = computed(() => {
 })
 
 const aCount = computed(() => candidates.value.filter(c => c.score >= 80).length)
-const breakoutCount = computed(() => candidates.value.filter(c => c.is_breakout).length)
-const nearCount = computed(() => candidates.value.filter(c => !c.is_breakout && c.score >= 70).length)
+const lowBuyCount = computed(() => candidates.value.filter(c => c.dry_stable_verdict === '可低吸').length)
+const confirmCount = computed(() => candidates.value.filter(c => c.dry_stable_verdict === '突破确认').length)
 const avgScore = computed(() => {
   if (!candidates.value.length) return 0
   return Math.round(candidates.value.reduce((s, c) => s + c.score, 0) / candidates.value.length)
@@ -151,24 +163,42 @@ const maxScore = computed(() => candidates.value.reduce((m, c) => Math.max(m, c.
 function goToStock(code) { selectedCode.value = code; router.push(`/stock/${code}`) }
 function barClass(c) { return c.score >= 80 ? 'bar-gold' : c.score >= 70 ? 'bar-blue' : 'bar-gray' }
 function scoreColorClass(s) { return s >= 80 ? 'sc-gold' : s >= 70 ? 'sc-blue' : 'sc-muted' }
+function price(v) { return v ? Number(v).toFixed(2) : '--' }
+function verdictType(c) {
+  if (c.dry_stable_verdict === '可低吸') return 'strong'
+  if (c.dry_stable_verdict === '突破确认') return 'breakout'
+  return c.score >= 70 ? 'medium' : 'weak'
+}
+function marketClass(s) {
+  if (s === '良好') return 'red'
+  if (s === '较差') return 'green'
+  return 'orange'
+}
 function distPct(c) {
-  if (!c.breakout_price || !c.latest_close) return '--'
-  return ((c.latest_close - c.breakout_price) / c.breakout_price * 100).toFixed(1) + '%'
+  const pivot = c.pivot || c.breakout_price
+  if (!pivot || !c.latest_close) return '--'
+  return ((c.latest_close - pivot) / pivot * 100).toFixed(1) + '%'
 }
 function distClass(c) {
-  if (!c.breakout_price || !c.latest_close) return ''
-  const d = (c.latest_close - c.breakout_price) / c.breakout_price
+  const pivot = c.pivot || c.breakout_price
+  if (!pivot || !c.latest_close) return ''
+  const d = (c.latest_close - pivot) / pivot
   return d > 0 ? 'red' : d > -0.05 ? 'orange' : 'muted'
 }
 function exportCSV() {
-  const header = '代码,名称,评分,等级,突破,放量,最新价,突破位,杯体深度,柄部回撤,杯体天数,放量倍数'
+  const header = '代码,名称,评分,干稳结论,量干,价稳,RR,仓位,大盘,突破,放量,最新价,Pivot,杯体深度,柄部回撤,杯体天数,放量倍数'
   const rows = candidates.value.map(c => [
     c.code, c.name, c.score,
-    c.score >= 80 ? '强候选' : c.score >= 70 ? '中等候选' : '弱候选',
+    c.dry_stable_verdict || '',
+    c.volume_dry_score ?? '',
+    c.price_stable_score ?? '',
+    c.rr1 ?? '',
+    c.position_advice || '',
+    c.market_status || '',
     c.is_breakout ? '是' : '否',
     c.is_volume_breakout ? '是' : '否',
     c.latest_close?.toFixed(2) || '',
-    c.breakout_price?.toFixed(2) || '',
+    (c.pivot || c.breakout_price)?.toFixed?.(2) || '',
     c.cup_depth_pct?.toFixed(1) || '',
     c.handle_depth_pct?.toFixed(1) || '',
     c.cup_duration || '',
@@ -239,6 +269,7 @@ onMounted(async () => {
 .center { text-align: center; }
 .muted { color: var(--text-muted); }
 .red { color: var(--up-red); }
+.blue { color: var(--accent); }
 .orange { color: var(--warn-orange); }
 .green { color: var(--down-green); }
 .score-num { font-size: 16px; font-weight: 700; font-family: var(--font-mono); }

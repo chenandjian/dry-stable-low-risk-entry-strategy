@@ -9,6 +9,8 @@ logger = logging.getLogger(__name__)
 
 CSV_HEADER = [
     "股票代码", "股票名称", "形态评分", "信号等级",
+    "干稳结论", "量干评分", "价稳评分", "低吸区间", "Pivot",
+    "止损价", "第一止盈", "盈亏比", "仓位建议", "大盘环境", "环境仓位",
     "突破状态", "放量确认", "最新收盘价", "突破位",
     "距突破位比例", "杯体回撤深度", "杯体周期",
     "柄部回撤幅度", "柄部周期",
@@ -40,6 +42,13 @@ def write_candidates_csv(
         writer.writerow(CSV_HEADER)
 
         for stock, result in candidates:
+            dry = stock.get("dry_stable", {})
+            decision = dry.get("decision", {})
+            volume_dry = dry.get("volume_dry", {})
+            price_stable = dry.get("price_stable", {})
+            key = dry.get("key_prices", {})
+            rr = dry.get("risk_reward", {})
+            market = dry.get("market_environment", {})
             # 分级
             if result.score >= 80:
                 rating = "强候选"
@@ -60,6 +69,17 @@ def write_candidates_csv(
                 stock.get("name", ""),
                 result.score,
                 rating,
+                decision.get("verdict", ""),
+                volume_dry.get("score", ""),
+                price_stable.get("score", ""),
+                key.get("entry_zone", ""),
+                key.get("pivot", ""),
+                key.get("stop_loss", ""),
+                key.get("target_1", ""),
+                rr.get("rr1", ""),
+                rr.get("position_advice", ""),
+                market.get("status", ""),
+                market.get("position_advice", ""),
                 "已突破" if result.is_breakout else "未突破",
                 "是" if result.is_volume_breakout else "否",
                 f"{latest_close:.2f}",
@@ -121,6 +141,17 @@ def write_candidates_csv_from_db(
                 c.get("name", ""),
                 c.get("score", 0),
                 c.get("rating", ""),
+                c.get("dry_stable_verdict", ""),
+                c.get("volume_dry_score", ""),
+                c.get("price_stable_score", ""),
+                f"{c.get('entry_zone_low', 0)} - {c.get('entry_zone_high', 0)}",
+                c.get("pivot", ""),
+                c.get("stop_loss", ""),
+                c.get("target_1", ""),
+                c.get("rr1", ""),
+                c.get("position_advice", ""),
+                c.get("market_status", ""),
+                c.get("market_position_advice", ""),
                 "已突破" if c.get("is_breakout") else "未突破",
                 "是" if c.get("is_volume_breakout") else "否",
                 f"{latest_close:.2f}",
