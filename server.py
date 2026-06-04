@@ -49,7 +49,7 @@ async def lifespan(app: FastAPI):
                     code = detail.split()[0] if detail else ""
                     _running["stats"] = {**stats, "scanned": current, "processed": current, "total_stocks": total, "current_code": code, "current_name": detail[len(code):].strip() if len(detail) > len(code) else detail}
             result = scan_all(config, progress_callback=on_progress, resume_task_id=interrupted["id"], stop_event=_stop_event)
-            _running["running"] = False
+            _clear_running()
             _running["stats"] = result["stats"]
             _running["candidates"] = result["candidates"]
         t = threading.Thread(target=resume_scan, daemon=True)
