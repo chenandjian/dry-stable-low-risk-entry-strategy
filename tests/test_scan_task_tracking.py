@@ -173,17 +173,24 @@ def test_get_a_stock_pool_result_uses_akshare_when_available(monkeypatch, tmp_pa
         def iterrows(self):
             return iter([
                 (0, {"code": "600000", "name": "浦发银行"}),
-                (1, {"code": "000001", "name": "平安银行"}),
+                (1, {"code": "830001", "name": "北交测试"}),
+                (2, {"code": "000002", "name": "ST样本"}),
             ])
 
     fake_ak = types.SimpleNamespace(stock_info_a_code_name=lambda: FakeDataFrame())
     monkeypatch.setitem(__import__("sys").modules, "akshare", fake_ak)
 
-    result = stock_pool.get_a_stock_pool_result({"market": {}})
+    result = stock_pool.get_a_stock_pool_result({"market": {"exclude_st": True, "exclude_bj": True}})
+    saved = db.get_stock_pool()
 
     assert result["source"] == "akshare"
     assert result["error"] is None
-    assert [s["code"] for s in result["stocks"]] == ["600000", "000001"]
+    assert result["stocks"] == [{"code": "600000", "name": "浦发银行", "market": "上证主板"}]
+    assert saved == [
+        {"code": "600000", "name": "浦发银行", "market": ""},
+        {"code": "830001", "name": "北交测试", "market": ""},
+        {"code": "000002", "name": "ST样本", "market": ""},
+    ]
 
 
 
@@ -205,3 +212,38 @@ def test_get_a_stock_pool_result_falls_back_to_cached_pool(monkeypatch, tmp_path
     assert result["source"] == "cached"
     assert "akshare down" in result["error"]
     assert result["stocks"][0]["code"] == "600000"
+
+
+
+def test_get_a_stock_pool_result_returns_none_source_when_all_sources_fail(monkeypatch, tmp_path):
+    import types
+    from scanner import stock_pool
+
+    db.init_db(str(tmp_path / "cuphandle.db"))
+
+    def fail():
+        raise RuntimeError("akshare down")
+
+    fake_ak = types.SimpleNamespace(stock_info_a_code_name=fail)
+    monkeypatch.setitem(__import__("sys").modules, "akshare", fake_ak)
+
+    result = stock_pool.get_a_stock_pool_result({"market": {}})
+
+    assert result["source"] == "none"
+    assert result["stocks"] == []
+    assert result["error"]
+    assert "akshare down" in result["error"] or "stock pool" in result["error"].lower()
+
+
+
+def test_get_a_stock_pool_delegates_to_result_helper(monkeypatch):
+    from scanner import stock_pool
+
+    expected = [{"code": "600000", "name": "浦发银行"}]
+    monkeypatch.setattr(
+        stock_pool,
+        "get_a_stock_pool_result",
+        lambda config: {"stocks": expected, "source": "akshare", "error": None},
+    )
+
+    assert stock_pool.get_a_stock_pool({"market": {}}) == expected
