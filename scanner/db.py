@@ -352,8 +352,18 @@ def finish_scan_task(task_id: str, finished_at: str, candidates_count: int,
 
 
 def mark_dead_tasks_as_failed():
-    """Mark any running tasks as failed — they were interrupted by server restart."""
+    """Mark any running tasks as failed — they were interrupted by server restart.
+    Also reset fetching stocks to pending so auto-resume can re-process them."""
     conn = get_conn()
+    running_ids = conn.execute(
+        "SELECT id FROM scan_tasks WHERE status='running'"
+    ).fetchall()
+    for (task_id,) in running_ids:
+        conn.execute(
+            "UPDATE task_stocks SET status='pending', status_reason=NULL, error_detail=NULL "
+            "WHERE task_id=? AND status='fetching'",
+            (task_id,),
+        )
     conn.execute(
         "UPDATE scan_tasks SET status='failed', error='Server restarted' WHERE status='running'"
     )
