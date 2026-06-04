@@ -442,6 +442,7 @@ async def resume_task(task_id: str):
     db_path = config.get("data", {}).get("database_path", "data/cuphandle.db")
     db.init_db(db_path)
 
+    import datetime
     conflict = _scan_conflict_response()
     if conflict:
         return conflict
