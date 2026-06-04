@@ -432,16 +432,20 @@ async function initChart() {
     wickDownColor: '#22C55E',
   })
   candleSeries.setData(candleData)
+  // Reserve bottom 35% for volume + RSI panes
+  candleSeries.priceScale().applyOptions({
+    scaleMargins: { top: 0, bottom: 0.35 },
+  })
   console.log('[StockDetail] chart ready, candles:', candleData.length)
 
-  // Volume series (overlay on bottom)
+  // Volume pane (middle ~15%)
   const volumeSeries = chart.addSeries(HistogramSeries, {
     color: 'rgba(239,68,68,0.4)',
     priceFormat: { type: 'volume' },
-    priceScaleId: '',
+    priceScaleId: 'volume',
   })
-  volumeSeries.priceScale().applyOptions({
-    scaleMargins: { top: 0.8, bottom: 0 },
+  chart.priceScale('volume').applyOptions({
+    scaleMargins: { top: 0.72, bottom: 0.15 },
   })
 
   const volumeData = ohlcRaw.map(d => ({
@@ -466,7 +470,7 @@ async function initChart() {
     maSeries.setData(maData)
   })
 
-  // RSI pane (overlaid in main chart, bottom-margin)
+  // RSI pane (bottom ~15%)
   const rsiPeriods = [6, 12, 24]
   const rsiColors = ['#4F7DFF', '#F59E0B', '#EF4444']
 
@@ -482,10 +486,27 @@ async function initChart() {
     rsiSeries.setData(rsiData)
   })
 
-  // Configure RSI price scale
   chart.priceScale('rsi').applyOptions({
-    scaleMargins: { top: 0.85, bottom: 0 },
+    scaleMargins: { top: 0.88, bottom: 0 },
   })
+  // Add RSI reference bands (70 overbought / 50 midline / 30 oversold)
+  const rsiBand70 = chart.addSeries(LineSeries, {
+    color: 'rgba(239,68,68,0.15)', lineWidth: 1,
+    priceLineVisible: false, lastValueVisible: false, priceScaleId: 'rsi',
+  })
+  const rsiBand50 = chart.addSeries(LineSeries, {
+    color: 'rgba(90,106,126,0.15)', lineWidth: 1, lineStyle: 2,
+    priceLineVisible: false, lastValueVisible: false, priceScaleId: 'rsi',
+  })
+  const rsiBand30 = chart.addSeries(LineSeries, {
+    color: 'rgba(34,197,94,0.15)', lineWidth: 1,
+    priceLineVisible: false, lastValueVisible: false, priceScaleId: 'rsi',
+  })
+  // Fill bands with constant values
+  const rsiTimes = candleData.map(d => ({ time: d.time }))
+  rsiBand70.setData(rsiTimes.map(d => ({ ...d, value: 70 })))
+  rsiBand50.setData(rsiTimes.map(d => ({ ...d, value: 50 })))
+  rsiBand30.setData(rsiTimes.map(d => ({ ...d, value: 30 })))
 
   // Store chart reference for resize
   chartRef.value._chart = chart
