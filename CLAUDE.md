@@ -44,14 +44,20 @@ npm --prefix web run preview
            scanner/data_source.py (互斥锁管理)
            scanner/sina_source.py / tencent_source.py (HTTP抓取)
            scanner/stock_pool.py (股票池)
-算法层:    scanner/pattern_detector.py (杯柄识别)
+算法层:    scanner/pattern_detector.py (杯柄+VCP识别)
            scanner/liquidity_filter.py (流动性过滤)
            scanner/scorer.py (评分 0-100)
-分析层:    analyzer/volume_dry.py (量干评分 0-10)
-           analyzer/price_stable.py (价稳评分 0-10)
-           analyzer/pattern_score.py (形态评分 0-20)
-           analyzer/key_prices.py + risk_reward.py (关键价格/仓位)
+分析层:    analyzer/dry_stable.py → analyze_dry_stable() 串联全部分析
+             ├─ analyzer/volume_dry.py (量干评分 0-10)
+             ├─ analyzer/price_stable.py (价稳评分 0-10)
+             ├─ analyzer/pattern_score.py (形态评分 0-20, 杯柄/VCP择优)
+             ├─ analyzer/key_prices.py (关键价格/入场区间)
+             ├─ analyzer/risk_reward.py (风险收益比 + 仓位建议)
+             ├─ analyzer/invalid_rules.py (形态失效条件)
+             ├─ analyzer/market_env.py (大盘环境评估)
+             └─ analyzer/decision.py (最终决策：可低吸/突破确认/观察/不建议买入)
 回测层:    scanner/backtester.py (历史回测)
+指标层:    scanner/index_source.py (大盘指数数据)
 输出层:    output/csv_writer.py / json_writer.py
 前端:      web/ (Vue 3 + ECharts · 深色金融终端风格)
 ```
@@ -60,7 +66,7 @@ npm --prefix web run preview
 
 - **数据源互斥锁：** 两个扫描线程不能同时请求同一个数据源（新浪/腾讯）。`DataSourceManager` 用 `threading.Lock(blocking=False)` 实现非阻塞互斥。线程取不到锁时 sleep 0.1s 后重试。
 - **扫描 fresh-first：** 点击开始扫描默认重新拉取个股日线；缓存只用于合并历史和详情展示，主备数据源都失败时不能用旧缓存生成扫描结果。
-- **腾讯源内置新浪回退：** `fetch_tencent_daily()` 内部可能请求新浪；在扫描线程中调用腾讯源时也要考虑新浪锁，避免绕过 `DataSourceManager`。
+- **腾讯源纯源化：** `fetch_tencent_daily()` 为纯腾讯源，失败返回 None。回退逻辑统一在引擎层 `_fetch_with_retry` 处理，数据源函数内部不再偷偷切源。
 - **扫描任务追踪：** `scan_tasks` 记录任务级统计，`task_stocks` 记录每只股票的 `pending/fetching/scanned/skipped/failed/candidate`、失败原因、数据源尝试和最新 K 线日期。
 - **候选去重：** 同一任务内候选按 `(task_id, code)` 唯一；内存层用 code 字典去重，数据库层用唯一索引/upsert，前端按 code 归并。
 - **全局扫描互斥：** 任意时刻只允许一个扫描过程（全量、失败重拉、调度、恢复）；启动前同时检查 `_running` 和 DB 中 `status='running'` 的任务。
@@ -82,14 +88,21 @@ npm --prefix web run preview
 | `scanner/db.py` | SQLite 数据库层 — 连接管理 + 5 表 CRUD |
 | `scanner/data_source.py` | `DataSourceManager` — 新浪+腾讯双源互斥锁 |
 | `scanner/sina_source.py` | `fetch_sina_daily(code, days)` → `list[dict] \| None` |
-| `scanner/tencent_source.py` | `fetch_tencent_daily(code, days)` → `list[dict] \| None`（内部回退新浪） |
+| `scanner/tencent_source.py` | `fetch_tencent_daily(code, days)` → `list[dict] \| None`（纯腾讯源，回退由引擎层处理） |
 | `scanner/pattern_detector.py` | `detect_cup_handle(data, config)` → `CupHandleResult` |
 | `scanner/scorer.py` | `score_cup_handle(result)` / `score_cup_handle_advanced(result, data)` → `int` (0-100) |
 | `scanner/engine.py` | `scan_all(config)` — 双线程全市场扫描主循环 |
 | `scanner/backtester.py` | `run_backtest(stocks, fetch_fn, config)` — 历史回测 |
 | `analyzer/volume_dry.py` | `score_volume_dry(data)` → `VolumeDryResult` (0-10) |
 | `analyzer/price_stable.py` | `score_price_stable(data)` → `PriceStableResult` (0-10) |
+| `analyzer/pattern_score.py` | `score_pattern(result, data)` → `PatternScoreResult` (0-20, 杯柄/VCP 择优) |
+| `analyzer/key_prices.py` | `calculate_key_prices(...)` → `KeyPricesResult` (入场区间/支点/止损/目标) |
 | `analyzer/risk_reward.py` | `calculate_risk_reward(...)` → `RiskRewardResult` |
+| `analyzer/dry_stable.py` | `analyze_dry_stable(result, data, market_data)` → `dict` — 串联全部 8 个分析模块 |
+| `analyzer/decision.py` | `make_dry_stable_decision(...)` → `DryStableDecision` — 最终买入判决 |
+| `analyzer/market_env.py` | `assess_market_environment(market_data)` → `MarketEnvResult` |
+| `analyzer/invalid_rules.py` | `find_invalid_conditions(...)` → `list[str]` |
+| `scanner/index_source.py` | `fetch_market_index_daily(code)` → `list[dict]` (复用新浪源) |
 | `server.py` | FastAPI 服务 — CORS + lifespan + 历史持久化 |
 | `web/src/pages/ScannerConsole.vue` | 前端首页 — 机会雷达控制台 |
 
@@ -113,6 +126,8 @@ npm --prefix web run preview
 - **新浪 API**: 返回 JSONP 格式 `data([...]);`，需要手动 `text[5:-2]` 后解析 JSON。
 - **Scan 线程崩溃**: `server.py` 中 scan 线程的 `except` 现已含 `traceback.format_exc()`，但需检查日志才能看到。`_running["stats"]` 为空即扫描未正常启动。
 - **config.yaml 中的假参数**: `data.cache_dir`、`data.start_date`、`cup.filter_v_shape`、`output.csv/json/charts`、`scheduler.webhook_url` 等键存在于 yaml 但代码中未使用。新增配置项前先确认代码已接入。
+- **config.yaml 缺失的有效参数**: `data.source_busy_max_retries`（默认 3）代码中已使用但 config.yaml 中未声明，可通过 yaml 覆盖。
+- **scheduler cron 解析不完整**: `scheduler/scheduler.py` 只解析 cron 表达式的 minute、hour、day_of_week 三个字段；day_of_month 和 month 被忽略（默认 `*`）。含日/月限制的表达式（如 `"30 15 1 * 1-5"`）无法正确限制为每月第一天。
 
 ## .gitignore Policy
 
