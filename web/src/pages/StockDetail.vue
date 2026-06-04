@@ -151,7 +151,7 @@ import { useApi } from '../composables/useApi.js'
 import SignalBadge from '../components/SignalBadge.vue'
 import ScoreBar from '../components/ScoreBar.vue'
 import RiskBox from '../components/RiskBox.vue'
-import { createChart } from 'lightweight-charts'
+import { createChart, CandlestickSeries, LineSeries, HistogramSeries } from 'lightweight-charts'
 
 // --- Helper: MA calculation ---
 function calcMA(data, period) {
@@ -409,7 +409,7 @@ async function initChart() {
   }))
 
   // Candlestick series
-  const candleSeries = chart.addCandlestickSeries({
+  const candleSeries = chart.addSeries(CandlestickSeries, {
     upColor: '#EF4444',
     downColor: '#22C55E',
     borderUpColor: '#EF4444',
@@ -421,7 +421,7 @@ async function initChart() {
   console.log('[StockDetail] chart ready, candles:', candleData.length)
 
   // Volume series (overlay on bottom)
-  const volumeSeries = chart.addHistogramSeries({
+  const volumeSeries = chart.addSeries(HistogramSeries, {
     color: 'rgba(239,68,68,0.4)',
     priceFormat: { type: 'volume' },
     priceScaleId: '',
@@ -443,7 +443,7 @@ async function initChart() {
 
   maPeriods.forEach((period, i) => {
     const maData = calcMA(candleData, period)
-    const maSeries = chart.addLineSeries({
+    const maSeries = chart.addSeries(LineSeries, {
       color: maColors[i],
       lineWidth: 1,
       priceLineVisible: false,
@@ -458,7 +458,7 @@ async function initChart() {
 
   rsiPeriods.forEach((period, i) => {
     const rsiData = calcRSI(candleData, period)
-    const rsiSeries = chart.addLineSeries({
+    const rsiSeries = chart.addSeries(LineSeries, {
       color: rsiColors[i],
       lineWidth: 1,
       priceLineVisible: false,
