@@ -8,6 +8,7 @@ Single database file at data/cuphandle.db with tables:
 import sqlite3
 import os
 import threading
+import datetime
 from contextlib import contextmanager
 
 DB_PATH = None
@@ -17,6 +18,12 @@ _local = threading.local()
 def init_db(path: str = "data/cuphandle.db"):
     """Initialize database and create tables if not exist."""
     global DB_PATH
+    if hasattr(_local, 'conn') and _local.conn is not None:
+        try:
+            _local.conn.close()
+        except sqlite3.Error:
+            pass
+        _local.conn = None
     DB_PATH = path
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with get_conn() as conn:
@@ -105,6 +112,10 @@ def init_db(path: str = "data/cuphandle.db"):
             CREATE INDEX IF NOT EXISTS idx_candidates_score ON candidates(score DESC);
         ''')
         _ensure_candidate_columns(conn)
+        _ensure_scan_task_columns(conn)
+        _ensure_task_stocks_table(conn)
+        _dedupe_candidates_before_unique_index(conn)
+        conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_candidates_task_code ON candidates(task_id, code)")
         conn.commit()
 
 
@@ -134,6 +145,93 @@ def _ensure_candidate_columns(conn: sqlite3.Connection):
     for name, typ in columns.items():
         if name not in existing:
             conn.execute(f"ALTER TABLE candidates ADD COLUMN {name} {typ}")
+
+
+
+
+def _ensure_scan_task_columns(conn: sqlite3.Connection):
+    """Add scan task tracking columns for databases created by older versions."""
+    existing = {d[1] for d in conn.execute("PRAGMA table_info(scan_tasks)").fetchall()}
+    columns = {
+        "success_count": "INTEGER DEFAULT 0",
+        "failed_count": "INTEGER DEFAULT 0",
+        "stock_pool_source": "TEXT",
+        "stock_pool_error": "TEXT",
+        "retry_mode": "TEXT DEFAULT 'full'",
+        "data_fresh_policy": "TEXT DEFAULT 'force_refresh'",
+        "latest_trade_date": "TEXT",
+    }
+    for name, typ in columns.items():
+        if name not in existing:
+            conn.execute(f"ALTER TABLE scan_tasks ADD COLUMN {name} {typ}")
+
+
+
+def _ensure_task_stocks_table(conn: sqlite3.Connection):
+    """Create per-task stock tracking table used by scan progress and retries."""
+    conn.execute('''
+        CREATE TABLE IF NOT EXISTS task_stocks (
+            task_id TEXT NOT NULL,
+            idx INTEGER NOT NULL,
+            code TEXT NOT NULL,
+            name TEXT NOT NULL,
+            market TEXT,
+            status TEXT DEFAULT 'pending',
+            status_reason TEXT,
+            error_detail TEXT,
+            primary_source TEXT,
+            fallback_source TEXT,
+            primary_attempts INTEGER DEFAULT 0,
+            fallback_attempts INTEGER DEFAULT 0,
+            primary_error TEXT,
+            fallback_error TEXT,
+            kline_latest_date TEXT,
+            quote_status TEXT DEFAULT 'not_requested',
+            quote_error TEXT,
+            started_at TEXT,
+            finished_at TEXT,
+            updated_at TEXT DEFAULT (datetime('now')),
+            PRIMARY KEY (task_id, code),
+            FOREIGN KEY (task_id) REFERENCES scan_tasks(id)
+        )
+    ''')
+    existing = {d[1] for d in conn.execute("PRAGMA table_info(task_stocks)").fetchall()}
+    columns = {
+        "market": "TEXT",
+        "status": "TEXT DEFAULT 'pending'",
+        "status_reason": "TEXT",
+        "error_detail": "TEXT",
+        "primary_source": "TEXT",
+        "fallback_source": "TEXT",
+        "primary_attempts": "INTEGER DEFAULT 0",
+        "fallback_attempts": "INTEGER DEFAULT 0",
+        "primary_error": "TEXT",
+        "fallback_error": "TEXT",
+        "kline_latest_date": "TEXT",
+        "quote_status": "TEXT DEFAULT 'not_requested'",
+        "quote_error": "TEXT",
+        "started_at": "TEXT",
+        "finished_at": "TEXT",
+        "updated_at": "TEXT",
+    }
+    for name, typ in columns.items():
+        if name not in existing:
+            conn.execute(f"ALTER TABLE task_stocks ADD COLUMN {name} {typ}")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_task_stocks_task_status ON task_stocks(task_id, status)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_task_stocks_task_idx ON task_stocks(task_id, idx)")
+
+
+
+def _dedupe_candidates_before_unique_index(conn: sqlite3.Connection):
+    """Keep the newest row for each task/code before adding a unique index."""
+    conn.execute('''
+        DELETE FROM candidates
+        WHERE id NOT IN (
+            SELECT MAX(id)
+            FROM candidates
+            GROUP BY task_id, code
+        )
+    ''')
 
 
 def get_conn() -> sqlite3.Connection:
@@ -213,12 +311,17 @@ def get_ohlc_latest_date(code: str) -> str | None:
 
 # ====== Scan Tasks ======
 
-def create_scan_task(task_id: str, started_at: str, total_stocks: int = 0) -> int:
+def create_scan_task(task_id: str, started_at: str, total_stocks: int = 0,
+                     stock_pool_source: str = None, stock_pool_error: str = None,
+                     retry_mode: str = "full") -> int:
     """Insert a new scan task. Returns row id."""
     conn = get_conn()
     conn.execute(
-        "INSERT INTO scan_tasks (id, started_at, status, total_stocks) VALUES (?, ?, 'running', ?)",
-        (task_id, started_at, total_stocks)
+        """INSERT INTO scan_tasks
+           (id, started_at, status, total_stocks, stock_pool_source,
+            stock_pool_error, retry_mode, data_fresh_policy)
+           VALUES (?, ?, 'running', ?, ?, ?, ?, 'force_refresh')""",
+        (task_id, started_at, total_stocks, stock_pool_source, stock_pool_error, retry_mode),
     )
     conn.commit()
     return conn.execute("SELECT last_insert_rowid()").fetchone()[0]
@@ -269,40 +372,155 @@ def get_interrupted_task() -> dict | None:
     return {"id": row[0], "scanned": row[1], "total_stocks": row[2]}
 
 
-def save_task_stocks(task_id: str, stocks: list):
-    """Save stock pool for a task (for resume support)."""
+def save_task_stocks(task_id: str, stocks: list[dict]):
+    """Save the complete stock list for a scan task."""
     conn = get_conn()
     conn.execute("DELETE FROM task_stocks WHERE task_id = ?", (task_id,))
     conn.executemany(
-        "INSERT INTO task_stocks (task_id, idx, code, name, scanned) VALUES (?, ?, ?, ?, 0)",
-        [(task_id, i, s["code"], s["name"]) for i, s in enumerate(stocks)]
+        """INSERT INTO task_stocks (task_id, idx, code, name, market, status)
+           VALUES (?, ?, ?, ?, ?, 'pending')""",
+        [(task_id, i, s["code"], s.get("name", ""), s.get("market", "")) for i, s in enumerate(stocks)]
+    )
+    conn.execute("UPDATE scan_tasks SET total_stocks=? WHERE id=?", (len(stocks), task_id))
+    conn.commit()
+
+
+def update_task_stock(task_id: str, code: str, **fields):
+    """Update fields for one task stock row."""
+    allowed = {
+        "status", "status_reason", "error_detail", "primary_source", "fallback_source",
+        "primary_attempts", "fallback_attempts", "primary_error", "fallback_error",
+        "kline_latest_date", "quote_status", "quote_error", "started_at", "finished_at",
+    }
+    updates = {k: v for k, v in fields.items() if k in allowed}
+    if not updates:
+        return
+    updates["updated_at"] = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    assignments = ", ".join(f"{k}=?" for k in updates)
+    values = list(updates.values()) + [task_id, code]
+    conn = get_conn()
+    conn.execute(f"UPDATE task_stocks SET {assignments} WHERE task_id=? AND code=?", values)
+    conn.commit()
+
+
+def get_task_stocks(task_id: str, status: str = None, limit: int = 100, offset: int = 0) -> list[dict]:
+    """Return tracked stocks for a task, optionally filtered by status."""
+    conn = get_conn()
+    if status:
+        rows = conn.execute(
+            "SELECT * FROM task_stocks WHERE task_id=? AND status=? ORDER BY idx LIMIT ? OFFSET ?",
+            (task_id, status, limit, offset),
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            "SELECT * FROM task_stocks WHERE task_id=? ORDER BY idx LIMIT ? OFFSET ?",
+            (task_id, limit, offset),
+        ).fetchall()
+    columns = [d[1] for d in conn.execute("PRAGMA table_info(task_stocks)").fetchall()]
+    return [dict(zip(columns, row)) for row in rows]
+
+
+def get_pending_stocks(task_id: str, from_idx: int = 0) -> list[dict]:
+    """Get pending stocks for a resumed task."""
+    conn = get_conn()
+    rows = conn.execute(
+        """SELECT code, name, market FROM task_stocks
+           WHERE task_id=? AND idx>=? AND status IN ('pending', 'fetching')
+           ORDER BY idx""",
+        (task_id, from_idx),
+    ).fetchall()
+    return [{"code": r[0], "name": r[1], "market": r[2]} for r in rows]
+
+
+def get_failed_task_stocks(task_id: str) -> list[dict]:
+    """Return failed stocks for retry."""
+    return get_task_stocks(task_id, status="failed", limit=100000, offset=0)
+
+
+def reset_failed_task_stocks(task_id: str):
+    """Move failed stocks back to pending before a retry run."""
+    conn = get_conn()
+    conn.execute(
+        """UPDATE task_stocks
+           SET status='pending', status_reason=NULL, error_detail=NULL,
+               primary_attempts=0, fallback_attempts=0,
+               primary_error=NULL, fallback_error=NULL,
+               quote_status='not_requested', quote_error=NULL,
+               updated_at=datetime('now')
+           WHERE task_id=? AND status='failed'""",
+        (task_id,),
     )
     conn.commit()
 
 
-def get_pending_stocks(task_id: str, from_idx: int = 0) -> list[dict]:
-    """Get remaining stocks to scan for a resumed task."""
+def summarize_task_stocks(task_id: str) -> dict:
+    """Count task stocks by status."""
     conn = get_conn()
+    total = conn.execute("SELECT COUNT(*) FROM task_stocks WHERE task_id=?", (task_id,)).fetchone()[0]
     rows = conn.execute(
-        "SELECT code, name FROM task_stocks WHERE task_id = ? AND idx >= ? ORDER BY idx",
-        (task_id, from_idx)
+        "SELECT status, COUNT(*) FROM task_stocks WHERE task_id=? GROUP BY status",
+        (task_id,),
     ).fetchall()
-    return [{"code": r[0], "name": r[1]} for r in rows]
+    counts = {r[0]: r[1] for r in rows}
+    return {
+        "total_stocks": total,
+        "pending": counts.get("pending", 0),
+        "fetching": counts.get("fetching", 0),
+        "scanned": counts.get("scanned", 0),
+        "skipped": counts.get("skipped", 0),
+        "failed": counts.get("failed", 0),
+        "candidate": counts.get("candidate", 0),
+    }
+
+
+def refresh_scan_task_counts(task_id: str) -> dict:
+    """Persist scan task aggregate counts from task_stocks."""
+    s = summarize_task_stocks(task_id)
+    processed = s["scanned"] + s["skipped"] + s["failed"] + s["candidate"]
+    candidates_count = s["candidate"]
+    latest_row = get_conn().execute(
+        "SELECT MAX(kline_latest_date) FROM task_stocks WHERE task_id=?",
+        (task_id,),
+    ).fetchone()
+    latest_trade_date = latest_row[0] if latest_row else None
+    conn = get_conn()
+    conn.execute(
+        """UPDATE scan_tasks
+           SET total_stocks=?, scanned=?, skipped=?, failed_count=?,
+               success_count=?, candidates_count=?, latest_trade_date=?
+           WHERE id=?""",
+        (
+            s["total_stocks"], processed, s["skipped"], s["failed"],
+            s["scanned"] + s["candidate"], candidates_count, latest_trade_date, task_id,
+        ),
+    )
+    conn.commit()
+    return {
+        **s,
+        "processed": processed,
+        "success_count": s["scanned"] + s["candidate"],
+        "failed_count": s["failed"],
+        "candidates_count": candidates_count,
+        "latest_trade_date": latest_trade_date,
+    }
 
 
 def get_scan_tasks() -> list[dict]:
     """Get all scan tasks, most recent first."""
     conn = get_conn()
     rows = conn.execute(
-        "SELECT id, started_at, finished_at, status, total_stocks, scanned, skipped, "
-        "candidates_count, elapsed_seconds FROM scan_tasks ORDER BY started_at DESC"
+        """SELECT id, started_at, finished_at, status, total_stocks, scanned, skipped,
+                  candidates_count, elapsed_seconds, failed_count, stock_pool_source,
+                  latest_trade_date
+           FROM scan_tasks ORDER BY started_at DESC"""
     ).fetchall()
     return [
         {"id": r[0], "date": r[1] or "", "finished_at": r[2],
-         "running": r[3] == 'running', "scope": f"全市场 · {r[4]}只",
+         "running": r[3] == 'running', "status": r[3], "scope": f"全市场 · {r[4]}只",
          "total_stocks": r[4], "scanned": r[5], "total": r[4],
-         "candidates": r[7], "elapsed_seconds": r[8],
-         "duration": f"{r[8]:.0f}s" if r[8] is not None else None}
+         "skipped": r[6], "candidates": r[7], "elapsed_seconds": r[8],
+         "duration": f"{r[8]:.0f}s" if r[8] is not None else None,
+         "failed": r[9], "stock_pool_source": r[10], "latest_trade_date": r[11]}
         for r in rows
     ]
 
@@ -364,9 +582,11 @@ def upsert_candidate(task_id: str, d: dict):
         d.get("market_status", ""),
         d.get("market_position_advice", ""),
     )
-    placeholders = ", ".join("?" for _ in columns)
+    value_marks = ", ".join("?" for _ in columns)
+    update_assignments = ", ".join(f"{c}=excluded.{c}" for c in columns if c not in ("task_id", "code"))
     conn.execute(
-        f"INSERT OR REPLACE INTO candidates ({', '.join(columns)}) VALUES ({placeholders})",
+        f"""INSERT INTO candidates ({', '.join(columns)}) VALUES ({value_marks})
+            ON CONFLICT(task_id, code) DO UPDATE SET {update_assignments}""",
         values,
     )
     conn.commit()
@@ -440,9 +660,11 @@ def save_candidates(task_id: str, candidates: list, strong: int = 80, medium: in
         "entry_zone_low", "entry_zone_high", "pivot", "stop_loss", "target_1", "target_2",
         "market_status", "market_position_advice",
     ]
-    placeholders = ", ".join("?" for _ in columns)
+    value_marks = ", ".join("?" for _ in columns)
+    update_assignments = ", ".join(f"{c}=excluded.{c}" for c in columns if c not in ("task_id", "code"))
     conn.executemany(
-        f"INSERT OR REPLACE INTO candidates ({', '.join(columns)}) VALUES ({placeholders})",
+        f"""INSERT INTO candidates ({', '.join(columns)}) VALUES ({value_marks})
+            ON CONFLICT(task_id, code) DO UPDATE SET {update_assignments}""",
         rows,
     )
     conn.commit()
