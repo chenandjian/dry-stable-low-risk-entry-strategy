@@ -32,13 +32,14 @@ class FetchResult:
     from_cache: bool = False
 
 
-def scan_all(config: dict, progress_callback=None, resume_task_id: str = None) -> dict:
+def scan_all(config: dict, progress_callback=None, resume_task_id: str = None, task_id: str = None) -> dict:
     """双线程全市场扫描。
 
     Args:
         config: 完整配置
         progress_callback: 可选进度回调 fn(stage, current, total, detail)
         resume_task_id: 中断任务 ID，恢复时跳过已扫股票
+        task_id: 扫描任务 ID，用于更新 task_stocks 跟踪
 
     Returns:
         {"candidates": [...], "stats": {...}, "task_id": "..."}
@@ -57,12 +58,14 @@ def scan_all(config: dict, progress_callback=None, resume_task_id: str = None) -
         if info:
             start_offset = info.get("scanned", 0)
             stocks = db.get_pending_stocks(resume_task_id, from_idx=start_offset)
+    if task_id is None:
+        task_id = resume_task_id or __import__('time').strftime("%Y%m%d-%H%M%S")
+
     if not stocks:
         stocks = get_a_stock_pool(config)
         start_offset = 0
         # 保存股票列表供续扫
         if not resume_task_id:
-            task_id = __import__('time').strftime("%Y%m%d-%H%M%S")
             db.save_task_stocks(task_id, stocks)
 
     stock_queue = Queue()
@@ -74,7 +77,10 @@ def scan_all(config: dict, progress_callback=None, resume_task_id: str = None) -
     candidate_lock = threading.Lock()
     scanned_count = [0]
     skip_count = [0]
+    failed_count = [0]
     stats_lock = threading.Lock()
+    busy_retries_by_code = {}
+    busy_retry_lock = threading.Lock()
 
     # Merge config sections with handle key prefixing
     cup_cfg = config.get("cup", {})
@@ -84,6 +90,8 @@ def scan_all(config: dict, progress_callback=None, resume_task_id: str = None) -
     pattern_cfg = {**cup_cfg, **handle_prefixed, **breakout_cfg}
     liquidity_cfg = config.get("liquidity", {})
     scoring_cfg = config.get("scoring", {})
+    max_busy_retries = config.get("data", {}).get("source_busy_max_retries", 3)
+    worker_count = config.get("data", {}).get("worker_count", 2)
     market_data = fetch_market_index_daily()
 
     start_time = time.time()
@@ -108,11 +116,36 @@ def scan_all(config: dict, progress_callback=None, resume_task_id: str = None) -
                 data = fetch_result.data
                 if data is None:
                     if _is_transient_source_busy(fetch_result):
-                        stock_queue.put(stock)
-                        time.sleep(0.1)
+                        with busy_retry_lock:
+                            busy_count = busy_retries_by_code.get(code, 0) + 1
+                            busy_retries_by_code[code] = busy_count
+                        if busy_count <= max_busy_retries:
+                            stock_queue.put(stock)
+                            time.sleep(0.1)
+                            continue
+                        db.update_task_stock(
+                            task_id,
+                            code,
+                            status="failed",
+                            status_reason="数据源忙，超过重试次数",
+                            primary_source=fetch_result.primary_source,
+                            fallback_source=fetch_result.fallback_source,
+                            primary_attempts=fetch_result.primary_attempts,
+                            fallback_attempts=fetch_result.fallback_attempts,
+                            primary_error=fetch_result.primary_error,
+                            fallback_error=fetch_result.fallback_error,
+                        )
+                        db.refresh_scan_task_counts(task_id)
+                        with stats_lock:
+                            failed_count[0] += 1
+                            skip_count[0] += 1
+                        with busy_retry_lock:
+                            busy_retries_by_code.pop(code, None)
                         continue
                     with stats_lock:
                         skip_count[0] += 1
+                    with busy_retry_lock:
+                        busy_retries_by_code.pop(code, None)
                     continue
 
                 # 上市天数过滤（日线数据不足即视为新股）
@@ -189,6 +222,8 @@ def scan_all(config: dict, progress_callback=None, resume_task_id: str = None) -
 
                 with stats_lock:
                     scanned_count[0] += 1
+                with busy_retry_lock:
+                    busy_retries_by_code.pop(code, None)
 
                 if progress_callback:
                     progress_callback("scanning", scanned_count[0], len(stocks),
@@ -198,16 +233,20 @@ def scan_all(config: dict, progress_callback=None, resume_task_id: str = None) -
                 logger.error(f"Error scanning {code}: {e}")
                 with stats_lock:
                     skip_count[0] += 1
+                with busy_retry_lock:
+                    busy_retries_by_code.pop(code, None)
             finally:
                 mgr.release(ds)
 
-    # 启动双线程
-    t1 = threading.Thread(target=worker, args=("t1",), daemon=True)
-    t2 = threading.Thread(target=worker, args=("t2",), daemon=True)
-    t1.start()
-    t2.start()
-    t1.join()
-    t2.join()
+    # 启动扫描线程
+    threads = [
+        threading.Thread(target=worker, args=(f"t{i+1}",), daemon=True)
+        for i in range(max(1, worker_count))
+    ]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
 
     elapsed = time.time() - start_time
 
@@ -220,11 +259,12 @@ def scan_all(config: dict, progress_callback=None, resume_task_id: str = None) -
             "total_stocks": len(stocks),
             "scanned": scanned_count[0],
             "skipped": skip_count[0],
+            "failed": failed_count[0],
             "candidates_found": len(candidates),
             "elapsed_seconds": round(elapsed, 1),
             "speed": round(scanned_count[0] / elapsed, 1) if elapsed > 0 else 0,
         },
-        "task_id": time.strftime("%Y%m%d-%H%M%S"),
+        "task_id": task_id,
     }
 
 

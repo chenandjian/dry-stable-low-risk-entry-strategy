@@ -80,7 +80,7 @@ def test_scan_all_requeues_stock_after_transient_source_busy(monkeypatch, tmp_pa
 
     def fake_fetch_with_retry(code, ds, mgr=None):
         attempts['count'] += 1
-        FakeScanManager.events.append(f'fetch:{attempts['count']}')
+        FakeScanManager.events.append(f"fetch:{attempts['count']}")
         if attempts['count'] == 1:
             return engine.FetchResult(
                 data=None,
@@ -119,6 +119,72 @@ def test_scan_all_requeues_stock_after_transient_source_busy(monkeypatch, tmp_pa
     assert result['stats']['scanned'] == 1
     assert result['stats']['skipped'] == 0
     assert result['stats']['candidates_found'] == 0
+    assert sleep_calls == [0.1]
+    assert FakeScanManager.events == [
+        'acquire',
+        'fetch:1',
+        'release:tencent',
+        'acquire',
+        'fetch:2',
+        'release:tencent',
+    ]
+
+
+def test_scan_all_stops_requeue_after_busy_retry_budget(monkeypatch, tmp_path):
+    db_path = tmp_path / 'cuphandle.db'
+    config = {
+        'data': {'database_path': str(db_path), 'source_busy_max_retries': 1},
+        'liquidity': {'enabled': False, 'min_listing_days': 250},
+        'scoring': {'medium_threshold': 70},
+    }
+    stock = {'code': '600000', 'name': 'PF Bank'}
+    attempts = {'count': 0}
+    sleep_calls = []
+    FakeScanManager.events = []
+
+    db.init_db(str(db_path))
+    db.create_scan_task('task-1', '2026-06-04 09:30:00', total_stocks=0)
+
+    def fake_fetch_with_retry(code, ds, mgr=None):
+        attempts['count'] += 1
+        FakeScanManager.events.append(f"fetch:{attempts['count']}")
+        return engine.FetchResult(
+            data=None,
+            primary_source=ds,
+            fallback_source='sina' if ds == 'tencent' else 'tencent',
+            primary_attempts=2,
+            fallback_attempts=0,
+            primary_error='data source busy',
+            fallback_error='data source busy',
+        )
+
+    monkeypatch.setattr(engine, 'DataSourceManager', FakeScanManager)
+    monkeypatch.setattr(engine, '_fetch_with_retry', fake_fetch_with_retry)
+    monkeypatch.setattr(engine.threading, 'Thread', ImmediateThread)
+    monkeypatch.setattr(engine.time, 'sleep', lambda seconds: sleep_calls.append(seconds))
+    monkeypatch.setattr(stock_pool, 'get_a_stock_pool', lambda config: [stock.copy()])
+    monkeypatch.setattr(engine, 'fetch_market_index_daily', lambda: [])
+
+    result = engine.scan_all(config, task_id='task-1')
+
+    failed_rows = db.get_task_stocks('task-1', status='failed', limit=10, offset=0)
+
+    assert attempts['count'] == 2
+    assert result['task_id'] == 'task-1'
+    assert result['stats']['scanned'] == 0
+    assert result['stats']['skipped'] == 1
+    assert result['stats']['failed'] == 1
+    assert result['stats']['candidates_found'] == 0
+    assert len(failed_rows) == 1
+    assert failed_rows[0]['code'] == '600000'
+    assert failed_rows[0]['status_reason'] == '数据源忙，超过重试次数'
+    assert failed_rows[0]['primary_source'] == 'tencent'
+    assert failed_rows[0]['fallback_source'] == 'sina'
+    assert failed_rows[0]['primary_attempts'] == 2
+    assert failed_rows[0]['fallback_attempts'] == 0
+    assert failed_rows[0]['primary_error'] == 'data source busy'
+    assert failed_rows[0]['fallback_error'] == 'data source busy'
+    assert db.get_scan_tasks()[0]['failed'] == 1
     assert sleep_calls == [0.1]
     assert FakeScanManager.events == [
         'acquire',
