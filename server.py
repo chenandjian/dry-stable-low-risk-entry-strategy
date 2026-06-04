@@ -451,6 +451,7 @@ async def get_candidate(code: str):
         trade_plan = dry.get("trade_plan", {})
 
     return {
+        "task_id": c.get("task_id", ""),
         "code": c.get("code", ""),
         "name": c.get("name", ""),
         "score": c.get("score", 0),

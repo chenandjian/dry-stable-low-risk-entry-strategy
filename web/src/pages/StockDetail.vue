@@ -199,7 +199,7 @@ function calcRSI(data, period) {
 
 const route = useRoute()
 const router = useRouter()
-const { getCandidate, getCandidates, getScanTasks } = useApi()
+const { getCandidate, getCandidates } = useApi()
 
 const stock = ref({})
 const score = ref(0)
@@ -219,10 +219,25 @@ async function loadStock(code) {
   }
 }
 
+async function loadWatchlist() {
+  const taskId = stock.value.task_id
+  const cands = taskId
+    ? await getCandidates({ task_id: taskId })
+    : await getCandidates()
+  watchlist.value = (cands.candidates || []).map(c => ({
+    code: c.code, name: c.name, score: c.score,
+    is_breakout: c.is_breakout, is_volume_breakout: c.is_volume_breakout,
+    breakout_price: c.breakout_price, latest_close: c.latest_close,
+    vol_multiplier: c.vol_multiplier,
+    dry_stable_verdict: c.dry_stable_verdict,
+  }))
+}
+
 // Watch for route param changes (e.g., /stock/000001 -> /stock/000002)
 watch(() => route.params.code, async (newCode) => {
   if (newCode) {
     await loadStock(newCode)
+    await loadWatchlist()
     await nextTick()
     await initChart()
   }
@@ -469,21 +484,9 @@ onMounted(async () => {
   const code = route.params.code
   if (code) await loadStock(code)
 
-  // Load watchlist from latest completed task
+  // Load watchlist from same task as current stock
   try {
-    const taskData = await getScanTasks()
-    const tasks = (taskData.tasks || []).filter(t => !t.running)
-    const latestCompleted = tasks.find(t => t.status === 'completed')
-    const cands = latestCompleted
-      ? await getCandidates({ task_id: latestCompleted.id })
-      : await getCandidates()
-    watchlist.value = (cands.candidates || []).map(c => ({
-      code: c.code, name: c.name, score: c.score,
-      is_breakout: c.is_breakout, is_volume_breakout: c.is_volume_breakout,
-      breakout_price: c.breakout_price, latest_close: c.latest_close,
-      vol_multiplier: c.vol_multiplier,
-      dry_stable_verdict: c.dry_stable_verdict,
-    }))
+    await loadWatchlist()
   } catch (e) {
     console.error('[StockDetail] Failed to load watchlist:', e)
   }
