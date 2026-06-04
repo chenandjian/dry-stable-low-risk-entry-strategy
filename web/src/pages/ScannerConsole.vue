@@ -97,7 +97,7 @@ import DiscoveryItem from '../components/DiscoveryItem.vue'
 import ScanEngine from '../components/ScanEngine.vue'
 
 const router = useRouter()
-const { startScan, getScanStatus, getCandidates, getTaskStocks, retryFailedStocks } = useApi()
+const { startScan, stopScan, getScanStatus, getCandidates, getTaskStocks, retryFailedStocks } = useApi()
 
 // Market status & clock
 const currentTime = ref('')
@@ -205,8 +205,10 @@ async function handleStartScan() {
 }
 
 async function handleStopScan() {
+  await stopScan()
   scanning.value = false
   if (pollTimer) clearInterval(pollTimer)
+  addLog('info', '扫描已停止')
 }
 
 function applyStats(status) {

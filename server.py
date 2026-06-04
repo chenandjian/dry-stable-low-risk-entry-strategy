@@ -289,6 +289,25 @@ async def start_scan():
     }
 
 
+@app.post("/api/scan/stop")
+async def stop_scan():
+    """Stop the currently running scan."""
+    if not _running["running"]:
+        return {"status": "no_scan_running"}
+    _running["stop_requested"] = True
+    # Mark task as cancelled
+    task_id = _running.get("task_id")
+    if task_id:
+        conn = db.get_conn()
+        conn.execute(
+            "UPDATE scan_tasks SET status='cancelled', error='User stopped' WHERE id=?",
+            (task_id,),
+        )
+        conn.commit()
+    _clear_running()
+    return {"status": "stopped", "task_id": task_id}
+
+
 @app.get("/api/scan/status")
 async def scan_status():
     if _running["running"]:

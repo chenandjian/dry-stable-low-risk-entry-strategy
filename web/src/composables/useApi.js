@@ -7,6 +7,11 @@ export function useApi() {
     return { ...body, ok: res.ok, statusCode: res.status }
   }
 
+  async function stopScan() {
+    const res = await fetch(`${API_BASE}/scan/stop`, { method: 'POST' })
+    return res.json()
+  }
+
   async function getScanStatus() {
     const res = await fetch(`${API_BASE}/scan/status`)
     return res.json()
@@ -62,7 +67,7 @@ export function useApi() {
   }
 
   return {
-    startScan, getScanStatus, getCandidates, getCandidate, getScanTasks,
+    startScan, stopScan, getScanStatus, getCandidates, getCandidate, getScanTasks,
     getTaskStocks, retryFailedStocks, getConfig, updateConfig,
   }
 }
