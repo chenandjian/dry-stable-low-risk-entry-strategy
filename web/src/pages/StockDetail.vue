@@ -151,7 +151,7 @@ import { useApi } from '../composables/useApi.js'
 import SignalBadge from '../components/SignalBadge.vue'
 import ScoreBar from '../components/ScoreBar.vue'
 import RiskBox from '../components/RiskBox.vue'
-import { createChart, CandlestickSeries, LineSeries, HistogramSeries } from 'lightweight-charts'
+import { createChart, CandlestickSeries, LineSeries, HistogramSeries, createSeriesMarkers } from 'lightweight-charts'
 
 // --- Helper: MA calculation ---
 function calcMA(data, period) {
@@ -482,7 +482,7 @@ async function initChart() {
   if (s.cup_low_date) markers.push({ time: s.cup_low_date, position: 'belowBar', color: '#EF4444', shape: 'arrowUp', text: '杯底' })
   if (s.right_high_date) markers.push({ time: s.right_high_date, position: 'aboveBar', color: '#F59E0B', shape: 'arrowDown', text: '右杯口' })
   if (s.handle_low_date) markers.push({ time: s.handle_low_date, position: 'belowBar', color: '#4F7DFF', shape: 'arrowUp', text: '柄低' })
-  candleSeries.setMarkers(markers.filter(m => m.time))
+  if (markers.length) createSeriesMarkers(candleSeries, markers.filter(m => m.time))
 
   chart.timeScale().fitContent()
 }
