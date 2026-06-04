@@ -15,6 +15,7 @@
           </SignalBadge>
           <SignalBadge type="breakout" v-if="stock.is_breakout">◉ 已突破</SignalBadge>
           <SignalBadge type="volume" v-if="stock.is_volume_breakout">放量确认</SignalBadge>
+          <SignalBadge type="medium" v-if="stock.pattern_type">{{ stock.pattern_type }}</SignalBadge>
           <SignalBadge :type="dryVerdictType" v-if="stock.dry_stable_verdict">{{ stock.dry_stable_verdict }}</SignalBadge>
         </div>
       </div>
@@ -23,6 +24,7 @@
       <div class="kv-list">
         <div class="kv"><span class="k">量干 / 价稳</span><span class="v blue">{{ stock.volume_dry_score ?? '--' }} / {{ stock.price_stable_score ?? '--' }}</span></div>
         <div class="kv"><span class="k">形态分</span><span class="v">{{ stock.pattern_score_20 ?? '--' }} / 20</span></div>
+        <div class="kv"><span class="k">形态类型</span><span class="v">{{ stock.pattern_type || '--' }}</span></div>
         <div class="kv"><span class="k">大盘环境</span><span class="v" :class="marketClass">{{ stock.market_status || '一般' }}</span></div>
         <div class="kv"><span class="k">建议仓位</span><span class="v">{{ stock.position_advice || '--' }}</span></div>
       </div>
@@ -69,13 +71,20 @@
         <div class="chart-left">
         </div>
         <div class="chart-right">
-          <span>{{ stock.cup_duration || '--' }}d 杯体 · 深度 {{ stock.cup_depth_pct?.toFixed(1) }}%</span>
+          <span>{{ structureSummary }}</span>
         </div>
       </div>
       <div ref="chartRef" class="chart-body"></div>
       <div class="structure-readout">
-        <div class="structure-title">杯柄结构时间线</div>
-        <div class="structure-grid">
+        <div class="structure-title">{{ isVcp ? 'VCP 收缩结构' : '杯柄结构时间线' }}</div>
+        <div class="structure-grid" v-if="isVcp">
+          <div class="sc"><div class="phase">低吸区间</div><div class="val">{{ entryZone }}</div><div class="vrd blue">缩量企稳观察</div></div>
+          <div class="sc"><div class="phase">Pivot</div><div class="val">{{ price(stock.pivot || stock.breakout_price) }}</div><div class="vrd gold">突破参考</div></div>
+          <div class="sc"><div class="phase">止损</div><div class="val">{{ price(stopLoss) }}</div><div class="vrd blue">结构失效线</div></div>
+          <div class="sc"><div class="phase">目标价</div><div class="val">{{ price(target1) }}</div><div class="vrd blue">第一目标</div></div>
+          <div class="sc"><div class="phase">干稳评级</div><div class="val">{{ stock.dry_stable_verdict || '--' }}</div><div class="vrd" :class="stock.dry_stable_verdict === '可低吸' ? 'gold' : 'blue'">{{ stock.pattern_score_20 ?? '--' }}/20</div></div>
+        </div>
+        <div class="structure-grid" v-else>
           <div class="sc"><div class="phase">① 前置上涨</div><div class="val">{{ stock.left_high_price?.toFixed(2) }}</div><div class="vrd blue">左杯口高点</div></div>
           <div class="sc"><div class="phase">② 杯体下降</div><div class="val">{{ stock.cup_depth_pct?.toFixed(1) }}%</div><div class="vrd gold">深度{{ stock.cup_depth_pct >= 12 && stock.cup_depth_pct <= 33 ? '合理' : '偏离' }}</div></div>
           <div class="sc"><div class="phase">③ 杯底整理</div><div class="val">{{ stock.cup_duration }}d</div><div class="vrd blue">杯体{{ stock.cup_duration >= 50 ? '成熟' : '偏短' }}</div></div>
@@ -172,6 +181,13 @@ const marketClass = computed(() => {
   if (stock.value.market_status === '良好') return 'red'
   if (stock.value.market_status === '较差') return 'green'
   return 'orange'
+})
+const isVcp = computed(() => stock.value.key_pattern_type === 'vcp')
+const structureSummary = computed(() => {
+  if (isVcp.value) return `VCP · ${stock.value.pattern_type || '收缩结构'}`
+  const duration = stock.value.cup_duration || '--'
+  const depth = stock.value.cup_depth_pct != null ? stock.value.cup_depth_pct.toFixed(1) : '--'
+  return `${duration}d 杯体 · 深度 ${depth}%`
 })
 
 function price(v) {

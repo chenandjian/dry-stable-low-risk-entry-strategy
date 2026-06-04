@@ -154,6 +154,8 @@ def scan_all(config: dict, progress_callback=None, resume_task_id: str = None) -
                                                "volume_dry_score": dry_stable["volume_dry"]["score"],
                                                "price_stable_score": dry_stable["price_stable"]["score"],
                                                "pattern_score_20": dry_stable["pattern_score"]["score"],
+                                               "pattern_type": dry_stable["pattern_score"]["type"],
+                                               "key_pattern_type": dry_stable["pattern_score"]["key_pattern_type"],
                                                "risk_percent": dry_stable["risk_reward"]["risk_percent"],
                                                "rr1": dry_stable["risk_reward"]["rr1"],
                                                "position_advice": dry_stable["risk_reward"]["position_advice"],

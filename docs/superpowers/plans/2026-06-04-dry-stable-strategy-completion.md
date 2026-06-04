@@ -155,7 +155,7 @@ git commit -m "Connect market index environment data"
 - Modify: `web/src/pages/ResultsRadar.vue`
 - Test: `tests/test_db_strategy_fields.py`
 
-- [ ] **Step 1: Persist and return pattern type**
+- [x] **Step 1: Persist and return pattern type**
 
 Extend DB/API fields with `pattern_type` and `key_pattern_type`, sourced from `dry_stable["pattern_score"]`.
 
@@ -173,7 +173,7 @@ pattern.get("type", ""),
 pattern.get("key_pattern_type", ""),
 ```
 
-- [ ] **Step 2: Add DB assertion**
+- [x] **Step 2: Add DB assertion**
 
 Update `tests/test_db_strategy_fields.py`:
 
@@ -182,7 +182,7 @@ assert saved["pattern_type"] == "较成熟VCP"
 assert saved["key_pattern_type"] == "vcp"
 ```
 
-- [ ] **Step 3: Update API responses**
+- [x] **Step 3: Update API responses**
 
 Add to `server.py` candidate list and detail responses:
 
@@ -191,7 +191,7 @@ Add to `server.py` candidate list and detail responses:
 "key_pattern_type": c.get("key_pattern_type", ""),
 ```
 
-- [ ] **Step 4: Update results table**
+- [x] **Step 4: Update results table**
 
 In `web/src/pages/ResultsRadar.vue`, add a compact “形态” column:
 
@@ -200,7 +200,7 @@ In `web/src/pages/ResultsRadar.vue`, add a compact “形态” column:
 <td class="center">{{ c.pattern_type || '--' }}</td>
 ```
 
-- [ ] **Step 5: Update stock detail structure block**
+- [x] **Step 5: Update stock detail structure block**
 
 In `web/src/pages/StockDetail.vue`, conditionally show VCP labels when `stock.key_pattern_type === 'vcp'`:
 
@@ -210,7 +210,7 @@ In `web/src/pages/StockDetail.vue`, conditionally show VCP labels when `stock.ke
 
 For VCP, show `低吸区间 / Pivot / 止损 / 目标价 / 干稳评级` instead of cup-only stages.
 
-- [ ] **Step 6: Verify**
+- [x] **Step 6: Verify**
 
 Run:
 
@@ -221,7 +221,7 @@ npm.cmd run build
 
 Expected: tests pass; build succeeds.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add scanner/db.py server.py tests/test_db_strategy_fields.py web/src/pages/ResultsRadar.vue web/src/pages/StockDetail.vue

@@ -16,7 +16,7 @@ def test_save_candidates_persists_dry_stable_and_market_fields(tmp_path):
             "decision": {"verdict": "可低吸", "summary": "测试摘要"},
             "volume_dry": {"score": 8},
             "price_stable": {"score": 7},
-            "pattern_score": {"score": 15},
+            "pattern_score": {"score": 15, "type": "较成熟VCP", "key_pattern_type": "vcp"},
             "risk_reward": {"risk_percent": 4.2, "rr1": 2.4, "position_advice": "30%-40%"},
             "key_prices": {
                 "entry_zone_low": 10.1,
@@ -38,3 +38,5 @@ def test_save_candidates_persists_dry_stable_and_market_fields(tmp_path):
     assert saved["volume_dry_score"] == 8
     assert saved["market_status"] == "一般"
     assert saved["pivot"] == 11.0
+    assert saved["pattern_type"] == "较成熟VCP"
+    assert saved["key_pattern_type"] == "vcp"

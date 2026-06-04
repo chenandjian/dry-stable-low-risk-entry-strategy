@@ -37,6 +37,7 @@
               <th @click="sortBy = 'code'" class="sortable">代码</th>
               <th @click="sortBy = 'name'" class="sortable">名称</th>
               <th @click="sortBy = 'score'" class="sortable center">形态评分</th>
+              <th class="center">形态</th>
               <th class="center">干稳结论</th>
               <th class="center">量干/价稳</th>
               <th class="right">RR</th>
@@ -64,6 +65,7 @@
               <td class="center">
                 <span class="score-num" :class="scoreColorClass(c.score)">{{ c.score }}</span>
               </td>
+              <td class="center">{{ c.pattern_type || '--' }}</td>
               <td class="center">
                 <SignalBadge :type="verdictType(c)">
                   {{ c.dry_stable_verdict || c.rating || '观察' }}
@@ -96,7 +98,7 @@
               </td>
             </tr>
             <tr v-if="filteredCandidates.length === 0">
-              <td colspan="18" class="empty-row">无符合条件的候选</td>
+              <td colspan="19" class="empty-row">无符合条件的候选</td>
             </tr>
           </tbody>
         </table>
@@ -186,9 +188,10 @@ function distClass(c) {
   return d > 0 ? 'red' : d > -0.05 ? 'orange' : 'muted'
 }
 function exportCSV() {
-  const header = '代码,名称,评分,干稳结论,量干,价稳,RR,仓位,大盘,突破,放量,最新价,Pivot,杯体深度,柄部回撤,杯体天数,放量倍数'
+  const header = '代码,名称,评分,形态,干稳结论,量干,价稳,RR,仓位,大盘,突破,放量,最新价,Pivot,杯体深度,柄部回撤,杯体天数,放量倍数'
   const rows = candidates.value.map(c => [
     c.code, c.name, c.score,
+    c.pattern_type || '',
     c.dry_stable_verdict || '',
     c.volume_dry_score ?? '',
     c.price_stable_score ?? '',

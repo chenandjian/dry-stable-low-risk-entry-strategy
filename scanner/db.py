@@ -86,6 +86,8 @@ def init_db(path: str = "data/cuphandle.db"):
                 volume_dry_score    INTEGER,
                 price_stable_score  INTEGER,
                 pattern_score_20    INTEGER,
+                pattern_type        TEXT,
+                key_pattern_type    TEXT,
                 risk_percent        REAL,
                 rr1                 REAL,
                 position_advice     TEXT,
@@ -115,6 +117,8 @@ def _ensure_candidate_columns(conn: sqlite3.Connection):
         "volume_dry_score": "INTEGER",
         "price_stable_score": "INTEGER",
         "pattern_score_20": "INTEGER",
+        "pattern_type": "TEXT",
+        "key_pattern_type": "TEXT",
         "risk_percent": "REAL",
         "rr1": "REAL",
         "position_advice": "TEXT",
@@ -318,34 +322,36 @@ def upsert_candidate(task_id: str, d: dict):
     """Insert or update a single candidate (for real-time discovery)."""
     conn = get_conn()
     rating = "强候选" if d["score"] >= 80 else "中等候选" if d["score"] >= 70 else "弱候选"
-    conn.execute("""
-        INSERT OR REPLACE INTO candidates (
-            task_id, code, name, score, rating,
-            is_breakout, is_volume_breakout, breakout_price, vol_multiplier,
-            cup_depth_pct, cup_duration, handle_depth_pct, handle_duration,
-            lip_deviation_pct,
-            left_high_price, cup_low_price, right_high_price, handle_low_price,
-            left_high_date, cup_low_date, right_high_date, handle_low_date,
-            latest_close, latest_turnover,
-            dry_stable_verdict, dry_stable_summary,
-            volume_dry_score, price_stable_score, pattern_score_20,
-            risk_percent, rr1, position_advice,
-            entry_zone_low, entry_zone_high, pivot, stop_loss, target_1, target_2
-            , market_status, market_position_advice
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 0, 0, 0, 0, '', '', '', '', ?, 0,
-                  ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    """, (
+    columns = [
+        "task_id", "code", "name", "score", "rating",
+        "is_breakout", "is_volume_breakout", "breakout_price", "vol_multiplier",
+        "cup_depth_pct", "cup_duration", "handle_depth_pct", "handle_duration",
+        "lip_deviation_pct", "left_high_price", "cup_low_price", "right_high_price",
+        "handle_low_price", "left_high_date", "cup_low_date", "right_high_date",
+        "handle_low_date", "latest_close", "latest_turnover",
+        "dry_stable_verdict", "dry_stable_summary",
+        "volume_dry_score", "price_stable_score", "pattern_score_20",
+        "pattern_type", "key_pattern_type",
+        "risk_percent", "rr1", "position_advice",
+        "entry_zone_low", "entry_zone_high", "pivot", "stop_loss", "target_1", "target_2",
+        "market_status", "market_position_advice",
+    ]
+    values = (
         task_id, d["code"], d["name"], d["score"], rating,
         d.get("is_breakout", 0), d.get("is_volume_breakout", 0),
         d.get("breakout_price", 0), d.get("vol_multiplier", 0),
         d.get("cup_depth_pct", 0), d.get("cup_duration", 0),
-        d.get("handle_depth_pct", 0),
+        d.get("handle_depth_pct", 0), 0,
+        0, 0, 0, 0, 0, "", "", "", "",
         d.get("latest_close", 0),
+        0,
         d.get("dry_stable_verdict", ""),
         d.get("dry_stable_summary", ""),
         d.get("volume_dry_score", 0),
         d.get("price_stable_score", 0),
         d.get("pattern_score_20", 0),
+        d.get("pattern_type", ""),
+        d.get("key_pattern_type", ""),
         d.get("risk_percent", 0),
         d.get("rr1", 0),
         d.get("position_advice", ""),
@@ -357,7 +363,12 @@ def upsert_candidate(task_id: str, d: dict):
         d.get("target_2", 0),
         d.get("market_status", ""),
         d.get("market_position_advice", ""),
-    ))
+    )
+    placeholders = ", ".join("?" for _ in columns)
+    conn.execute(
+        f"INSERT OR REPLACE INTO candidates ({', '.join(columns)}) VALUES ({placeholders})",
+        values,
+    )
     conn.commit()
 
 
@@ -401,6 +412,8 @@ def save_candidates(task_id: str, candidates: list, strong: int = 80, medium: in
             volume_dry.get("score", 0),
             price_stable.get("score", 0),
             pattern.get("score", 0),
+            pattern.get("type", ""),
+            pattern.get("key_pattern_type", ""),
             rr.get("risk_percent", 0),
             rr.get("rr1", 0),
             rr.get("position_advice", ""),
@@ -413,25 +426,24 @@ def save_candidates(task_id: str, candidates: list, strong: int = 80, medium: in
             market.get("status", ""),
             market.get("position_advice", ""),
         ))
+    columns = [
+        "task_id", "code", "name", "score", "rating",
+        "is_breakout", "is_volume_breakout", "breakout_price", "vol_multiplier",
+        "cup_depth_pct", "cup_duration", "handle_depth_pct", "handle_duration",
+        "lip_deviation_pct", "left_high_price", "cup_low_price", "right_high_price",
+        "handle_low_price", "left_high_date", "cup_low_date", "right_high_date",
+        "handle_low_date", "latest_close", "latest_turnover",
+        "dry_stable_verdict", "dry_stable_summary",
+        "volume_dry_score", "price_stable_score", "pattern_score_20",
+        "pattern_type", "key_pattern_type",
+        "risk_percent", "rr1", "position_advice",
+        "entry_zone_low", "entry_zone_high", "pivot", "stop_loss", "target_1", "target_2",
+        "market_status", "market_position_advice",
+    ]
+    placeholders = ", ".join("?" for _ in columns)
     conn.executemany(
-        """INSERT OR REPLACE INTO candidates (
-            task_id, code, name, score, rating,
-            is_breakout, is_volume_breakout, breakout_price, vol_multiplier,
-            cup_depth_pct, cup_duration, handle_depth_pct, handle_duration,
-            lip_deviation_pct,
-            left_high_price, cup_low_price, right_high_price, handle_low_price,
-            left_high_date, cup_low_date, right_high_date, handle_low_date,
-            latest_close, latest_turnover,
-            dry_stable_verdict, dry_stable_summary,
-            volume_dry_score, price_stable_score, pattern_score_20,
-            risk_percent, rr1, position_advice,
-            entry_zone_low, entry_zone_high, pivot, stop_loss, target_1, target_2
-            , market_status, market_position_advice
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                  ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                  ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                  ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-        rows
+        f"INSERT OR REPLACE INTO candidates ({', '.join(columns)}) VALUES ({placeholders})",
+        rows,
     )
     conn.commit()
 
