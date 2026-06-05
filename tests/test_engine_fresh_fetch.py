@@ -103,7 +103,15 @@ def test_scan_all_requeues_stock_after_transient_source_busy(monkeypatch, tmp_pa
     monkeypatch.setattr(stock_pool, 'get_a_stock_pool', lambda config: [stock.copy()])
     monkeypatch.setattr(engine, 'fetch_market_index_daily', lambda: [])
     monkeypatch.setattr(engine, 'passes_liquidity_filter', lambda data, cfg: True)
-    monkeypatch.setattr(engine, 'detect_cup_handle', lambda data, cfg: engine.CupHandleResult(found=False))
+    class FakeStrategyEngine:
+        def __init__(self, config):
+            pass
+
+        def evaluate_at(self, data, code='', name='', market_data=None):
+            result = engine.CupHandleResult(found=False, code=code, name=name)
+            return type('Eval', (), {'result': result, 'dry_stable': None})()
+
+    monkeypatch.setattr(engine, 'CupHandleStrategyEngine', FakeStrategyEngine)
     monkeypatch.setattr(
         engine,
         'analyze_dry_stable',
@@ -300,28 +308,33 @@ def test_scan_all_deduplicates_candidates(monkeypatch, tmp_path):
         ),
     )
     monkeypatch.setattr(engine, 'passes_liquidity_filter', lambda data, cfg: True)
-    monkeypatch.setattr(engine, 'detect_cup_handle', lambda data, cfg: engine.CupHandleResult(found=True, score=0))
-    monkeypatch.setattr(engine, 'score_cup_handle_advanced', lambda result, data, scoring_cfg=None: 80)
-    monkeypatch.setattr(
-        engine,
-        'analyze_dry_stable',
-        lambda result, data, market_data=None: {
-            'decision': {'verdict': '可低吸', 'summary': '测试'},
-            'volume_dry': {'score': 8},
-            'price_stable': {'score': 8},
-            'pattern_score': {'score': 16, 'type': '杯柄', 'key_pattern_type': 'cup_handle'},
-            'risk_reward': {'risk_percent': 4.0, 'rr1': 2.0, 'position_advice': '30%'},
-            'key_prices': {
-                'entry_zone_low': 19,
-                'entry_zone_high': 20,
-                'pivot': 21,
-                'stop_loss': 18,
-                'target_1': 24,
-                'target_2': 26,
-            },
-            'market_environment': {'status': '一般', 'position_advice': '轻仓'},
+
+    dry_stable = {
+        'decision': {'verdict': '可低吸', 'summary': '测试'},
+        'volume_dry': {'score': 8},
+        'price_stable': {'score': 8},
+        'pattern_score': {'score': 16, 'type': '杯柄', 'key_pattern_type': 'cup_handle'},
+        'risk_reward': {'risk_percent': 4.0, 'rr1': 2.0, 'position_advice': '30%'},
+        'key_prices': {
+            'entry_zone_low': 19,
+            'entry_zone_high': 20,
+            'pivot': 21,
+            'stop_loss': 18,
+            'target_1': 24,
+            'target_2': 26,
         },
-    )
+        'market_environment': {'status': '一般', 'position_advice': '轻仓'},
+    }
+
+    class FakeStrategyEngine:
+        def __init__(self, config):
+            pass
+
+        def evaluate_at(self, data, code='', name='', market_data=None):
+            result = engine.CupHandleResult(found=True, code=code, name=name, score=80)
+            return type('Eval', (), {'result': result, 'dry_stable': dry_stable})()
+
+    monkeypatch.setattr(engine, 'CupHandleStrategyEngine', FakeStrategyEngine)
 
     result = engine.scan_all(config, task_id='task-1', stocks=stocks, worker_count=1)
     candidate_rows = db.get_task_stocks('task-1', status='candidate')

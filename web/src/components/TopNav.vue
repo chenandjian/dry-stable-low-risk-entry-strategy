@@ -6,6 +6,7 @@
     <div class="topnav-tabs">
       <router-link to="/" class="topnav-tab" active-class="active">机会雷达</router-link>
       <router-link to="/results" class="topnav-tab" active-class="active">候选列表</router-link>
+      <router-link to="/backtest/cup-handle" class="topnav-tab" active-class="active">单股回测</router-link>
       <router-link to="/tasks" class="topnav-tab" active-class="active">任务中心</router-link>
       <router-link to="/config" class="topnav-tab" active-class="active">策略配置</router-link>
     </div>

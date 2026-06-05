@@ -12,6 +12,10 @@ from scanner.engine import scan_all
 from analyzer.dry_stable import analyze_dry_stable
 from scanner.index_source import fetch_market_index_daily
 from scanner.pattern_detector import CupHandleResult
+from scanner.single_stock_backtest import (
+    DataCoverageError,
+    run_single_stock_cuphandle_backtest,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -479,6 +483,38 @@ async def get_candidates(task_id: str = None):
             "vol_multiplier": c.get("vol_multiplier", 0),
         })
     return {"candidates": result, "total": len(result)}
+
+
+@app.post("/api/stock/{code}/backtest/cup-handle")
+async def backtest_cup_handle(code: str, payload: dict):
+    """Run single-stock cup-handle strategy backtest."""
+    config = load_config()
+    db_path = config.get("data", {}).get("database_path", "data/cuphandle.db")
+    db.init_db(db_path)
+    try:
+        specified = payload.get("specifiedHandle") or {}
+        result = run_single_stock_cuphandle_backtest(
+            code,
+            payload.get("startDate", ""),
+            payload.get("endDate", ""),
+            config,
+            handle_start_date=specified.get("startDate"),
+            handle_end_date=specified.get("endDate"),
+        )
+        return result
+    except ValueError as exc:
+        return JSONResponse(
+            {"error": "Invalid request", "message": str(exc)},
+            status_code=400,
+        )
+    except DataCoverageError as exc:
+        return JSONResponse(exc.to_dict(), status_code=422)
+    except Exception as exc:
+        logger.exception("Single stock cup-handle backtest failed")
+        return JSONResponse(
+            {"error": "Backtest failed", "message": str(exc)},
+            status_code=500,
+        )
 
 
 @app.get("/api/stock/{code}/ohlc")

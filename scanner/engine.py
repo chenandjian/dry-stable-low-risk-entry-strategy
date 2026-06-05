@@ -14,10 +14,9 @@ from scanner.sina_source import fetch_sina_daily
 from scanner.tencent_source import fetch_tencent_daily
 from scanner.index_source import fetch_market_index_daily
 from scanner.liquidity_filter import passes_liquidity_filter
-from scanner.pattern_detector import detect_cup_handle
 from scanner.pattern_detector import CupHandleResult
-from scanner.scorer import score_cup_handle_advanced
 from analyzer.dry_stable import analyze_dry_stable
+from scanner.strategy_engine import CupHandleStrategyEngine
 
 logger = logging.getLogger(__name__)
 
@@ -90,15 +89,11 @@ def scan_all(
     busy_retries_by_code = {}
     busy_retry_lock = threading.Lock()
 
-    cup_cfg = config.get("cup", {})
-    handle_cfg = config.get("handle", {})
-    breakout_cfg = config.get("breakout", {})
-    handle_prefixed = {f"handle_{k}": v for k, v in handle_cfg.items()}
-    pattern_cfg = {**cup_cfg, **handle_prefixed, **breakout_cfg}
     liquidity_cfg = config.get("liquidity", {})
     scoring_cfg = config.get("scoring", {})
     daily_sources = config.get("data", {}).get("daily_sources") or DEFAULT_DAILY_SOURCES
     kline_days = config.get("data", {}).get("daily_kline_days") or liquidity_cfg.get("min_listing_days", 250)
+    strategy_engine = CupHandleStrategyEngine(config)
     max_busy_retries = config.get("data", {}).get("source_busy_max_retries", 3)
     market_data = fetch_market_index_daily()
 
@@ -236,13 +231,15 @@ def scan_all(
                         progress_callback("scanning", start_offset + failed_count[0] + skip_count[0] + scanned_count[0], start_offset + len(stocks), f"{code} {stock.get('name', '')}")
                     continue
 
-                result = detect_cup_handle(data, pattern_cfg)
-                if result.found:
-                    result.code = code
-                    result.name = stock.get("name", "")
-                    result.score = score_cup_handle_advanced(result, data, scoring_cfg)
-                    dry_stable = analyze_dry_stable(result, data, market_data=market_data)
-                else:
+                evaluation = strategy_engine.evaluate_at(
+                    data,
+                    code=code,
+                    name=stock.get("name", ""),
+                    market_data=market_data,
+                )
+                result = evaluation.result
+                dry_stable = evaluation.dry_stable
+                if not result.found:
                     result = CupHandleResult(found=False, code=code, name=stock.get("name", ""))
                     dry_stable = analyze_dry_stable(result, data, market_data=market_data)
                     pattern20 = dry_stable["pattern_score"]["score"]

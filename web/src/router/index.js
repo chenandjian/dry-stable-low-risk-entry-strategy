@@ -5,6 +5,8 @@ const routes = [
   { path: '/results', name: 'ResultsRadar', component: () => import('../pages/ResultsRadar.vue') },
   { path: '/tasks', name: 'TaskCenter', component: () => import('../pages/TaskCenter.vue') },
   { path: '/config', name: 'StrategyConfig', component: () => import('../pages/StrategyConfig.vue') },
+  { path: '/backtest/cup-handle', name: 'SingleStockBacktest', component: () => import('../pages/SingleStockBacktest.vue') },
+  { path: '/backtest/cup-handle/:code', name: 'SingleStockBacktestWithCode', component: () => import('../pages/SingleStockBacktest.vue') },
   { path: '/stock/:code', name: 'StockDetail', component: () => import('../pages/StockDetail.vue') },
 ]
 

@@ -18,6 +18,9 @@
           <SignalBadge type="medium" v-if="stock.pattern_type">{{ stock.pattern_type }}</SignalBadge>
           <SignalBadge :type="dryVerdictType" v-if="stock.dry_stable_verdict">{{ stock.dry_stable_verdict }}</SignalBadge>
         </div>
+        <button class="backtest-link" @click="router.push(`/backtest/cup-handle/${stock.code}`)">
+          用该股票回测
+        </button>
       </div>
 
       <div class="section-label">干稳低吸</div>
@@ -574,6 +577,19 @@ onUnmounted(() => {
 .green { color: var(--down-green); }
 .change { font-size: 14px; }
 .tags { display: flex; gap: 6px; margin-top: 10px; flex-wrap: wrap; }
+.backtest-link {
+  margin-top: 10px;
+  width: 100%;
+  border: 1px solid var(--accent);
+  background: rgba(79, 125, 255, 0.12);
+  color: var(--accent);
+  border-radius: 4px;
+  padding: 8px 10px;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
+}
+.backtest-link:hover { background: rgba(79, 125, 255, 0.2); }
 
 .section-label {
   font-size: 11px; font-weight: 600; color: var(--text-muted);

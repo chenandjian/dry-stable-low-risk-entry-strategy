@@ -61,8 +61,19 @@ export function useApi() {
     } catch { return { status: 'error', message: '保存失败' } }
   }
 
+  async function runCupHandleBacktest(code, payload) {
+    const res = await fetch(`${API_BASE}/stock/${code}/backtest/cup-handle`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    })
+    const body = await res.json()
+    return { ...body, ok: res.ok, statusCode: res.status }
+  }
+
   return {
     startScan, getScanStatus, getCandidates, getCandidate, getScanTasks,
     getTaskStocks, retryFailedStocks, getConfig, updateConfig,
+    runCupHandleBacktest,
   }
 }
