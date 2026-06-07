@@ -20,7 +20,7 @@
       <h3 class="section-title">基础参数</h3>
       <div class="param-grid">
         <div class="param">
-          <label title="近20日平均成交额低于此值的股票将被过滤（单位：元）">平均成交额阈值 <span class="unit">万元</span></label>
+          <label title="近20日平均成交额低于此值的股票将被过滤（单位：元）">平均成交额阈值 <span class="unit">元</span></label>
           <input type="number" v-model.number="config.liquidity.min_avg_turnover"
             @input="markDirty" step="1000000" />
           <span class="default">默认 1亿</span>
@@ -55,7 +55,7 @@
             <span class="default">默认 500万</span>
           </div>
           <div class="param">
-            <label title="最近交易日成交额低于此值的股票将被过滤（单位：元）">最新成交额阈值 <span class="unit">万元</span></label>
+            <label title="最近交易日成交额低于此值的股票将被过滤（单位：元）">最新成交额阈值 <span class="unit">元</span></label>
             <input type="number" v-model.number="config.liquidity.min_latest_turnover"
               @input="markDirty" step="1000000" />
             <span class="default">默认 8000万</span>
