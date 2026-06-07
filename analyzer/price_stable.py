@@ -11,17 +11,32 @@ Scoring dimensions (0-10):
 Hard rule: score < 6 → can NOT be "可低吸"
 New low cap: if any close in last 5 days is a new 20-day low → cap at 5
 Increasing amplitude cap: consecutive declining with increasing amplitude → cap at 5
+Support break cap: close below handle_low / MA50 → cap at 5
 """
 
 from dataclasses import dataclass, field
+
+DEFAULT_PS_CFG = {
+    "close_tightness_strong_pct": 3,
+    "close_tightness_normal_pct": 5,
+    "support_break_max_score": 5,
+}
 
 
 @dataclass
 class PriceStableResult:
     total_score: int = 0
+    raw_score: int = 0
     sub_scores: dict = field(default_factory=dict)
     verdict: str = "不建议买入"
     details: list = field(default_factory=list)
+    caps: list = field(default_factory=list)
+    warnings: list = field(default_factory=list)
+    positive_factors: list = field(default_factory=list)
+    reject_reasons: list = field(default_factory=list)
+    # Auxiliary fields
+    close_tightness_5d: float = 0.0
+    close_position_5d_avg: float = 0.0
 
 
 def _avg(seq):
@@ -56,11 +71,17 @@ def _atr(data, n=14):
     return _ma(tr, n)
 
 
-def score_price_stable(data: list[dict]) -> PriceStableResult:
+def score_price_stable(data: list[dict], config: dict | None = None,
+                       handle_low: float = 0) -> PriceStableResult:
     """Calculate Price Stability Score from daily OHLC data.
 
     Requires at least 30 trading days of data.
+
+    Args:
+        config: 来自 config.yaml 的 price_stable 段。
+        handle_low: 柄部低点价格，用于支撑跌破封顶（0 表示不检查）。
     """
+    cfg = {**DEFAULT_PS_CFG, **(config or {})}
     result = PriceStableResult()
 
     if not data or len(data) < 30:
@@ -130,32 +151,18 @@ def score_price_stable(data: list[dict]) -> PriceStableResult:
     result.sub_scores["C_higher_lows"] = score_c
     score += score_c
 
-    # D. Close above key MA/support (max 2 pts)
+    # D. Close above MA20 (max 2 pts) — optimized: count days
     score_d = 0
-    ma10 = _ma(closes, 10)
     ma20 = _ma(closes, 20)
-    key_support = ma20  # use MA20 as key support
-
-    breaches = 0
-    for i in range(n - 5, n):
-        if closes[i] < key_support[i]:
-            # Check if recovered within 2 days
-            breached = True
-            for j in range(i + 1, min(i + 3, n)):
-                if closes[j] >= key_support[j]:
-                    breached = False
-                    break
-            if breached:
-                breaches += 1
-
-    if breaches == 0:
+    above_count = sum(1 for i in range(n - 5, n) if closes[i] >= ma20[i])
+    if above_count >= 4:
         score_d = 2
-        result.details.append("All 5 closes above MA20: +2")
-    elif breaches == 1:
+        result.details.append(f"{above_count}/5 days above MA20: +2")
+    elif above_count >= 3 and closes[-1] >= ma20[-1]:
         score_d = 1
-        result.details.append("1 breach but recovered: +1")
+        result.details.append(f"{above_count}/5 days above MA20, last above: +1")
     else:
-        result.details.append(f"{breaches} breaches: +0")
+        result.details.append(f"{above_count}/5 days above MA20: +0")
     result.sub_scores["D_above_support"] = score_d
     score += score_d
 
@@ -177,26 +184,67 @@ def score_price_stable(data: list[dict]) -> PriceStableResult:
     result.sub_scores["E_atr_declining"] = score_e
     score += score_e
 
-    result.total_score = min(score, 10)
+    result.raw_score = min(score, 10)
+    result.total_score = result.raw_score
 
-    # New 20-day low cap
+    # --- Auxiliary indicators ---
+
+    # Close tightness
+    if len(closes) >= 5:
+        close5 = closes[-5:]
+        max_c5, min_c5 = max(close5), min(close5)
+        if min_c5 > 0:
+            result.close_tightness_5d = round(max_c5 / min_c5 - 1, 4)
+            tight_strong = float(cfg["close_tightness_strong_pct"]) / 100
+            tight_normal = float(cfg["close_tightness_normal_pct"]) / 100
+            if result.close_tightness_5d <= tight_strong:
+                result.positive_factors.append(f"近5日收盘波动≤{cfg['close_tightness_strong_pct']}%，价格紧致")
+            elif result.close_tightness_5d <= tight_normal:
+                result.positive_factors.append(f"近5日收盘波动≤{cfg['close_tightness_normal_pct']}%，价格较紧致")
+
+    # Close position
+    close_positions = []
+    for i in range(max(0, n - 5), n):
+        if highs[i] > lows[i]:
+            close_positions.append((closes[i] - lows[i]) / (highs[i] - lows[i]))
+    if close_positions:
+        result.close_position_5d_avg = round(_avg(close_positions), 2)
+        if result.close_position_5d_avg >= 0.6:
+            result.positive_factors.append("近5日收盘位置偏强，买盘承接明显")
+
+    # --- Capping rules ---
+
+    # 1. New 20-day low cap
     close_low20 = min(closes[-20:]) if len(closes) >= 20 else 0
     for i in range(n - 5, n):
-        if closes[i] <= close_low20 * 0.99:  # new 20-day low
+        if closes[i] <= close_low20 * 0.99:
             result.total_score = min(result.total_score, 5)
-            result.details.append("NEW 20-DAY LOW: score capped at 5")
+            result.caps.append("近5日出现20日新低，价稳最高5分")
+            result.reject_reasons.append("近5日出现20日新低，价格尚未稳定")
             break
 
-    # Consecutive declining with increasing amplitude
+    # 2. Consecutive declining with increasing amplitude
     for i in range(n - 3, n):
         if i > 0 and closes[i] < closes[i - 1]:
             if i > 1 and closes[i - 1] < closes[i - 2]:
                 drop1 = abs(closes[i - 1] - closes[i - 2])
                 drop2 = abs(closes[i] - closes[i - 1])
-                if drop2 > drop1:  # amplitude increasing
+                if drop2 > drop1:
                     result.total_score = min(result.total_score, 5)
-                    result.details.append("DECLINING WITH INCREASING AMPLITUDE: score capped at 5")
+                    result.caps.append("连续下跌且跌幅放大，价稳最高5分")
                     break
+
+    # 3. Support break cap
+    support_broken = False
+    if handle_low > 0 and closes[-1] < handle_low:
+        support_broken = True
+    if closes[-1] < ma20[-1] * 0.98 if len(ma20) > 0 else False:
+        support_broken = True
+    if support_broken:
+        cap = int(cfg["support_break_max_score"])
+        result.total_score = min(result.total_score, cap)
+        result.caps.append(f"跌破关键支撑，价稳最高{cap}分")
+        result.reject_reasons.append("跌破关键支撑，价格尚未稳定")
 
     # Verdict
     if result.total_score >= 7:

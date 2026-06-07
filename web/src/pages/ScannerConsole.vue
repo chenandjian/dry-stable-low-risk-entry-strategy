@@ -323,9 +323,11 @@ function formatDetail(c) {
 }
 
 function statusFor(c) {
-  if (c.dry_stable_verdict === '可低吸') return 'near'
+  const vk = c.verdict_key || ''
+  if (vk === 'BUY_LOW' || c.dry_stable_verdict === '可低吸') return 'near'
   if (c.is_breakout) return 'breakout'
-  if (c.dry_stable_verdict === '突破确认') return 'confirm'
+  if (vk === 'WATCH_BREAKOUT' || c.dry_stable_verdict === '突破确认') return 'confirm'
+  if (vk.startsWith('WAIT_')) return 'wait'
   return c.score >= 70 ? 'near' : 'watch'
 }
 

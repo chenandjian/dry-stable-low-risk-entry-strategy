@@ -25,7 +25,7 @@ const props = defineProps({
   name: String,
   score: Number,
   rating: String,     // 'strong' | 'medium' | 'weak'
-  status: String,     // 'breakout' | 'confirm' | 'near' | 'watch'
+  status: String,     // 'breakout' | 'confirm' | 'near' | 'watch' | 'wait'
   detail: String,
 })
 defineEmits(['click'])
@@ -34,6 +34,7 @@ const barClass = computed(() => {
   if (props.status === 'breakout') return 'bar-red'
   if (props.status === 'confirm') return 'bar-orange'
   if (props.status === 'near') return 'bar-blue'
+  if (props.status === 'wait') return 'bar-muted'
   return 'bar-blue'
 })
 const ratingType = computed(() => props.rating || 'medium')
@@ -42,7 +43,7 @@ const ratingLabel = computed(() => ({
 })[props.rating] || '候选')
 const statusType = computed(() => props.status || 'watch')
 const statusLabel = computed(() => ({
-  breakout: '已突破', confirm: '突破确认', near: '接近突破', watch: '观察'
+  breakout: '已突破', confirm: '突破确认', near: '接近突破', watch: '观察', wait: '等待条件'
 })[props.status] || '观察')
 const scoreColor = computed(() => {
   if (props.score >= 80) return 'score-gold'
@@ -62,6 +63,7 @@ const scoreColor = computed(() => {
 .bar-red { background: var(--up-red); }
 .bar-orange { background: var(--warn-orange); }
 .bar-blue { background: var(--accent); }
+.bar-muted { background: var(--text-muted); }
 .info { flex: 1; min-width: 0; }
 .top-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .code { font-family: var(--font-mono); color: var(--accent); font-size: 13px; font-weight: 600; }

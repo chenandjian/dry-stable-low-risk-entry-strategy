@@ -9,7 +9,7 @@ defineProps({
   type: {
     type: String,
     default: 'medium',
-    validator: v => ['strong', 'medium', 'weak', 'breakout', 'confirm', 'near', 'watch', 'volume'].includes(v),
+    validator: v => ['strong', 'medium', 'weak', 'breakout', 'confirm', 'near', 'watch', 'wait', 'volume'].includes(v),
   },
 })
 </script>
@@ -25,6 +25,7 @@ defineProps({
 .badge-breakout { background: rgba(239,68,68,0.12); color: var(--up-red); }
 .badge-confirm { background: rgba(249,115,22,0.12); color: var(--warn-orange); }
 .badge-near { background: rgba(79,125,255,0.10); color: var(--accent); }
+.badge-wait { background: rgba(90,106,126,0.1); color: var(--text-muted); }
 .badge-watch { background: rgba(90,106,126,0.1); color: var(--text-muted); }
 .badge-volume { background: rgba(239,68,68,0.1); color: var(--up-red); }
 </style>

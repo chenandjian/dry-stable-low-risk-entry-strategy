@@ -66,6 +66,7 @@ def test_price_more_than_five_percent_above_pivot_is_chasing():
 
 
 def test_hard_rules_block_buying():
+    """量干不足时应返回 WAIT_VOLUME 而非直接 REJECT。"""
     decision = make_dry_stable_decision(
         pattern_score=15,
         volume_dry_score=5,
@@ -74,8 +75,9 @@ def test_hard_rules_block_buying():
         risk_reward=_rr(),
     )
 
-    assert decision.verdict == "不建议买入"
-    assert "量能未干" in decision.summary
+    assert decision.verdict == "等量能萎缩"
+    assert decision.verdict_key == "WAIT_VOLUME"
+    assert "量干" in decision.summary
 
 
 def test_bad_market_environment_blocks_buying():

@@ -180,9 +180,11 @@ function barClass(c) { return c.score >= 80 ? 'bar-gold' : c.score >= 70 ? 'bar-
 function scoreColorClass(s) { return s >= 80 ? 'sc-gold' : s >= 70 ? 'sc-blue' : 'sc-muted' }
 function price(v) { return v ? Number(v).toFixed(2) : '--' }
 function verdictType(c) {
-  if (c.dry_stable_verdict === '可低吸') return 'strong'
+  const vk = c.verdict_key || ''
+  if (vk === 'BUY_LOW' || c.dry_stable_verdict === '可低吸') return 'strong'
   if (c.is_breakout) return 'breakout'
-  if (c.dry_stable_verdict === '突破确认') return 'confirm'
+  if (vk === 'WATCH_BREAKOUT' || c.dry_stable_verdict === '突破确认') return 'confirm'
+  if (vk.startsWith('WAIT_')) return 'wait'
   return c.score >= 70 ? 'medium' : 'weak'
 }
 function marketClass(s) {
