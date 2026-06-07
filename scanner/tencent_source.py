@@ -26,7 +26,14 @@ def fetch_tencent_daily(code: str, days: int = 250) -> list[dict] | None:
 
 
 def _try_tencent_kline(symbol: str, days: int) -> list[dict] | None:
-    """Attempt Tencent K-line API."""
+    """Attempt Tencent K-line API.
+
+    K-line array format: [date, open, close, high, low, volume(手)]
+    The response also includes ``qt`` real-time quote data which contains
+    the actual turnover (amount) for the latest trading day.  We use that
+    exact amount for the last row and fall back to ``close * volume(股)``
+    for historical rows where no per-row amount is available.
+    """
     url = "https://web.ifzq.gtimg.cn/appstock/app/fqkline/get"
     params = {
         "param": f"{symbol},day,,,{days},qfq",
@@ -50,16 +57,37 @@ def _try_tencent_kline(symbol: str, days: int) -> list[dict] | None:
         if not klines:
             return None
 
+        # Extract exact amount (万元) from real-time quote for the latest day
+        qt_amount = None
+        qt = stock_data.get("qt", {}).get(symbol, [])
+        if len(qt) > 57 and qt[57]:
+            try:
+                qt_amount = float(qt[57]) * 10000  # 万元 → 元
+            except (ValueError, TypeError):
+                pass
+
         result = []
-        for item in klines:
+        for i, item in enumerate(klines):
+            open_ = float(item[1])
+            close = float(item[2])
+            high = float(item[3])
+            low = float(item[4])
+            vol_shares = float(item[5]) * 100  # 手 → 股
+
+            is_last = (i == len(klines) - 1)
+            if is_last and qt_amount is not None:
+                turnover = qt_amount
+            else:
+                turnover = close * vol_shares
+
             result.append({
                 "date": item[0],
-                "open": float(item[1]),
-                "close": float(item[2]),
-                "high": float(item[3]),
-                "low": float(item[4]),
-                "volume": float(item[5]) * 100,
-                "turnover": float(item[2]) * float(item[5]) * 100,
+                "open": open_,
+                "close": close,
+                "high": high,
+                "low": low,
+                "volume": vol_shares,
+                "turnover": turnover,
             })
         return result
 
