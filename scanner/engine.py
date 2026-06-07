@@ -460,7 +460,7 @@ def _fetch_with_retry(
             logger.info("%s  %s  %d行", code, ds_name, len(data))
             return result
         else:
-            logger.debug("%s  %s  ✗ %s", code, ds_name, error)
+            logger.warning("%s  %s  ✗ %s", code, ds_name, error)
 
     if saw_source_busy:
         result.fallback_error = "data source busy"
