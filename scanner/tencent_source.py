@@ -58,8 +58,8 @@ def _try_tencent_kline(symbol: str, days: int) -> list[dict] | None:
                 "close": float(item[2]),
                 "high": float(item[3]),
                 "low": float(item[4]),
-                "volume": float(item[5]),
-                "turnover": float(item[2]) * float(item[5]),
+                "volume": float(item[5]) * 100,
+                "turnover": float(item[2]) * float(item[5]) * 100,
             })
         return result
 
