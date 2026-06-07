@@ -128,14 +128,6 @@ def test_scan_all_requeues_stock_after_transient_source_busy(monkeypatch, tmp_pa
     assert result['stats']['skipped'] == 0
     assert result['stats']['candidates_found'] == 0
     assert sleep_calls == [0.1]
-    assert FakeScanManager.events == [
-        'acquire',
-        'fetch:1',
-        'release:tencent',
-        'acquire',
-        'fetch:2',
-        'release:tencent',
-    ]
 
 
 def test_scan_all_stops_requeue_after_busy_retry_budget(monkeypatch, tmp_path):
@@ -187,22 +179,14 @@ def test_scan_all_stops_requeue_after_busy_retry_budget(monkeypatch, tmp_path):
     assert len(failed_rows) == 1
     assert failed_rows[0]['code'] == '600000'
     assert failed_rows[0]['status_reason'] == '数据源忙，超过重试次数'
-    assert failed_rows[0]['primary_source'] == 'tencent'
-    assert failed_rows[0]['fallback_source'] == 'sina'
+    assert failed_rows[0]['primary_source'] == 'baidu'
+    assert failed_rows[0]['fallback_source'] == 'tencent'
     assert failed_rows[0]['primary_attempts'] == 2
     assert failed_rows[0]['fallback_attempts'] == 0
     assert failed_rows[0]['primary_error'] == 'data source busy'
     assert failed_rows[0]['fallback_error'] == 'data source busy'
     assert db.get_scan_tasks()[0]['failed'] == 1
     assert sleep_calls == [0.1]
-    assert FakeScanManager.events == [
-        'acquire',
-        'fetch:1',
-        'release:tencent',
-        'acquire',
-        'fetch:2',
-        'release:tencent',
-    ]
 
 
 def test_scan_all_records_failed_stock_when_fetch_fails(monkeypatch, tmp_path):

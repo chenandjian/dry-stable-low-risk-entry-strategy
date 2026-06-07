@@ -109,26 +109,19 @@ def scan_all(
             except Exception:
                 break
 
-            ds = mgr.try_acquire_any()
-            if ds is None:
-                time.sleep(0.1)
-                stock_queue.put(stock)
-                continue
-
             code = stock["code"]
-            fallback_ds = "tencent" if ds == "sina" else "sina"
             try:
                 db.update_task_stock(
                     task_id,
                     code,
                     status="fetching",
-                    primary_source=ds,
-                    fallback_source=fallback_ds,
+                    primary_source=daily_sources[0],
+                    fallback_source=daily_sources[-1],
                     started_at=_now(),
                 )
                 fetch_result = _fetch_with_retry(
                     code,
-                    ds if ds in daily_sources else daily_sources[0],
+                    daily_sources[0],
                     retry_attempts=primary_attempts,
                     fallback_attempts=fallback_attempts,
                     mgr=mgr,
@@ -342,7 +335,7 @@ def scan_all(
                 if progress_callback:
                     progress_callback("scanning", start_offset + failed_count[0] + skip_count[0] + scanned_count[0], start_offset + len(stocks), f"{code} {stock.get('name', '')}")
             finally:
-                mgr.release(ds)
+                pass
 
     threads = [threading.Thread(target=worker, args=(f"t{i+1}",), daemon=True) for i in range(worker_count)]
     for thread in threads:
