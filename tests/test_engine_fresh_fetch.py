@@ -344,7 +344,7 @@ def test_fetch_with_retry_ignores_fresh_cache_when_source_succeeds(monkeypatch, 
 
     monkeypatch.setattr(engine, "fetch_sina_daily", fake_sina)
     monkeypatch.setattr(engine, "fetch_tencent_daily", lambda code: None)
-    result = engine._fetch_with_retry("600000", "sina", retry_attempts=2, fallback_attempts=2, sleep_fn=lambda _: None)
+    result = engine._fetch_with_retry("600000", "sina", retry_attempts=2, fallback_attempts=2, sleep_fn=lambda _: None, source_chain=["sina", "tencent"])
 
     assert calls == ["600000"]
     assert result.data[-1]["date"] == "2026-06-04"
@@ -369,7 +369,7 @@ def test_fetch_with_retry_uses_fallback_after_primary_failures(monkeypatch, tmp_
 
     monkeypatch.setattr(engine, "fetch_sina_daily", fake_sina)
     monkeypatch.setattr(engine, "fetch_tencent_daily", fake_tencent)
-    result = engine._fetch_with_retry("600000", "sina", retry_attempts=2, fallback_attempts=2, sleep_fn=lambda _: None)
+    result = engine._fetch_with_retry("600000", "sina", retry_attempts=2, fallback_attempts=2, sleep_fn=lambda _: None, source_chain=["sina", "tencent"])
 
     assert result.data[-1]["date"] == "2026-06-04"
     assert result.primary_attempts == 2
@@ -394,6 +394,7 @@ def test_fetch_with_retry_tencent_primary_fetches_independently(monkeypatch, tmp
         fallback_attempts=2,
         sleep_fn=lambda _: None,
         mgr=mgr,
+        source_chain=["sina", "tencent"],
     )
 
     assert result.data is not None
@@ -421,6 +422,7 @@ def test_fetch_with_retry_fallback_acquires_releases_via_manager(monkeypatch, tm
         fallback_attempts=2,
         sleep_fn=lambda _: None,
         mgr=mgr,
+        source_chain=["sina", "tencent"],
     )
 
     assert result.data[-1]["date"] == "2026-06-04"
@@ -448,6 +450,7 @@ def test_fetch_with_retry_skips_fallback_when_manager_reports_source_busy(monkey
         fallback_attempts=2,
         sleep_fn=lambda _: None,
         mgr=mgr,
+        source_chain=["sina", "tencent"],
     )
 
     assert result.data is None
@@ -475,6 +478,7 @@ def test_fetch_with_retry_acquires_and_releases_fallback_lock(monkeypatch, tmp_p
         fallback_attempts=2,
         sleep_fn=lambda _: None,
         mgr=mgr,
+        source_chain=["sina", "tencent"],
     )
 
     assert result.data[-1]["date"] == "2026-06-04"
@@ -499,7 +503,7 @@ def test_fetch_with_retry_treats_sina_456_as_transient_source_busy(monkeypatch, 
     monkeypatch.setattr(engine, "fetch_sina_daily", fake_sina)
     monkeypatch.setattr(engine, "fetch_tencent_daily", lambda code: None)
 
-    result = engine._fetch_with_retry("000868", "sina", retry_attempts=2, fallback_attempts=2, sleep_fn=lambda _: None)
+    result = engine._fetch_with_retry("000868", "sina", retry_attempts=2, fallback_attempts=2, sleep_fn=lambda _: None, source_chain=["sina", "tencent"])
 
     assert result.data is None
     assert result.primary_error == "data source busy"
@@ -512,7 +516,7 @@ def test_fetch_with_retry_does_not_return_cache_when_sources_fail(monkeypatch, t
 
     monkeypatch.setattr(engine, "fetch_sina_daily", lambda code: None)
     monkeypatch.setattr(engine, "fetch_tencent_daily", lambda code: None)
-    result = engine._fetch_with_retry("600000", "sina", retry_attempts=2, fallback_attempts=2, sleep_fn=lambda _: None)
+    result = engine._fetch_with_retry("600000", "sina", retry_attempts=2, fallback_attempts=2, sleep_fn=lambda _: None, source_chain=["sina", "tencent"])
 
     assert result.data is None
     assert result.primary_attempts == 2
@@ -520,3 +524,140 @@ def test_fetch_with_retry_does_not_return_cache_when_sources_fail(monkeypatch, t
     assert result.primary_error == "empty response"
     assert result.fallback_error == "empty response"
     assert result.from_cache is False
+
+
+def test_fetch_with_retry_uses_configured_daily_source_chain_mootdx_first(monkeypatch, tmp_path):
+    db.init_db(str(tmp_path / "cuphandle.db"))
+    calls = []
+
+    monkeypatch.setattr(engine, "fetch_mootdx_daily", lambda code: calls.append("mootdx") or [_row("2026-06-05", close=11.0)], raising=False)
+    monkeypatch.setattr(engine, "fetch_baidu_daily", lambda code: calls.append("baidu") or [_row("2026-06-05", close=12.0)], raising=False)
+    monkeypatch.setattr(engine, "fetch_sina_daily", lambda code: calls.append("sina") or [_row("2026-06-05", close=13.0)])
+    monkeypatch.setattr(engine, "fetch_tencent_daily", lambda code: calls.append("tencent") or [_row("2026-06-05", close=14.0)])
+
+    result = engine._fetch_with_retry(
+        "600000",
+        "mootdx",
+        retry_attempts=2,
+        fallback_attempts=2,
+        sleep_fn=lambda _: None,
+        source_chain=["mootdx", "baidu", "sina", "tencent"],
+    )
+
+    assert calls == ["mootdx"]
+    assert result.data[-1]["date"] == "2026-06-05"
+    assert result.data[-1]["close"] == 11.0
+    assert result.primary_source == "mootdx"
+    assert result.fallback_source == "mootdx"
+    assert result.primary_attempts == 1
+    assert result.primary_error is None
+
+
+def test_normalize_source_chain_deduplicates_primary_and_preserves_order():
+    assert engine._normalize_source_chain(["sina", "baidu", "sina", "tencent", "baidu"], "sina") == ["sina", "baidu", "tencent"]
+
+
+def test_fetch_with_retry_does_not_treat_unmanaged_sources_as_busy(monkeypatch, tmp_path):
+    db.init_db(str(tmp_path / "cuphandle.db"))
+    calls = []
+    mgr = FakeManager({"tencent": True})
+
+    monkeypatch.setattr(engine, "fetch_sina_daily", lambda code: calls.append("sina") or None)
+    monkeypatch.setattr(engine, "fetch_mootdx_daily", lambda code: calls.append("mootdx") or None, raising=False)
+    monkeypatch.setattr(engine, "fetch_baidu_daily", lambda code: calls.append("baidu") or None, raising=False)
+    monkeypatch.setattr(engine, "fetch_tencent_daily", lambda code: calls.append("tencent") or [_row("2026-06-05", close=14.0)])
+
+    result = engine._fetch_with_retry(
+        "600000",
+        "sina",
+        retry_attempts=1,
+        fallback_attempts=1,
+        sleep_fn=lambda _: None,
+        mgr=mgr,
+        source_chain=["sina", "mootdx", "baidu", "tencent"],
+    )
+
+    assert calls == ["sina", "mootdx", "baidu", "tencent"]
+    assert result.data[-1]["close"] == 14.0
+    assert result.fallback_source == "tencent"
+    assert result.fallback_error is None
+    assert mgr.acquire_calls == ["tencent"]
+    assert mgr.release_calls == ["tencent"]
+
+
+def test_fetch_with_retry_continues_after_managed_source_busy(monkeypatch, tmp_path):
+    db.init_db(str(tmp_path / "cuphandle.db"))
+    calls = []
+    mgr = FakeManager({"tencent": False})
+
+    monkeypatch.setattr(engine, "fetch_sina_daily", lambda code: calls.append("sina") or None)
+    monkeypatch.setattr(engine, "fetch_tencent_daily", lambda code: calls.append("tencent") or [_row("2026-06-05", close=13.0)])
+    monkeypatch.setattr(engine, "fetch_baidu_daily", lambda code: calls.append("baidu") or [_row("2026-06-05", close=12.0)], raising=False)
+
+    result = engine._fetch_with_retry(
+        "600000",
+        "sina",
+        retry_attempts=1,
+        fallback_attempts=1,
+        sleep_fn=lambda _: None,
+        mgr=mgr,
+        source_chain=["sina", "tencent", "baidu"],
+    )
+
+    assert calls == ["sina", "baidu"]
+    assert result.data[-1]["close"] == 12.0
+    assert result.fallback_source == "baidu"
+    assert result.fallback_error is None
+    assert mgr.acquire_calls == ["tencent"]
+    assert mgr.release_calls == []
+
+
+def test_fetch_with_retry_continues_after_unknown_source(monkeypatch, tmp_path):
+    db.init_db(str(tmp_path / "cuphandle.db"))
+    calls = []
+
+    monkeypatch.setattr(engine, "fetch_sina_daily", lambda code: calls.append("sina") or None)
+    monkeypatch.setattr(engine, "fetch_tencent_daily", lambda code: calls.append("tencent") or [_row("2026-06-05", close=14.0)])
+
+    result = engine._fetch_with_retry(
+        "600000",
+        "sina",
+        retry_attempts=1,
+        fallback_attempts=1,
+        sleep_fn=lambda _: None,
+        source_chain=["sina", "bad_source", "tencent"],
+    )
+
+    assert calls == ["sina", "tencent"]
+    assert result.data[-1]["close"] == 14.0
+    assert result.fallback_source == "tencent"
+    assert result.fallback_error is None
+
+
+def test_fetch_with_retry_preserves_fetch_busy_error_if_later_sources_fail(monkeypatch, tmp_path):
+    db.init_db(str(tmp_path / "cuphandle.db"))
+    calls = []
+    mgr = FakeManager({"tencent": True})
+
+    def busy_tencent(code):
+        calls.append("tencent")
+        raise RuntimeError("429 Too Many Requests")
+
+    monkeypatch.setattr(engine, "fetch_sina_daily", lambda code: calls.append("sina") or None)
+    monkeypatch.setattr(engine, "fetch_tencent_daily", busy_tencent)
+    monkeypatch.setattr(engine, "fetch_baidu_daily", lambda code: calls.append("baidu") or None, raising=False)
+
+    result = engine._fetch_with_retry(
+        "600000",
+        "sina",
+        retry_attempts=1,
+        fallback_attempts=1,
+        sleep_fn=lambda _: None,
+        mgr=mgr,
+        source_chain=["sina", "tencent", "baidu"],
+    )
+
+    assert calls == ["sina", "tencent", "baidu"]
+    assert result.data is None
+    assert result.fallback_error == "data source busy"
+    assert engine._is_transient_source_busy(result) is True

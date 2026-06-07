@@ -8,6 +8,8 @@ from typing import Callable
 
 import scanner.db as db
 from scanner.data_source import DataSourceManager
+from scanner.mootdx_source import fetch_mootdx_daily
+from scanner.baidu_source import fetch_baidu_daily
 from scanner.sina_source import fetch_sina_daily
 from scanner.tencent_source import fetch_tencent_daily
 from scanner.index_source import fetch_market_index_daily
@@ -359,6 +361,42 @@ def scan_all(
         "task_id": task_id,
     }
 
+DEFAULT_DAILY_SOURCES = ["mootdx", "baidu", "sina", "tencent"]
+
+
+def _daily_fetch_fn(ds_name: str):
+    fetchers = {
+        "mootdx": fetch_mootdx_daily,
+        "baidu": fetch_baidu_daily,
+        "sina": fetch_sina_daily,
+        "tencent": fetch_tencent_daily,
+    }
+    if ds_name not in fetchers:
+        raise ValueError(f"Unknown daily data source: {ds_name}")
+    return fetchers[ds_name]
+
+
+def _normalize_source_chain(source_chain: list[str] | None, primary_ds: str) -> list[str]:
+    raw_chain = [primary_ds] + list(source_chain or DEFAULT_DAILY_SOURCES)
+    chain = []
+    for ds_name in raw_chain:
+        if ds_name not in chain:
+            chain.append(ds_name)
+    return chain
+
+
+def _manager_handles_source(mgr: DataSourceManager | None, ds_name: str) -> bool:
+    if mgr is None:
+        return False
+    locks = getattr(mgr, "_locks", None)
+    if isinstance(locks, dict):
+        return ds_name in locks
+    acquire_results = getattr(mgr, "acquire_results", None)
+    if isinstance(acquire_results, dict):
+        return ds_name in acquire_results
+    return True
+
+
 def _fetch_with_retry(
     code: str,
     primary_ds: str,
@@ -366,50 +404,51 @@ def _fetch_with_retry(
     fallback_attempts: int = 2,
     sleep_fn: Callable[[float], None] = time.sleep,
     mgr: DataSourceManager | None = None,
+    source_chain: list[str] | None = None,
 ) -> FetchResult:
-    """Fetch fresh K-line data first; cache is only used to merge history."""
-    fallback_ds = "tencent" if primary_ds == "sina" else "sina"
+    """Fetch fresh K-line data from the configured source chain, then merge with cache."""
+    chain = _normalize_source_chain(source_chain, primary_ds)
     cached = db.get_ohlc(code)
-    result = FetchResult(data=None, primary_source=primary_ds, fallback_source=fallback_ds)
+    result = FetchResult(data=None, primary_source=chain[0], fallback_source=chain[0])
+    saw_source_busy = False
 
-    data, attempts, error = _try_fetch_source(
-        code,
-        primary_ds,
-        retry_attempts,
-        sleep_fn,
-    )
-    result.primary_attempts = attempts
-    result.primary_error = error
-    if data:
-        merged = _merge_data(cached or [], data)
-        db.save_ohlc(code, merged)
-        result.data = merged
-        return result
+    for index, ds_name in enumerate(chain):
+        attempts_allowed = retry_attempts if index == 0 else fallback_attempts
+        if index > 0:
+            result.fallback_source = ds_name
 
-    if mgr is not None:
-        if not mgr.acquire(fallback_ds):
-            result.fallback_attempts = 0
-            result.fallback_error = "data source busy"
+        if index > 0 and _manager_handles_source(mgr, ds_name):
+            if not mgr.acquire(ds_name):
+                result.fallback_attempts = 0
+                result.fallback_error = "data source busy"
+                saw_source_busy = True
+                continue
+            try:
+                data, attempts, error = _try_fetch_source(code, ds_name, attempts_allowed, sleep_fn)
+            finally:
+                mgr.release(ds_name)
+        else:
+            data, attempts, error = _try_fetch_source(code, ds_name, attempts_allowed, sleep_fn)
+
+        if index == 0:
+            result.primary_attempts = attempts
+            result.primary_error = error
+        else:
+            result.fallback_attempts = attempts
+            result.fallback_error = error
+        if error == "data source busy":
+            saw_source_busy = True
+
+        if data:
+            merged = _merge_data(cached or [], data)
+            db.save_ohlc(code, merged)
+            result.data = merged
+            if index > 0:
+                result.fallback_error = None
             return result
-        try:
-            data, attempts, error = _try_fetch_source(
-                code,
-                fallback_ds,
-                fallback_attempts,
-                sleep_fn,
-            )
-        finally:
-            mgr.release(fallback_ds)
-    else:
-        data, attempts, error = _try_fetch_source(code, fallback_ds, fallback_attempts, sleep_fn)
-    result.fallback_attempts = attempts
-    result.fallback_error = error
-    if data:
-        merged = _merge_data(cached or [], data)
-        db.save_ohlc(code, merged)
-        result.data = merged
-        return result
 
+    if saw_source_busy:
+        result.fallback_error = "data source busy"
     return result
 
 
@@ -426,15 +465,16 @@ def _try_fetch_source(
     sleep_fn: Callable[[float], None],
 ) -> tuple[list[dict] | None, int, str | None]:
     """Try fetching from a data source with retries and backoff."""
-    fetch_fn = fetch_sina_daily if ds_name == "sina" else fetch_tencent_daily
-
     last_error = None
     for attempt in range(1, attempts + 1):
         try:
+            fetch_fn = _daily_fetch_fn(ds_name)
             data = fetch_fn(code)
             if data:
                 return data, attempt, None
             last_error = "empty response"
+        except ValueError as exc:
+            return None, attempt, str(exc)
         except Exception as exc:
             last_error = _classify_fetch_error(exc)
         if attempt < attempts:
