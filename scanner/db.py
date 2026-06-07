@@ -141,6 +141,13 @@ def _ensure_candidate_columns(conn: sqlite3.Connection):
         "target_2": "REAL",
         "market_status": "TEXT",
         "market_position_advice": "TEXT",
+        "verdict_key": "TEXT",
+        "positive_factors": "TEXT",
+        "warnings": "TEXT",
+        "reject_reasons": "TEXT",
+        "raw_volume_dry_score": "INTEGER",
+        "raw_price_stable_score": "INTEGER",
+        "score_caps": "TEXT",
     }
     for name, typ in columns.items():
         if name not in existing:
@@ -567,6 +574,14 @@ def get_running_task_id() -> str | None:
 
 # ====== Candidates ======
 
+def _json_list(value):
+    """Encode a list as JSON string for TEXT column storage, or return empty string."""
+    if not value:
+        return ""
+    import json
+    return json.dumps(list(value), ensure_ascii=False)
+
+
 def delete_candidates(task_id: str):
     """Delete all candidates for a task (so re-evaluate can replace them)."""
     conn = get_conn()
@@ -591,6 +606,8 @@ def upsert_candidate(task_id: str, d: dict):
         "risk_percent", "rr1", "position_advice",
         "entry_zone_low", "entry_zone_high", "pivot", "stop_loss", "target_1", "target_2",
         "market_status", "market_position_advice",
+        "verdict_key", "positive_factors", "warnings", "reject_reasons",
+        "raw_volume_dry_score", "raw_price_stable_score", "score_caps",
     ]
     values = (
         task_id, d["code"], d["name"], d["score"], rating,
@@ -619,6 +636,13 @@ def upsert_candidate(task_id: str, d: dict):
         d.get("target_2", 0),
         d.get("market_status", ""),
         d.get("market_position_advice", ""),
+        d.get("verdict_key", ""),
+        _json_list(d.get("positive_factors")),
+        _json_list(d.get("warnings")),
+        _json_list(d.get("reject_reasons")),
+        d.get("raw_volume_dry_score", 0),
+        d.get("raw_price_stable_score", 0),
+        _json_list(d.get("score_caps")),
     )
     value_marks = ", ".join("?" for _ in columns)
     update_assignments = ", ".join(f"{c}=excluded.{c}" for c in columns if c not in ("task_id", "code"))
@@ -683,6 +707,13 @@ def save_candidates(task_id: str, candidates: list, strong: int = 80, medium: in
             key.get("target_2", 0),
             market.get("status", ""),
             market.get("position_advice", ""),
+            decision.get("verdict_key", ""),
+            _json_list(decision.get("positive_factors")),
+            _json_list(decision.get("warnings")),
+            _json_list(decision.get("reject_reasons")),
+            volume_dry.get("raw_score", 0),
+            price_stable.get("raw_score", 0),
+            _json_list(volume_dry.get("caps", []) + price_stable.get("caps", [])),
         ))
     columns = [
         "task_id", "code", "name", "score", "rating",
@@ -697,6 +728,8 @@ def save_candidates(task_id: str, candidates: list, strong: int = 80, medium: in
         "risk_percent", "rr1", "position_advice",
         "entry_zone_low", "entry_zone_high", "pivot", "stop_loss", "target_1", "target_2",
         "market_status", "market_position_advice",
+        "verdict_key", "positive_factors", "warnings", "reject_reasons",
+        "raw_volume_dry_score", "raw_price_stable_score", "score_caps",
     ]
     value_marks = ", ".join("?" for _ in columns)
     update_assignments = ", ".join(f"{c}=excluded.{c}" for c in columns if c not in ("task_id", "code"))
