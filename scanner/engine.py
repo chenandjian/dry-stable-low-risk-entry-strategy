@@ -98,6 +98,7 @@ def scan_all(
     liquidity_cfg = config.get("liquidity", {})
     scoring_cfg = config.get("scoring", {})
     daily_sources = config.get("data", {}).get("daily_sources") or DEFAULT_DAILY_SOURCES
+    kline_days = config.get("data", {}).get("daily_kline_days") or liquidity_cfg.get("min_listing_days", 250)
     max_busy_retries = config.get("data", {}).get("source_busy_max_retries", 3)
     market_data = fetch_market_index_daily()
 
@@ -137,6 +138,7 @@ def scan_all(
                     fallback_attempts=fallback_attempts,
                     mgr=mgr,
                     source_chain=daily_sources,
+                    kline_days=kline_days,
                 )
                 data = fetch_result.data
                 if data is None:
@@ -167,6 +169,8 @@ def scan_all(
                             skip_count[0] += 1
                         with busy_retry_lock:
                             busy_retries_by_code.pop(code, None)
+                        if progress_callback:
+                            progress_callback("scanning", start_offset + failed_count[0] + skip_count[0] + scanned_count[0], start_offset + len(stocks), f"{code} {stock.get('name', '')}")
                         continue
                     db.update_task_stock(
                         task_id,
@@ -187,6 +191,8 @@ def scan_all(
                         skip_count[0] += 1
                     with busy_retry_lock:
                         busy_retries_by_code.pop(code, None)
+                    if progress_callback:
+                        progress_callback("scanning", start_offset + failed_count[0] + skip_count[0] + scanned_count[0], start_offset + len(stocks), f"{code} {stock.get('name', '')}")
                     continue
 
                 latest_trade_date = data[-1].get("date") if data else None
@@ -205,6 +211,8 @@ def scan_all(
                         skip_count[0] += 1
                     with busy_retry_lock:
                         busy_retries_by_code.pop(code, None)
+                    if progress_callback:
+                        progress_callback("scanning", start_offset + failed_count[0] + skip_count[0] + scanned_count[0], start_offset + len(stocks), f"{code} {stock.get('name', '')}")
                     continue
 
                 stock["latest_close"] = data[-1]["close"]
@@ -224,6 +232,8 @@ def scan_all(
                         skip_count[0] += 1
                     with busy_retry_lock:
                         busy_retries_by_code.pop(code, None)
+                    if progress_callback:
+                        progress_callback("scanning", start_offset + failed_count[0] + skip_count[0] + scanned_count[0], start_offset + len(stocks), f"{code} {stock.get('name', '')}")
                     continue
 
                 result = detect_cup_handle(data, pattern_cfg)
@@ -332,6 +342,8 @@ def scan_all(
                     skip_count[0] += 1
                 with busy_retry_lock:
                     busy_retries_by_code.pop(code, None)
+                if progress_callback:
+                    progress_callback("scanning", start_offset + failed_count[0] + skip_count[0] + scanned_count[0], start_offset + len(stocks), f"{code} {stock.get('name', '')}")
             finally:
                 mgr.release(ds)
 
@@ -407,6 +419,7 @@ def _fetch_with_retry(
     sleep_fn: Callable[[float], None] = time.sleep,
     mgr: DataSourceManager | None = None,
     source_chain: list[str] | None = None,
+    kline_days: int = 250,
 ) -> FetchResult:
     """Fetch fresh K-line data from the configured source chain, then merge with cache."""
     chain = _normalize_source_chain(source_chain, primary_ds)
@@ -426,11 +439,11 @@ def _fetch_with_retry(
                 saw_source_busy = True
                 continue
             try:
-                data, attempts, error = _try_fetch_source(code, ds_name, attempts_allowed, sleep_fn)
+                data, attempts, error = _try_fetch_source(code, ds_name, attempts_allowed, sleep_fn, kline_days)
             finally:
                 mgr.release(ds_name)
         else:
-            data, attempts, error = _try_fetch_source(code, ds_name, attempts_allowed, sleep_fn)
+            data, attempts, error = _try_fetch_source(code, ds_name, attempts_allowed, sleep_fn, kline_days)
 
         if index == 0:
             result.primary_attempts = attempts
@@ -465,13 +478,14 @@ def _try_fetch_source(
     ds_name: str,
     attempts: int,
     sleep_fn: Callable[[float], None],
+    kline_days: int = 250,
 ) -> tuple[list[dict] | None, int, str | None]:
     """Try fetching from a data source with retries and backoff."""
     last_error = None
     for attempt in range(1, attempts + 1):
         try:
             fetch_fn = _daily_fetch_fn(ds_name)
-            data = fetch_fn(code)
+            data = _call_fetch_fn(fetch_fn, code, kline_days)
             if data:
                 return data, attempt, None
             last_error = "empty response"
@@ -490,6 +504,13 @@ def _classify_fetch_error(exc: Exception) -> str:
     if "456" in text or "429" in text:
         return "data source busy"
     return text
+
+
+def _call_fetch_fn(fetch_fn, code: str, days: int) -> list[dict] | None:
+    try:
+        return fetch_fn(code, days=days)
+    except TypeError:
+        return fetch_fn(code)
 
 
 def _merge_data(cached: list[dict], fresh: list[dict]) -> list[dict]:
