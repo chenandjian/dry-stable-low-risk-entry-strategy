@@ -661,3 +661,77 @@ def test_fetch_with_retry_preserves_fetch_busy_error_if_later_sources_fail(monke
     assert result.data is None
     assert result.fallback_error == "data source busy"
     assert engine._is_transient_source_busy(result) is True
+
+
+def test_fetch_with_retry_falls_back_to_baidu_after_mootdx_failure(monkeypatch, tmp_path):
+    db.init_db(str(tmp_path / "cuphandle.db"))
+    calls = []
+
+    monkeypatch.setattr(engine, "fetch_mootdx_daily", lambda code: calls.append("mootdx") or None, raising=False)
+    monkeypatch.setattr(engine, "fetch_baidu_daily", lambda code: calls.append("baidu") or [_row("2026-06-05", close=12.0)], raising=False)
+    monkeypatch.setattr(engine, "fetch_sina_daily", lambda code: calls.append("sina") or [_row("2026-06-05", close=13.0)])
+    monkeypatch.setattr(engine, "fetch_tencent_daily", lambda code: calls.append("tencent") or [_row("2026-06-05", close=14.0)])
+
+    result = engine._fetch_with_retry(
+        "600000",
+        "mootdx",
+        retry_attempts=1,
+        fallback_attempts=1,
+        sleep_fn=lambda _: None,
+        source_chain=["mootdx", "baidu", "sina", "tencent"],
+    )
+
+    assert calls == ["mootdx", "baidu"]
+    assert result.data[-1]["close"] == 12.0
+    assert result.primary_error == "empty response"
+    assert result.fallback_source == "baidu"
+    assert result.fallback_error is None
+
+
+def test_fetch_with_retry_falls_back_through_sina_to_tencent(monkeypatch, tmp_path):
+    db.init_db(str(tmp_path / "cuphandle.db"))
+    calls = []
+
+    monkeypatch.setattr(engine, "fetch_mootdx_daily", lambda code: calls.append("mootdx") or None, raising=False)
+    monkeypatch.setattr(engine, "fetch_baidu_daily", lambda code: calls.append("baidu") or None, raising=False)
+    monkeypatch.setattr(engine, "fetch_sina_daily", lambda code: calls.append("sina") or None)
+    monkeypatch.setattr(engine, "fetch_tencent_daily", lambda code: calls.append("tencent") or [_row("2026-06-05", close=14.0)])
+
+    result = engine._fetch_with_retry(
+        "600000",
+        "mootdx",
+        retry_attempts=1,
+        fallback_attempts=1,
+        sleep_fn=lambda _: None,
+        source_chain=["mootdx", "baidu", "sina", "tencent"],
+    )
+
+    assert calls == ["mootdx", "baidu", "sina", "tencent"]
+    assert result.data[-1]["close"] == 14.0
+    assert result.fallback_source == "tencent"
+    assert result.fallback_error is None
+
+
+def test_fetch_with_retry_multi_source_failure_does_not_return_cache(monkeypatch, tmp_path):
+    db.init_db(str(tmp_path / "cuphandle.db"))
+    db.save_ohlc("600000", [_row("2026-06-03", close=9.0)])
+    calls = []
+
+    monkeypatch.setattr(engine, "fetch_mootdx_daily", lambda code: calls.append("mootdx") or None, raising=False)
+    monkeypatch.setattr(engine, "fetch_baidu_daily", lambda code: calls.append("baidu") or None, raising=False)
+    monkeypatch.setattr(engine, "fetch_sina_daily", lambda code: calls.append("sina") or None)
+    monkeypatch.setattr(engine, "fetch_tencent_daily", lambda code: calls.append("tencent") or None)
+
+    result = engine._fetch_with_retry(
+        "600000",
+        "mootdx",
+        retry_attempts=1,
+        fallback_attempts=1,
+        sleep_fn=lambda _: None,
+        source_chain=["mootdx", "baidu", "sina", "tencent"],
+    )
+
+    assert calls == ["mootdx", "baidu", "sina", "tencent"]
+    assert result.data is None
+    assert result.from_cache is False
+    assert db.get_ohlc("600000")[-1]["date"] == "2026-06-03"
