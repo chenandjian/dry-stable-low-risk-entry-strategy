@@ -337,6 +337,16 @@ def update_scan_progress(task_id: str, scanned: int, skipped: int = 0, candidate
     conn.commit()
 
 
+def update_scan_task_total(task_id: str, total: int, source: str = ""):
+    """Update the total stock count and source after pool is ready."""
+    conn = get_conn()
+    conn.execute(
+        "UPDATE scan_tasks SET total_stocks=?, stock_pool_source=? WHERE id=?",
+        (total, source, task_id),
+    )
+    conn.commit()
+
+
 def finish_scan_task(task_id: str, finished_at: str, candidates_count: int,
                      elapsed_seconds: float, scanned: int = 0, skipped: int = 0):
     """Mark scan task as completed."""

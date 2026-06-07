@@ -177,35 +177,35 @@ async def start_scan():
     if conflict:
         return conflict
 
-    pool_result = get_a_stock_pool_result(config)
-    stocks = pool_result["stocks"]
-    if not stocks:
-        return JSONResponse(
-            {"error": "No stock pool available", "detail": pool_result.get("error")},
-            status_code=503,
-        )
-
     task_id = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
     started_at = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    db.create_scan_task(
-        task_id,
-        started_at,
-        total_stocks=len(stocks),
-        stock_pool_source=pool_result["source"],
-        stock_pool_error=pool_result.get("error"),
-        retry_mode="full",
-    )
-    db.save_task_stocks(task_id, stocks)
+    db.create_scan_task(task_id, started_at, total_stocks=0, retry_mode="full")
     _set_running(task_id, "full")
     _running["started_at"] = started_at
     _running["stats"] = {
-        "total_stocks": len(stocks),
-        "stock_pool_source": pool_result["source"],
+        "total_stocks": 0,
         "current_code": "--",
-        "current_name": "初始化中",
+        "current_name": "获取股票池中…",
     }
 
     def run():
+        pool_result = get_a_stock_pool_result(config)
+        stocks = pool_result["stocks"]
+        if not stocks:
+            _running["stats"] = {"error": "No stock pool available"}
+            conn = db.get_conn()
+            conn.execute("UPDATE scan_tasks SET status='failed', error=? WHERE id=?", ("No stock pool", task_id))
+            conn.commit()
+            _clear_running()
+            return
+        db.update_scan_task_total(task_id, len(stocks), pool_result["source"])
+        db.save_task_stocks(task_id, stocks)
+        _running["stats"] = {
+            "total_stocks": len(stocks),
+            "stock_pool_source": pool_result["source"],
+            "current_code": "--",
+            "current_name": "初始化中",
+        }
         try:
             def on_progress(stage, current, total, detail, discovery=None):
                 """实时更新扫描进度到内存状态和数据库。"""
@@ -316,8 +316,8 @@ async def start_scan():
     return {
         "task_id": task_id,
         "status": "started",
-        "total_stocks": len(stocks),
-        "stock_pool_source": pool_result["source"],
+        "total_stocks": 0,
+        "stock_pool_source": "",
     }
 
 
