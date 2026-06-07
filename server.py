@@ -323,7 +323,7 @@ async def scan_status():
             "running": True,
             "task_id": _running["task_id"],
             "mode": _running.get("mode", "full"),
-            "stats": {**summary, **_running.get("stats", {})},
+            "stats": {**_running.get("stats", {}), **summary},
         }
     running_id = db.get_running_task_id()
     if running_id:
