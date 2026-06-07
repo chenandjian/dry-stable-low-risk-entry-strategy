@@ -29,7 +29,7 @@ def fetch_mootdx_daily(code: str, days: int = 250) -> list[dict] | None:
             return None
         return sorted(rows, key=lambda row: row["date"])
     except Exception as exc:
-        logger.warning("mootdx fetch error for %s: %s", code, exc)
+        logger.debug("mootdx fetch error for %s: %s", code, exc)
         return None
 
 
