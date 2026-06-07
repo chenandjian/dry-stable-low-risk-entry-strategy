@@ -1,5 +1,6 @@
 akshare>=1.14.0
 requests>=2.31.0
+mootdx>=0.10
 pyyaml>=6.0
 fastapi>=0.110.0
 uvicorn>=0.29.0
