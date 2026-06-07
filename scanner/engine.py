@@ -472,7 +472,7 @@ def re_evaluate_task(
             progress_callback("scanning", i + 1, total, f"{code} {name}")
 
     # Remove candidates that no longer qualify
-    removed = old_codes - new_codes
+    removed = old_candidates - new_codes
     if removed:
         conn = db.get_conn()
         for code in removed:
@@ -485,7 +485,7 @@ def re_evaluate_task(
         "status": "completed",
         "candidates_found": len(new_codes),
         "total_stocks": total,
-        "added": len(new_codes - old_codes),
+        "added": len(new_codes - old_candidates),
         "removed": len(removed),
     }
 
