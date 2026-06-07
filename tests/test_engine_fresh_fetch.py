@@ -433,9 +433,9 @@ def test_concurrent_fetch_managed_source_lock_acquire_release(monkeypatch, tmp_p
     assert len(mgr.release_calls) >= 1
 
 
-def test_concurrent_fetch_unmanaged_source_skipped_on_busy_lock(monkeypatch, tmp_path):
+def test_concurrent_fetch_busy_source_skipped_other_succeeds(monkeypatch, tmp_path):
     db.init_db(str(tmp_path / "cuphandle.db"))
-    mgr = FakeManager({"sina": False})  # sina lock busy
+    mgr = FakeManager({"sina": False, "baidu": True, "tencent": True})  # sina lock busy
 
     monkeypatch.setattr(engine, "fetch_sina_daily", lambda code, days=250: [_row("2026-06-04", close=10.0)])
     monkeypatch.setattr(engine, "fetch_baidu_daily", lambda code, days=250: [_row("2026-06-04", close=12.0)], raising=False)
@@ -448,9 +448,9 @@ def test_concurrent_fetch_unmanaged_source_skipped_on_busy_lock(monkeypatch, tmp
         source_chain=["baidu", "sina", "tencent"],
     )
 
-    # baidu (unmanaged) or tencent (unmanaged) should succeed
+    # busy source (sina) skipped; baidu or tencent should succeed
     assert result.data is not None
-    assert mgr.acquire_calls == ["sina"]  # tried to acquire sina but it was busy
+    assert "sina" in mgr.acquire_calls  # tried to acquire sina but it was busy
 
 
 def test_concurrent_fetch_kline_days_passed_through(monkeypatch, tmp_path):

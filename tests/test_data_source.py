@@ -28,13 +28,17 @@ def test_try_acquire_any():
     """自动获取空闲数据源"""
     mgr = DataSourceManager()
     ds = mgr.try_acquire_any()
-    assert ds in ("sina", "tencent")
+    assert ds in ("baidu", "sina", "tencent")
     ds2 = mgr.try_acquire_any()
-    assert ds2 in ("sina", "tencent")
+    assert ds2 in ("baidu", "sina", "tencent")
     assert ds2 != ds  # 第二个源不同于第一个
-    assert mgr.try_acquire_any() is None  # 两个都忙
+    ds3 = mgr.try_acquire_any()
+    assert ds3 in ("baidu", "sina", "tencent")
+    assert ds3 not in (ds, ds2)  # 第三个源不同于前两个
+    assert mgr.try_acquire_any() is None  # 三个都忙
     mgr.release(ds)
     mgr.release(ds2)
+    mgr.release(ds3)
 
 
 def test_release_always_safe():

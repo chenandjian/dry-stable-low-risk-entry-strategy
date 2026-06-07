@@ -14,6 +14,7 @@ class DataSourceManager:
 
     def __init__(self):
         self._locks: dict[str, threading.Lock] = {
+            "baidu": threading.Lock(),
             "sina": threading.Lock(),
             "tencent": threading.Lock(),
         }
