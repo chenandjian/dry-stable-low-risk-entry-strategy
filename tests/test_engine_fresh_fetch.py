@@ -294,7 +294,7 @@ def test_scan_all_deduplicates_candidates(monkeypatch, tmp_path):
     monkeypatch.setattr(engine, 'passes_liquidity_filter', lambda data, cfg: True)
 
     dry_stable = {
-        'decision': {'verdict': '可低吸', 'summary': '测试'},
+        'decision': {'verdict': '可低吸', 'verdict_key': 'BUY_LOW', 'summary': '测试'},
         'volume_dry': {'score': 8},
         'price_stable': {'score': 8},
         'pattern_score': {'score': 16, 'type': '杯柄', 'key_pattern_type': 'cup_handle'},
@@ -646,7 +646,7 @@ def test_re_evaluate_finds_candidates_on_existing_data(monkeypatch, tmp_path):
         def evaluate_at(self, data, code="", name="", market_data=None):
             r = engine.CupHandleResult(found=True, code=code, name=name, score=75)
             dry = {
-                "decision": {"verdict": "突破确认", "summary": "ok"},
+                "decision": {"verdict": "突破确认", "verdict_key": "WATCH_BREAKOUT", "summary": "ok"},
                 "volume_dry": {"score": 7}, "price_stable": {"score": 7},
                 "pattern_score": {"score": 15, "type": "杯柄", "key_pattern_type": "cup_handle"},
                 "risk_reward": {"risk_percent": 5, "rr1": 2.0, "position_advice": "20%"},
@@ -695,7 +695,7 @@ def test_re_evaluate_replaces_old_candidates(monkeypatch, tmp_path):
         def evaluate_at(self, data, code="", name="", market_data=None):
             r = engine.CupHandleResult(found=True, code=code, name=name, score=80)
             dry = {
-                "decision": {"verdict": "可低吸", "summary": "good"},
+                "decision": {"verdict": "可低吸", "verdict_key": "BUY_LOW", "summary": "good"},
                 "volume_dry": {"score": 8}, "price_stable": {"score": 8},
                 "pattern_score": {"score": 17, "type": "杯柄", "key_pattern_type": "cup_handle"},
                 "risk_reward": {"risk_percent": 4, "rr1": 2.5, "position_advice": "30%"},

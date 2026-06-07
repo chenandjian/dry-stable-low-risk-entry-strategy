@@ -246,8 +246,10 @@ def scan_all(
                         result.score = min(100, dry_stable["pattern_score"]["score"] * 5)
                     stock["dry_stable"] = dry_stable
                     strategy_verdict = dry_stable["decision"]["verdict"]
+                    candidate_keys = {"BUY_LOW", "WATCH_BREAKOUT", "WAIT_ENTRY"}
+                    verdict_key = dry_stable["decision"].get("verdict_key", "")
                     reject_keys = {"REJECT", "不建议买入"}
-                    if result.score >= scoring_cfg.get("medium_threshold", 70) - 10 and strategy_verdict not in reject_keys and dry_stable["decision"].get("verdict_key", "") not in reject_keys:
+                    if result.score >= scoring_cfg.get("medium_threshold", 70) - 10 and strategy_verdict not in reject_keys and verdict_key in candidate_keys:
                         with candidate_lock:
                             candidate_by_code[code] = (stock, result)
                             unique_candidates = len(candidate_by_code)
@@ -465,8 +467,10 @@ def re_evaluate_task(
                 if result.score == 0:
                     result.score = min(100, dry_stable["pattern_score"]["score"] * 5)
                 verdict = dry_stable["decision"]["verdict"]
+                candidate_keys = {"BUY_LOW", "WATCH_BREAKOUT", "WAIT_ENTRY"}
+                verdict_key = dry_stable["decision"].get("verdict_key", "")
                 reject_keys = {"REJECT", "不建议买入"}
-                if result.score >= min_score and verdict not in reject_keys and dry_stable["decision"].get("verdict_key", "") not in reject_keys:
+                if result.score >= min_score and verdict not in reject_keys and verdict_key in candidate_keys:
                     latest_close = data[-1]["close"]
                     discovery = _build_discovery(code, name, result, dry_stable, latest_close)
                     db.upsert_candidate(task_id, discovery)
