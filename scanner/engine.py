@@ -457,7 +457,10 @@ def _fetch_with_retry(
             result.data = merged
             if index > 0:
                 result.fallback_error = None
+            logger.info("%s  %s  %d行", code, ds_name, len(data))
             return result
+        else:
+            logger.debug("%s  %s  ✗ %s", code, ds_name, error)
 
     if saw_source_busy:
         result.fallback_error = "data source busy"
