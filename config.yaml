@@ -25,7 +25,7 @@ liquidity:
   min_avg_volume: 5000000        # 500万股
   min_latest_turnover: 80000000  # 8000万
   min_stock_price: 10           # 最低股价 10元
-  min_listing_days: 250         # 新股最短上市天数
+  min_listing_days: 250         # 日线拉取天数（低于此天数的新股自动过滤）
 
 cup:
   min_duration: 35

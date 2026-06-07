@@ -32,7 +32,7 @@
           <span class="default">默认 10元</span>
         </div>
         <div class="param">
-          <label title="上市交易日少于此天数的股票将被过滤">新股最短上市天数 <span class="unit">交易日</span></label>
+          <label title="每只股票拉取的日线数量，低于此天数的股票自动过滤">日线拉取天数 <span class="unit">交易日</span></label>
           <input type="number" v-model.number="config.liquidity.min_listing_days"
             @input="markDirty" step="10" min="30" />
           <span class="default">默认 250天</span>
@@ -237,7 +237,7 @@ function validate() {
   const liq = config.liquidity
   if (liq.min_avg_turnover < 10000000) errors.push('成交额阈值最低 1000万')
   if (liq.min_stock_price < 1) errors.push('最低股价不能低于 1元')
-  if (liq.min_listing_days < 30) errors.push('上市天数最低 30天')
+  if (liq.min_listing_days < 30) errors.push('拉取天数最低 30天')
 
   return errors
 }
