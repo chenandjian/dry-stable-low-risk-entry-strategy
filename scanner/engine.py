@@ -366,6 +366,130 @@ def scan_all(
         "task_id": task_id,
     }
 
+
+def _build_discovery(code: str, name: str, result, dry_stable: dict, latest_close: float) -> dict:
+    """Build a discovery dict in the same format as the scan progress callback."""
+    return {
+        "code": code,
+        "name": name,
+        "score": result.score,
+        "is_breakout": result.is_breakout,
+        "is_volume_breakout": result.is_volume_breakout,
+        "breakout_price": result.breakout_price,
+        "cup_depth_pct": result.cup_depth_pct,
+        "cup_duration": result.cup_duration,
+        "handle_depth_pct": result.handle_depth_pct,
+        "vol_multiplier": result.vol_multiplier,
+        "latest_close": latest_close,
+        "dry_stable_verdict": dry_stable["decision"]["verdict"],
+        "dry_stable_summary": dry_stable["decision"]["summary"],
+        "volume_dry_score": dry_stable["volume_dry"]["score"],
+        "price_stable_score": dry_stable["price_stable"]["score"],
+        "pattern_score_20": dry_stable["pattern_score"]["score"],
+        "pattern_type": dry_stable["pattern_score"]["type"],
+        "key_pattern_type": dry_stable["pattern_score"]["key_pattern_type"],
+        "risk_percent": dry_stable["risk_reward"]["risk_percent"],
+        "rr1": dry_stable["risk_reward"]["rr1"],
+        "position_advice": dry_stable["risk_reward"]["position_advice"],
+        "entry_zone_low": dry_stable["key_prices"]["entry_zone_low"],
+        "entry_zone_high": dry_stable["key_prices"]["entry_zone_high"],
+        "pivot": dry_stable["key_prices"]["pivot"],
+        "stop_loss": dry_stable["key_prices"]["stop_loss"],
+        "target_1": dry_stable["key_prices"]["target_1"],
+        "target_2": dry_stable["key_prices"]["target_2"],
+        "market_status": dry_stable["market_environment"]["status"],
+        "market_position_advice": dry_stable["market_environment"]["position_advice"],
+    }
+
+
+def re_evaluate_task(
+    config: dict,
+    task_id: str,
+    progress_callback=None,
+) -> dict:
+    """Re-run strategy evaluation on existing OHLC data for a completed task.
+
+    Does NOT re-fetch stock data — only re-applies liquidity filter, pattern
+    detection and dry-stable analysis using the current config.  Old candidates
+    are replaced with new ones.
+    """
+    db_path = config.get("data", {}).get("database_path", "data/cuphandle.db")
+    db.init_db(db_path)
+
+    stocks = db.get_task_stocks(task_id, limit=100000, offset=0)
+    if not stocks:
+        return {"task_id": task_id, "status": "no_stocks", "candidates_found": 0}
+
+    liquidity_cfg = config.get("liquidity", {})
+    scoring_cfg = config.get("scoring", {})
+    strategy_engine = CupHandleStrategyEngine(config)
+    market_data = fetch_market_index_daily()
+    old_candidates = {c["code"] for c in db.get_candidates(task_id=task_id)}
+    min_score = scoring_cfg.get("medium_threshold", 70) - 10
+    total = len(stocks)
+    new_codes = set()
+
+    for i, stock in enumerate(stocks):
+        code = stock["code"]
+        name = stock.get("name", "")
+        data = db.get_ohlc(code)
+        if not data:
+            continue
+
+        try:
+            if not passes_liquidity_filter(data, liquidity_cfg):
+                continue
+
+            evaluation = strategy_engine.evaluate_at(
+                data, code=code, name=name, market_data=market_data,
+            )
+            result = evaluation.result
+            dry_stable = evaluation.dry_stable
+
+            if not result.found:
+                result = CupHandleResult(found=False, code=code, name=name)
+                dry_stable = analyze_dry_stable(result, data, market_data=market_data, config=config)
+                pat20 = dry_stable["pattern_score"]["score"]
+                if dry_stable["pattern_score"].get("key_pattern_type") != "vcp" or pat20 < 13:
+                    dry_stable = None
+
+            if dry_stable:
+                if result.score == 0:
+                    result.score = min(100, dry_stable["pattern_score"]["score"] * 5)
+                verdict = dry_stable["decision"]["verdict"]
+                if result.score >= min_score and verdict != "不建议买入":
+                    latest_close = data[-1]["close"]
+                    discovery = _build_discovery(code, name, result, dry_stable, latest_close)
+                    db.upsert_candidate(task_id, discovery)
+                    new_codes.add(code)
+                    if progress_callback:
+                        progress_callback("discovery", len(new_codes), total,
+                                          f"{code} {name}", discovery)
+        except Exception:
+            pass
+
+        if progress_callback and (i + 1) % 100 == 0:
+            progress_callback("scanning", i + 1, total, f"{code} {name}")
+
+    # Remove candidates that no longer qualify
+    removed = old_codes - new_codes
+    if removed:
+        conn = db.get_conn()
+        for code in removed:
+            conn.execute("DELETE FROM candidates WHERE task_id=? AND code=?", (task_id, code))
+        conn.commit()
+
+    db.refresh_scan_task_counts(task_id)
+    return {
+        "task_id": task_id,
+        "status": "completed",
+        "candidates_found": len(new_codes),
+        "total_stocks": total,
+        "added": len(new_codes - old_codes),
+        "removed": len(removed),
+    }
+
+
 DEFAULT_DAILY_SOURCES = ["baidu", "sina", "tencent"]
 
 

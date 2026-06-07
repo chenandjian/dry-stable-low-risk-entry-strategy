@@ -31,6 +31,7 @@
         <span class="muted">{{ t.latest_trade_date || '--' }}</span>
         <span class="actions">
           <button class="action-btn" @click="viewResults(t.id)" v-if="!t.running">查看结果</button>
+          <button class="action-btn primary" @click="handleReEvaluate(t.id)" v-if="!t.running">重新扫描策略</button>
           <button class="action-btn" @click="viewFailures(t.id)" v-if="!t.running && t.failed">失败列表</button>
           <button class="action-btn" @click="exportResults(t.id)" v-if="!t.running">导出</button>
           <span v-if="t.running" class="st-running">实时查看 →</span>
@@ -46,7 +47,7 @@ import { useRouter } from 'vue-router'
 import { useApi } from '../composables/useApi.js'
 
 const router = useRouter()
-const { getScanTasks } = useApi()
+const { getScanTasks, reEvaluateTask } = useApi()
 const tasks = ref([])
 let pollTimer = null
 
@@ -58,6 +59,12 @@ function statusText(status) {
 function viewResults(id) { router.push('/results') }
 function viewFailures(id) { router.push(`/?task=${id}&status=failed`) }
 function exportResults(id) { window.open('/api/candidates', '_blank') }
+async function handleReEvaluate(taskId) {
+  const res = await reEvaluateTask(taskId)
+  if (res.ok) {
+    await loadTasks()
+  }
+}
 
 async function loadTasks() {
   try {

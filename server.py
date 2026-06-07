@@ -15,7 +15,7 @@ from fastapi.middleware.cors import CORSMiddleware
 import yaml
 
 import scanner.db as db
-from scanner.engine import scan_all
+from scanner.engine import scan_all, re_evaluate_task
 from analyzer.dry_stable import analyze_dry_stable
 from scanner.index_source import fetch_market_index_daily
 from scanner.pattern_detector import CupHandleResult
@@ -442,6 +442,34 @@ async def retry_failed_stocks(task_id: str):
     threading.Thread(target=run_retry, daemon=True).start()
     return {"task_id": task_id, "status": "retry_started", "retry_count": len(stocks)}
 
+
+@app.post("/api/scan/tasks/{task_id}/re-evaluate")
+async def re_evaluate_task_endpoint(task_id: str):
+    """Re-run strategy evaluation on existing OHLC data without re-fetching."""
+    config = load_config()
+    db_path = config.get("data", {}).get("database_path", "data/cuphandle.db")
+    db.init_db(db_path)
+
+    conn = db.get_conn()
+    task = conn.execute("SELECT id FROM scan_tasks WHERE id=?", (task_id,)).fetchone()
+    if not task:
+        return JSONResponse({"error": "Task not found"}, status_code=404)
+
+    def run_re_eval():
+        import datetime
+        try:
+            result = re_evaluate_task(config, task_id)
+            logger.info(
+                "Re-evaluate %s: %d candidates (added %d, removed %d)",
+                task_id, result["candidates_found"],
+                result.get("added", 0), result.get("removed", 0),
+            )
+        except Exception as e:
+            import traceback
+            logger.error(f"Re-evaluate {task_id} failed: {e}\n{traceback.format_exc()}")
+
+    threading.Thread(target=run_re_eval, daemon=True).start()
+    return {"task_id": task_id, "status": "re_evaluate_started"}
 
 
 @app.get("/api/candidates")

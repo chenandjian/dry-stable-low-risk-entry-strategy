@@ -43,6 +43,12 @@ export function useApi() {
     return { ...body, ok: res.ok, statusCode: res.status }
   }
 
+  async function reEvaluateTask(taskId) {
+    const res = await fetch(`${API_BASE}/scan/tasks/${taskId}/re-evaluate`, { method: 'POST' })
+    const body = await res.json()
+    return { ...body, ok: res.ok, statusCode: res.status }
+  }
+
   async function getConfig() {
     try {
       const res = await fetch(`${API_BASE}/config`)
@@ -73,7 +79,7 @@ export function useApi() {
 
   return {
     startScan, getScanStatus, getCandidates, getCandidate, getScanTasks,
-    getTaskStocks, retryFailedStocks, getConfig, updateConfig,
+    getTaskStocks, retryFailedStocks, reEvaluateTask, getConfig, updateConfig,
     runCupHandleBacktest,
   }
 }

@@ -567,6 +567,13 @@ def get_running_task_id() -> str | None:
 
 # ====== Candidates ======
 
+def delete_candidates(task_id: str):
+    """Delete all candidates for a task (so re-evaluate can replace them)."""
+    conn = get_conn()
+    conn.execute("DELETE FROM candidates WHERE task_id=?", (task_id,))
+    conn.commit()
+
+
 def upsert_candidate(task_id: str, d: dict):
     """Insert or update a single candidate (for real-time discovery)."""
     conn = get_conn()
