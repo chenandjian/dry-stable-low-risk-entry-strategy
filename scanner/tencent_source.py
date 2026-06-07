@@ -29,7 +29,7 @@ def _try_tencent_kline(symbol: str, days: int) -> list[dict] | None:
     """Attempt Tencent K-line API."""
     url = "https://web.ifzq.gtimg.cn/appstock/app/fqkline/get"
     params = {
-        "param": f"{symbol},day,,,{days}",
+        "param": f"{symbol},day,,,{days},qfq",
         "_var": "kline_day",
     }
 
