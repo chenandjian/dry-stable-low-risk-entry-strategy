@@ -772,7 +772,13 @@ def test_scan_all_passes_configured_daily_sources_to_fetch(monkeypatch, tmp_path
     monkeypatch.setattr(stock_pool, "get_a_stock_pool", lambda config: [{"code": "600000", "name": "PF Bank"}])
     monkeypatch.setattr(engine, "fetch_market_index_daily", lambda: [])
     monkeypatch.setattr(engine, "passes_liquidity_filter", lambda data, cfg: True)
-    monkeypatch.setattr(engine, "detect_cup_handle", lambda data, cfg: engine.CupHandleResult(found=False))
+    class FakeStrategyEngine:
+        def __init__(self, config):
+            pass
+        def evaluate_at(self, data, code='', name='', market_data=None):
+            result = engine.CupHandleResult(found=False, code=code, name=name)
+            return type('Eval', (), {'result': result, 'dry_stable': None})()
+    monkeypatch.setattr(engine, "CupHandleStrategyEngine", FakeStrategyEngine)
     monkeypatch.setattr(
         engine,
         "analyze_dry_stable",
@@ -829,7 +835,13 @@ def test_scan_all_uses_daily_kline_days_config(monkeypatch, tmp_path):
     monkeypatch.setattr(stock_pool, "get_a_stock_pool", lambda config: [{"code": "600000", "name": "PF Bank"}])
     monkeypatch.setattr(engine, "fetch_market_index_daily", lambda: [])
     monkeypatch.setattr(engine, "passes_liquidity_filter", lambda data, cfg: True)
-    monkeypatch.setattr(engine, "detect_cup_handle", lambda data, cfg: engine.CupHandleResult(found=False))
+    class FakeStrategyEngine:
+        def __init__(self, config):
+            pass
+        def evaluate_at(self, data, code='', name='', market_data=None):
+            result = engine.CupHandleResult(found=False, code=code, name=name)
+            return type('Eval', (), {'result': result, 'dry_stable': None})()
+    monkeypatch.setattr(engine, "CupHandleStrategyEngine", FakeStrategyEngine)
     monkeypatch.setattr(
         engine,
         "analyze_dry_stable",
