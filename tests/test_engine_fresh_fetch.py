@@ -617,3 +617,125 @@ def test_scan_all_reports_progress_when_stock_skipped_for_insufficient_listing_d
     )
 
     assert progress == [("scanning", 1, 1, "600000 PF Bank")]
+
+
+# ---- re_evaluate_task ----
+
+def test_re_evaluate_finds_candidates_on_existing_data(monkeypatch, tmp_path):
+    """Should find cup-handle candidates from DB-stored OHLC without re-fetching."""
+    db_path = tmp_path / "cuphandle.db"
+    config = {
+        "data": {"database_path": str(db_path)},
+        "liquidity": {"enabled": False, "min_listing_days": 5},
+        "scoring": {"medium_threshold": 70},
+    }
+    db.init_db(str(db_path))
+    db.create_scan_task("task-1", "2026-01-01 09:00:00", total_stocks=2)
+    db.save_task_stocks("task-1", [
+        {"code": "600000", "name": "TestA", "market": "SSE"},
+        {"code": "000001", "name": "TestB", "market": "SZ"},
+    ])
+    # Store OHLC with a cup-handle pattern
+    db.save_ohlc("600000", _rows(260, close=20.0))
+    db.save_ohlc("000001", _rows(50, close=5.0))
+
+    monkeypatch.setattr(engine, "fetch_market_index_daily", lambda: [])
+
+    class FakeEngine:
+        def __init__(self, config): pass
+        def evaluate_at(self, data, code="", name="", market_data=None):
+            r = engine.CupHandleResult(found=True, code=code, name=name, score=75)
+            dry = {
+                "decision": {"verdict": "突破确认", "summary": "ok"},
+                "volume_dry": {"score": 7}, "price_stable": {"score": 7},
+                "pattern_score": {"score": 15, "type": "杯柄", "key_pattern_type": "cup_handle"},
+                "risk_reward": {"risk_percent": 5, "rr1": 2.0, "position_advice": "20%"},
+                "key_prices": {"entry_zone_low": 19, "entry_zone_high": 21, "pivot": 22,
+                               "stop_loss": 18, "target_1": 25, "target_2": 28},
+                "market_environment": {"status": "一般", "position_advice": "轻仓"},
+            }
+            return type("Eval", (), {"result": r, "dry_stable": dry})()
+
+    monkeypatch.setattr(engine, "CupHandleStrategyEngine", FakeEngine)
+    # Make passes_liquidity_filter always return True
+    monkeypatch.setattr(engine, "passes_liquidity_filter", lambda data, cfg: True)
+
+    result = engine.re_evaluate_task(config, "task-1")
+
+    assert result["status"] == "completed"
+    assert result["candidates_found"] == 2
+    assert result["total_stocks"] == 2
+    # Verify candidates persisted
+    cands = db.get_candidates(task_id="task-1")
+    assert len(cands) == 2
+
+
+def test_re_evaluate_replaces_old_candidates(monkeypatch, tmp_path):
+    """Old candidates should be removed, new ones take their place."""
+    db_path = tmp_path / "cuphandle.db"
+    config = {
+        "data": {"database_path": str(db_path)},
+        "liquidity": {"enabled": False, "min_listing_days": 5},
+        "scoring": {"medium_threshold": 70},
+    }
+    db.init_db(str(db_path))
+    db.create_scan_task("task-1", "2026-01-01 09:00:00", total_stocks=1)
+    db.save_task_stocks("task-1", [{"code": "600000", "name": "TestA", "market": "SSE"}])
+    db.save_ohlc("600000", _rows(260, close=20.0))
+
+    # Pre-populate an old candidate (via upsert)
+    db.upsert_candidate("task-1", {"code": "600000", "name": "TestA", "score": 60})
+    assert len(db.get_candidates(task_id="task-1")) == 1
+
+    monkeypatch.setattr(engine, "fetch_market_index_daily", lambda: [])
+    monkeypatch.setattr(engine, "passes_liquidity_filter", lambda data, cfg: True)
+
+    class FakeEngine:
+        def __init__(self, config): pass
+        def evaluate_at(self, data, code="", name="", market_data=None):
+            r = engine.CupHandleResult(found=True, code=code, name=name, score=80)
+            dry = {
+                "decision": {"verdict": "可低吸", "summary": "good"},
+                "volume_dry": {"score": 8}, "price_stable": {"score": 8},
+                "pattern_score": {"score": 17, "type": "杯柄", "key_pattern_type": "cup_handle"},
+                "risk_reward": {"risk_percent": 4, "rr1": 2.5, "position_advice": "30%"},
+                "key_prices": {"entry_zone_low": 19, "entry_zone_high": 20, "pivot": 21,
+                               "stop_loss": 18, "target_1": 25, "target_2": 30},
+                "market_environment": {"status": "良好", "position_advice": "正常"},
+            }
+            return type("Eval", (), {"result": r, "dry_stable": dry})()
+
+    monkeypatch.setattr(engine, "CupHandleStrategyEngine", FakeEngine)
+
+    result = engine.re_evaluate_task(config, "task-1")
+    assert result["candidates_found"] == 1
+    # Old score-60 candidate replaced by new score-80
+    cands = db.get_candidates(task_id="task-1")
+    assert len(cands) == 1
+    assert cands[0]["score"] == 80
+
+
+def test_re_evaluate_handles_no_ohlc_gracefully(monkeypatch, tmp_path):
+    """Tasks with stocks that have no OHLC data should not crash."""
+    db_path = tmp_path / "cuphandle.db"
+    config = {"data": {"database_path": str(db_path)}}
+    db.init_db(str(db_path))
+    db.create_scan_task("task-1", "2026-01-01 09:00:00", total_stocks=1)
+    db.save_task_stocks("task-1", [{"code": "999999", "name": "Ghost", "market": "SSE"}])
+
+    monkeypatch.setattr(engine, "fetch_market_index_daily", lambda: [])
+
+    result = engine.re_evaluate_task(config, "task-1")
+    assert result["status"] == "completed"
+    assert result["candidates_found"] == 0
+
+
+def test_re_evaluate_returns_no_stocks_for_unknown_task(monkeypatch, tmp_path):
+    """Unknown task_id should return no_stocks status."""
+    db_path = tmp_path / "cuphandle.db"
+    config = {"data": {"database_path": str(db_path)}}
+    db.init_db(str(db_path))
+
+    result = engine.re_evaluate_task(config, "nonexistent")
+    assert result["status"] == "no_stocks"
+    assert result["candidates_found"] == 0
