@@ -455,10 +455,21 @@ async def re_evaluate_task_endpoint(task_id: str):
     if not task:
         return JSONResponse({"error": "Task not found"}, status_code=404)
 
+    # Set status so frontend can show progress
+    conn.execute("UPDATE scan_tasks SET status='re_evaluating' WHERE id=?", (task_id,))
+    conn.commit()
+
     def run_re_eval():
         import datetime
         try:
             result = re_evaluate_task(config, task_id)
+            now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            conn2 = db.get_conn()
+            conn2.execute(
+                "UPDATE scan_tasks SET status='completed', candidates_count=?, finished_at=? WHERE id=?",
+                (result["candidates_found"], now, task_id),
+            )
+            conn2.commit()
             logger.info(
                 "Re-evaluate %s: %d candidates (added %d, removed %d)",
                 task_id, result["candidates_found"],
@@ -467,9 +478,12 @@ async def re_evaluate_task_endpoint(task_id: str):
         except Exception as e:
             import traceback
             logger.error(f"Re-evaluate {task_id} failed: {e}\n{traceback.format_exc()}")
+            conn2 = db.get_conn()
+            conn2.execute("UPDATE scan_tasks SET status='completed', error=? WHERE id=?", (str(e), task_id))
+            conn2.commit()
 
     threading.Thread(target=run_re_eval, daemon=True).start()
-    return {"task_id": task_id, "status": "re_evaluate_started"}
+    return {"task_id": task_id, "status": "re_evaluating"}
 
 
 @app.get("/api/candidates")

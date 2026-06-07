@@ -19,21 +19,23 @@
       <div v-if="tasks.length === 0" class="empty-state">
         暂无扫描记录
       </div>
-      <div v-for="t in tasks" :key="t.id" class="task-row">
-        <span class="task-dot" :class="t.running ? 'running' : 'done'"></span>
+      <div v-for="t in tasks" :key="t.id" class="task-row" :class="{ 're-evaluating': isReEvaluating(t) }">
+        <span class="task-dot" :class="dotClass(t)"></span>
         <span class="task-id">{{ t.id }}</span>
         <span class="task-date">{{ t.date }}</span>
-        <span :class="t.running ? 'st-running' : 'st-done'">{{ t.running ? '扫描中' : statusText(t.status) }}</span>
+        <span :class="statusClass(t)">{{ statusLabel(t) }}</span>
         <span class="muted">{{ t.duration || '--' }}</span>
-        <span class="blue">{{ t.candidates || 0 }}</span>
+        <span class="blue">{{ t.candidates || 0 }}<span v-if="candidateDelta(t)" class="delta">{{ candidateDelta(t) }}</span></span>
         <span class="red">{{ t.failed || 0 }}</span>
         <span class="muted">{{ t.stock_pool_source || '--' }}</span>
         <span class="muted">{{ t.latest_trade_date || '--' }}</span>
         <span class="actions">
-          <button class="action-btn" @click="viewResults(t.id)" v-if="!t.running">查看结果</button>
-          <button class="action-btn primary" @click="handleReEvaluate(t.id)" v-if="!t.running">重新扫描策略</button>
-          <button class="action-btn" @click="viewFailures(t.id)" v-if="!t.running && t.failed">失败列表</button>
-          <button class="action-btn" @click="exportResults(t.id)" v-if="!t.running">导出</button>
+          <button class="action-btn" @click="viewResults(t.id)" v-if="!isReEvaluating(t) && !t.running">查看结果</button>
+          <button class="action-btn primary" @click="handleReEvaluate(t.id)" :disabled="isReEvaluating(t)" v-if="!t.running">
+            {{ isReEvaluating(t) ? '重新评估中...' : '重新扫描策略' }}
+          </button>
+          <button class="action-btn" @click="viewFailures(t.id)" v-if="!isReEvaluating(t) && !t.running && t.failed">失败列表</button>
+          <button class="action-btn" @click="exportResults(t.id)" v-if="!isReEvaluating(t) && !t.running">导出</button>
           <span v-if="t.running" class="st-running">实时查看 →</span>
         </span>
       </div>
@@ -49,27 +51,69 @@ import { useApi } from '../composables/useApi.js'
 const router = useRouter()
 const { getScanTasks, reEvaluateTask } = useApi()
 const tasks = ref([])
+const reEvaluating = ref(new Set())
+const preCounts = ref({})   // taskId → previous candidate count
 let pollTimer = null
 
-function statusText(status) {
-  if (status === 'failed') return '失败'
-  if (status === 'cancelled') return '已停止'
+function isReEvaluating(t) { return reEvaluating.value.has(t.id) || t.status === 're_evaluating' }
+function dotClass(t) {
+  if (t.running || isReEvaluating(t)) return 'running'
+  return 'done'
+}
+function statusClass(t) {
+  if (t.running) return 'st-running'
+  if (isReEvaluating(t)) return 'st-running'
+  return 'st-done'
+}
+function statusLabel(t) {
+  if (t.running) return '扫描中'
+  if (isReEvaluating(t)) return '重新评估中...'
+  if (t.status === 'failed') return '失败'
+  if (t.status === 'cancelled') return '已停止'
   return '已完成'
+}
+function candidateDelta(t) {
+  const prev = preCounts.value[t.id]
+  if (prev != null && t.candidates !== prev && !isReEvaluating(t)) {
+    const d = t.candidates - prev
+    return d > 0 ? ` +${d}` : ` ${d}`
+  }
+  return ''
 }
 function viewResults(id) { router.push('/results') }
 function viewFailures(id) { router.push(`/?task=${id}&status=failed`) }
 function exportResults(id) { window.open('/api/candidates', '_blank') }
 async function handleReEvaluate(taskId) {
+  preCounts.value[taskId] = tasks.value.find(t => t.id === taskId)?.candidates || 0
+  reEvaluating.value.add(taskId)
   const res = await reEvaluateTask(taskId)
   if (res.ok) {
-    await loadTasks()
+    // Poll until status returns to 'completed'
+    let tries = 0
+    while (tries < 60) {
+      await new Promise(r => setTimeout(r, 1000))
+      await loadTasks()
+      const task = tasks.value.find(t => t.id === taskId)
+      if (task && task.status !== 're_evaluating') {
+        // Done — keep delta visible briefly
+        setTimeout(() => { delete preCounts.value[taskId] }, 5000)
+        break
+      }
+      tries++
+    }
   }
+  reEvaluating.value.delete(taskId)
+  await loadTasks()
 }
 
 async function loadTasks() {
   try {
     const data = await getScanTasks()
     tasks.value = (data.tasks || [])
+    // Sync re-evaluating state from server status
+    for (const t of tasks.value) {
+      if (t.status === 're_evaluating') reEvaluating.value.add(t.id)
+    }
   } catch (e) {
     console.error('Failed to load tasks:', e)
   }
@@ -114,5 +158,8 @@ onUnmounted(() => { if (pollTimer) clearInterval(pollTimer) })
 }
 .action-btn:hover { border-color: var(--accent); color: var(--accent); }
 .action-btn.primary { border-color: var(--accent); color: var(--accent); }
+.action-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.delta { font-size: 10px; margin-left: 2px; color: var(--down-green); }
+.task-row.re-evaluating { background: rgba(249,115,22,0.04); }
 .empty-state { padding: 40px; text-align: center; color: var(--text-muted); }
 </style>
