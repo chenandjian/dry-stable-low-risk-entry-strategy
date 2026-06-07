@@ -436,10 +436,18 @@ def _try_fetch_source(
                 return data, attempt, None
             last_error = "empty response"
         except Exception as exc:
-            last_error = str(exc)
+            last_error = _classify_fetch_error(exc)
         if attempt < attempts:
             sleep_fn(min(0.5 * attempt, 2.0))
     return None, attempts, last_error
+
+
+
+def _classify_fetch_error(exc: Exception) -> str:
+    text = str(exc)
+    if "456" in text or "429" in text:
+        return "data source busy"
+    return text
 
 
 def _merge_data(cached: list[dict], fresh: list[dict]) -> list[dict]:

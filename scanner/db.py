@@ -344,7 +344,7 @@ def finish_scan_task(task_id: str, finished_at: str, candidates_count: int,
     conn.execute(
         """UPDATE scan_tasks
            SET status='completed', finished_at=?, candidates_count=?,
-               elapsed_seconds=?, scanned=?, skipped=?
+               elapsed_seconds=?, scanned=?, skipped=?, error=NULL
            WHERE id=?""",
         (finished_at, candidates_count, elapsed_seconds, scanned, skipped, task_id)
     )
@@ -365,7 +365,7 @@ def mark_dead_tasks_as_failed():
             (task_id,),
         )
     conn.execute(
-        "UPDATE scan_tasks SET status='failed', error='Server restarted' WHERE status='running'"
+        "UPDATE scan_tasks SET status='failed', error='Interrupted by current server startup' WHERE status='running'"
     )
     conn.commit()
 
@@ -375,7 +375,7 @@ def get_interrupted_task() -> dict | None:
     conn = get_conn()
     row = conn.execute(
         "SELECT id, scanned, total_stocks FROM scan_tasks "
-        "WHERE (status='failed' AND error='Server restarted') "
+        "WHERE (status='failed' AND error='Interrupted by current server startup') "
         "   OR (status='cancelled' AND error='User stopped') "
         "ORDER BY started_at DESC LIMIT 1"
     ).fetchone()
@@ -433,13 +433,18 @@ def get_task_stocks(task_id: str, status: str = None, limit: int = 100, offset: 
 
 
 def get_pending_stocks(task_id: str, from_idx: int = 0) -> list[dict]:
-    """Get pending stocks for a resumed task."""
+    """Get unfinished stocks for a resumed task.
+
+    Resume must not trust scan_tasks.scanned as an idx offset: multi-threaded scans
+    and source-busy requeues can leave low-idx rows unfinished while later rows are
+    already processed.
+    """
     conn = get_conn()
     rows = conn.execute(
         """SELECT code, name, market FROM task_stocks
-           WHERE task_id=? AND idx>=? AND status IN ('pending', 'fetching')
+           WHERE task_id=? AND status IN ('pending', 'fetching')
            ORDER BY idx""",
-        (task_id, from_idx),
+        (task_id,),
     ).fetchall()
     return [{"code": r[0], "name": r[1], "market": r[2]} for r in rows]
 

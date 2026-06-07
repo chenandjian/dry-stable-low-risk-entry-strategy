@@ -2,6 +2,7 @@
 import requests
 import logging
 import time
+import json
 
 logger = logging.getLogger(__name__)
 
@@ -49,7 +50,6 @@ def fetch_sina_daily(code: str, days: int = 250) -> list[dict] | None:
                 end = text.rindex(")")
                 text = text[start:end]
 
-            import json
             raw_data = json.loads(text)
 
             if not raw_data or not isinstance(raw_data, list):
@@ -80,6 +80,16 @@ def fetch_sina_daily(code: str, days: int = 250) -> list[dict] | None:
             else:
                 logger.warning(f"Sina fetch failed for {code} after {max_retries} retries: {e}")
                 return None
-        except (requests.HTTPError, ValueError, KeyError, TypeError, json.JSONDecodeError) as e:
+        except requests.HTTPError as e:
+            if _is_rate_limited(e):
+                raise RuntimeError(str(e)) from e
             logger.warning(f"Sina fetch/parse error for {code}: {e}")
             return None
+        except (ValueError, KeyError, TypeError, json.JSONDecodeError) as e:
+            logger.warning(f"Sina fetch/parse error for {code}: {e}")
+            return None
+
+
+def _is_rate_limited(exc: Exception) -> bool:
+    text = str(exc)
+    return "456" in text or "429" in text

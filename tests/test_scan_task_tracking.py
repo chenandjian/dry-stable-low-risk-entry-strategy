@@ -163,6 +163,58 @@ def test_candidates_are_unique_per_task_and_code(tmp_path):
 
 
 
+def test_get_pending_stocks_resume_includes_low_idx_unfinished_rows(tmp_path):
+    db.init_db(str(tmp_path / "cuphandle.db"))
+    db.create_scan_task("task-resume", "2026-06-04 09:30:00", total_stocks=4)
+    db.save_task_stocks("task-resume", [
+        {"code": "000001", "name": "平安银行", "market": "深证主板"},
+        {"code": "000002", "name": "万科A", "market": "深证主板"},
+        {"code": "600000", "name": "浦发银行", "market": "上证主板"},
+        {"code": "600036", "name": "招商银行", "market": "上证主板"},
+    ])
+    db.update_task_stock("task-resume", "000001", status="fetching")
+    db.update_task_stock("task-resume", "000002", status="scanned")
+    db.update_task_stock("task-resume", "600000", status="skipped")
+    db.update_task_stock("task-resume", "600036", status="pending")
+
+    pending = db.get_pending_stocks("task-resume", from_idx=3)
+
+    assert [row["code"] for row in pending] == ["000001", "600036"]
+
+
+def test_get_interrupted_task_ignores_stale_server_restarted_history(tmp_path):
+    db.init_db(str(tmp_path / "cuphandle.db"))
+    db.create_scan_task("old-failed", "2026-06-04 09:30:00", total_stocks=2)
+    db.save_task_stocks("old-failed", [
+        {"code": "000001", "name": "平安银行", "market": "深证主板"},
+        {"code": "000002", "name": "万科A", "market": "深证主板"},
+    ])
+    db.update_task_stock("old-failed", "000001", status="scanned")
+    db.refresh_scan_task_counts("old-failed")
+    conn = db.get_conn()
+    conn.execute("UPDATE scan_tasks SET status='failed', error='Server restarted' WHERE id=?", ("old-failed",))
+    conn.commit()
+
+    assert db.get_interrupted_task() is None
+
+
+def test_mark_dead_tasks_as_failed_makes_current_interrupted_task_resumable(tmp_path):
+    db.init_db(str(tmp_path / "cuphandle.db"))
+    db.create_scan_task("running-now", "2026-06-06 09:30:00", total_stocks=2)
+    db.save_task_stocks("running-now", [
+        {"code": "000001", "name": "平安银行", "market": "深证主板"},
+        {"code": "000002", "name": "万科A", "market": "深证主板"},
+    ])
+    db.update_task_stock("running-now", "000001", status="scanned")
+    db.update_task_stock("running-now", "000002", status="fetching")
+    db.refresh_scan_task_counts("running-now")
+
+    db.mark_dead_tasks_as_failed()
+
+    interrupted = db.get_interrupted_task()
+    assert interrupted["id"] == "running-now"
+
+
 def test_get_a_stock_pool_result_uses_akshare_when_available(monkeypatch, tmp_path):
     import types
     from scanner import stock_pool

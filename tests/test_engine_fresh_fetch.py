@@ -486,6 +486,26 @@ def test_fetch_with_retry_acquires_and_releases_fallback_lock(monkeypatch, tmp_p
     assert mgr.release_calls == ["tencent"]
 
 
+
+
+def test_fetch_with_retry_treats_sina_456_as_transient_source_busy(monkeypatch, tmp_path):
+    db.init_db(str(tmp_path / "cuphandle.db"))
+    calls = []
+
+    def fake_sina(code):
+        calls.append(code)
+        raise RuntimeError("456 Client Error")
+
+    monkeypatch.setattr(engine, "fetch_sina_daily", fake_sina)
+    monkeypatch.setattr(engine, "fetch_tencent_daily", lambda code: None)
+
+    result = engine._fetch_with_retry("000868", "sina", retry_attempts=2, fallback_attempts=2, sleep_fn=lambda _: None)
+
+    assert result.data is None
+    assert result.primary_error == "data source busy"
+    assert engine._is_transient_source_busy(result) is True
+
+
 def test_fetch_with_retry_does_not_return_cache_when_sources_fail(monkeypatch, tmp_path):
     db.init_db(str(tmp_path / "cuphandle.db"))
     db.save_ohlc("600000", [_row("2026-06-03", close=9.0)])
