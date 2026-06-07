@@ -162,6 +162,53 @@
             <div class="range-val">{{ config.decision.low_buy_max_risk_percent }}%</div>
           </div>
         </div>
+
+        <h4 class="sub-group-title">量干进阶</h4>
+        <div class="param-grid">
+          <div class="param">
+            <label title="近10日价格线性回归斜率低于此值且收盘低于MA20时，量干最高分被限制">缩量阴跌封顶分</label>
+            <input type="range" min="4" max="8" v-model.number="config.volume_dry.bad_shrink_max_score" @input="markDirty" />
+            <div class="range-val">{{ config.volume_dry.bad_shrink_max_score }} 分</div>
+          </div>
+          <div class="param">
+            <label title="股价处于近60日区间下半部时量干最高分">低位缩量封顶分</label>
+            <input type="range" min="4" max="8" v-model.number="config.volume_dry.low_position_max_score" @input="markDirty" />
+            <div class="range-val">{{ config.volume_dry.low_position_max_score }} 分</div>
+          </div>
+          <div class="param">
+            <label title="近5天放量但不涨时量干最高分">放量滞涨封顶分</label>
+            <input type="range" min="4" max="8" v-model.number="config.volume_dry.volume_stall_max_score" @input="markDirty" />
+            <div class="range-val">{{ config.volume_dry.volume_stall_max_score }} 分</div>
+          </div>
+          <div class="param">
+            <label title="近3天放量大阴线时量干最高分">大阴线封顶分</label>
+            <input type="range" min="3" max="7" v-model.number="config.volume_dry.big_bear_max_score" @input="markDirty" />
+            <div class="range-val">{{ config.volume_dry.big_bear_max_score }} 分</div>
+          </div>
+        </div>
+
+        <h4 class="sub-group-title">价稳进阶</h4>
+        <div class="param-grid">
+          <div class="param">
+            <label title="近5日收盘价波动≤此值视为价格紧致">收盘紧致度 <span class="unit">%</span></label>
+            <input type="range" min="1" max="8" v-model.number="config.price_stable.close_tightness_strong_pct" @input="markDirty" />
+            <div class="range-val">{{ config.price_stable.close_tightness_strong_pct }}%</div>
+          </div>
+          <div class="param">
+            <label title="跌破柄底/MA50时价稳最高分">支撑跌破封顶分</label>
+            <input type="range" min="3" max="7" v-model.number="config.price_stable.support_break_max_score" @input="markDirty" />
+            <div class="range-val">{{ config.price_stable.support_break_max_score }} 分</div>
+          </div>
+        </div>
+
+        <h4 class="sub-group-title">风报进阶</h4>
+        <div class="param-grid">
+          <div class="param">
+            <label title="止损空间必须≥ATR14×此倍数，否则发出警告">ATR止损倍数</label>
+            <input type="range" min="1.0" max="2.0" step="0.1" v-model.number="config.risk_reward.atr_stop_multiplier" @input="markDirty" />
+            <div class="range-val">{{ config.risk_reward.atr_stop_multiplier }}×</div>
+          </div>
+        </div>
       </div>
     </section>
 
@@ -192,6 +239,9 @@ const config = reactive({
   handle: {},
   breakout: {},
   decision: {},
+  volume_dry: { bad_shrink_max_score: 6, low_position_max_score: 6, volume_stall_max_score: 6, big_bear_max_score: 5 },
+  price_stable: { close_tightness_strong_pct: 3, support_break_max_score: 5 },
+  risk_reward: { atr_stop_multiplier: 1.2 },
 })
 
 const dirty = ref(false)
@@ -312,6 +362,9 @@ async function saveConfig() {
         volume_multiplier: config.breakout.volume_multiplier,
       },
       decision: { ...config.decision },
+      volume_dry: { ...config.volume_dry },
+      price_stable: { ...config.price_stable },
+      risk_reward: { ...config.risk_reward },
     }
     const res = await updateConfig(payload)
     if (res.status === 'ok') {
