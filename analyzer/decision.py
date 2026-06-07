@@ -18,6 +18,20 @@ class DryStableDecision:
     invalid_conditions: list[str] = field(default_factory=list)
 
 
+DEFAULT_DECISION_CFG = {
+    "min_pattern_score": 8,
+    "min_volume_dry_score": 6,
+    "min_price_stable_score": 6,
+    "max_risk_percent": 8,
+    "min_rr1": 2.0,
+    "chase_threshold_pct": 5,
+    "low_buy_min_pattern_score": 13,
+    "low_buy_min_volume_dry": 7,
+    "low_buy_min_price_stable": 7,
+    "low_buy_max_risk_percent": 6,
+}
+
+
 def make_dry_stable_decision(
     pattern_score: int,
     volume_dry_score: int,
@@ -26,13 +40,26 @@ def make_dry_stable_decision(
     risk_reward,
     invalid_conditions: list[str] | None = None,
     market_status: str = "一般",
-    max_risk_percent: float = 8,
+    decision_cfg: dict | None = None,
 ) -> DryStableDecision:
     """Apply the hard rules from the dry-stable strategy document.
 
     Args:
-        max_risk_percent: 止损空间上限（%），超过此值直接 reject。默认 8。
+        decision_cfg: 来自 config.yaml 的 decision 段，支持自定义所有阈值。
     """
+    cfg = {**DEFAULT_DECISION_CFG, **(decision_cfg or {})}
+
+    min_pattern = int(cfg["min_pattern_score"])
+    min_vd = int(cfg["min_volume_dry_score"])
+    min_ps = int(cfg["min_price_stable_score"])
+    max_risk = float(cfg["max_risk_percent"])
+    min_rr1 = float(cfg["min_rr1"])
+    chase_pct = float(cfg["chase_threshold_pct"])
+    lb_pattern = int(cfg["low_buy_min_pattern_score"])
+    lb_vd = int(cfg["low_buy_min_volume_dry"])
+    lb_ps = int(cfg["low_buy_min_price_stable"])
+    lb_max_risk = float(cfg["low_buy_max_risk_percent"])
+
     d = DryStableDecision()
 
     current = key_prices.current_price
@@ -41,33 +68,33 @@ def make_dry_stable_decision(
     pivot = key_prices.pivot
 
     d.in_low_buy_zone = low > 0 and high > 0 and low <= current <= high
-    d.near_pivot = pivot > 0 and current <= pivot * 1.05
-    d.is_chasing = pivot > 0 and current > pivot * 1.05
+    d.near_pivot = pivot > 0 and current <= pivot * (1 + chase_pct / 100)
+    d.is_chasing = pivot > 0 and current > pivot * (1 + chase_pct / 100)
 
     if invalid_conditions:
         return _block(d, invalid_conditions[0], invalid_conditions)
     if market_status == "较差":
         return _block(d, "大盘环境较差")
 
-    if pattern_score < 8:
+    if pattern_score < min_pattern:
         return _block(d, "形态不成熟")
-    if volume_dry_score < 6:
+    if volume_dry_score < min_vd:
         return _block(d, "量能未干")
-    if price_stable_score < 6:
+    if price_stable_score < min_ps:
         return _block(d, "价格未稳")
-    if risk_reward.risk_percent > max_risk_percent:
-        return _block(d, f"止损空间超过{max_risk_percent:.0f}%")
-    if risk_reward.rr1 < 2:
-        return _block(d, "第一目标盈亏比低于2:1")
+    if risk_reward.risk_percent > max_risk:
+        return _block(d, f"止损空间超过{max_risk:.0f}%")
+    if risk_reward.rr1 < min_rr1:
+        return _block(d, f"第一目标盈亏比低于{min_rr1}:1")
     if d.is_chasing:
-        return _block(d, "当前价高于Pivot超过5%，已远离低风险买点")
+        return _block(d, f"当前价高于Pivot超过{chase_pct}%，已远离低风险买点")
 
     if (
-        pattern_score >= 13
-        and volume_dry_score >= 7
-        and price_stable_score >= 7
-        and risk_reward.risk_percent <= 6
-        and risk_reward.rr1 >= 2
+        pattern_score >= lb_pattern
+        and volume_dry_score >= lb_vd
+        and price_stable_score >= lb_ps
+        and risk_reward.risk_percent <= lb_max_risk
+        and risk_reward.rr1 >= min_rr1
         and d.in_low_buy_zone
     ):
         d.verdict = "可低吸"
@@ -77,14 +104,14 @@ def make_dry_stable_decision(
             "量干评分达到低吸标准",
             "价稳评分达到低吸标准",
             "当前价靠近柄部/支撑低吸区间",
-            "止损空间不超过6%且第一目标盈亏比不低于2:1",
+            f"止损空间不超过{lb_max_risk:.0f}%且第一目标盈亏比不低于{min_rr1}:1",
         ]
         return d
 
     if (
-        pattern_score >= 13
-        and volume_dry_score >= 6
-        and price_stable_score >= 6
+        pattern_score >= lb_pattern
+        and volume_dry_score >= min_vd
+        and price_stable_score >= min_ps
         and d.near_pivot
     ):
         d.verdict = "突破确认"
@@ -92,7 +119,7 @@ def make_dry_stable_decision(
         d.reasons = [
             "形态评分达到成熟标准",
             "量价状态达到观察标准",
-            "当前价未远离Pivot超过5%",
+            f"当前价未远离Pivot超过{chase_pct}%",
         ]
         if not d.in_low_buy_zone:
             d.reasons.append("当前价不在理想低吸区间内")

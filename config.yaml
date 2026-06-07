@@ -50,7 +50,18 @@ scoring:
   strong_threshold: 80
   medium_threshold: 70
 decision:
-  max_risk_percent: 8   # 止损空间上限（%），超过此值直接 reject
+  # 硬拒绝阈值（任一不满足 → 不建议买入）
+  min_pattern_score: 8
+  min_volume_dry_score: 6
+  min_price_stable_score: 6
+  max_risk_percent: 8
+  min_rr1: 2.0
+  chase_threshold_pct: 5
+  # "可低吸" 条件（比硬拒绝更严）
+  low_buy_min_pattern_score: 13
+  low_buy_min_volume_dry: 7
+  low_buy_min_price_stable: 7
+  low_buy_max_risk_percent: 6
 output:
   csv: true
   json: true

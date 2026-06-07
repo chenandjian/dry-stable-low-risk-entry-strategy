@@ -18,12 +18,22 @@ class RiskRewardResult:
 
 def calculate_risk_reward(key_prices, volume_dry_score: int = 0, price_stable_score: int = 0,
                           pattern_score: int = 0,
-                          max_risk_percent: float = 8) -> RiskRewardResult:
+                          decision_cfg: dict | None = None) -> RiskRewardResult:
     """Calculate risk/reward ratio and position sizing advice.
 
     Args:
-        max_risk_percent: 止损空间上限（%），超过此值 can_buy=False。默认 8。
+        decision_cfg: 来自 config.yaml 的 decision 段。
     """
+    cfg = {**DEFAULT_RR_CFG, **(decision_cfg or {})}
+    max_risk = float(cfg["max_risk_percent"])
+    min_rr1 = float(cfg["min_rr1"])
+    lb_pattern = int(cfg["low_buy_min_pattern_score"])
+    lb_vd = int(cfg["low_buy_min_volume_dry"])
+    lb_ps = int(cfg["low_buy_min_price_stable"])
+    lb_max_risk = float(cfg["low_buy_max_risk_percent"])
+    min_vd = int(cfg["min_volume_dry_score"])
+    min_ps = int(cfg["min_price_stable_score"])
+
     r = RiskRewardResult()
 
     cp = key_prices.current_price
@@ -46,13 +56,13 @@ def calculate_risk_reward(key_prices, volume_dry_score: int = 0, price_stable_sc
         r.rr2 = round((t2 - cp) / risk, 1)
 
     # Hard rules
-    if r.risk_percent > max_risk_percent:
+    if r.risk_percent > max_risk:
         r.can_buy = False
         r.risk_level = "高风险"
         r.position_advice = "0%"
         return r
 
-    if r.rr1 < 2:
+    if r.rr1 < min_rr1:
         r.can_buy = False
         r.risk_level = "高风险"
         r.position_advice = "0%"
@@ -60,17 +70,17 @@ def calculate_risk_reward(key_prices, volume_dry_score: int = 0, price_stable_sc
 
     # Risk level determination
     all_good = (
-        pattern_score >= 13
-        and volume_dry_score >= 7
-        and price_stable_score >= 7
-        and r.risk_percent <= 6
-        and r.rr1 >= 2
+        pattern_score >= lb_pattern
+        and volume_dry_score >= lb_vd
+        and price_stable_score >= lb_ps
+        and r.risk_percent <= lb_max_risk
+        and r.rr1 >= min_rr1
     )
 
     if all_good:
         r.risk_level = "低"
         r.can_buy = True
-    elif volume_dry_score >= 6 and price_stable_score >= 6 and pattern_score >= 13:
+    elif volume_dry_score >= min_vd and price_stable_score >= min_ps and pattern_score >= lb_pattern:
         r.risk_level = "中"
         r.can_buy = False
     else:
@@ -84,7 +94,7 @@ def calculate_risk_reward(key_prices, volume_dry_score: int = 0, price_stable_sc
         else:
             r.position_advice = "30%-40%"
     elif r.risk_level == "中":
-        if r.risk_percent <= 6:
+        if r.risk_percent <= lb_max_risk:
             r.position_advice = "20%-30%"
         else:
             r.position_advice = "10%-20%"
@@ -92,3 +102,15 @@ def calculate_risk_reward(key_prices, volume_dry_score: int = 0, price_stable_sc
         r.position_advice = "0%"
 
     return r
+
+
+DEFAULT_RR_CFG = {
+    "max_risk_percent": 8,
+    "min_rr1": 2.0,
+    "low_buy_min_pattern_score": 13,
+    "low_buy_min_volume_dry": 7,
+    "low_buy_min_price_stable": 7,
+    "low_buy_max_risk_percent": 6,
+    "min_volume_dry_score": 6,
+    "min_price_stable_score": 6,
+}

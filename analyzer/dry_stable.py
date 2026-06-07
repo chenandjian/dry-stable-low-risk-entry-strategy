@@ -18,7 +18,6 @@ def analyze_dry_stable(result, data: list[dict], market_data: list[dict] | None 
         config: 可选配置字典，支持 decision.max_risk_percent（默认 8）。
     """
     decision_cfg = (config or {}).get("decision", {})
-    max_risk_percent = float(decision_cfg.get("max_risk_percent", 8))
 
     vol_dry = score_volume_dry(data)
     price_stable = score_price_stable(data)
@@ -30,7 +29,7 @@ def analyze_dry_stable(result, data: list[dict], market_data: list[dict] | None 
         volume_dry_score=vol_dry.total_score,
         price_stable_score=price_stable.total_score,
         pattern_score=pattern.total_score,
-        max_risk_percent=max_risk_percent,
+        decision_cfg=decision_cfg,
     )
     invalid_conditions = find_invalid_conditions(data, key_prices, result)
     market_env = assess_market_environment(market_data)
@@ -42,7 +41,7 @@ def analyze_dry_stable(result, data: list[dict], market_data: list[dict] | None 
         risk_reward=rr,
         invalid_conditions=invalid_conditions,
         market_status=market_env.status,
-        max_risk_percent=max_risk_percent,
+        decision_cfg=decision_cfg,
     )
 
     return {
