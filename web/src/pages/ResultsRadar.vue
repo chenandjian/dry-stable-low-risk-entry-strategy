@@ -182,9 +182,10 @@ function price(v) { return v ? Number(v).toFixed(2) : '--' }
 function verdictType(c) {
   const vk = c.verdict_key || ''
   if (vk === 'BUY_LOW' || c.dry_stable_verdict === '可低吸') return 'strong'
-  if (c.is_breakout) return 'breakout'
   if (vk === 'WATCH_BREAKOUT' || c.dry_stable_verdict === '突破确认') return 'confirm'
   if (vk.startsWith('WAIT_')) return 'wait'
+  if (vk === 'REJECT' || c.dry_stable_verdict === '不建议买入') return 'weak'
+  if (c.is_breakout) return 'breakout'
   return c.score >= 70 ? 'medium' : 'weak'
 }
 function marketClass(s) {

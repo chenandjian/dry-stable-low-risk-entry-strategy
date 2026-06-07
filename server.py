@@ -245,6 +245,7 @@ async def start_scan():
                         "vol_multiplier": discovery["vol_multiplier"],
                         "breakout_price": discovery.get("breakout_price", 0),
                         "latest_close": discovery.get("latest_close", 0),
+                        "verdict_key": discovery.get("verdict_key", ""),
                     })
                     _running["stats"] = {
                         **stats,
@@ -488,6 +489,9 @@ async def re_evaluate_task_endpoint(task_id: str):
 
 @app.get("/api/candidates")
 async def get_candidates(task_id: str = None):
+    config = load_config()
+    db_path = config.get("data", {}).get("database_path", "data/cuphandle.db")
+    db.init_db(db_path)
     # If a specific task is requested, always query DB
     if task_id:
         cands = db.get_candidates(task_id=task_id)
@@ -530,6 +534,13 @@ async def get_candidates(task_id: str = None):
             "handle_depth_pct": c.get("handle_depth_pct", 0),
             "cup_duration": c.get("cup_duration", 0),
             "vol_multiplier": c.get("vol_multiplier", 0),
+            "verdict_key": c.get("verdict_key", ""),
+            "positive_factors": c.get("positive_factors", ""),
+            "warnings": c.get("warnings", ""),
+            "reject_reasons": c.get("reject_reasons", ""),
+            "raw_volume_dry_score": c.get("raw_volume_dry_score", 0),
+            "raw_price_stable_score": c.get("raw_price_stable_score", 0),
+            "score_caps": c.get("score_caps", ""),
         })
     return {"candidates": result, "total": len(result)}
 
@@ -628,6 +639,13 @@ async def get_candidate(code: str):
         "latest_close": c.get("latest_close", 0),
         "latest_turnover": c.get("latest_turnover", 0),
         "lip_deviation_pct": c.get("lip_deviation_pct", 0),
+        "verdict_key": c.get("verdict_key", ""),
+        "positive_factors": c.get("positive_factors", ""),
+        "warnings": c.get("warnings", ""),
+        "reject_reasons": c.get("reject_reasons", ""),
+        "raw_volume_dry_score": c.get("raw_volume_dry_score", 0),
+        "raw_price_stable_score": c.get("raw_price_stable_score", 0),
+        "score_caps": c.get("score_caps", ""),
         "trade_plan": trade_plan,
     }
 

@@ -324,10 +324,13 @@ function formatDetail(c) {
 
 function statusFor(c) {
   const vk = c.verdict_key || ''
+  // Strategy verdict takes priority over pattern breakout flag
   if (vk === 'BUY_LOW' || c.dry_stable_verdict === '可低吸') return 'near'
-  if (c.is_breakout) return 'breakout'
   if (vk === 'WATCH_BREAKOUT' || c.dry_stable_verdict === '突破确认') return 'confirm'
   if (vk.startsWith('WAIT_')) return 'wait'
+  if (vk === 'REJECT' || c.dry_stable_verdict === '不建议买入') return 'watch'
+  // Fallback: pattern-level flags
+  if (c.is_breakout) return 'breakout'
   return c.score >= 70 ? 'near' : 'watch'
 }
 
