@@ -207,7 +207,7 @@ def test_evaluate_at_rejects_when_dry_stable_prefers_vcp(monkeypatch):
     data = make_ohlc_from_closes(build_cup_handle_closes())
     engine = CupHandleStrategyEngine(full_config())
 
-    def fake_analyze_dry_stable(result, data, market_data=None):
+    def fake_analyze_dry_stable(result, data, market_data=None, config=None):
         return {
             "decision": {"verdict": "观察"},
             "pattern_score": {"key_pattern_type": "vcp"},
@@ -228,7 +228,7 @@ def test_evaluate_at_rejects_partial_dry_stable_schema(monkeypatch):
     data = make_ohlc_from_closes(build_cup_handle_closes())
     engine = CupHandleStrategyEngine(full_config())
 
-    def fake_analyze_dry_stable(result, data, market_data=None):
+    def fake_analyze_dry_stable(result, data, market_data=None, config=None):
         return {
             "decision": {},
             "pattern_score": {},
@@ -251,7 +251,7 @@ def test_evaluate_at_rejects_unknown_dry_stable_verdict(monkeypatch):
     data = make_ohlc_from_closes(build_cup_handle_closes())
     engine = CupHandleStrategyEngine(full_config())
 
-    def fake_analyze_dry_stable(result, data, market_data=None):
+    def fake_analyze_dry_stable(result, data, market_data=None, config=None):
         return {
             "decision": {"verdict": "神秘状态"},
             "pattern_score": {"key_pattern_type": "cup_handle"},

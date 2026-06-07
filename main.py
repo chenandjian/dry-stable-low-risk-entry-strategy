@@ -111,7 +111,7 @@ def cmd_analyze(args):
 
     # Dry-stable analysis
     market_data = fetch_market_index_daily()
-    dry_stable = analyze_dry_stable(result, data, market_data=market_data)
+    dry_stable = analyze_dry_stable(result, data, market_data=market_data, config=config)
 
     # Build analysis output
     analysis = {

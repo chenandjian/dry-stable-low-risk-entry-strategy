@@ -118,7 +118,7 @@ class CupHandleStrategyEngine:
             data_until_date,
             self.scoring_cfg,
         )
-        dry_stable = analyze_dry_stable(result, data_until_date, market_data=market_data)
+        dry_stable = analyze_dry_stable(result, data_until_date, market_data=market_data, config=self.config)
         passed_rules, failed_rules = self._candidate_rules(result, dry_stable)
         return StrategyEvaluation(
             not failed_rules,

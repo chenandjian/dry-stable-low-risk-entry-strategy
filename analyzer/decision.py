@@ -26,8 +26,13 @@ def make_dry_stable_decision(
     risk_reward,
     invalid_conditions: list[str] | None = None,
     market_status: str = "一般",
+    max_risk_percent: float = 8,
 ) -> DryStableDecision:
-    """Apply the hard rules from the dry-stable strategy document."""
+    """Apply the hard rules from the dry-stable strategy document.
+
+    Args:
+        max_risk_percent: 止损空间上限（%），超过此值直接 reject。默认 8。
+    """
     d = DryStableDecision()
 
     current = key_prices.current_price
@@ -50,8 +55,8 @@ def make_dry_stable_decision(
         return _block(d, "量能未干")
     if price_stable_score < 6:
         return _block(d, "价格未稳")
-    if risk_reward.risk_percent > 8:
-        return _block(d, "止损空间超过8%")
+    if risk_reward.risk_percent > max_risk_percent:
+        return _block(d, f"止损空间超过{max_risk_percent:.0f}%")
     if risk_reward.rr1 < 2:
         return _block(d, "第一目标盈亏比低于2:1")
     if d.is_chasing:

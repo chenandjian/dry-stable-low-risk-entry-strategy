@@ -235,7 +235,7 @@ def scan_all(
                 dry_stable = evaluation.dry_stable
                 if not result.found:
                     result = CupHandleResult(found=False, code=code, name=stock.get("name", ""))
-                    dry_stable = analyze_dry_stable(result, data, market_data=market_data)
+                    dry_stable = analyze_dry_stable(result, data, market_data=market_data, config=config)
                     pattern20 = dry_stable["pattern_score"]["score"]
                     if dry_stable["pattern_score"].get("key_pattern_type") != "vcp" or pattern20 < 13:
                         dry_stable = None

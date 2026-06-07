@@ -17,8 +17,13 @@ class RiskRewardResult:
 
 
 def calculate_risk_reward(key_prices, volume_dry_score: int = 0, price_stable_score: int = 0,
-                          pattern_score: int = 0) -> RiskRewardResult:
-    """Calculate risk/reward ratio and position sizing advice."""
+                          pattern_score: int = 0,
+                          max_risk_percent: float = 8) -> RiskRewardResult:
+    """Calculate risk/reward ratio and position sizing advice.
+
+    Args:
+        max_risk_percent: 止损空间上限（%），超过此值 can_buy=False。默认 8。
+    """
     r = RiskRewardResult()
 
     cp = key_prices.current_price
@@ -41,7 +46,7 @@ def calculate_risk_reward(key_prices, volume_dry_score: int = 0, price_stable_sc
         r.rr2 = round((t2 - cp) / risk, 1)
 
     # Hard rules
-    if r.risk_percent > 8:
+    if r.risk_percent > max_risk_percent:
         r.can_buy = False
         r.risk_level = "高风险"
         r.position_advice = "0%"
