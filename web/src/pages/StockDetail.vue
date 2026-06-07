@@ -32,6 +32,18 @@
         <div class="kv"><span class="k">建议仓位</span><span class="v">{{ stock.position_advice || '--' }}</span></div>
       </div>
 
+      <div v-if="hasDiagnostics" class="diagnostics">
+        <div class="diag-item warn" v-for="w in parseList(stock.warnings)" :key="w">⚠ {{ w }}</div>
+        <div class="diag-item reject" v-for="r in parseList(stock.reject_reasons)" :key="r">✗ {{ r }}</div>
+        <div class="diag-item cap" v-for="c in parseList(stock.score_caps)" :key="c">⊡ {{ c }}</div>
+        <div class="diag-item raw" v-if="stock.raw_volume_dry_score && stock.raw_volume_dry_score !== stock.volume_dry_score">
+          量干原始 {{ stock.raw_volume_dry_score }} → 封顶 {{ stock.volume_dry_score }}
+        </div>
+        <div class="diag-item raw" v-if="stock.raw_price_stable_score && stock.raw_price_stable_score !== stock.price_stable_score">
+          价稳原始 {{ stock.raw_price_stable_score }} → 封顶 {{ stock.price_stable_score }}
+        </div>
+      </div>
+
       <div class="section-label">形态评分</div>
       <div class="score-section">
         <ScoreBar label="杯体结构" :current="cupScore" :max="35" />
@@ -293,6 +305,17 @@ const dryVerdictType = computed(() => {
   if (stock.value.dry_stable_verdict === '突破确认') return 'breakout'
   return 'medium'
 })
+const hasDiagnostics = computed(() => {
+  const s = stock.value
+  return (s.warnings || s.reject_reasons || s.score_caps ||
+    (s.raw_volume_dry_score && s.raw_volume_dry_score !== s.volume_dry_score) ||
+    (s.raw_price_stable_score && s.raw_price_stable_score !== s.price_stable_score))
+})
+function parseList(v) {
+  if (!v) return []
+  if (Array.isArray(v)) return v
+  try { return JSON.parse(v) } catch { return [v] }
+}
 const marketClass = computed(() => {
   if (stock.value.market_status === '良好') return 'red'
   if (stock.value.market_status === '较差') return 'green'
@@ -679,4 +702,10 @@ onUnmounted(() => {
 .wl-score { font-size: 16px; font-weight: 700; font-family: var(--font-mono); flex-shrink: 0; color: var(--text-primary); }
 .wl-score.gold { color: var(--gold); }
 .wl-score.muted { color: var(--text-muted); }
+.diagnostics { margin-top: 12px; padding: 10px 12px; background: rgba(0,0,0,0.15); border-radius: 4px; }
+.diag-item { font-size: 11px; line-height: 1.6; padding: 2px 0; }
+.diag-item.warn { color: var(--warn-orange); }
+.diag-item.reject { color: var(--up-red); }
+.diag-item.cap { color: var(--text-muted); }
+.diag-item.raw { color: var(--accent); font-family: var(--font-mono); }
 </style>
