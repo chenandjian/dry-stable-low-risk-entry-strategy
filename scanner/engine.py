@@ -97,6 +97,7 @@ def scan_all(
     pattern_cfg = {**cup_cfg, **handle_prefixed, **breakout_cfg}
     liquidity_cfg = config.get("liquidity", {})
     scoring_cfg = config.get("scoring", {})
+    daily_sources = config.get("data", {}).get("daily_sources") or DEFAULT_DAILY_SOURCES
     max_busy_retries = config.get("data", {}).get("source_busy_max_retries", 3)
     market_data = fetch_market_index_daily()
 
@@ -131,10 +132,11 @@ def scan_all(
                 )
                 fetch_result = _fetch_with_retry(
                     code,
-                    ds,
+                    ds if ds in daily_sources else daily_sources[0],
                     retry_attempts=primary_attempts,
                     fallback_attempts=fallback_attempts,
                     mgr=mgr,
+                    source_chain=daily_sources,
                 )
                 data = fetch_result.data
                 if data is None:

@@ -735,3 +735,40 @@ def test_fetch_with_retry_multi_source_failure_does_not_return_cache(monkeypatch
     assert result.data is None
     assert result.from_cache is False
     assert db.get_ohlc("600000")[-1]["date"] == "2026-06-03"
+
+
+def test_scan_all_passes_configured_daily_sources_to_fetch(monkeypatch, tmp_path):
+    config = {
+        "data": {
+            "database_path": str(tmp_path / "cuphandle.db"),
+            "daily_sources": ["baidu", "sina"],
+            "worker_count": 1,
+        },
+        "liquidity": {"min_listing_days": 250},
+        "scoring": {"medium_threshold": 70},
+    }
+    seen = []
+
+    def fake_fetch_with_retry(code, ds, *args, source_chain=None, **kwargs):
+        seen.append({"ds": ds, "source_chain": source_chain})
+        return engine.FetchResult(data=_rows(260), primary_source=ds, fallback_source=ds, primary_attempts=1)
+
+    monkeypatch.setattr(engine, "_fetch_with_retry", fake_fetch_with_retry)
+    monkeypatch.setattr(engine, "DataSourceManager", FakeScanManager)
+    monkeypatch.setattr(engine.threading, "Thread", ImmediateThread)
+    monkeypatch.setattr(stock_pool, "get_a_stock_pool", lambda config: [{"code": "600000", "name": "PF Bank"}])
+    monkeypatch.setattr(engine, "fetch_market_index_daily", lambda: [])
+    monkeypatch.setattr(engine, "passes_liquidity_filter", lambda data, cfg: True)
+    monkeypatch.setattr(engine, "detect_cup_handle", lambda data, cfg: engine.CupHandleResult(found=False))
+    monkeypatch.setattr(
+        engine,
+        "analyze_dry_stable",
+        lambda result, data, market_data=None: {
+            "pattern_score": {"score": 0, "key_pattern_type": "other", "type": "other"},
+            "decision": {"verdict": "不建议买入", "summary": ""},
+        },
+    )
+
+    engine.scan_all(config, worker_count=1)
+
+    assert seen == [{"ds": "baidu", "source_chain": ["baidu", "sina"]}]
