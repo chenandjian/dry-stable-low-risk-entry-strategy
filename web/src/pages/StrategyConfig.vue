@@ -128,6 +128,40 @@
             <div class="range-val">{{ config.breakout.volume_multiplier }}×</div>
           </div>
         </div>
+
+        <h4 class="sub-group-title">决策规则</h4>
+        <div class="param-grid">
+          <div class="param">
+            <label title="止损空间超过此值直接拒绝买入">止损空间上限 <span class="unit">%</span></label>
+            <input type="range" min="5" max="15" step="0.5" v-model.number="maxRiskPercent" @input="markDirty" />
+            <div class="range-val">{{ maxRiskPercent }}%</div>
+          </div>
+          <div class="param">
+            <label title="量干评分低于此值直接拒绝">量干最低分</label>
+            <input type="range" min="3" max="8" v-model.number="config.decision.min_volume_dry_score" @input="markDirty" />
+            <div class="range-val">{{ config.decision.min_volume_dry_score }} 分</div>
+          </div>
+          <div class="param">
+            <label title="价稳评分低于此值直接拒绝">价稳最低分</label>
+            <input type="range" min="3" max="8" v-model.number="config.decision.min_price_stable_score" @input="markDirty" />
+            <div class="range-val">{{ config.decision.min_price_stable_score }} 分</div>
+          </div>
+          <div class="param">
+            <label title="形态评分低于此值直接拒绝">形态最低分</label>
+            <input type="range" min="5" max="12" v-model.number="config.decision.min_pattern_score" @input="markDirty" />
+            <div class="range-val">{{ config.decision.min_pattern_score }} 分</div>
+          </div>
+          <div class="param">
+            <label title="第一目标盈亏比低于此值直接拒绝">盈亏比下限</label>
+            <input type="range" min="1.0" max="3.0" step="0.1" v-model.number="config.decision.min_rr1" @input="markDirty" />
+            <div class="range-val">{{ config.decision.min_rr1 }} : 1</div>
+          </div>
+          <div class="param">
+            <label title="可低吸额外要求：止损空间上限">可低吸止损上限 <span class="unit">%</span></label>
+            <input type="range" min="3" max="10" step="0.5" v-model.number="config.decision.low_buy_max_risk_percent" @input="markDirty" />
+            <div class="range-val">{{ config.decision.low_buy_max_risk_percent }}%</div>
+          </div>
+        </div>
       </div>
     </section>
 
@@ -157,6 +191,7 @@ const config = reactive({
   cup: {},
   handle: {},
   breakout: {},
+  decision: {},
 })
 
 const dirty = ref(false)
@@ -197,6 +232,10 @@ const handleMaxDepth = computed({
 const breakoutBuffer = computed({
   get: () => Math.round((config.breakout?.buffer_pct || 0.02) * 100),
   set: (v) => { config.breakout.buffer_pct = v / 100 },
+})
+const maxRiskPercent = computed({
+  get: () => config.decision?.max_risk_percent ?? 8,
+  set: (v) => { config.decision.max_risk_percent = v },
 })
 
 const markets = [
@@ -272,6 +311,7 @@ async function saveConfig() {
         buffer_pct: config.breakout.buffer_pct,
         volume_multiplier: config.breakout.volume_multiplier,
       },
+      decision: { ...config.decision },
     }
     const res = await updateConfig(payload)
     if (res.status === 'ok') {
