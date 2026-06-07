@@ -25,14 +25,15 @@ const props = defineProps({
   name: String,
   score: Number,
   rating: String,     // 'strong' | 'medium' | 'weak'
-  status: String,     // 'breakout' | 'near' | 'watch'
+  status: String,     // 'breakout' | 'confirm' | 'near' | 'watch'
   detail: String,
 })
 defineEmits(['click'])
 
 const barClass = computed(() => {
   if (props.status === 'breakout') return 'bar-red'
-  if (props.status === 'near') return 'bar-orange'
+  if (props.status === 'confirm') return 'bar-orange'
+  if (props.status === 'near') return 'bar-blue'
   return 'bar-blue'
 })
 const ratingType = computed(() => props.rating || 'medium')
@@ -41,7 +42,7 @@ const ratingLabel = computed(() => ({
 })[props.rating] || '候选')
 const statusType = computed(() => props.status || 'watch')
 const statusLabel = computed(() => ({
-  breakout: '已突破', near: '接近突破', watch: '观察'
+  breakout: '已突破', confirm: '突破确认', near: '接近突破', watch: '观察'
 })[props.status] || '观察')
 const scoreColor = computed(() => {
   if (props.score >= 80) return 'score-gold'

@@ -324,7 +324,8 @@ function formatDetail(c) {
 
 function statusFor(c) {
   if (c.dry_stable_verdict === '可低吸') return 'near'
-  if (c.dry_stable_verdict === '突破确认' || c.is_breakout) return 'breakout'
+  if (c.is_breakout) return 'breakout'
+  if (c.dry_stable_verdict === '突破确认') return 'confirm'
   return c.score >= 70 ? 'near' : 'watch'
 }
 

@@ -19,7 +19,7 @@ data:
 liquidity:
   enabled: true
   avg_turnover_days: 20
-  min_avg_turnover: 50000000
+  min_avg_turnover: 100000000
   min_avg_volume: 5000000
   min_latest_turnover: 80000000
   min_stock_price: 10
@@ -52,7 +52,7 @@ scoring:
 decision:
   min_pattern_score: 8
   min_volume_dry_score: 6
-  min_price_stable_score: 6
+  min_price_stable_score: 5
   max_risk_percent: 10
   min_rr1: 2
   chase_threshold_pct: 5

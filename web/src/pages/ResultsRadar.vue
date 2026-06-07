@@ -181,7 +181,8 @@ function scoreColorClass(s) { return s >= 80 ? 'sc-gold' : s >= 70 ? 'sc-blue' :
 function price(v) { return v ? Number(v).toFixed(2) : '--' }
 function verdictType(c) {
   if (c.dry_stable_verdict === '可低吸') return 'strong'
-  if (c.dry_stable_verdict === '突破确认') return 'breakout'
+  if (c.is_breakout) return 'breakout'
+  if (c.dry_stable_verdict === '突破确认') return 'confirm'
   return c.score >= 70 ? 'medium' : 'weak'
 }
 function marketClass(s) {
