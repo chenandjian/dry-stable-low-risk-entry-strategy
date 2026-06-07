@@ -11,7 +11,6 @@ data:
   cache_dir: ./cache/daily
   database_path: ./data/cuphandle.db
   daily_sources:
-    - mootdx
     - baidu
     - sina
     - tencent

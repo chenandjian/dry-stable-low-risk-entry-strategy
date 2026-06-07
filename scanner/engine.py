@@ -372,7 +372,7 @@ def scan_all(
         "task_id": task_id,
     }
 
-DEFAULT_DAILY_SOURCES = ["mootdx", "baidu", "sina", "tencent"]
+DEFAULT_DAILY_SOURCES = ["baidu", "sina", "tencent"]
 
 
 def _daily_fetch_fn(ds_name: str):
