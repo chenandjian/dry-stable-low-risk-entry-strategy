@@ -409,6 +409,17 @@ def _build_discovery(code: str, name: str, result, dry_stable: dict, latest_clos
         "target_2": dry_stable["key_prices"]["target_2"],
         "market_status": dry_stable["market_environment"]["status"],
         "market_position_advice": dry_stable["market_environment"]["position_advice"],
+        # Pattern detail fields
+        "handle_duration": result.handle_duration,
+        "lip_deviation_pct": result.lip_deviation_pct,
+        "left_high_price": result.left_high_price,
+        "cup_low_price": result.cup_low_price,
+        "right_high_price": result.right_high_price,
+        "handle_low_price": result.handle_low_price,
+        "left_high_date": result.left_high_date or "",
+        "cup_low_date": result.cup_low_date or "",
+        "right_high_date": result.right_high_date or "",
+        "handle_low_date": result.handle_low_date or "",
     }
 
 
