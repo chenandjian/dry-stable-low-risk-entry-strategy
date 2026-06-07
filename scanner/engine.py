@@ -457,7 +457,13 @@ def _fetch_with_retry(
             result.data = merged
             if index > 0:
                 result.fallback_error = None
-            logger.info("%s  %s  %d行", code, ds_name, len(data))
+            recent = data[-1]
+            prev = data[-2] if len(data) >= 2 else None
+            parts = [f"{code}  {ds_name}  {len(data)}行"]
+            if prev:
+                parts.append(f"{prev['date'][5:]}: O{prev['open']:.2f} H{prev['high']:.2f} L{prev['low']:.2f} C{prev['close']:.2f}")
+            parts.append(f"{recent['date'][5:]}: O{recent['open']:.2f} H{recent['high']:.2f} L{recent['low']:.2f} C{recent['close']:.2f}")
+            logger.info("  ".join(parts))
             return result
         else:
             logger.warning("%s  %s  ✗ %s", code, ds_name, error)
