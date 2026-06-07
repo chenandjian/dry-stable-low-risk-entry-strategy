@@ -2,6 +2,7 @@
 import logging
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from queue import Queue
 from typing import Callable
@@ -401,6 +402,27 @@ def _manager_handles_source(mgr: DataSourceManager | None, ds_name: str) -> bool
     return True
 
 
+def _try_source_with_lock(
+    code: str,
+    ds_name: str,
+    attempts: int,
+    sleep_fn: Callable[[float], None],
+    kline_days: int,
+    mgr: DataSourceManager | None,
+) -> tuple[str, list[dict] | None, int, str | None]:
+    """Try a single source, acquiring/releasing its lock if managed."""
+    if _manager_handles_source(mgr, ds_name):
+        if not mgr.acquire(ds_name):
+            return ds_name, None, 0, "data source busy"
+        try:
+            data, attempts, error = _try_fetch_source(code, ds_name, attempts, sleep_fn, kline_days)
+        finally:
+            mgr.release(ds_name)
+    else:
+        data, attempts, error = _try_fetch_source(code, ds_name, attempts, sleep_fn, kline_days)
+    return ds_name, data, attempts, error
+
+
 def _fetch_with_retry(
     code: str,
     primary_ds: str,
@@ -411,56 +433,58 @@ def _fetch_with_retry(
     source_chain: list[str] | None = None,
     kline_days: int = 250,
 ) -> FetchResult:
-    """Fetch fresh K-line data from the configured source chain, then merge with cache."""
+    """Fetch fresh K-line data concurrently from all configured sources."""
     chain = _normalize_source_chain(source_chain, primary_ds)
     cached = db.get_ohlc(code)
-    result = FetchResult(data=None, primary_source=chain[0], fallback_source=chain[0])
-    saw_source_busy = False
+    fetched_source = chain[0]
 
-    for index, ds_name in enumerate(chain):
-        attempts_allowed = retry_attempts if index == 0 else fallback_attempts
-        if index > 0:
-            result.fallback_source = ds_name
+    with ThreadPoolExecutor(max_workers=len(chain)) as executor:
+        futures = {}
+        for ds_name in chain:
+            attempts = retry_attempts if ds_name == chain[0] else fallback_attempts
+            futures[executor.submit(
+                _try_source_with_lock, code, ds_name, attempts, sleep_fn, kline_days, mgr
+            )] = ds_name
 
-        if index > 0 and _manager_handles_source(mgr, ds_name):
-            if not mgr.acquire(ds_name):
-                result.fallback_attempts = 0
-                result.fallback_error = "data source busy"
+        saw_source_busy = False
+        for future in as_completed(futures):
+            ds_name = futures[future]
+            try:
+                _, data, attempts, error = future.result()
+            except Exception:
+                logger.warning("%s  %s  ✗ exception", code, ds_name)
+                continue
+
+            if error == "data source busy":
                 saw_source_busy = True
                 continue
-            try:
-                data, attempts, error = _try_fetch_source(code, ds_name, attempts_allowed, sleep_fn, kline_days)
-            finally:
-                mgr.release(ds_name)
-        else:
-            data, attempts, error = _try_fetch_source(code, ds_name, attempts_allowed, sleep_fn, kline_days)
 
-        if index == 0:
-            result.primary_attempts = attempts
-            result.primary_error = error
-        else:
-            result.fallback_attempts = attempts
-            result.fallback_error = error
-        if error == "data source busy":
-            saw_source_busy = True
+            if data:
+                merged = _merge_data(cached or [], data)
+                db.save_ohlc(code, merged)
+                fetched_source = ds_name
+                for f in futures:
+                    f.cancel()
 
-        if data:
-            merged = _merge_data(cached or [], data)
-            db.save_ohlc(code, merged)
-            result.data = merged
-            if index > 0:
-                result.fallback_error = None
-            recent = data[-1]
-            prev = data[-2] if len(data) >= 2 else None
-            parts = [f"{code}  {ds_name}  {len(data)}行"]
-            if prev:
-                parts.append(f"{prev['date'][5:]}: O{prev['open']:.2f} H{prev['high']:.2f} L{prev['low']:.2f} C{prev['close']:.2f}")
-            parts.append(f"{recent['date'][5:]}: O{recent['open']:.2f} H{recent['high']:.2f} L{recent['low']:.2f} C{recent['close']:.2f}")
-            logger.info("  ".join(parts))
-            return result
-        else:
-            logger.warning("%s  %s  ✗ %s", code, ds_name, error)
+                recent = data[-1]
+                prev = data[-2] if len(data) >= 2 else None
+                parts = [f"{code}  {ds_name}  {len(data)}行"]
+                if prev:
+                    parts.append(f"{prev['date'][5:]}: O{prev['open']:.2f} H{prev['high']:.2f} L{prev['low']:.2f} C{prev['close']:.2f}")
+                parts.append(f"{recent['date'][5:]}: O{recent['open']:.2f} H{recent['high']:.2f} L{recent['low']:.2f} C{recent['close']:.2f}")
+                logger.info("  ".join(parts))
 
+                return FetchResult(
+                    data=merged,
+                    primary_source=chain[0],
+                    fallback_source=ds_name if ds_name != chain[0] else chain[0],
+                    primary_attempts=attempts if ds_name == chain[0] else 0,
+                    fallback_attempts=attempts if ds_name != chain[0] else 0,
+                )
+            else:
+                logger.warning("%s  %s  ✗ %s", code, ds_name, error)
+
+    result = FetchResult(data=None, primary_source=chain[0], fallback_source=chain[-1])
     if saw_source_busy:
         result.fallback_error = "data source busy"
     return result
