@@ -89,13 +89,14 @@
 
 <script setup>
 import { ref, reactive, computed, onMounted, onUnmounted } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRouter, useRoute } from 'vue-router'
 import { useApi } from '../composables/useApi.js'
 import MetricCard from '../components/MetricCard.vue'
 import DiscoveryItem from '../components/DiscoveryItem.vue'
 import ScanEngine from '../components/ScanEngine.vue'
 
 const router = useRouter()
+const route = useRoute()
 const { startScan, getScanStatus, getCandidates, getTaskStocks, retryFailedStocks } = useApi()
 
 // Market status & clock
@@ -338,6 +339,13 @@ function updateMetrics() {
 }
 
 onMounted(async () => {
+  // If navigated from TaskCenter with ?task=..., load failures for that task
+  const queryTaskId = route.query.task
+  if (queryTaskId) {
+    scanProgress.taskId = queryTaskId
+    await loadFailures()
+  }
+
   await loadResults()
   // Check if a scan is already running
   try {
@@ -347,7 +355,9 @@ onMounted(async () => {
       scanning.value = true
       pollTimer = setInterval(pollStatus, 1000)
     }
-    await loadFailures()
+    if (!queryTaskId) {
+      await loadFailures()
+    }
   } catch (e) { console.error('Check status on mount failed:', e) }
   updateTime()
   clockTimer = setInterval(updateTime, 1000)
