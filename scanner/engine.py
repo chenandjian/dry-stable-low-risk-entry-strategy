@@ -547,30 +547,49 @@ def _fetch_with_retry(
     source_chain: list[str] | None = None,
     kline_days: int = 250,
 ) -> FetchResult:
-    """Fetch K-line by trying sources in order.  Per-source locks ensure
-    different stocks naturally route to different sources, achieving
-    source-level parallelism without intra-stock concurrency.
+    """Fetch K-line data by acquiring any free data source.
+
+    Tries to grab any idle source (non-blocking).  If all are busy,
+    waits briefly and retries.  This lets different threads naturally
+    spread across baidu/sina/tencent without a central scheduler.
     """
     chain = _normalize_source_chain(source_chain, primary_ds)
     cached = db.get_ohlc(code)
     saw_source_busy = False
+    tried_sources: set[str] = set()
+    busy_retries = 0
+    max_busy_retries = 3
 
-    for i, ds_name in enumerate(chain):
-        attempts = retry_attempts if ds_name == chain[0] else fallback_attempts
-
-        # Per-source mutex: acquire non-blocking, skip if busy
-        locked = False
+    for _ in range(len(chain) * 2):  # enough tries to cover busy retries + fallbacks
+        # Acquire any free source
+        ds_name = None
         if mgr is not None:
-            if not mgr.acquire(ds_name):
-                logger.debug("%s  %s  ⏳ busy", code, ds_name)
-                saw_source_busy = True
+            ds_name = mgr.try_acquire_any()
+            if ds_name is None:
+                busy_retries += 1
+                if busy_retries > max_busy_retries:
+                    saw_source_busy = True
+                    break
+                logger.debug("%s  all busy (retry %d/%d)", code, busy_retries, max_busy_retries)
+                sleep_fn(0.1)
                 continue
-            locked = True
+
+        # No DataSourceManager — try sources in order
+        if ds_name is None:
+            for name in chain:
+                if name not in tried_sources:
+                    ds_name = name
+                    break
+            if ds_name is None:
+                break
+
+        tried_sources.add(ds_name)
+        locked = mgr is not None  # already acquired via try_acquire_any
 
         try:
-            data, used_attempts, error = _try_fetch_source(code, ds_name, attempts, sleep_fn, kline_days)
+            data, used_attempts, error = _try_fetch_source(code, ds_name, retry_attempts, sleep_fn, kline_days)
         finally:
-            if locked:
+            if locked and mgr is not None:
                 mgr.release(ds_name)
 
         if error:
@@ -589,9 +608,9 @@ def _fetch_with_retry(
             if prev:
                 parts.append(f"{prev['date'][5:]}: O{prev['open']:.2f} H{prev['high']:.2f} L{prev['low']:.2f} C{prev['close']:.2f}")
             parts.append(f"{recent['date'][5:]}: O{recent['open']:.2f} H{recent['high']:.2f} L{recent['low']:.2f} C{recent['close']:.2f}")
-            other_sources = [n for n in chain if n != ds_name]
-            if other_sources:
-                parts.append(f"(未试: {','.join(other_sources)})")
+            untried = [n for n in chain if n not in tried_sources]
+            if untried:
+                parts.append(f"(未试: {','.join(untried)})")
             logger.info("  ".join(parts))
 
             return FetchResult(
