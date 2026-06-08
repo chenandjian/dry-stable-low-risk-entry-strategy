@@ -232,27 +232,27 @@ class CupHandleStrategyEngine:
             )
 
         key_pattern_type = dry_stable.get("pattern_score", {}).get("key_pattern_type") if dry_stable else None
-        if key_pattern_type == "cup_handle":
+        if key_pattern_type in ("cup_handle", "vcp"):
             passed.append(
                 RuleDiagnostic(
                     "关键形态类型",
-                    "cup_handle",
+                    "cup_handle / vcp",
                     key_pattern_type,
                     "info",
-                    "干稳分析当前仍以杯柄作为主导形态。",
+                    "干稳分析当前仍以杯柄或VCP作为主导形态。",
                 )
             )
         else:
             actual_value = str(key_pattern_type) if key_pattern_type is not None else "缺失"
             explanation = (
-                "干稳分析缺少 key_pattern_type，不能确认杯柄仍是主导形态。"
+                "干稳分析缺少 key_pattern_type，不能确认杯柄/VCP仍是主导形态。"
                 if key_pattern_type is None
-                else "干稳分析当前主导形态不是杯柄，不能按杯柄策略结果晋级。"
+                else "干稳分析当前主导形态不是杯柄/VCP，不能按杯柄/VCP策略结果晋级。"
             )
             failed.append(
                 RuleDiagnostic(
                     "关键形态类型",
-                    "cup_handle",
+                    "cup_handle / vcp",
                     actual_value,
                     "high",
                     explanation,

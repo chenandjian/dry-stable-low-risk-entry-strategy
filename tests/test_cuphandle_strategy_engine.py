@@ -218,8 +218,8 @@ def test_evaluate_at_rejects_when_dry_stable_prefers_vcp(monkeypatch):
     evaluation = engine.evaluate_at(data, code="600000")
 
     assert evaluation.result.found is True
-    assert evaluation.passed is False
-    assert any(rule.ruleName == "关键形态类型" for rule in evaluation.failed_rules)
+    assert evaluation.passed is True
+    assert any(rule.ruleName == "关键形态类型" for rule in evaluation.passed_rules)
 
 
 def test_evaluate_at_rejects_partial_dry_stable_schema(monkeypatch):
