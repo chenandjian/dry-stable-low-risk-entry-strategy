@@ -235,7 +235,9 @@ onUnmounted(() => { if (chart.value) chart.value.remove() })
 .section-title { font-size: 14px; font-weight: 700; margin-bottom: 12px; }
 .section-title.small { margin-top: 14px; color: var(--text-secondary); }
 label { display: block; margin: 10px 0 5px; font-size: 12px; color: var(--text-secondary); }
-.form-input { width: 100%; background: var(--bg-card); color: var(--text-primary); border: 1px solid var(--border); border-radius: 4px; padding: 8px; }
+.form-input { width: 100%; background: var(--bg-card); color: var(--text-primary); border: 1px solid var(--border); border-radius: 4px; padding: 8px; font-family: var(--font-mono); }
+.form-input[type="date"] { color-scheme: dark; min-height: 38px; }
+.form-input[type="date"]::-webkit-calendar-picker-indicator { filter: invert(0.8); cursor: pointer; }
 .run-btn { width: 100%; margin-top: 14px; padding: 10px; border: none; border-radius: 4px; background: var(--accent); color: #fff; font-weight: 700; cursor: pointer; }
 .run-btn:disabled { opacity: 0.6; cursor: not-allowed; }
 .main-panel { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
