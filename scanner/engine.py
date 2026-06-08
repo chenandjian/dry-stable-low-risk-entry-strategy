@@ -225,11 +225,8 @@ def scan_all(
                         progress_callback("scanning", start_offset + failed_count[0] + skip_count[0] + scanned_count[0], start_offset + len(stocks), f"{code} {stock.get('name', '')}")
                     continue
 
-                # Limit analysis window to configured kline days + buffer
-                max_window = kline_days + 120
-                analysis_data = data[-max_window:] if len(data) > max_window else data
                 evaluation = strategy_engine.evaluate_at(
-                    analysis_data,
+                    data,
                     code=code,
                     name=stock.get("name", ""),
                     market_data=market_data,
@@ -459,7 +456,7 @@ def re_evaluate_task(
     for i, stock in enumerate(stocks):
         code = stock["code"]
         name = stock.get("name", "")
-        data = db.get_ohlc(code)
+        data = db.get_ohlc(code, max_rows=MAX_OHLC_WINDOW)
         if not data:
             continue
 
@@ -467,9 +464,8 @@ def re_evaluate_task(
             if not passes_liquidity_filter(data, liquidity_cfg):
                 continue
 
-            analysis_data = data[-370:] if len(data) > 370 else data  # ~1.5 years
             evaluation = strategy_engine.evaluate_at(
-                analysis_data, code=code, name=name, market_data=market_data,
+                data, code=code, name=name, market_data=market_data,
             )
             result = evaluation.result
             dry_stable = evaluation.dry_stable
@@ -522,6 +518,7 @@ def re_evaluate_task(
 
 
 DEFAULT_DAILY_SOURCES = ["baidu", "sina", "tencent"]
+MAX_OHLC_WINDOW = 400  # max trading days stored/analyzed (~1.5 years), consistent across all sources
 
 
 def _daily_fetch_fn(ds_name: str):
@@ -615,7 +612,7 @@ def _fetch_with_retry(
                 continue
 
             if data:
-                merged = _merge_data(cached or [], data)
+                merged = _merge_data(cached or [], data, max_rows=MAX_OHLC_WINDOW)
                 db.save_ohlc(code, merged)
                 fetched_source = ds_name
                 for f in futures:
@@ -691,10 +688,12 @@ def _call_fetch_fn(fetch_fn, code: str, days: int) -> list[dict] | None:
         return fetch_fn(code)
 
 
-def _merge_data(cached: list[dict], fresh: list[dict]) -> list[dict]:
-    """合并缓存和新数据，去重按日期排序。"""
+def _merge_data(cached: list[dict], fresh: list[dict], max_rows: int = 0) -> list[dict]:
+    """合并缓存和新数据，去重按日期排序。可限制最大行数。"""
     seen = {d["date"]: d for d in cached}
     for d in fresh:
         seen[d["date"]] = d
     merged = sorted(seen.values(), key=lambda x: x["date"])
+    if max_rows and len(merged) > max_rows:
+        merged = merged[-max_rows:]
     return merged

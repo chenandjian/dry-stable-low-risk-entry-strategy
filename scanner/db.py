@@ -294,15 +294,19 @@ def save_ohlc(code: str, data: list[dict]):
     conn.commit()
 
 
-def get_ohlc(code: str) -> list[dict] | None:
-    """Get cached OHLC data for a stock, sorted by date."""
+def get_ohlc(code: str, max_rows: int = 0) -> list[dict] | None:
+    """Get cached OHLC data for a stock, sorted by date.
+
+    Args:
+        max_rows: if > 0, return only the most recent N rows.
+    """
     conn = get_conn()
-    rows = conn.execute(
-        "SELECT date, open, high, low, close, volume, turnover "
-        "FROM daily_ohlc WHERE code = ? ORDER BY date", (code,)
-    ).fetchall()
+    query = "SELECT date, open, high, low, close, volume, turnover FROM daily_ohlc WHERE code = ? ORDER BY date"
+    rows = conn.execute(query, (code,)).fetchall()
     if not rows:
         return None
+    if max_rows and len(rows) > max_rows:
+        rows = rows[-max_rows:]
     return [
         {"date": r[0], "open": r[1], "high": r[2], "low": r[3],
          "close": r[4], "volume": r[5], "turnover": r[6]}
