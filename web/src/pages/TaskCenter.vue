@@ -80,7 +80,7 @@ function candidateDelta(t) {
   }
   return ''
 }
-function viewResults(id) { router.push('/results') }
+function viewResults(id) { router.push(`/results?task_id=${id}`) }
 function viewFailures(id) { router.push(`/?task=${id}&status=failed`) }
 function exportResults(id) { window.open('/api/candidates', '_blank') }
 async function handleReEvaluate(taskId) {

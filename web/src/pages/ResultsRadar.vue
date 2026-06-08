@@ -120,12 +120,13 @@
 
 <script setup>
 import { ref, computed, onMounted } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRouter, useRoute } from 'vue-router'
 import { useApi } from '../composables/useApi.js'
 import MetricCard from '../components/MetricCard.vue'
 import SignalBadge from '../components/SignalBadge.vue'
 
 const router = useRouter()
+const route = useRoute()
 const { getCandidates, getScanTasks } = useApi()
 
 const candidates = ref([])
@@ -236,14 +237,17 @@ async function loadTasks() {
   try {
     const data = await getScanTasks()
     tasks.value = (data.tasks || []).filter(t => !t.running)
-    // 默认选中最近一次已完成的
+    // Prefer task_id from query param, then fall back to latest completed
+    const queryTaskId = route.query.task_id
+    if (queryTaskId) {
+      const match = tasks.value.find(t => t.id === queryTaskId)
+      if (match) selectedTaskId.value = match.id
+    }
     if (!selectedTaskId.value && tasks.value.length) {
       const completed = tasks.value.find(t => t.status === 'completed')
-      if (completed) {
-        selectedTaskId.value = completed.id
-        await loadCandidates()
-      }
+      if (completed) selectedTaskId.value = completed.id
     }
+    if (selectedTaskId.value) await loadCandidates()
   } catch (e) { console.error('Failed to load tasks:', e) }
 }
 
