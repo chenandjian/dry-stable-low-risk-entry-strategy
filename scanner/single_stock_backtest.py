@@ -328,6 +328,10 @@ def run_single_stock_cuphandle_backtest(
 
     working_data = _rows_between(data, required_start_date, end_date)
 
+    # Match scan's data window: cap evaluation window to kline_days
+    liquidity_cfg = config.get("liquidity", {})
+    kline_days = config.get("data", {}).get("daily_kline_days") or liquidity_cfg.get("min_listing_days", 250)
+
     name = _lookup_stock_name(code)
     engine = CupHandleStrategyEngine(config)
     backtest_rows = _rows_between(working_data, start_date, end_date)
@@ -337,7 +341,9 @@ def run_single_stock_cuphandle_backtest(
         window = _rows_until(working_data, row["date"])
         if not window:
             continue
-        evaluation = engine.evaluate_at(window, code=code, name=name)
+        # Cap evaluation window to match scan's kline_days for consistency
+        eval_window = window[-kline_days:] if len(window) > kline_days else window
+        evaluation = engine.evaluate_at(eval_window, code=code, name=name)
         has_pattern = getattr(evaluation.result, "found", False)
         is_vcp = (evaluation.dry_stable or {}).get("pattern_score", {}).get("key_pattern_type") == "vcp"
         if (not has_pattern and not is_vcp) or not getattr(evaluation, "passed", False):
