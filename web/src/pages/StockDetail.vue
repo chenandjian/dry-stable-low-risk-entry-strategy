@@ -27,7 +27,7 @@
       <div class="kv-list">
         <div class="kv"><span class="k">量干 / 价稳</span><span class="v blue">{{ stock.volume_dry_score ?? '--' }} / {{ stock.price_stable_score ?? '--' }}</span></div>
         <div class="kv"><span class="k">形态分</span><span class="v">{{ stock.pattern_score_20 ?? '--' }} / 20 <span class="sub">杯柄{{ stock.cup_handle_score ?? 0 }} VCP{{ stock.vcp_score ?? 0 }}</span></span></div>
-        <div class="kv"><span class="k">形态类型</span><span class="v">{{ stock.pattern_type || '--' }} · {{ stock.key_pattern_type === 'vcp' ? 'VCP主导' : '杯柄主导' }}</span></div>
+        <div class="kv"><span class="k">形态类型</span><span class="v">{{ stock.pattern_type || '--' }}<span class="sub" v-if="stock.vcp_contractions">VCP {{ stock.vcp_contractions }}T</span></span></div>
         <div class="kv"><span class="k">大盘环境</span><span class="v" :class="marketClass">{{ stock.market_status || '一般' }}</span></div>
         <div class="kv"><span class="k">建议仓位</span><span class="v">{{ stock.position_advice || '--' }}</span></div>
       </div>

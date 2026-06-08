@@ -13,6 +13,7 @@ class PatternScoreResult:
     pattern_type: str = "无有效形态"
     cup_handle_score: int = 0
     vcp_score: int = 0
+    vcp_contractions: int = 0
     details: list = None
 
     def __post_init__(self):
@@ -32,7 +33,9 @@ def score_pattern(result: CupHandleResult, data: list[dict]) -> PatternScoreResu
     r.cup_handle_score = ch_score
 
     # VCP Score (0-20)
-    r.vcp_score = _score_vcp_pattern(data)
+    vcp_result = _score_vcp_pattern(data)
+    r.vcp_score = vcp_result[0]
+    r.vcp_contractions = vcp_result[1]
 
     r.total_score = max(ch_score, r.vcp_score)
 
@@ -48,17 +51,20 @@ def score_pattern(result: CupHandleResult, data: list[dict]) -> PatternScoreResu
     return r
 
 
-def _score_vcp_pattern(data: list[dict]) -> int:
-    """VCP score (0-20) per dry-stable strategy section 10."""
+def _score_vcp_pattern(data: list[dict]) -> tuple[int, int]:
+    """VCP score (0-20) per dry-stable strategy section 10.
+
+    Returns (score, contraction_count).
+    """
     if not data or len(data) < 60:
-        return 0
+        return 0, 0
 
     closes = [d["close"] for d in data]
     lows = [d["low"] for d in data]
     volumes = [d["volume"] for d in data]
     contractions = _find_vcp_contractions(data)
     if not contractions:
-        return 0
+        return 0, 0
 
     score = 0
     first_high_idx = contractions[0]["high_idx"]
@@ -120,7 +126,7 @@ def _score_vcp_pattern(data: list[dict]) -> int:
         elif 0 <= risk <= 0.08:
             score += 1
 
-    return min(score, 20)
+    return min(score, 20), len(contractions)
 
 
 def _find_vcp_contractions(data: list[dict]) -> list[dict]:

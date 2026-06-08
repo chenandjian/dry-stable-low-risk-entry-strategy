@@ -76,7 +76,7 @@
               <td class="center">
                 <span class="score-num" :class="scoreColorClass(c.score)">{{ c.score }}</span>
               </td>
-              <td class="center">{{ c.pattern_type || '--' }}</td>
+              <td class="center">{{ c.pattern_type || '--' }}<span class="vcp-tag" v-if="c.vcp_contractions"> VCP{{ c.vcp_contractions }}T</span></td>
               <td class="center">
                 <SignalBadge :type="verdictType(c)">
                   {{ c.dry_stable_verdict || c.rating || '观察' }}
@@ -342,4 +342,5 @@ onMounted(async () => {
 .bar-blue { background: var(--accent); }
 .bar-gray { background: var(--text-muted); }
 .empty-row { text-align: center; padding: 40px; color: var(--text-muted); }
+.vcp-tag { font-size: 10px; color: var(--accent); font-weight: 600; }
 </style>

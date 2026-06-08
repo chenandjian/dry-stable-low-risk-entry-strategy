@@ -95,6 +95,7 @@ def analyze_dry_stable(result, data: list[dict], market_data: list[dict] | None 
             "type": pattern.pattern_type,
             "cup_handle_score": pattern.cup_handle_score,
             "vcp_score": pattern.vcp_score,
+            "vcp_contractions": pattern.vcp_contractions,
             "key_pattern_type": key_pattern_type,
         },
         "key_prices": {

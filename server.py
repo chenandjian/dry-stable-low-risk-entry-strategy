@@ -517,6 +517,7 @@ async def get_candidates(task_id: str = None):
             "key_pattern_type": c.get("key_pattern_type", ""),
             "cup_handle_score": c.get("cup_handle_score", 0),
             "vcp_score": c.get("vcp_score", 0),
+            "vcp_contractions": c.get("vcp_contractions", 0),
             "risk_percent": c.get("risk_percent", 0),
             "rr1": c.get("rr1", 0),
             "position_advice": c.get("position_advice", ""),
