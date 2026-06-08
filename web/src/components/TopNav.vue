@@ -4,11 +4,11 @@
       CupHandle<span class="accent">Scan</span>
     </div>
     <div class="topnav-tabs">
-      <router-link to="/" class="topnav-tab" active-class="active">机会雷达</router-link>
-      <router-link to="/results" class="topnav-tab" active-class="active">候选列表</router-link>
-      <router-link to="/backtest/cup-handle" class="topnav-tab" active-class="active">单股回测</router-link>
-      <router-link to="/tasks" class="topnav-tab" active-class="active">任务中心</router-link>
-      <router-link to="/config" class="topnav-tab" active-class="active">策略配置</router-link>
+      <router-link to="/" class="topnav-tab" :class="{ active: isActive('/') }">机会雷达</router-link>
+      <router-link to="/results" class="topnav-tab" :class="{ active: isActive('/results') }">候选列表</router-link>
+      <router-link to="/backtest/cup-handle" class="topnav-tab" :class="{ active: isActive('/backtest/cup-handle') }">单股回测</router-link>
+      <router-link to="/tasks" class="topnav-tab" :class="{ active: isActive('/tasks') }">任务中心</router-link>
+      <router-link to="/config" class="topnav-tab" :class="{ active: isActive('/config') }">策略配置</router-link>
     </div>
     <div class="topnav-right">
       <span class="market-indicator">A股市场</span>
@@ -18,8 +18,12 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, computed } from 'vue'
+import { useRoute } from 'vue-router'
+const route = useRoute()
 const lastScan = ref('')
+
+function isActive(path) { return route.path.startsWith(path) }
 
 onMounted(async () => {
   try {
@@ -27,7 +31,6 @@ onMounted(async () => {
     const data = await res.json()
     const tasks = data.tasks || []
     if (tasks.length) {
-      // Use the start of the date string (e.g. "2026-06-04 00:39" → "06-04 00:39")
       const d = tasks[0].date
       lastScan.value = d ? d.slice(5, 16) : d
     }
