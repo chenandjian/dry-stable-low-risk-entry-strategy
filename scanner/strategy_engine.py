@@ -209,6 +209,7 @@ class CupHandleStrategyEngine:
         failed: list[RuleDiagnostic] = []
         threshold = self.scoring_cfg.get("medium_threshold", 70) - 10
         reject_keys = {"REJECT", "不建议买入"}
+        candidate_keys = {"BUY_LOW", "WATCH_BREAKOUT", "WAIT_ENTRY"}
 
         if result.score >= threshold:
             passed.append(
@@ -261,7 +262,7 @@ class CupHandleStrategyEngine:
 
         verdict = dry_stable.get("decision", {}).get("verdict") if dry_stable else None
         verdict_key = dry_stable.get("decision", {}).get("verdict_key", "") if dry_stable else ""
-        if verdict_key and verdict_key not in reject_keys:
+        if verdict_key and verdict_key in candidate_keys:
             passed.append(
                 RuleDiagnostic(
                     "最终策略结论",
