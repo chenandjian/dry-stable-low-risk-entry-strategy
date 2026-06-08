@@ -225,8 +225,11 @@ def scan_all(
                         progress_callback("scanning", start_offset + failed_count[0] + skip_count[0] + scanned_count[0], start_offset + len(stocks), f"{code} {stock.get('name', '')}")
                     continue
 
+                # Limit analysis window to configured kline days + buffer
+                max_window = kline_days + 120
+                analysis_data = data[-max_window:] if len(data) > max_window else data
                 evaluation = strategy_engine.evaluate_at(
-                    data,
+                    analysis_data,
                     code=code,
                     name=stock.get("name", ""),
                     market_data=market_data,
@@ -464,8 +467,9 @@ def re_evaluate_task(
             if not passes_liquidity_filter(data, liquidity_cfg):
                 continue
 
+            analysis_data = data[-370:] if len(data) > 370 else data  # ~1.5 years
             evaluation = strategy_engine.evaluate_at(
-                data, code=code, name=name, market_data=market_data,
+                analysis_data, code=code, name=name, market_data=market_data,
             )
             result = evaluation.result
             dry_stable = evaluation.dry_stable
