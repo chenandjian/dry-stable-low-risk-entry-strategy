@@ -51,7 +51,7 @@ scoring:
   medium_threshold: 70
 decision:
   min_pattern_score: 8
-  min_volume_dry_score: 6
+  min_volume_dry_score: 5
   min_price_stable_score: 5
   max_risk_percent: 10
   min_rr1: 2
