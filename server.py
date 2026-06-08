@@ -212,7 +212,10 @@ async def start_scan():
                 stats = _running.get("stats", {})
                 if stage == "discovery" and discovery:
                     found = stats.get("candidates_found", 0) + 1
-                    db.upsert_candidate(task_id, discovery)
+                    try:
+                        db.upsert_candidate(task_id, discovery)
+                    except Exception as exc:
+                        logger.error("Failed to upsert candidate %s: %s", discovery.get("code", "?"), exc)
                     discoveries = list(stats.get("discoveries") or [])
                     discoveries.insert(0, {
                         "code": discovery["code"],
