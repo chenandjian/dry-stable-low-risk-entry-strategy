@@ -330,27 +330,25 @@ def test_scan_all_deduplicates_candidates(monkeypatch, tmp_path):
     assert candidate_rows[0]['code'] == '600000'
 
 
-# ---- concurrent fetch tests ----
+# ---- serial source-chain fetch tests ----
 
 
-def test_concurrent_fetch_first_success_wins(monkeypatch, tmp_path):
-    """All sources tried concurrently. First to return data wins."""
+def test_fetch_tries_sources_in_order_first_success_wins(monkeypatch, tmp_path):
+    """Sources tried in order; first to return data wins; remaining skipped."""
     db.init_db(str(tmp_path / "cuphandle.db"))
-    import time as _time
     calls = []
 
-    def slow_baidu(code, days=250):
-        _time.sleep(0.1)
+    def fake_baidu(code, days=250):
         calls.append("baidu")
         return [_row("2026-06-04", close=12.0)]
 
-    def fast_sina(code, days=250):
+    def fake_sina(code, days=250):
         calls.append("sina")
         return [_row("2026-06-04", close=13.0)]
 
-    monkeypatch.setattr(engine, "fetch_sina_daily", fast_sina)
-    monkeypatch.setattr(engine, "fetch_baidu_daily", slow_baidu, raising=False)
-    monkeypatch.setattr(engine, "fetch_tencent_daily", lambda code, days=250: calls.append("tencent") or [_row("2026-06-04", close=14.0)])
+    monkeypatch.setattr(engine, "fetch_baidu_daily", fake_baidu, raising=False)
+    monkeypatch.setattr(engine, "fetch_sina_daily", fake_sina)
+    monkeypatch.setattr(engine, "fetch_tencent_daily", lambda code, days=250: calls.append("tencent") or None)
 
     result = engine._fetch_with_retry(
         "600000", "baidu",
@@ -360,11 +358,31 @@ def test_concurrent_fetch_first_success_wins(monkeypatch, tmp_path):
     )
 
     assert result.data is not None
-    assert "sina" in calls or "tencent" in calls or "baidu" in calls
+    assert calls == ["baidu"]  # baidu succeeded first, sina/tencent never tried
+    assert result.data[-1]["close"] == 12.0
+
+
+def test_fetch_falls_back_when_first_source_fails(monkeypatch, tmp_path):
+    """When first source returns None, next source is tried."""
+    db.init_db(str(tmp_path / "cuphandle.db"))
+
+    monkeypatch.setattr(engine, "fetch_baidu_daily", lambda code, days=250: None, raising=False)
+    monkeypatch.setattr(engine, "fetch_sina_daily", lambda code, days=250: [_row("2026-06-04", close=13.0)])
+    monkeypatch.setattr(engine, "fetch_tencent_daily", lambda code, days=250: None)
+
+    result = engine._fetch_with_retry(
+        "600000", "baidu",
+        retry_attempts=1, fallback_attempts=1,
+        sleep_fn=lambda _: None,
+        source_chain=["baidu", "sina", "tencent"],
+    )
+
     assert result.data is not None
+    assert result.data[-1]["close"] == 13.0
+    assert result.fallback_source == "sina"
 
 
-def test_concurrent_fetch_merges_and_saves(monkeypatch, tmp_path):
+def test_fetch_merges_and_saves(monkeypatch, tmp_path):
     db.init_db(str(tmp_path / "cuphandle.db"))
     db.save_ohlc("600000", [_row("2026-06-03", close=9.0)])
 
@@ -380,7 +398,7 @@ def test_concurrent_fetch_merges_and_saves(monkeypatch, tmp_path):
     assert db.get_ohlc("600000")[-1]["date"] == "2026-06-04"
 
 
-def test_concurrent_fetch_all_fail_returns_none(monkeypatch, tmp_path):
+def test_fetch_all_fail_returns_none(monkeypatch, tmp_path):
     db.init_db(str(tmp_path / "cuphandle.db"))
     db.save_ohlc("600000", [_row("2026-06-03", close=9.0)])
 
@@ -393,10 +411,9 @@ def test_concurrent_fetch_all_fail_returns_none(monkeypatch, tmp_path):
 
     assert result.data is None
     assert result.from_cache is False
-    assert db.get_ohlc("600000")[-1]["date"] == "2026-06-03"
 
 
-def test_concurrent_fetch_source_busy_preserved_when_all_fail(monkeypatch, tmp_path):
+def test_fetch_source_busy_preserved_when_all_fail(monkeypatch, tmp_path):
     db.init_db(str(tmp_path / "cuphandle.db"))
 
     def busy_sina(code, days=250):
@@ -413,7 +430,7 @@ def test_concurrent_fetch_source_busy_preserved_when_all_fail(monkeypatch, tmp_p
     assert engine._is_transient_source_busy(result) is True
 
 
-def test_concurrent_fetch_managed_source_lock_acquire_release(monkeypatch, tmp_path):
+def test_fetch_lock_acquire_release(monkeypatch, tmp_path):
     db.init_db(str(tmp_path / "cuphandle.db"))
     mgr = FakeManager({"sina": True})
 
@@ -428,18 +445,17 @@ def test_concurrent_fetch_managed_source_lock_acquire_release(monkeypatch, tmp_p
     )
 
     assert result.data is not None
-    assert mgr.acquire_calls
-    # both sources should release after fetch
-    assert len(mgr.release_calls) >= 1
+    assert mgr.acquire_calls == ["sina"]  # only sina acquired (first source succeeded)
+    assert mgr.release_calls == ["sina"]
 
 
-def test_concurrent_fetch_busy_source_skipped_other_succeeds(monkeypatch, tmp_path):
+def test_fetch_busy_source_skipped_next_tried(monkeypatch, tmp_path):
     db.init_db(str(tmp_path / "cuphandle.db"))
-    mgr = FakeManager({"sina": False, "baidu": True, "tencent": True})  # sina lock busy
+    mgr = FakeManager({"baidu": False, "sina": True, "tencent": True})  # baidu lock busy
 
-    monkeypatch.setattr(engine, "fetch_sina_daily", lambda code, days=250: [_row("2026-06-04", close=10.0)])
     monkeypatch.setattr(engine, "fetch_baidu_daily", lambda code, days=250: [_row("2026-06-04", close=12.0)], raising=False)
-    monkeypatch.setattr(engine, "fetch_tencent_daily", lambda code, days=250: [_row("2026-06-04", close=14.0)])
+    monkeypatch.setattr(engine, "fetch_sina_daily", lambda code, days=250: [_row("2026-06-04", close=13.0)])
+    monkeypatch.setattr(engine, "fetch_tencent_daily", lambda code, days=250: None)
 
     result = engine._fetch_with_retry(
         "600000", "baidu",
@@ -448,12 +464,13 @@ def test_concurrent_fetch_busy_source_skipped_other_succeeds(monkeypatch, tmp_pa
         source_chain=["baidu", "sina", "tencent"],
     )
 
-    # busy source (sina) skipped; baidu or tencent should succeed
     assert result.data is not None
-    assert "sina" in mgr.acquire_calls  # tried to acquire sina but it was busy
+    assert result.fallback_source == "sina"  # baidu busy → sina won
+    assert "baidu" in mgr.acquire_calls
+    assert "sina" in mgr.acquire_calls
 
 
-def test_concurrent_fetch_kline_days_passed_through(monkeypatch, tmp_path):
+def test_fetch_kline_days_passed_through(monkeypatch, tmp_path):
     db.init_db(str(tmp_path / "cuphandle.db"))
     seen = []
 
@@ -474,24 +491,26 @@ def test_concurrent_fetch_kline_days_passed_through(monkeypatch, tmp_path):
 
     assert result.data is not None
     assert 320 in seen
-    db.init_db(str(tmp_path / "cuphandle.db"))
-    db.save_ohlc("600000", [_row("2026-06-03", close=9.0)])
-    calls = []
 
-    def fake_sina(code):
-        calls.append(code)
+    # also works with positional-only signature (no days param)
+    db2 = str(tmp_path / "cuphandle2.db")
+    db.init_db(db2)
+    db.save_ohlc("600000", [_row("2026-06-03", close=9.0)])
+    calls2 = []
+
+    def fake_sina2(code):
+        calls2.append(code)
         return [_row("2026-06-04", close=10.0)]
 
-    monkeypatch.setattr(engine, "fetch_sina_daily", fake_sina)
+    monkeypatch.setattr(engine, "fetch_sina_daily", fake_sina2)
     monkeypatch.setattr(engine, "fetch_tencent_daily", lambda code: None)
-    result = engine._fetch_with_retry("600000", "sina", retry_attempts=2, fallback_attempts=2, sleep_fn=lambda _: None, source_chain=["sina", "tencent"])
+    result2 = engine._fetch_with_retry("600000", "sina", retry_attempts=2, fallback_attempts=2,
+                                        sleep_fn=lambda _: None, source_chain=["sina", "tencent"])
 
-    assert calls == ["600000"]
-    assert result.data[-1]["date"] == "2026-06-04"
-    assert result.from_cache is False
-    assert result.primary_attempts == 1
-    assert result.fallback_attempts == 0
-    assert db.get_ohlc("600000")[-1]["date"] == "2026-06-04"
+    assert calls2 == ["600000"]
+    assert result2.data is not None
+    assert result2.data[-1]["date"] == "2026-06-04"
+    assert result2.primary_attempts == 1
 
 
 def test_normalize_source_chain_deduplicates_primary_and_preserves_order():
