@@ -209,7 +209,7 @@ def test_evaluate_at_rejects_when_dry_stable_prefers_vcp(monkeypatch):
 
     def fake_analyze_dry_stable(result, data, market_data=None, config=None):
         return {
-            "decision": {"verdict": "观察"},
+            "decision": {"verdict": "观察", "verdict_key": "WATCH_BREAKOUT"},
             "pattern_score": {"key_pattern_type": "vcp"},
         }
 

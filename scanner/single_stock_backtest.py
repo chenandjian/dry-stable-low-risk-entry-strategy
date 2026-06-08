@@ -338,7 +338,9 @@ def run_single_stock_cuphandle_backtest(
         if not window:
             continue
         evaluation = engine.evaluate_at(window, code=code, name=name)
-        if not getattr(evaluation.result, "found", False) or not getattr(evaluation, "passed", False):
+        has_pattern = getattr(evaluation.result, "found", False)
+        is_vcp = (evaluation.dry_stable or {}).get("pattern_score", {}).get("key_pattern_type") == "vcp"
+        if (not has_pattern and not is_vcp) or not getattr(evaluation, "passed", False):
             continue
         entry = _build_pattern_entry(code, evaluation, window)
         identity = _pattern_identity(entry)

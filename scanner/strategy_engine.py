@@ -208,7 +208,7 @@ class CupHandleStrategyEngine:
         passed: list[RuleDiagnostic] = []
         failed: list[RuleDiagnostic] = []
         threshold = self.scoring_cfg.get("medium_threshold", 70) - 10
-        allowed_verdicts = {"观察", "可低吸", "突破确认"}
+        reject_keys = {"REJECT", "不建议买入"}
 
         if result.score >= threshold:
             passed.append(
@@ -260,7 +260,8 @@ class CupHandleStrategyEngine:
             )
 
         verdict = dry_stable.get("decision", {}).get("verdict") if dry_stable else None
-        if verdict in allowed_verdicts:
+        verdict_key = dry_stable.get("decision", {}).get("verdict_key", "") if dry_stable else ""
+        if verdict_key and verdict_key not in reject_keys:
             passed.append(
                 RuleDiagnostic(
                     "最终策略结论",
@@ -271,17 +272,17 @@ class CupHandleStrategyEngine:
                 )
             )
         else:
-            actual_value = str(verdict) if verdict is not None else "缺失"
-            if verdict == "不建议买入":
+            actual_value = str(verdict or verdict_key) if (verdict or verdict_key) else "缺失"
+            if verdict_key in reject_keys:
                 explanation = "干稳低吸决策认为该结构暂不适合买入。"
-            elif verdict is None:
+            elif not verdict_key:
                 explanation = "干稳分析缺少最终 verdict，候选结果必须按失败处理。"
             else:
                 explanation = "干稳分析返回了未知 verdict，候选结果必须按失败处理。"
             failed.append(
                 RuleDiagnostic(
                     "最终策略结论",
-                    "观察 / 可低吸 / 突破确认",
+                    "非 REJECT / 不建议买入",
                     actual_value,
                     "high",
                     explanation,
