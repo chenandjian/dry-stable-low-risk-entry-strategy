@@ -593,6 +593,13 @@ async def get_stock_ohlc(code: str):
 async def get_candidate(code: str):
     c = db.get_candidate(code)
     if not c:
+        # Check in-memory discoveries during active scan
+        ds = (_running.get("stats", {}).get("discoveries") or []) if _running.get("running") else []
+        for d in ds:
+            if d.get("code") == code:
+                c = d
+                break
+    if not c:
         return JSONResponse({"error": "Not found"}, status_code=404)
     trade_plan = {}
     ohlc = db.get_ohlc(code)
