@@ -605,6 +605,7 @@ def _fetch_with_retry(
 
             if error == "data source busy":
                 saw_source_busy = True
+                logger.debug("%s  %s  ⏳ busy", code, ds_name)
                 continue
 
             if data:
@@ -620,6 +621,10 @@ def _fetch_with_retry(
                 if prev:
                     parts.append(f"{prev['date'][5:]}: O{prev['open']:.2f} H{prev['high']:.2f} L{prev['low']:.2f} C{prev['close']:.2f}")
                 parts.append(f"{recent['date'][5:]}: O{recent['open']:.2f} H{recent['high']:.2f} L{recent['low']:.2f} C{recent['close']:.2f}")
+                # Log which sources were skipped
+                skipped = [n for n in chain if n != ds_name]
+                if skipped:
+                    parts.append(f"(跳过: {','.join(skipped)})")
                 logger.info("  ".join(parts))
 
                 return FetchResult(
