@@ -75,14 +75,14 @@
         <table v-else class="result-table">
           <thead><tr><th>柄区间</th><th>检测日</th><th>分数</th><th>决策</th><th>柄回撤</th><th>杯深</th><th>突破</th></tr></thead>
           <tbody>
-            <tr v-for="p in result.patterns" :key="p.id" :class="{ selected: p.id === selectedPatternId }" @click="selectPattern(p.id)">
-              <td>{{ p.pattern.handleStartDate }} ~ {{ p.pattern.handleEndDate }}</td>
+            <tr v-for="p in result.patterns" :key="p.patternId" :class="{ selected: p.patternId === selectedPatternId }" @click="selectPattern(p.patternId)">
+              <td>{{ p.handleStartDate }} ~ {{ p.handleEndDate }}</td>
               <td>{{ p.detectedDate }}</td>
               <td class="score">{{ p.score }}</td>
-              <td>{{ p.decision?.verdict || '--' }}</td>
-              <td>{{ pct(p.pattern.handleDepthPct) }}</td>
-              <td>{{ pct(p.pattern.cupDepthPct) }}</td>
-              <td>{{ p.pattern.isBreakout ? '是' : '否' }}</td>
+              <td>{{ p.dryStable?.decision?.verdict || '--' }}</td>
+              <td>{{ pct(p.handleDepthPct) }}</td>
+              <td>{{ pct(p.cupDepthPct) }}</td>
+              <td>{{ p.isBreakout ? '是' : '否' }}</td>
             </tr>
           </tbody>
         </table>
@@ -91,16 +91,16 @@
       <section v-if="selectedPattern" class="breakdown-card">
         <div class="section-title">评分拆解</div>
         <div class="breakdown-grid">
-          <ScoreBar label="量干" :current="selectedPattern.scoreBreakdown?.volumeDry?.score || 0" :max="10" />
-          <ScoreBar label="价稳" :current="selectedPattern.scoreBreakdown?.priceStable?.score || 0" :max="10" />
-          <ScoreBar label="形态" :current="selectedPattern.scoreBreakdown?.patternScore?.score || 0" :max="20" />
+          <ScoreBar label="量干" :current="selectedPattern.dryStable?.volume_dry?.score || 0" :max="10" />
+          <ScoreBar label="价稳" :current="selectedPattern.dryStable?.price_stable?.score || 0" :max="10" />
+          <ScoreBar label="形态" :current="selectedPattern.dryStable?.pattern_score?.score || 0" :max="20" />
         </div>
         <div class="trade-plan">
-          <div>低吸区间：{{ price(selectedPattern.tradePlan?.entryZoneLow) }} ~ {{ price(selectedPattern.tradePlan?.entryZoneHigh) }}</div>
-          <div>Pivot：{{ price(selectedPattern.tradePlan?.pivot) }} · 止损：{{ price(selectedPattern.tradePlan?.stopLoss) }}</div>
-          <div>目标：{{ price(selectedPattern.tradePlan?.target1) }} / {{ price(selectedPattern.tradePlan?.target2) }} · RR：{{ selectedPattern.tradePlan?.riskReward1 ?? '--' }}</div>
+          <div>低吸区间：{{ price(selectedPattern.dryStable?.key_prices?.entry_zone_low) }} ~ {{ price(selectedPattern.dryStable?.key_prices?.entry_zone_high) }}</div>
+          <div>Pivot：{{ price(selectedPattern.dryStable?.key_prices?.pivot) }} · 止损：{{ price(selectedPattern.dryStable?.key_prices?.stop_loss) }}</div>
+          <div>目标：{{ price(selectedPattern.dryStable?.key_prices?.target_1) }} / {{ price(selectedPattern.dryStable?.key_prices?.target_2) }} · RR：{{ selectedPattern.dryStable?.risk_reward?.rr1 ?? '--' }}</div>
         </div>
-        <RiskBox>{{ selectedPattern.decision?.summary || '无决策说明' }}</RiskBox>
+        <RiskBox>{{ selectedPattern.dryStable?.decision?.summary || '无决策说明' }}</RiskBox>
       </section>
     </main>
   </div>
@@ -133,7 +133,7 @@ const form = ref({
   handleEndDate: '',
 })
 
-const selectedPattern = computed(() => (result.value?.patterns || []).find(p => p.id === selectedPatternId.value) || null)
+const selectedPattern = computed(() => (result.value?.patterns || []).find(p => p.patternId === selectedPatternId.value) || null)
 const shortHash = computed(() => result.value?.configHash ? result.value.configHash.slice(0, 18) + '…' : '--')
 
 function summaryValue(key) {
@@ -208,12 +208,12 @@ function drawMarkers() {
   for (const pattern of result.value.patterns || []) {
     const selected = pattern.id === selectedPatternId.value
     const color = selected ? '#FBBF24' : '#4F7DFF'
-    markers.push({ time: pattern.pattern.handleStartDate, position: 'belowBar', color, shape: 'arrowUp', text: selected ? '柄开始' : '自动柄' })
-    markers.push({ time: pattern.pattern.handleEndDate, position: 'aboveBar', color, shape: 'arrowDown', text: selected ? '柄结束' : '' })
-    markers.push({ time: pattern.pattern.handleLowDate, position: 'belowBar', color: '#F59E0B', shape: 'circle', text: '柄低' })
-    markers.push({ time: pattern.pattern.leftHighDate, position: 'aboveBar', color: '#64748B', shape: 'circle', text: '左杯口' })
-    markers.push({ time: pattern.pattern.cupLowDate, position: 'belowBar', color: '#64748B', shape: 'circle', text: '杯底' })
-    markers.push({ time: pattern.pattern.rightHighDate, position: 'aboveBar', color: '#64748B', shape: 'circle', text: '右杯口' })
+    markers.push({ time: pattern.handleStartDate, position: 'belowBar', color, shape: 'arrowUp', text: selected ? '柄开始' : '自动柄' })
+    markers.push({ time: pattern.handleEndDate, position: 'aboveBar', color, shape: 'arrowDown', text: selected ? '柄结束' : '' })
+    markers.push({ time: pattern.handleLowDate, position: 'belowBar', color: '#F59E0B', shape: 'circle', text: '柄低' })
+    markers.push({ time: pattern.leftHighDate, position: 'aboveBar', color: '#64748B', shape: 'circle', text: '左杯口' })
+    markers.push({ time: pattern.cupLowDate, position: 'belowBar', color: '#64748B', shape: 'circle', text: '杯底' })
+    markers.push({ time: pattern.rightHighDate, position: 'aboveBar', color: '#64748B', shape: 'circle', text: '右杯口' })
   }
   const specified = result.value.specifiedDiagnosis
   if (specified) {
