@@ -92,7 +92,7 @@ def scan_all(
     liquidity_cfg = config.get("liquidity", {})
     scoring_cfg = config.get("scoring", {})
     daily_sources = config.get("data", {}).get("daily_sources") or DEFAULT_DAILY_SOURCES
-    kline_days = config.get("data", {}).get("daily_kline_days") or liquidity_cfg.get("min_listing_days", 250)
+    kline_days = config.get("data", {}).get("daily_kline_days") or liquidity_cfg.get("min_listing_days", 250) or 250
     strategy_engine = CupHandleStrategyEngine(config)
     max_busy_retries = config.get("data", {}).get("source_busy_max_retries", 3)
     market_data = fetch_market_index_daily()
@@ -443,7 +443,7 @@ def re_evaluate_task(
 
     liquidity_cfg = config.get("liquidity", {})
     scoring_cfg = config.get("scoring", {})
-    kline_days = config.get("data", {}).get("daily_kline_days") or liquidity_cfg.get("min_listing_days", 250)
+    kline_days = config.get("data", {}).get("daily_kline_days") or liquidity_cfg.get("min_listing_days", 250) or 250
     strategy_engine = CupHandleStrategyEngine(config)
     market_data = fetch_market_index_daily()
     old_candidates = {c["code"] for c in db.get_candidates(task_id=task_id)}
