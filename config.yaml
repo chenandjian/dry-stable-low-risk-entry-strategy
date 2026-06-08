@@ -18,6 +18,7 @@ data:
   use_fq: true
   daily_kline_days: 250        # 扫描分析窗口（日线拉取天数）
   backtest_window_days: 250    # 回测滑动窗口（在历史数据中滑动评估的天数）
+  worker_count: 3              # 扫描线程数（建议等于数据源数量）
 liquidity:
   enabled: true
   avg_turnover_days: 20

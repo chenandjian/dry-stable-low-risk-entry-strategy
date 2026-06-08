@@ -40,7 +40,7 @@ def scan_all(
     task_id: str = None,
     stocks: list[dict] = None,
     retry_policy: str = "normal",
-    worker_count: int = 2,
+    worker_count: int = 3,
 ) -> dict:
     """双线程全市场扫描。"""
     from scanner.stock_pool import get_a_stock_pool
