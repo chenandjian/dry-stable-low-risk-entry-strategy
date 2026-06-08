@@ -398,6 +398,8 @@ def _build_discovery(code: str, name: str, result, dry_stable: dict, latest_clos
         "pattern_score_20": dry_stable["pattern_score"]["score"],
         "pattern_type": dry_stable["pattern_score"]["type"],
         "key_pattern_type": dry_stable["pattern_score"]["key_pattern_type"],
+        "cup_handle_score": dry_stable["pattern_score"].get("cup_handle_score", 0),
+        "vcp_score": dry_stable["pattern_score"].get("vcp_score", 0),
         "risk_percent": dry_stable["risk_reward"]["risk_percent"],
         "rr1": dry_stable["risk_reward"]["rr1"],
         "position_advice": dry_stable["risk_reward"]["position_advice"],
