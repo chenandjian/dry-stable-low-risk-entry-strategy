@@ -7,6 +7,7 @@ from datetime import datetime, timedelta
 
 from scanner import db
 from scanner.engine import _merge_data
+from scanner.baidu_source import fetch_baidu_daily
 from scanner.sina_source import fetch_sina_daily
 from scanner.strategy_engine import CupHandleStrategyEngine, serialize_pattern_for_backtest
 from scanner.tencent_source import fetch_tencent_daily
@@ -100,10 +101,11 @@ def default_fresh_fetch(
     if required_start_date and required_end_date:
         days = _estimate_fetch_days(required_start_date, required_end_date)
 
-    data = fetch_sina_daily(code, days=days)
-    if data:
-        return data
-    return fetch_tencent_daily(code, days=days)
+    for fetch_fn in (fetch_baidu_daily, fetch_sina_daily, fetch_tencent_daily):
+        data = fetch_fn(code, days=days)
+        if data:
+            return data
+    return None
 
 
 def _call_fetch_fn(fetch_fn, code: str, required_start_date: str, required_end_date: str) -> list[dict] | None:

@@ -96,6 +96,7 @@ def test_ensure_backtest_data_default_fetch_requests_span_aware_days(tmp_path, m
     def fake_tencent_fetch(code, days=250):
         raise AssertionError("tencent fallback should not be used when sina returns data")
 
+    monkeypatch.setattr("scanner.single_stock_backtest.fetch_baidu_daily", lambda code, days=250: None)
     monkeypatch.setattr("scanner.single_stock_backtest.fetch_sina_daily", fake_sina_fetch)
     monkeypatch.setattr("scanner.single_stock_backtest.fetch_tencent_daily", fake_tencent_fetch)
 
