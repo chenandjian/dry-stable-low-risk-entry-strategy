@@ -446,6 +446,7 @@ def re_evaluate_task(
 
     liquidity_cfg = config.get("liquidity", {})
     scoring_cfg = config.get("scoring", {})
+    kline_days = config.get("data", {}).get("daily_kline_days") or liquidity_cfg.get("min_listing_days", 250)
     strategy_engine = CupHandleStrategyEngine(config)
     market_data = fetch_market_index_daily()
     old_candidates = {c["code"] for c in db.get_candidates(task_id=task_id)}
@@ -456,7 +457,7 @@ def re_evaluate_task(
     for i, stock in enumerate(stocks):
         code = stock["code"]
         name = stock.get("name", "")
-        data = db.get_ohlc(code, max_rows=MAX_OHLC_WINDOW)
+        data = db.get_ohlc(code, max_rows=kline_days)
         if not data:
             continue
 
@@ -518,7 +519,6 @@ def re_evaluate_task(
 
 
 DEFAULT_DAILY_SOURCES = ["baidu", "sina", "tencent"]
-MAX_OHLC_WINDOW = 400  # max trading days stored/analyzed (~1.5 years), consistent across all sources
 
 
 def _daily_fetch_fn(ds_name: str):
@@ -612,7 +612,7 @@ def _fetch_with_retry(
                 continue
 
             if data:
-                merged = _merge_data(cached or [], data, max_rows=MAX_OHLC_WINDOW)
+                merged = _merge_data(cached or [], data, max_rows=kline_days)
                 db.save_ohlc(code, merged)
                 fetched_source = ds_name
                 for f in futures:
