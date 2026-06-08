@@ -284,8 +284,10 @@ async def start_scan():
                 retry_policy="normal",
             )
 
+            # Save candidates from scan result (may be empty if progress_callback
+            # discovered candidates but scan_all lost them — see re-evaluate below)
+            sc = config.get("scoring", {})
             if result["candidates"]:
-                sc = config.get("scoring", {})
                 db.save_candidates(
                     task_id, result["candidates"],
                     strong=sc.get("strong_threshold", 80),
@@ -294,6 +296,16 @@ async def start_scan():
 
             s = result["stats"]
             _running["stats"] = s
+
+            # Safety net: if scan found candidates via progress_callback but
+            # scan_all lost them, re-evaluate to sync candidates table.
+            if not result["candidates"]:
+                candidate_count = db.summarize_task_stocks(task_id).get("candidate", 0)
+                if candidate_count > 0:
+                    logger.info("Sync: re-evaluating %d candidate-marked stocks", candidate_count)
+                    re_evaluate_task(config, task_id)
+                    s = db.refresh_scan_task_counts(task_id)
+
             db.finish_scan_task(
                 task_id,
                 finished_at=datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
