@@ -8,6 +8,10 @@ from analyzer.dry_stable import analyze_dry_stable
 from scanner.pattern_detector import CupHandleResult, detect_cup_handle
 from scanner.scorer import score_cup_handle_advanced
 
+# Single source of truth for which verdict_keys qualify as candidates
+CANDIDATE_KEYS = frozenset({"BUY_LOW", "WATCH_BREAKOUT", "WAIT_ENTRY"})
+REJECT_KEYS = frozenset({"REJECT", "不建议买入"})
+
 
 @dataclass
 class RuleDiagnostic:
@@ -208,9 +212,6 @@ class CupHandleStrategyEngine:
         passed: list[RuleDiagnostic] = []
         failed: list[RuleDiagnostic] = []
         threshold = self.scoring_cfg.get("medium_threshold", 70) - 10
-        reject_keys = {"REJECT", "不建议买入"}
-        candidate_keys = {"BUY_LOW", "WATCH_BREAKOUT", "WAIT_ENTRY"}
-
         if result.score >= threshold:
             passed.append(
                 RuleDiagnostic(
@@ -262,7 +263,7 @@ class CupHandleStrategyEngine:
 
         verdict = dry_stable.get("decision", {}).get("verdict") if dry_stable else None
         verdict_key = dry_stable.get("decision", {}).get("verdict_key", "") if dry_stable else ""
-        if verdict_key and verdict_key in candidate_keys:
+        if verdict_key and verdict_key in CANDIDATE_KEYS:
             passed.append(
                 RuleDiagnostic(
                     "最终策略结论",
@@ -274,7 +275,7 @@ class CupHandleStrategyEngine:
             )
         else:
             actual_value = str(verdict or verdict_key) if (verdict or verdict_key) else "缺失"
-            if verdict_key in reject_keys:
+            if verdict_key in REJECT_KEYS:
                 explanation = "干稳低吸决策认为该结构暂不适合买入。"
             elif not verdict_key:
                 explanation = "干稳分析缺少最终 verdict，候选结果必须按失败处理。"
