@@ -23,7 +23,10 @@ import { useRoute } from 'vue-router'
 const route = useRoute()
 const lastScan = ref('')
 
-function isActive(path) { return route.path.startsWith(path) }
+function isActive(path) {
+  if (path === '/') return route.path === '/' || route.path === ''
+  return route.path.startsWith(path)
+}
 
 onMounted(async () => {
   try {
