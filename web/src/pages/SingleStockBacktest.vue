@@ -73,15 +73,15 @@
         <div v-if="!result" class="empty-text">请输入参数并运行回测</div>
         <div v-else-if="!result.patterns?.length" class="empty-text">该时间段未识别到符合杯柄策略的柄区域</div>
         <table v-else class="result-table">
-          <thead><tr><th>柄区间</th><th>检测日</th><th>分数</th><th>决策</th><th>柄回撤</th><th>杯深</th><th>突破</th></tr></thead>
+          <thead><tr><th>首次发现</th><th>最后确认</th><th>类型</th><th>分数</th><th>决策</th><th>回撤</th><th>突破</th></tr></thead>
           <tbody>
             <tr v-for="p in result.patterns" :key="p.patternId" :class="{ selected: p.patternId === selectedPatternId }" @click="selectPattern(p.patternId)">
-              <td>{{ p.handleStartDate }} ~ {{ p.handleEndDate }}</td>
+              <td>{{ p.firstDetectedDate }}</td>
               <td>{{ p.detectedDate }}</td>
+              <td>{{ p.dryStable?.pattern_score?.type || '--' }}</td>
               <td class="score">{{ p.score }}</td>
               <td>{{ p.dryStable?.decision?.verdict || '--' }}</td>
               <td>{{ pct(p.handleDepthPct) }}</td>
-              <td>{{ pct(p.cupDepthPct) }}</td>
               <td>{{ p.isBreakout ? '是' : '否' }}</td>
             </tr>
           </tbody>
