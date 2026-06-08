@@ -37,6 +37,12 @@
             @input="markDirty" step="10" min="30" />
           <span class="default">默认 250天</span>
         </div>
+        <div class="param">
+          <label title="回测时滑动窗口的交易日数，窗口在历史数据中逐日滑动评估">回测窗口期 <span class="unit">交易日</span></label>
+          <input type="number" v-model.number="config.data.backtest_window_days"
+            @input="markDirty" step="50" min="30" />
+          <span class="default">默认 250天</span>
+        </div>
       </div>
     </section>
 
@@ -235,6 +241,7 @@ const { getConfig, updateConfig } = useApi()
 const config = reactive({
   market: {},
   liquidity: {},
+  data: { backtest_window_days: 250 },
   cup: {},
   handle: {},
   breakout: {},
@@ -344,6 +351,7 @@ async function saveConfig() {
     const payload = {
       market: { ...config.market },
       liquidity: { ...config.liquidity },
+      data: { ...config.data },
       cup: {
         min_duration: config.cup.min_duration,
         max_duration: config.cup.max_duration,

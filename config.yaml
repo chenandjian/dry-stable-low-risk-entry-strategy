@@ -16,6 +16,8 @@ data:
   start_date: '2025-01-01'
   end_date: null
   use_fq: true
+  daily_kline_days: 250        # 扫描分析窗口（日线拉取天数）
+  backtest_window_days: 250    # 回测滑动窗口（在历史数据中滑动评估的天数）
 liquidity:
   enabled: true
   avg_turnover_days: 20
