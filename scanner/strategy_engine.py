@@ -367,6 +367,7 @@ def _serialize_pattern(result: CupHandleResult, data: list[dict]) -> dict:
         "isBreakout": result.is_breakout,
         "isVolumeBreakout": result.is_volume_breakout,
         "volMultiplier": result.vol_multiplier,
+        "patternKind": result.pattern_kind,
     }
 
 

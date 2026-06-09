@@ -199,6 +199,7 @@ def test_run_backtest_uses_only_data_up_to_detection_day(monkeypatch, tmp_path):
             self.passed = date in {"2025-01-10", "2025-01-11"}
             self.result = type("R", (), {
                 "found": self.passed,
+                "pattern_kind": "cup_handle",
                 "score": 80,
                 "handle_low_date": "2025-01-09",
                 "right_high_idx": 7,
@@ -350,7 +351,7 @@ def test_run_backtest_includes_specified_handle_diagnosis(monkeypatch, tmp_path)
         dry_stable = None
         passed_rules = []
         failed_rules = []
-        result = type("R", (), {"found": False, "score": 0})()
+        result = type("R", (), {"found": False, "score": 0, "pattern_kind": "cup_handle"})()
 
     class FakeDiagnosis:
         def to_dict(self):

@@ -234,8 +234,18 @@ def _canonical_handle_end_date(result, data: list[dict]) -> str:
     return data[end_idx]["date"]
 
 
-def _pattern_identity(pattern: dict) -> tuple[str, str, str]:
+def _pattern_identity(pattern: dict) -> tuple[str, str, str, str]:
+    kind = pattern.get("patternKind", "cup_handle")
+    if kind == "vcp":
+        # VCP identity uses contraction dates from patternKind + detectedDate
+        return (
+            "vcp",
+            pattern.get("handleStartDate", "") or pattern.get("detectedDate", ""),
+            pattern.get("handleLowDate", "") or pattern.get("detectedDate", ""),
+            str(pattern.get("vcpContractions", 0) or 0),
+        )
     return (
+        "cup_handle",
         pattern.get("handleStartDate", ""),
         pattern.get("handleEndDate", ""),
         pattern.get("handleLowDate", ""),
@@ -243,6 +253,14 @@ def _pattern_identity(pattern: dict) -> tuple[str, str, str]:
 
 
 def _pattern_id(code: str, pattern: dict) -> str:
+    kind = pattern.get("patternKind", "cup_handle")
+    if kind == "vcp":
+        return "vcp-{}-{}-{}-{}".format(
+            code,
+            pattern.get("handleStartDate", "") or pattern.get("detectedDate", ""),
+            pattern.get("handleLowDate", "") or pattern.get("detectedDate", ""),
+            pattern.get("vcpContractions", 0) or 0,
+        )
     return "{}-{}-{}-{}".format(
         code,
         pattern.get("handleStartDate", ""),
@@ -267,6 +285,9 @@ def _serialize_rules(rules) -> list[dict]:
 def _build_pattern_entry(code: str, evaluation, window: list[dict]) -> dict:
     pattern = serialize_pattern_for_backtest(evaluation.result, window)
     pattern["handleEndDate"] = _canonical_handle_end_date(evaluation.result, window)
+    # Add VCP contraction count for identity
+    if evaluation.dry_stable:
+        pattern["vcpContractions"] = evaluation.dry_stable.get("pattern_score", {}).get("vcp_contractions", 0)
     detected_date = window[-1]["date"]
     return {
         "patternId": _pattern_id(code, pattern),
