@@ -57,7 +57,13 @@ class BacktestResult:
     false_breakout_20d: bool = False
     false_breakout_60d: bool = False
 
-    # Stop loss hit: price drops below (breakout_price * 0.95)
+    # Strategy actual stop-loss (from unified engine, not breakout_price * 0.95)
+    actual_stop_loss: float = 0.0
+    entry_zone_low: float = 0.0
+    entry_zone_high: float = 0.0
+    pattern_kind: str = ""
+
+    # Stop loss hit: price drops below actual_stop_loss
     stop_loss_hit_5d: bool = False
     stop_loss_hit_10d: bool = False
     stop_loss_hit_20d: bool = False
@@ -182,6 +188,8 @@ def run_backtest(
                 continue
 
             r = evaluation.result
+            if r.score < min_score:
+                continue
             dry = evaluation.dry_stable
             stock_has_pattern = True
 
@@ -202,6 +210,10 @@ def run_backtest(
                 pattern_score_20=dry["pattern_score"]["score"],
                 risk_percent=dry["risk_reward"]["risk_percent"],
                 rr1=dry["risk_reward"]["rr1"],
+                actual_stop_loss=dry["key_prices"]["stop_loss"],
+                entry_zone_low=dry["key_prices"].get("entry_zone_low", 0),
+                entry_zone_high=dry["key_prices"].get("entry_zone_high", 0),
+                pattern_kind=getattr(r, "pattern_kind", "cup_handle"),
             )
 
             # Calculate forward returns
@@ -254,8 +266,8 @@ def _calc_forward(br: BacktestResult, detect_close: float, breakout_price: float
         min_low = min(future_lows)
         setattr(br, f"false_breakout_{label}", min_low < breakout_price * 0.97)
 
-        # Stop loss hit: 5% below breakout
-        sl_price = breakout_price * 0.95
+        # Stop loss hit: use strategy's actual stop_loss
+        sl_price = br.actual_stop_loss if br.actual_stop_loss > 0 else breakout_price * 0.95
         setattr(br, f"stop_loss_hit_{label}", min_low < sl_price)
 
 
