@@ -3,8 +3,10 @@
     <aside class="left-panel">
       <div class="panel-card">
         <div class="section-title">单股杯柄回测</div>
-        <label>股票代码</label>
-        <input v-model.trim="form.code" class="form-input" aria-label="股票代码" />
+        <label>股票代码 <span class="required">*</span></label>
+        <input v-model.trim="form.code" class="form-input" aria-label="股票代码"
+          placeholder="例如 600036" @blur="validateCode" />
+        <span class="date-err" v-if="codeError">{{ codeError }}</span>
         <label>回测开始日期</label>
         <input v-model="form.startDate" class="form-input date-input" type="date"
           @blur="validateDate('startDate')" />
@@ -148,6 +150,14 @@ const form = ref({
   handleEndDate: '',
 })
 const dateErrors = ref({})
+const codeError = ref('')
+
+function validateCode() {
+  const v = form.value.code
+  if (!v) { codeError.value = '请输入股票代码'; return }
+  if (!/^\d{6}$/.test(v)) { codeError.value = '股票代码应为6位数字'; return }
+  codeError.value = ''
+}
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/
 
@@ -190,7 +200,9 @@ function selectPattern(id) {
 async function runBacktest() {
   error.value = null
   result.value = null
-  // Validate all date fields before submit
+  // Validate all fields before submit
+  validateCode()
+  if (codeError.value) { error.value = { message: codeError.value }; return }
   for (const f of ['startDate','endDate','handleStartDate','handleEndDate']) {
     validateDate(f)
     if (dateErrors.value[f]) { error.value = { message: `${f}: ${dateErrors.value[f]}` }; return }
@@ -280,6 +292,7 @@ label { display: block; margin: 10px 0 5px; font-size: 12px; color: var(--text-s
 .date-input { color-scheme: dark; min-height: 38px; }
 .date-input::-webkit-calendar-picker-indicator { filter: invert(0.8); cursor: pointer; }
 .date-err { display: block; color: var(--up-red); font-size: 11px; margin-top: 2px; }
+.required { color: var(--up-red); }
 .run-btn { width: 100%; margin-top: 14px; padding: 10px; border: none; border-radius: 4px; background: var(--accent); color: #fff; font-weight: 700; cursor: pointer; }
 .run-btn:disabled { opacity: 0.6; cursor: not-allowed; }
 .main-panel { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
