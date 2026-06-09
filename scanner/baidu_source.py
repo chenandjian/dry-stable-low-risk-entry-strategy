@@ -6,6 +6,7 @@ import requests
 logger = logging.getLogger(__name__)
 
 BAIDU_KLINE_URL = "https://finance.pae.baidu.com/selfselect/getstockquotation"
+_baidu_blocked_logged = False
 
 
 def fetch_baidu_daily(code: str, days: int = 250) -> list[dict] | None:
@@ -32,7 +33,14 @@ def fetch_baidu_daily(code: str, days: int = 250) -> list[dict] | None:
     try:
         resp = requests.get(BAIDU_KLINE_URL, params=params, headers=headers, timeout=10)
         resp.raise_for_status()
-        rows = _parse_payload(resp.json())
+        payload = resp.json()
+        if payload.get("ResultCode") == 403:
+            global _baidu_blocked_logged
+            if not _baidu_blocked_logged:
+                logger.warning("Baidu API blocked (403 Forbidden) — 百度已封禁该接口")
+                _baidu_blocked_logged = True
+            return None
+        rows = _parse_payload(payload)
         if not rows:
             return None
         return rows[-days:]
