@@ -6,14 +6,22 @@
         <label>股票代码</label>
         <input v-model.trim="form.code" class="form-input" aria-label="股票代码" />
         <label>回测开始日期</label>
-        <input v-model="form.startDate" class="form-input" type="date" />
+        <input v-model="form.startDate" class="form-input" type="text"
+          placeholder="YYYY-MM-DD" @blur="validateDate('startDate')" />
+        <span class="date-err" v-if="dateErrors.startDate">{{ dateErrors.startDate }}</span>
         <label>回测结束日期</label>
-        <input v-model="form.endDate" class="form-input" type="date" />
+        <input v-model="form.endDate" class="form-input" type="text"
+          placeholder="YYYY-MM-DD" @blur="validateDate('endDate')" />
+        <span class="date-err" v-if="dateErrors.endDate">{{ dateErrors.endDate }}</span>
         <div class="section-title small">指定柄区域（可选）</div>
         <label>柄开始日期</label>
-        <input v-model="form.handleStartDate" class="form-input" type="date" />
+        <input v-model="form.handleStartDate" class="form-input" type="text"
+          placeholder="YYYY-MM-DD" @blur="validateDate('handleStartDate')" />
+        <span class="date-err" v-if="dateErrors.handleStartDate">{{ dateErrors.handleStartDate }}</span>
         <label>柄结束日期</label>
-        <input v-model="form.handleEndDate" class="form-input" type="date" />
+        <input v-model="form.handleEndDate" class="form-input" type="text"
+          placeholder="YYYY-MM-DD" @blur="validateDate('handleEndDate')" />
+        <span class="date-err" v-if="dateErrors.handleEndDate">{{ dateErrors.handleEndDate }}</span>
         <button class="run-btn" :disabled="loading" @click="runBacktest">
           {{ loading ? '计算中...' : '运行回测' }}
         </button>
@@ -132,6 +140,24 @@ const form = ref({
   handleStartDate: '',
   handleEndDate: '',
 })
+const dateErrors = ref({})
+
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/
+
+function validateDate(field) {
+  const v = form.value[field]
+  if (!v) { delete dateErrors.value[field]; return }
+  if (!DATE_RE.test(v)) {
+    dateErrors.value[field] = '格式应为 YYYY-MM-DD'
+    return
+  }
+  const d = new Date(v + 'T00:00:00')
+  if (isNaN(d.getTime())) {
+    dateErrors.value[field] = '无效日期'
+    return
+  }
+  delete dateErrors.value[field]
+}
 
 const selectedPattern = computed(() => (result.value?.patterns || []).find(p => p.patternId === selectedPatternId.value) || null)
 const shortHash = computed(() => result.value?.configHash ? result.value.configHash.slice(0, 18) + '…' : '--')
@@ -157,6 +183,14 @@ function selectPattern(id) {
 async function runBacktest() {
   error.value = null
   result.value = null
+  // Validate all date fields before submit
+  for (const f of ['startDate','endDate','handleStartDate','handleEndDate']) {
+    validateDate(f)
+    if (dateErrors.value[f]) { error.value = { message: `${f}: ${dateErrors.value[f]}` }; return }
+  }
+  if (!form.value.startDate || !form.value.endDate) {
+    error.value = { message: '请填写回测开始和结束日期' }; return
+  }
   loading.value = true
   try {
     const payload = {
@@ -236,8 +270,8 @@ onUnmounted(() => { if (chart.value) chart.value.remove() })
 .section-title.small { margin-top: 14px; color: var(--text-secondary); }
 label { display: block; margin: 10px 0 5px; font-size: 12px; color: var(--text-secondary); }
 .form-input { width: 100%; background: var(--bg-card); color: var(--text-primary); border: 1px solid var(--border); border-radius: 4px; padding: 8px; font-family: var(--font-mono); }
-.form-input[type="date"] { color-scheme: dark; min-height: 38px; }
-.form-input[type="date"]::-webkit-calendar-picker-indicator { filter: invert(0.8); cursor: pointer; }
+.form-input::placeholder { color: var(--text-muted); font-size: 12px; }
+.date-err { display: block; color: var(--up-red); font-size: 11px; margin-top: 2px; }
 .run-btn { width: 100%; margin-top: 14px; padding: 10px; border: none; border-radius: 4px; background: var(--accent); color: #fff; font-weight: 700; cursor: pointer; }
 .run-btn:disabled { opacity: 0.6; cursor: not-allowed; }
 .main-panel { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
