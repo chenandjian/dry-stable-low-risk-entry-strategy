@@ -37,7 +37,7 @@ def fetch_baidu_daily(code: str, days: int = 250) -> list[dict] | None:
             return None
         return rows[-days:]
     except Exception as exc:
-        logger.warning("Baidu kline fetch/parse error for %s: %s", code, exc)
+        logger.debug("Baidu kline fetch/parse error for %s: %s", code, exc)
         return None
 
 
@@ -51,7 +51,13 @@ def _normalize_code(code: str) -> str:
 
 
 def _parse_payload(payload: dict) -> list[dict]:
-    market_data = payload.get("Result", {}).get("newMarketData", {})
+    result = payload.get("Result", {})
+    if not isinstance(result, dict):
+        # API format changed (e.g. Result is now a list) — treat as empty
+        return []
+    market_data = result.get("newMarketData", {})
+    if not isinstance(market_data, dict):
+        return []
     keys = market_data.get("keys") or []
     raw_rows = market_data.get("marketData") or ""
     required = {"time", "open", "close", "high", "low", "volume", "amount"}
