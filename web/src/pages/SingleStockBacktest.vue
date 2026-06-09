@@ -51,6 +51,13 @@
     </aside>
 
     <main class="main-panel">
+      <div v-if="result?.dataCoverage?.coverageWarning" class="warning-card">
+        ⚠ 数据覆盖不足 — 输入区间在可用范围之外，仅展示可用数据内的结果
+        <div class="warning-detail">
+          输入区间：{{ result.dataCoverage.requiredRange?.startDate || '--' }} ~ {{ result.dataCoverage.requiredRange?.endDate || '--' }}
+          · 实际可用：{{ result.dataCoverage.availableRange?.startDate || '--' }} ~ {{ result.dataCoverage.availableRange?.endDate || '--' }}
+        </div>
+      </div>
       <div v-if="error" class="error-card">
         <div class="error-title">{{ error.message || error.error }}</div>
         <div v-if="error.requestedRange" class="error-detail">输入区间：{{ error.requestedRange.startDate }} ~ {{ error.requestedRange.endDate }}</div>
@@ -302,6 +309,12 @@ label { display: block; margin: 10px 0 5px; font-size: 12px; color: var(--text-s
 .error-title { color: var(--down-green); font-weight: 700; }
 .error-detail { margin-top: 8px; color: var(--text-secondary); }
 .error-detail span { display: inline-block; margin-right: 8px; }
+.warning-card {
+  background: rgba(245,158,11,0.08); border: 1px solid rgba(245,158,11,0.3);
+  border-radius: 8px; padding: 10px 14px; margin-bottom: 12px;
+  color: var(--warn-orange); font-size: 13px;
+}
+.warning-detail { margin-top: 6px; color: var(--text-muted); font-size: 11px; }
 .breakdown-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 12px; }
 .trade-plan { background: var(--bg-card); border: 1px solid var(--border); border-radius: 6px; padding: 10px; margin-bottom: 12px; color: var(--text-secondary); font-size: 12px; line-height: 1.8; }
 @media (max-width: 1100px) { .backtest-layout { grid-template-columns: 1fr; } .metric-grid { grid-template-columns: repeat(2, 1fr); } }
