@@ -1,124 +1,185 @@
-# Code Review Bug Fix Plan
+# Code Review Bug Fix Plan (Revised)
 
-Per `docs/reviews/2026-06-09-strategy-code-audit.md`, fix 8 high-severity bugs.
-Priority order: BUG-002 → BUG-001 → BUG-003 → BUG-004 → BUG-005 → BUG-006 → BUG-007 → BUG-008.
+> 修订依据: `docs/reviews/2026-06-09-bug-fix-plan-review.md`
+> 原始问题来源: `docs/reviews/2026-06-09-strategy-code-audit.md`
+> v2: 按 8 项强制审核意见全面修订
 
 ---
 
-## BUG-002: Market index uses wrong symbol
+## Phase 1: Core Trading Safety
 
-**Root cause:** `scanner/index_source.py:9` has `DEFAULT_MARKET_INDEX = "000001"`. Sina source maps non-6 codes to `sz{code}`, so `000001` becomes `sz000001` (平安银行), not `sh000001` (上证指数).
+### BUG-002: Market index uses wrong symbol
+
+**Root cause:** `scanner/index_source.py:9` `DEFAULT_MARKET_INDEX = "000001"` → `sina_source.py` non-6 codes mapped to `sz{code}` → `sz000001` = 平安银行, not 上证指数.
 
 **Fix:**
-1. `scanner/index_source.py`: Change `DEFAULT_MARKET_INDEX = "000001"` to `"sh000001"` and make `fetch_market_index_daily` directly call Sina with the correct symbol rather than passing through the stock-oriented `fetch_sina_daily`
-2. OR: Extend `fetch_sina_daily` to accept optional `prefix` param (e.g., `prefix="sh"`) for index codes
-3. Config: Add `market_index` to config.yaml under a new section for explicit control
+1. Create dedicated `fetch_sina_index_daily(symbol, days)` in index_source.py — does NOT go through stock code mapping
+2. Use symbol `sh000001` as default
+3. Add config `market_environment.index_symbol: sh000001`
+4. On fetch failure → return None → `assess_market_environment()` defaults to "一般"
 
-**Test:** Mock Sina response, assert `fetch_market_index_daily()` requests `sh000001` not `sz000001`.
-
----
-
-## BUG-001: RR1 always = 2.0 (fake pressure target)
-
-**Root cause:** `analyzer/key_prices.py:71` sets `target_1 = current_price + 2 * risk`. Then `risk_reward.py` computes `rr1 = (target_1 - cp) / risk = 2.0` always.
-
-**Fix:**
-1. `analyzer/key_prices.py`: `target_1` should use pivot (杯口突破位) as the first target, not a constructed 2R
-2. If pivot > current_price → `target_1 = pivot` (real resistance)
-3. Fallback: use 2R only if no pivot available
-4. `analyzer/decision.py`: `rr1 < min_rr1` now becomes a meaningful filter
-
-**Test:** Set current=100, stop=95, pivot=106. RR1 should be 1.2 → WAIT_RR.
+**Tests:**
+- Mock assert request uses `sh000001` not `sz000001`
+- Fetch failure → returns "一般"
 
 ---
 
-## BUG-003: ATR stop too close still allows BUY_LOW
+### BUG-001: Real RR1 from real resistance (not fake 2R)
 
-**Root cause:** `analyzer/risk_reward.py:82-85` only adds warning text; `can_buy` still True. Decision module doesn't check `risk_reward.can_buy`.
+**Root cause:** `analyzer/key_prices.py:71` sets `target_1 = current_price + 2 * risk`. `risk_reward.py` computes `rr1 = 2.0` always.
 
-**Fix:**
-1. `analyzer/risk_reward.py`: When `risk_pct < atr14_pct * atr_stop_multiplier`, set `can_buy = False` and `risk_level = "高风险"`
-2. `analyzer/decision.py`: Check `risk_reward.can_buy` before allowing BUY_LOW
+**Fix (per PLAN-002):**
+1. Add `find_real_target(data, cp)` to key_prices.py:
+   - Priority: ① pivot > cp → pivot, ② recent_high > cp → that high, ③ platform top
+   - If NO real target above cp → `target_1_real = None`
+2. `rr1 = (target_1_real - cp) / risk` if target_1_real exists, else `rr1 = 0`
+3. **NEVER** fall back to 2R for RR1 — no fake targets
+4. Already broke above pivot → pivot is support, not target; find NEXT resistance
+5. No real target → `rr1 < min_rr1` → `WAIT_RR`, forbid BUY_LOW
 
-**Test:** risk=2%, ATR14=3%, multiplier=1.2 → must NOT output BUY_LOW.
-
----
-
-## BUG-004: Far below pivot still shows WATCH_BREAKOUT
-
-**Root cause:** `analyzer/decision.py:99-100` checks `current <= pivot * 1.05` with no lower bound.
-
-**Fix:**
-1. Add lower bound: `current >= pivot * 0.85` (within 15% below pivot)
-2. `near_pivot = pivot * 0.85 <= current <= pivot * 1.05`
-3. Far below pivot → WAIT_ENTRY or WAIT_STABLE instead
-
-**Test:** current=60, pivot=100 → near_pivot=False → NOT WATCH_BREAKOUT.
+**Tests:**
+- cp=100, stop=95, pivot=106 above → rr1=1.2 → WAIT_RR
+- cp=110, stop=105, pivot=100 (broken) → must find higher resistance
+- No real resistance → rr1=0 → WAIT_RR
 
 ---
 
-## BUG-005: Historical backtester uses different strategy than online
+### BUG-003: ATR stop-too-close blocks BUY_LOW with structured state
 
-**Root cause:** `scanner/backtester.py` uses `score_cup_handle()` not `score_cup_handle_advanced()`, no config passing, no market data.
+**Root cause:** ATR check only adds warning text; `can_buy` unaffected; overridden later.
 
-**Fix:**
-1. Replace `scanner/backtester.py` pattern detection with `CupHandleStrategyEngine`
-2. Pass actual config and market_data
-3. Use actual stop_loss from strategy, not `breakout_price * 0.95`
-4. Support VCP-only candidates
+**Fix (per PLAN-003):**
+1. Add `RiskRewardResult.stop_too_close: bool = False`
+2. Set `r.stop_too_close = True` when `risk_pct < atr14_pct * atr_stop_multiplier`
+3. In `all_good` check: `not r.stop_too_close and ...`
+4. `stop_too_close=True` → `WAIT_ENTRY`, forbid `BUY_LOW`
+5. Does NOT just set `can_buy=False` (which gets overridden)
 
-**Test:** Same date, same stock → backtester and online produce identical verdict/score/stop_loss.
-
----
-
-## BUG-006: Single-stock backtest can't identify VCP-only
-
-**Root cause:** `strategy_engine.py:106-116` returns early when cup_handle not found, without running VCP analysis.
-
-**Fix:**
-1. Move VCP-only analysis into `StrategyEngine.evaluate_at()` — don't early-return when cup not found
-2. Remove duplicate VCP logic from `engine.py:235-241`
-3. Single entry point for all scans and backtests
-
-**Test:** `_make_vcp_data()` → backtest finds VCP pattern → scan finds same pattern.
+**Tests:**
+- risk=2%, ATR14=3%, mult=1.2 → stop_too_close=True → WAIT_ENTRY
+- Normal risk → behaves as before
 
 ---
 
-## BUG-007: try_acquire_any ignores config priority
+### BUG-004: Pivot distance has both upper and lower bounds
 
-**Root cause:** `engine.py:_fetch_with_retry` uses `mgr.try_acquire_any()` which randomizes. No respect for source chain order.
+**Root cause:** `near_pivot = current <= pivot * 1.05` with no lower bound.
 
-**Fix:**
-1. Replace `try_acquire_any()` with ordered iteration over source chain
-2. Try each source in config order (baidu → sina → tencent)
-3. Primary source uses `retry_attempts`, fallback sources use `fallback_attempts`
-4. Track failed sources, don't retry them
+**Fix (per PLAN-007):**
+1. Add config:
+```yaml
+decision:
+  chase_threshold_pct: 5     # existing
+  near_pivot_below_pct: 10   # new: max % below pivot to be "near"
+```
+2. `near_pivot = pivot>0 and current >= pivot*(1 - below_pct/100) and current <= pivot*(1 + chase_pct/100)`
+3. Current > pivot*(1+chase_pct) → `is_chasing=True` → REJECT
+4. Current < pivot*(1-below_pct/100) and not in entry zone → `WAIT_ENTRY`
 
-**Test:** Config [baidu,sina,tencent] → baidu tried first, sina second, tencent third.
-
----
-
-## BUG-008: Forward-adjust not unified across sources
-
-**Root cause:** Tencent uses qfq param, Sina/Baidu don't explicitly request adjusted prices.
-
-**Fix:**
-1. Verify Sina and Baidu return qfq prices by default
-2. If not, add qfq params where supported
-3. Remove or implement `config.data.use_fq`
-4. Add test comparing same stock across sources for price continuity
+**Tests:**
+- cp=60, pivot=100 → near_pivot=False → NOT WATCH_BREAKOUT
+- cp=95, pivot=100 → near_pivot=True → WATCH_BREAKOUT
 
 ---
 
-## Execution Order
+## Phase 2: Unified Strategy Engine
 
-1. BUG-002 (index) + BUG-001 (RR1) + BUG-003 (ATR) + BUG-004 (pivot) — core trading safety
-2. BUG-005 (backtester) + BUG-006 (VCP) — strategy consistency
-3. BUG-007 (source chain) + BUG-008 (复权) — data quality
+### BUG-006: VCP-only into unified engine (done before BUG-005)
 
-## Verification
+**Root cause:** `engine.py:235-241` has extra VCP logic outside engine. `strategy_engine.py` returns early on not-found.
+
+**Fix (per PLAN-004):**
+1. Remove early-return; always run `analyze_dry_stable`
+2. Add `pattern_kind: "cup_handle" | "vcp"` to CupHandleResult
+3. VCP score → `score * 5` for 0-100 (existing logic)
+4. VCP identity: `vcp-{code}-{contraction_dates}` — NOT using cup dates
+5. `_candidate_rules` checks `pattern_kind` for correct scoring
+6. Remove duplicate VCP logic from `engine.py:235-241`
+7. Single entry for scan, re-eval, backtest, single-backtest
+
+**Tests:**
+- VCP-only passes engine and becomes candidate
+- Scan and backtest same VCP conclusions
+- Two VCPs not deduped by empty cup dates
+
+---
+
+### BUG-005: Historical backtester uses unified engine
+
+**Root cause:** Uses `score_cup_handle()` not `score_cup_handle_advanced()`, no config, no market data.
+
+**Fix (per PLAN-001):**
+1. Replace with `CupHandleStrategyEngine`
+2. Pass actual config and actual stop_loss
+3. **Market data per-date:** slice market_data to only rows ≤ current eval date
+   ```python
+   detect_date = window[-1]["date"]
+   market_window = [r for r in market_data if r["date"] <= detect_date]
+   ```
+4. Support VCP-only via unified engine (BUG-006 must be done first)
+5. Record real verdict_key, entry_zone, stop_loss
+
+**Tests:**
+- Future market crash doesn't affect past evaluation
+- Same date → backtester and online identical verdict/score
+
+---
+
+## Phase 3: Data Quality
+
+### BUG-007: Respect source chain order and retry semantics
+
+**Root cause:** `try_acquire_any()` randomizes, ignoring config priority.
+
+**Fix (per PLAN-005):**
+1. Replace `try_acquire_any()` with ordered iteration over `source_chain`
+2. State per source: `not_tried → busy → failed → succeeded`
+3. For each source in config order:
+   - `mgr.acquire(ds_name)` non-blocking
+   - Lock acquired → fetch with `retry_attempts`(primary) or `fallback_attempts`(fallback)
+   - Lock busy → mark `busy`, continue (NOT failed)
+   - Fetch success → mark `succeeded`, return
+   - Fetch failure → mark `failed`, continue
+4. All busy → `data source busy` → scan requeue
+5. All failed → None (no cache fallback)
+6. `finally` always releases lock
+
+**Tests:**
+- Config [baidu,sina,tencent] → order respected
+- Busy skipped, next tried
+- All busy → requeue not permanent fail
+- Failed not retried in same fetch
+- Fallback uses `fallback_attempts`
+
+---
+
+### BUG-008: Unified forward-adjusted prices
+
+**Fix (per PLAN-008):**
+Investigation first (Phase 1), implementation after:
+1. Verify each source's output adjustment type
+2. If not adjusted → add qfq where supported
+3. Cache: clear old OHLC on deploy to avoid mixed-adjustment data
+
+**Tests:**
+- Cross-source price continuity for ex-dividend stock
+- Different adjustment data not silently merged
+
+---
+
+## Execution Order (per review)
+
+| Phase | Bugs | Dependency |
+|-------|------|------------|
+| 1. Core Safety | 002 → 001 → 003 → 004 | None |
+| 2. Unified Engine | 006 → 005 | BUG-006 before 005 |
+| 3. Data Quality | 007 → 008 | None |
+
+Each bug: write failing test → implement fix → verify.
+
+## Final Verification
 
 ```bash
-python -m pytest tests/ -v  # all new + existing tests pass
-npm --prefix web run build   # frontend builds
+python -m pytest tests/ -v    # all pass
+npm --prefix web run build     # frontend builds
 ```
