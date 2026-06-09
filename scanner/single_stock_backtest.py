@@ -396,6 +396,7 @@ def run_single_stock_cuphandle_backtest(
                 "endDate": end_date,
             },
             "availableRange": coverage.get("availableRange"),
+            "coverageWarning": coverage.get("coverageWarning", False),
         },
         "summary": {
             "tradingDays": len(backtest_rows),
