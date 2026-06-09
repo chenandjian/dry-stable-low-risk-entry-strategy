@@ -132,6 +132,14 @@ def make_dry_stable_decision(
     if risk_reward.risk_percent > max_risk:
         return _reject("REJECT", f"止损空间{risk_reward.risk_percent:.1f}%超过{max_risk:.0f}%上限")
 
+    if getattr(risk_reward, "stop_too_close", False):
+        d.verdict_key = "WAIT_ENTRY"
+        d.verdict = VERDICT_LABELS["WAIT_ENTRY"]
+        d.summary = f"止损过近(risk={risk_reward.risk_percent:.1f}% < ATR14波动)，等待更安全的入场点。"
+        d.reasons = ["止损距离小于正常波动范围", "等待价格回调或波动收窄后再入场"]
+        d.warnings.append(f"止损过近(risk={risk_reward.risk_percent:.1f}% < ATR14={risk_reward.atr14_pct:.1f}%×atr_stop_multiplier)")
+        return d
+
     if risk_reward.rr1 < min_rr1:
         d.verdict_key = "WAIT_RR"
         d.verdict = VERDICT_LABELS["WAIT_RR"]

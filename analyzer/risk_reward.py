@@ -32,6 +32,7 @@ class RiskRewardResult:
     risk_level: str = "高"
     position_advice: str = "0%"
     can_buy: bool = False
+    stop_too_close: bool = False
     atr14_pct: float = 0.0
     warnings: list = field(default_factory=list)
 
@@ -77,11 +78,12 @@ def calculate_risk_reward(key_prices, volume_dry_score: int = 0, price_stable_sc
         r.rr1 = round((t1 - cp) / risk, 1)
         r.rr2 = round((t2 - cp) / risk, 1)
 
-    # ATR stop validation
+    # ATR stop validation — when stop is too tight, mark structurally
     if data:
         r.atr14_pct = _calc_atr14_pct(data)
         atr_mult = float(cfg.get("atr_stop_multiplier", 1.2))
         if r.atr14_pct > 0 and r.risk_percent < r.atr14_pct * atr_mult:
+            r.stop_too_close = True
             r.warnings.append(f"止损过近(risk={r.risk_percent:.1f}% < ATR14={r.atr14_pct:.1f}%×{atr_mult})，容易被正常波动触发")
 
     # Hard rules
@@ -99,7 +101,8 @@ def calculate_risk_reward(key_prices, volume_dry_score: int = 0, price_stable_sc
 
     # Risk level determination
     all_good = (
-        pattern_score >= lb_pattern
+        not r.stop_too_close
+        and pattern_score >= lb_pattern
         and volume_dry_score >= lb_vd
         and price_stable_score >= lb_ps
         and r.risk_percent <= lb_max_risk
