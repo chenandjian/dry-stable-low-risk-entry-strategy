@@ -95,31 +95,34 @@ def calculate_key_prices(result, data: list[dict], pattern_type: str = "cup_hand
 
 
 def _find_real_target(data: list[dict], current_price: float, pivot: float) -> float | None:
-    """Find the nearest real resistance above current_price.
+    """Find the NEAREST real resistance above current_price.
 
-    Priority:
-    1. pivot if it's above current price (杯口突破位, not yet broken)
-    2. Highest high in recent 60 days if above current price
-    3. Nearby platform top
+    Collects candidates from: pivot (if not broken), swing highs, platform tops.
+    Returns the closest one above current_price (lowest valid candidate).
+
     Returns None if no resistance found above current price.
     """
-    # 1. Pivot above current → it's the nearest real target
+    candidates = []
+
+    # 1. Pivot above current → candidate (杯口突破位, not yet broken)
     if pivot > current_price:
-        return pivot
+        candidates.append(pivot)
 
-    # 2. Highest high in recent 60 days
+    # 2. Swing highs in recent 120 days (local maxima confirmed by both sides)
     if len(data) >= 60:
-        recent_high = max(d["high"] for d in data[-60:])
-        if recent_high > current_price:
-            return recent_high
+        highs = [d["high"] for d in data[-120:]]
+        for i in range(2, len(highs) - 2):
+            if (highs[i] >= highs[i-1] and highs[i] >= highs[i-2]
+                    and highs[i] >= highs[i+1] and highs[i] >= highs[i+2]):
+                if highs[i] > current_price:
+                    candidates.append(highs[i])
 
-    # 3. Local highs above current
-    highs = [d["high"] for d in data[-120:]]
-    for h in sorted(set(highs)):
-        if h > current_price:
-            return h
+    # 3. Pick the nearest above current price
+    above = sorted(set(c for c in candidates if c > current_price))
+    if above:
+        return above[0]  # closest resistance = lowest above current
 
-    return None  # No resistance found
+    return None
 
 
 def _calc_atr(data, n=14):

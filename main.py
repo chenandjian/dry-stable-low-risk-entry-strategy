@@ -110,7 +110,8 @@ def cmd_analyze(args):
     result.score = score
 
     # Dry-stable analysis
-    market_data = fetch_market_index_daily()
+    market_cfg = config.get("market_environment", {})
+    market_data = fetch_market_index_daily(market_cfg.get("index_symbol"))
     dry_stable = analyze_dry_stable(result, data, market_data=market_data, config=config)
 
     # Build analysis output

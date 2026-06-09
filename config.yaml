@@ -58,6 +58,7 @@ decision:
   max_risk_percent: 10
   min_rr1: 2
   chase_threshold_pct: 5
+  near_pivot_below_pct: 10
   low_buy_min_pattern_score: 13
   low_buy_min_volume_dry: 9
   low_buy_min_price_stable: 7

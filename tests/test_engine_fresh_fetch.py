@@ -108,7 +108,7 @@ def test_scan_all_requeues_stock_after_transient_source_busy(monkeypatch, tmp_pa
     monkeypatch.setattr(engine.threading, 'Thread', ImmediateThread)
     monkeypatch.setattr(engine.time, 'sleep', lambda seconds: sleep_calls.append(seconds))
     monkeypatch.setattr(stock_pool, 'get_a_stock_pool', lambda config: [stock.copy()])
-    monkeypatch.setattr(engine, 'fetch_market_index_daily', lambda: [])
+    monkeypatch.setattr(engine, 'fetch_market_index_daily', lambda symbol=None: [])
     monkeypatch.setattr(engine, 'passes_liquidity_filter', lambda data, cfg: True)
     class FakeStrategyEngine:
         def __init__(self, config):
@@ -170,7 +170,7 @@ def test_scan_all_stops_requeue_after_busy_retry_budget(monkeypatch, tmp_path):
     monkeypatch.setattr(engine.threading, 'Thread', ImmediateThread)
     monkeypatch.setattr(engine.time, 'sleep', lambda seconds: sleep_calls.append(seconds))
     monkeypatch.setattr(stock_pool, 'get_a_stock_pool', lambda config: [stock.copy()])
-    monkeypatch.setattr(engine, 'fetch_market_index_daily', lambda: [])
+    monkeypatch.setattr(engine, 'fetch_market_index_daily', lambda symbol=None: [])
 
     result = engine.scan_all(config, task_id='task-1')
 
@@ -207,7 +207,7 @@ def test_scan_all_records_failed_stock_when_fetch_fails(monkeypatch, tmp_path):
 
     monkeypatch.setattr(engine, 'DataSourceManager', FakeScanManager)
     monkeypatch.setattr(engine.threading, 'Thread', ImmediateThread)
-    monkeypatch.setattr(engine, 'fetch_market_index_daily', lambda: [])
+    monkeypatch.setattr(engine, 'fetch_market_index_daily', lambda symbol=None: [])
     monkeypatch.setattr(
         engine,
         '_fetch_with_retry',
@@ -249,7 +249,7 @@ def test_scan_all_marks_skipped_for_insufficient_listing_days(monkeypatch, tmp_p
 
     monkeypatch.setattr(engine, 'DataSourceManager', FakeScanManager)
     monkeypatch.setattr(engine.threading, 'Thread', ImmediateThread)
-    monkeypatch.setattr(engine, 'fetch_market_index_daily', lambda: [])
+    monkeypatch.setattr(engine, 'fetch_market_index_daily', lambda symbol=None: [])
     monkeypatch.setattr(
         engine,
         '_fetch_with_retry',
@@ -287,7 +287,7 @@ def test_scan_all_deduplicates_candidates(monkeypatch, tmp_path):
 
     monkeypatch.setattr(engine, 'DataSourceManager', FakeScanManager)
     monkeypatch.setattr(engine.threading, 'Thread', ImmediateThread)
-    monkeypatch.setattr(engine, 'fetch_market_index_daily', lambda: [])
+    monkeypatch.setattr(engine, 'fetch_market_index_daily', lambda symbol=None: [])
     monkeypatch.setattr(
         engine,
         '_fetch_with_retry',
@@ -513,7 +513,7 @@ def test_scan_all_passes_configured_daily_sources_to_fetch(monkeypatch, tmp_path
     monkeypatch.setattr(engine, "DataSourceManager", FakeScanManager)
     monkeypatch.setattr(engine.threading, "Thread", ImmediateThread)
     monkeypatch.setattr(stock_pool, "get_a_stock_pool", lambda config: [{"code": "600000", "name": "PF Bank"}])
-    monkeypatch.setattr(engine, "fetch_market_index_daily", lambda: [])
+    monkeypatch.setattr(engine, "fetch_market_index_daily", lambda symbol=None: [])
     monkeypatch.setattr(engine, "passes_liquidity_filter", lambda data, cfg: True)
     class FakeStrategyEngine:
         def __init__(self, config):
@@ -553,7 +553,7 @@ def test_scan_all_uses_daily_kline_days_config(monkeypatch, tmp_path):
     monkeypatch.setattr(engine.threading, "Thread", ImmediateThread)
     monkeypatch.setattr(engine, "_fetch_with_retry", fake_fetch_with_retry)
     monkeypatch.setattr(stock_pool, "get_a_stock_pool", lambda config: [{"code": "600000", "name": "PF Bank"}])
-    monkeypatch.setattr(engine, "fetch_market_index_daily", lambda: [])
+    monkeypatch.setattr(engine, "fetch_market_index_daily", lambda symbol=None: [])
     monkeypatch.setattr(engine, "passes_liquidity_filter", lambda data, cfg: True)
     class FakeStrategyEngine:
         def __init__(self, config):
@@ -591,7 +591,7 @@ def test_scan_all_reports_progress_when_stock_skipped_for_insufficient_listing_d
 
     monkeypatch.setattr(engine, "DataSourceManager", FakeScanManager)
     monkeypatch.setattr(engine.threading, "Thread", ImmediateThread)
-    monkeypatch.setattr(engine, "fetch_market_index_daily", lambda: [])
+    monkeypatch.setattr(engine, "fetch_market_index_daily", lambda symbol=None: [])
     monkeypatch.setattr(
         engine,
         "_fetch_with_retry",
@@ -634,7 +634,7 @@ def test_re_evaluate_finds_candidates_on_existing_data(monkeypatch, tmp_path):
     db.save_ohlc("600000", _rows(260, close=20.0))
     db.save_ohlc("000001", _rows(50, close=5.0))
 
-    monkeypatch.setattr(engine, "fetch_market_index_daily", lambda: [])
+    monkeypatch.setattr(engine, "fetch_market_index_daily", lambda symbol=None: [])
 
     class FakeEngine:
         def __init__(self, config): pass
@@ -682,7 +682,7 @@ def test_re_evaluate_replaces_old_candidates(monkeypatch, tmp_path):
     db.upsert_candidate("task-1", {"code": "600000", "name": "TestA", "score": 60})
     assert len(db.get_candidates(task_id="task-1")) == 1
 
-    monkeypatch.setattr(engine, "fetch_market_index_daily", lambda: [])
+    monkeypatch.setattr(engine, "fetch_market_index_daily", lambda symbol=None: [])
     monkeypatch.setattr(engine, "passes_liquidity_filter", lambda data, cfg: True)
 
     class FakeEngine:
@@ -718,7 +718,7 @@ def test_re_evaluate_handles_no_ohlc_gracefully(monkeypatch, tmp_path):
     db.create_scan_task("task-1", "2026-01-01 09:00:00", total_stocks=1)
     db.save_task_stocks("task-1", [{"code": "999999", "name": "Ghost", "market": "SSE"}])
 
-    monkeypatch.setattr(engine, "fetch_market_index_daily", lambda: [])
+    monkeypatch.setattr(engine, "fetch_market_index_daily", lambda symbol=None: [])
 
     result = engine.re_evaluate_task(config, "task-1")
     assert result["status"] == "completed"
