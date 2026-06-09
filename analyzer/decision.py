@@ -35,6 +35,7 @@ DEFAULT_DECISION_CFG = {
     "max_risk_percent": 8,
     "min_rr1": 2.0,
     "chase_threshold_pct": 5,
+    "near_pivot_below_pct": 10,
     "low_buy_min_pattern_score": 13,
     "low_buy_min_volume_dry": 9,
     "low_buy_min_price_stable": 7,
@@ -80,6 +81,7 @@ def make_dry_stable_decision(
     max_risk = float(cfg["max_risk_percent"])
     min_rr1 = float(cfg["min_rr1"])
     chase_pct = float(cfg["chase_threshold_pct"])
+    near_below_pct = float(cfg.get("near_pivot_below_pct", 10))
     lb_pattern = int(cfg["low_buy_min_pattern_score"])
     lb_vd = int(cfg["low_buy_min_volume_dry"])
     lb_ps = int(cfg["low_buy_min_price_stable"])
@@ -96,7 +98,9 @@ def make_dry_stable_decision(
     pivot = key_prices.pivot
 
     d.in_low_buy_zone = low > 0 and high > 0 and low <= current <= high
-    d.near_pivot = pivot > 0 and current <= pivot * (1 + chase_pct / 100)
+    d.near_pivot = (pivot > 0
+        and current >= pivot * (1 - near_below_pct / 100)
+        and current <= pivot * (1 + chase_pct / 100))
     d.is_chasing = pivot > 0 and current > pivot * (1 + chase_pct / 100)
 
     def _reject(key, reason, inv=None):
