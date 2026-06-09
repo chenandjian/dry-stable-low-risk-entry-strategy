@@ -6,21 +6,21 @@
         <label>股票代码</label>
         <input v-model.trim="form.code" class="form-input" aria-label="股票代码" />
         <label>回测开始日期</label>
-        <input v-model="form.startDate" class="form-input" type="text"
-          placeholder="YYYY-MM-DD" @blur="validateDate('startDate')" />
+        <input v-model="form.startDate" class="form-input date-input" type="date"
+          @blur="validateDate('startDate')" />
         <span class="date-err" v-if="dateErrors.startDate">{{ dateErrors.startDate }}</span>
         <label>回测结束日期</label>
-        <input v-model="form.endDate" class="form-input" type="text"
-          placeholder="YYYY-MM-DD" @blur="validateDate('endDate')" />
+        <input v-model="form.endDate" class="form-input date-input" type="date"
+          @blur="validateDate('endDate')" />
         <span class="date-err" v-if="dateErrors.endDate">{{ dateErrors.endDate }}</span>
         <div class="section-title small">指定柄区域（可选）</div>
         <label>柄开始日期</label>
-        <input v-model="form.handleStartDate" class="form-input" type="text"
-          placeholder="YYYY-MM-DD" @blur="validateDate('handleStartDate')" />
+        <input v-model="form.handleStartDate" class="form-input date-input" type="date"
+          @blur="validateDate('handleStartDate')" />
         <span class="date-err" v-if="dateErrors.handleStartDate">{{ dateErrors.handleStartDate }}</span>
         <label>柄结束日期</label>
-        <input v-model="form.handleEndDate" class="form-input" type="text"
-          placeholder="YYYY-MM-DD" @blur="validateDate('handleEndDate')" />
+        <input v-model="form.handleEndDate" class="form-input date-input" type="date"
+          @blur="validateDate('handleEndDate')" />
         <span class="date-err" v-if="dateErrors.handleEndDate">{{ dateErrors.handleEndDate }}</span>
         <button class="run-btn" :disabled="loading" @click="runBacktest">
           {{ loading ? '计算中...' : '运行回测' }}
@@ -270,7 +270,8 @@ onUnmounted(() => { if (chart.value) chart.value.remove() })
 .section-title.small { margin-top: 14px; color: var(--text-secondary); }
 label { display: block; margin: 10px 0 5px; font-size: 12px; color: var(--text-secondary); }
 .form-input { width: 100%; background: var(--bg-card); color: var(--text-primary); border: 1px solid var(--border); border-radius: 4px; padding: 8px; font-family: var(--font-mono); }
-.form-input::placeholder { color: var(--text-muted); font-size: 12px; }
+.date-input { color-scheme: dark; min-height: 38px; }
+.date-input::-webkit-calendar-picker-indicator { filter: invert(0.8); cursor: pointer; }
 .date-err { display: block; color: var(--up-red); font-size: 11px; margin-top: 2px; }
 .run-btn { width: 100%; margin-top: 14px; padding: 10px; border: none; border-radius: 4px; background: var(--accent); color: #fff; font-weight: 700; cursor: pointer; }
 .run-btn:disabled { opacity: 0.6; cursor: not-allowed; }
