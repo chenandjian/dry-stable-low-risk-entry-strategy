@@ -166,7 +166,12 @@ npm --prefix web run preview
 - **TaskCenter**: 「查看结果」带 task_id 跳转，ResultsRadar 预选对应任务。
 - **StockDetail**: 诊断信息（warnings/caps/reject）、VCP T 数、URL 保持 task_id 上下文。
 - **TopNav**: 手动 `isActive()` 替代 `router-link` 的 `active-class`。
-- **回测页**: 表格列改为首次发现/最后确认/类型/分数/决策/回撤。
+- **回测页**: 表格列改为首次发现/最后确认/类型/分数/决策/回撤。日期支持手动输入+日历选择+格式校验，股票代码必填校验。回测数据不足时显示黄色覆盖警告而非报错。
+- **回测数据拉取**: `_estimate_fetch_days` 上限 2000 天防 API 超限，数据覆盖不足时返回 partial 模式自动调整可用区间。
+
+### 扫描 vs 回测一致性
+
+两者共用同一套策略引擎、决策规则、候选过滤常量。唯一差异：扫描用 `min_listing_days` 控制窗口，回测用 `backtest_window_days`（默认均为 250）。
 
 ### Gotchas（新增）
 
