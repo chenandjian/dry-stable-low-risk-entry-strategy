@@ -1,27 +1,56 @@
 """Index OHLC data source for market environment analysis."""
 
 import logging
-
-from scanner.sina_source import fetch_sina_daily
+import json
+import requests
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_MARKET_INDEX = "000001"
+DEFAULT_MARKET_INDEX = "sh000001"  # 上证指数
 
 
-def fetch_market_index_daily(code: str = DEFAULT_MARKET_INDEX) -> list[dict] | None:
+def _fetch_sina_index_raw(symbol: str, days: int = 250) -> list[dict] | None:
+    """Dedicated index fetcher — uses Sina symbol directly without stock code mapping.
+
+    Symbol format: sh000001 (上证指数), sz399001 (深证成指), etc.
+    """
+    url = "https://quotes.sina.cn/cn/api/jsonp_v2.php/data/CN_MarketDataService.getKLineData"
+    params = {"symbol": symbol, "scale": "240", "datalen": str(days)}
+    try:
+        resp = requests.get(url, params=params, timeout=10, headers={
+            "Referer": "https://finance.sina.com.cn",
+        })
+        resp.raise_for_status()
+        text = resp.text
+        if text.startswith("data(") and text.endswith(");"):
+            text = text[5:-2]
+        elif "(" in text:
+            start = text.index("(") + 1
+            end = text.rindex(")")
+            text = text[start:end]
+        data = json.loads(text)
+        if not data or not isinstance(data, list):
+            return None
+        return data
+    except Exception as exc:
+        logger.warning("Index fetch failed for %s: %s", symbol, exc)
+        return None
+
+
+def fetch_market_index_daily(symbol: str | None = None) -> list[dict] | None:
     """Fetch market index daily OHLC data.
 
-    The current implementation reuses the existing Sina daily fetcher. If the
-    upstream index symbol format differs or data is unavailable, callers get
-    None and the market filter defaults to "一般".
+    Uses dedicated index API (not the stock-oriented fetch_sina_daily),
+    so the symbol is passed directly to Sina without stock code mapping.
+
+    Args:
+        symbol: Sina index symbol, e.g. "sh000001".  Defaults to 上证指数.
     """
-    try:
-        data = fetch_sina_daily(code)
-    except Exception as exc:
-        logger.warning("Market index fetch failed for %s: %s", code, exc)
-        return None
+    if symbol is None:
+        symbol = DEFAULT_MARKET_INDEX
+    data = _fetch_sina_index_raw(symbol)
     if not data:
+        logger.warning("Market index data unavailable for %s, market filter defaults to 一般", symbol)
         return None
     return normalize_index_ohlc(data)
 

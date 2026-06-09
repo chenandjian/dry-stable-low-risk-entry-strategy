@@ -73,6 +73,8 @@ volume_dry:
   big_bear_max_score: 6
   big_bear_volume_multiplier: 1.5
   big_bear_drop_pct: 3
+market_environment:
+  index_symbol: sh000001    # 大盘指数代码（新浪格式：sh000001=上证）
 price_stable:
   close_tightness_strong_pct: 3
   close_tightness_normal_pct: 5
