@@ -166,7 +166,10 @@ npm --prefix web run preview
 - **Pivot 双边距离**: 新增 `near_pivot_below_pct` 下限（默认 10%），远低于 Pivot 不再误判为 WATCH_BREAKOUT。
 - **VCP 统一引擎**: `StrategyEngine.evaluate_at()` 不再在杯柄未命中时提前返回，统一运行 VCP 分析。移除 `engine.py` 中的重复 VCP 逻辑。
 - **历史回测统一引擎**: `backtester.py` 使用 `CupHandleStrategyEngine` + 逐日大盘数据切片，防止未来数据泄漏。
-- **数据源链顺序**: `_fetch_with_retry` 按 config 顺序迭代（baidu→sina→tencent），busy→跳过不标记为失败，主源用 `retry_attempts` 备源用 `fallback_attempts`。全部 busy→requeue，全部 fail→None。
+- **数据源链顺序**: `_fetch_with_retry` 按 config 顺序迭代（baidu→sina→tencent），busy→跳过不标记为失败，主源用 `retry_attempts` 备源用 `fallback_attempts`。全部 busy→requeue，全部 fail→None。`FetchResult.source_errors` 保留各源失败详情。
+- **历史回测真实止损**: `BacktestResult` 保存策略实际 `stop_loss`/`entry_zone`/`pattern_kind`，`_calc_forward` 使用真实止损而非 `breakout_price*0.95`。`min_score` 参数恢复生效。
+- **VCP 身份模型**: `CupHandleResult.pattern_kind`（cup_handle/vcp），序列化含 `patternKind`，去重按 patternKind 分支避免 VCP 与杯柄碰撞。
+- **最近阻力**: `_find_real_target()` 用 swing high 确认找最近上方阻力，不再用最远高点冒充。
 
 ### 前端
 
