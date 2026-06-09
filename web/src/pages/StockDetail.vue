@@ -391,7 +391,8 @@ function distFromBreakout(w) {
 }
 
 function goToStock(code) {
-  router.push(`/stock/${code}`)
+  const q = route.query.task_id ? `?task_id=${route.query.task_id}` : ''
+  router.push(`/stock/${code}${q}`)
 }
 
 async function initChart() {
