@@ -53,24 +53,24 @@ scoring:
   medium_threshold: 70
 decision:
   min_pattern_score: 8
-  min_volume_dry_score: 5
+  min_volume_dry_score: 7
   min_price_stable_score: 5
   max_risk_percent: 10
   min_rr1: 2
   chase_threshold_pct: 5
   low_buy_min_pattern_score: 13
-  low_buy_min_volume_dry: 7
+  low_buy_min_volume_dry: 9
   low_buy_min_price_stable: 7
   low_buy_max_risk_percent: 6
 volume_dry:
-  bad_shrink_max_score: 6
+  bad_shrink_max_score: 7
   bad_shrink_slope_pct: -3
   min_position_60d_normal: 0.5
-  low_position_max_score: 6
-  very_low_position_max_score: 5
+  low_position_max_score: 7
+  very_low_position_max_score: 6
   volume_stall_multiplier: 1.5
-  volume_stall_max_score: 6
-  big_bear_max_score: 5
+  volume_stall_max_score: 7
+  big_bear_max_score: 6
   big_bear_volume_multiplier: 1.5
   big_bear_drop_pct: 3
 price_stable:

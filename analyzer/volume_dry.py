@@ -18,14 +18,14 @@ Volume-stall cap: if heavy volume without price advance, cap at 6
 from dataclasses import dataclass, field
 
 DEFAULT_VD_CFG = {
-    "bad_shrink_max_score": 6,
+    "bad_shrink_max_score": 7,
     "bad_shrink_slope_pct": -3,
     "min_position_60d_normal": 0.5,
-    "low_position_max_score": 6,
-    "very_low_position_max_score": 5,
+    "low_position_max_score": 7,
+    "very_low_position_max_score": 6,
     "volume_stall_multiplier": 1.5,
-    "volume_stall_max_score": 6,
-    "big_bear_max_score": 5,
+    "volume_stall_max_score": 7,
+    "big_bear_max_score": 6,
     "big_bear_volume_multiplier": 1.5,
     "big_bear_drop_pct": 3,
 }
@@ -91,84 +91,96 @@ def score_volume_dry(data: list[dict], config: dict | None = None) -> VolumeDryR
 
     score_a = 0; score_b = 0; score_c = 0; score_d = 0; score_e = 0
 
-    # A. Recent volume vs MA20 (max 2 pts)
+    # A. Recent volume vs MA20 (max 3 pts)
     if ma20 > 0:
         ratio_a = v5 / ma20
         if ratio_a <= 0.80:
-            score_a = 2
-            result.details.append(f"V5/MA20={ratio_a:.2f} <= 0.80: +2")
+            score_a = 3
+            result.details.append(f"V5/MA20={ratio_a:.2f} <= 0.80: +3")
         elif ratio_a <= 0.90:
+            score_a = 2
+            result.details.append(f"V5/MA20={ratio_a:.2f} <= 0.90: +2")
+        elif ratio_a <= 1.00:
             score_a = 1
-            result.details.append(f"V5/MA20={ratio_a:.2f} <= 0.90: +1")
+            result.details.append(f"V5/MA20={ratio_a:.2f} <= 1.00: +1")
         else:
-            result.details.append(f"V5/MA20={ratio_a:.2f} > 0.90: +0")
+            result.details.append(f"V5/MA20={ratio_a:.2f} > 1.00: +0")
     result.sub_scores["A_volume_vs_ma20"] = score_a
 
-    # B. Recent volume vs MA50 (max 2 pts)
+    # B. Recent volume vs MA50 (max 3 pts)
     if ma50 > 0:
         ratio_b = v5 / ma50
         if ratio_b <= 0.70:
-            score_b = 2
-            result.details.append(f"V5/MA50={ratio_b:.2f} <= 0.70: +2")
+            score_b = 3
+            result.details.append(f"V5/MA50={ratio_b:.2f} <= 0.70: +3")
         elif ratio_b <= 0.85:
+            score_b = 2
+            result.details.append(f"V5/MA50={ratio_b:.2f} <= 0.85: +2")
+        elif ratio_b <= 1.00:
             score_b = 1
-            result.details.append(f"V5/MA50={ratio_b:.2f} <= 0.85: +1")
+            result.details.append(f"V5/MA50={ratio_b:.2f} <= 1.00: +1")
         else:
-            result.details.append(f"V5/MA50={ratio_b:.2f} > 0.85: +0")
+            result.details.append(f"V5/MA50={ratio_b:.2f} > 1.00: +0")
     result.sub_scores["B_volume_vs_ma50"] = score_b
 
-    # C. Consolidation end volume decreasing (max 2 pts)
+    # C. Consolidation end volume decreasing (max 3 pts)
     if len(volumes) >= 15:
         v1 = _avg(volumes[-15:-10])
         v2 = _avg(volumes[-10:-5])
         v3 = v5
         if v1 > v2 > v3 and v1 > 0:
-            score_c = 2
-            result.details.append(f"V1({v1:.0f}) > V2({v2:.0f}) > V3({v3:.0f}): +2")
+            score_c = 3
+            result.details.append(f"V1({v1:.0f}) > V2({v2:.0f}) > V3({v3:.0f}): +3")
         elif v2 > v3 and v2 > 0:
+            score_c = 2
+            result.details.append(f"V2({v2:.0f}) > V3({v3:.0f}): +2")
+        elif v1 > v2 and v2 > 0:
             score_c = 1
-            result.details.append(f"V2({v2:.0f}) > V3({v3:.0f}): +1")
+            result.details.append("V1 > V2 (非严格递减): +1")
         else:
             result.details.append("Volume not decreasing: +0")
     result.sub_scores["C_shrinking_sequence"] = score_c
 
-    # D. Down day volume analysis (max 2 pts)
+    # D. Down day volume analysis (max 1.5 pts)
     down_vols = []
     for i in range(max(0, len(data) - 10), len(data)):
         if i > 0 and closes[i] < closes[i - 1]:
             down_vols.append(volumes[i])
     if not down_vols:
-        score_d = 2
-        result.details.append("No down days in last 10: +2")
+        score_d = 1.5
+        result.details.append("No down days in last 10: +1.5")
     elif ma20 > 0:
         avg_down_vol = _avg(down_vols)
         ratio_d = avg_down_vol / ma20
         if ratio_d <= 0.90:
-            score_d = 2
-            result.details.append(f"Down day avg vol/MA20={ratio_d:.2f} <= 0.90: +2")
+            score_d = 1.5
+            result.details.append(f"Down day avg vol/MA20={ratio_d:.2f} <= 0.90: +1.5")
         elif ratio_d <= 1.05:
-            score_d = 1
-            result.details.append(f"Down day avg vol/MA20={ratio_d:.2f} <= 1.05: +1")
+            score_d = 1.0
+            result.details.append(f"Down day avg vol/MA20={ratio_d:.2f} <= 1.05: +1.0")
         else:
             result.details.append(f"Down day avg vol/MA20={ratio_d:.2f} > 1.05: +0")
     result.sub_scores["D_down_day_volume"] = score_d
 
-    # E. Extreme low volume (max 2 pts)
+    # E. Extreme low volume (max 1.5 pts)
     if ma50 > 0:
         min_v5 = min(volumes[-5:])
         ratio_e = min_v5 / ma50
         if ratio_e <= 0.50:
-            score_e = 2
-            result.details.append(f"Min V5/MA50={ratio_e:.2f} <= 0.50: +2")
+            score_e = 1.5
+            result.details.append(f"Min V5/MA50={ratio_e:.2f} <= 0.50: +1.5")
         elif ratio_e <= 0.65:
-            score_e = 1
-            result.details.append(f"Min V5/MA50={ratio_e:.2f} <= 0.65: +1")
+            score_e = 1.0
+            result.details.append(f"Min V5/MA50={ratio_e:.2f} <= 0.65: +1.0")
+        elif ratio_e <= 0.80:
+            score_e = 0.5
+            result.details.append(f"Min V5/MA50={ratio_e:.2f} <= 0.80: +0.5")
         else:
-            result.details.append(f"Min V5/MA50={ratio_e:.2f} > 0.65: +0")
+            result.details.append(f"Min V5/MA50={ratio_e:.2f} > 0.80: +0")
     result.sub_scores["E_extreme_low"] = score_e
 
     raw_total = score_a + score_b + score_c + score_d + score_e
-    result.raw_score = min(raw_total, 10)
+    result.raw_score = min(raw_total, 12)
     result.total_score = result.raw_score
 
     # --- Capping rules ---
@@ -225,10 +237,10 @@ def score_volume_dry(data: list[dict], config: dict | None = None) -> VolumeDryR
                 result.warnings.append("近5日存在放量滞涨，上方抛压仍在")
                 break
 
-    # Verdict
-    if result.total_score >= 7:
+    # Verdict (scaled for max 12)
+    if result.total_score >= 9:
         result.verdict = "可低吸"
-    elif result.total_score >= 6:
+    elif result.total_score >= 7:
         result.verdict = "观察"
     else:
         result.verdict = "不建议买入"

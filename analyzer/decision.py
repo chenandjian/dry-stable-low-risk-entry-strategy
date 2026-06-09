@@ -30,13 +30,13 @@ class DryStableDecision:
 
 DEFAULT_DECISION_CFG = {
     "min_pattern_score": 8,
-    "min_volume_dry_score": 6,
+    "min_volume_dry_score": 7,
     "min_price_stable_score": 6,
     "max_risk_percent": 8,
     "min_rr1": 2.0,
     "chase_threshold_pct": 5,
     "low_buy_min_pattern_score": 13,
-    "low_buy_min_volume_dry": 7,
+    "low_buy_min_volume_dry": 9,
     "low_buy_min_price_stable": 7,
     "low_buy_max_risk_percent": 6,
 }

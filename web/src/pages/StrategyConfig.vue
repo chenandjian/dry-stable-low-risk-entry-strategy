@@ -143,8 +143,8 @@
             <div class="range-val">{{ maxRiskPercent }}%</div>
           </div>
           <div class="param">
-            <label title="量干评分低于此值直接拒绝">量干最低分</label>
-            <input type="range" min="3" max="8" v-model.number="config.decision.min_volume_dry_score" @input="markDirty" />
+            <label title="量干评分低于此值直接拒绝（满分12）">量干最低分</label>
+            <input type="range" min="4" max="10" v-model.number="config.decision.min_volume_dry_score" @input="markDirty" />
             <div class="range-val">{{ config.decision.min_volume_dry_score }} 分</div>
           </div>
           <div class="param">
@@ -173,22 +173,22 @@
         <div class="param-grid">
           <div class="param">
             <label title="近10日价格线性回归斜率低于此值且收盘低于MA20时，量干最高分被限制">缩量阴跌封顶分</label>
-            <input type="range" min="4" max="8" v-model.number="config.volume_dry.bad_shrink_max_score" @input="markDirty" />
+            <input type="range" min="5" max="10" v-model.number="config.volume_dry.bad_shrink_max_score" @input="markDirty" />
             <div class="range-val">{{ config.volume_dry.bad_shrink_max_score }} 分</div>
           </div>
           <div class="param">
             <label title="股价处于近60日区间下半部时量干最高分">低位缩量封顶分</label>
-            <input type="range" min="4" max="8" v-model.number="config.volume_dry.low_position_max_score" @input="markDirty" />
+            <input type="range" min="5" max="10" v-model.number="config.volume_dry.low_position_max_score" @input="markDirty" />
             <div class="range-val">{{ config.volume_dry.low_position_max_score }} 分</div>
           </div>
           <div class="param">
             <label title="近5天放量但不涨时量干最高分">放量滞涨封顶分</label>
-            <input type="range" min="4" max="8" v-model.number="config.volume_dry.volume_stall_max_score" @input="markDirty" />
+            <input type="range" min="5" max="10" v-model.number="config.volume_dry.volume_stall_max_score" @input="markDirty" />
             <div class="range-val">{{ config.volume_dry.volume_stall_max_score }} 分</div>
           </div>
           <div class="param">
             <label title="近3天放量大阴线时量干最高分">大阴线封顶分</label>
-            <input type="range" min="3" max="7" v-model.number="config.volume_dry.big_bear_max_score" @input="markDirty" />
+            <input type="range" min="4" max="9" v-model.number="config.volume_dry.big_bear_max_score" @input="markDirty" />
             <div class="range-val">{{ config.volume_dry.big_bear_max_score }} 分</div>
           </div>
         </div>
@@ -246,7 +246,7 @@ const config = reactive({
   handle: {},
   breakout: {},
   decision: {},
-  volume_dry: { bad_shrink_max_score: 6, low_position_max_score: 6, volume_stall_max_score: 6, big_bear_max_score: 5 },
+  volume_dry: { bad_shrink_max_score: 7, low_position_max_score: 7, volume_stall_max_score: 7, big_bear_max_score: 6 },
   price_stable: { close_tightness_strong_pct: 3, support_break_max_score: 5 },
   risk_reward: { atr_stop_multiplier: 1.2 },
 })

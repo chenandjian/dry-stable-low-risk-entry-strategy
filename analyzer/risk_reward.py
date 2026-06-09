@@ -137,10 +137,10 @@ DEFAULT_RR_CFG = {
     "max_risk_percent": 8,
     "min_rr1": 2.0,
     "low_buy_min_pattern_score": 13,
-    "low_buy_min_volume_dry": 7,
+    "low_buy_min_volume_dry": 9,
     "low_buy_min_price_stable": 7,
     "low_buy_max_risk_percent": 6,
-    "min_volume_dry_score": 6,
+    "min_volume_dry_score": 7,
     "min_price_stable_score": 6,
     "atr_stop_multiplier": 1.2,
 }
