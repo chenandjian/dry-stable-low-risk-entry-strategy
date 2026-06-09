@@ -176,7 +176,11 @@ const avgScore = computed(() => {
 })
 const maxScore = computed(() => candidates.value.reduce((m, c) => Math.max(m, c.score), 0))
 
-function goToStock(code) { selectedCode.value = code; router.push(`/stock/${code}`) }
+function goToStock(code) {
+  selectedCode.value = code
+  const q = selectedTaskId.value ? `?task_id=${selectedTaskId.value}` : ''
+  router.push(`/stock/${code}${q}`)
+}
 function barClass(c) { return c.score >= 80 ? 'bar-gold' : c.score >= 70 ? 'bar-blue' : 'bar-gray' }
 function scoreColorClass(s) { return s >= 80 ? 'sc-gold' : s >= 70 ? 'sc-blue' : 'sc-muted' }
 function price(v) { return v ? Number(v).toFixed(2) : '--' }

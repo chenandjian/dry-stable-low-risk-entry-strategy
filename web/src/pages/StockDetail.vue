@@ -240,6 +240,8 @@ async function loadStock(code) {
   try {
     const data = await getCandidate(code)
     if (data) {
+      // Preserve task_id from route query if available (for watchlist context)
+      if (!data.task_id && route.query.task_id) data.task_id = route.query.task_id
       stock.value = data
       score.value = data.score || 0
     }
