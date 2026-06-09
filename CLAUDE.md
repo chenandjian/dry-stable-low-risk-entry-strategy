@@ -160,6 +160,13 @@ npm --prefix web run preview
 - **回测窗口独立配置**: `data.backtest_window_days` 独立于扫描的 `min_listing_days`，前端可配。
 - **重新扫描策略**: 已完成任务可点「重新扫描策略」按钮，用当前配置重跑策略不重拉数据。
 - **`daily_kline_days` 优先级**: 已从 config.yaml 移除显式值（否则 `or min_listing_days` 永远短路），`min_listing_days`（日线拉取天数）现在是主控参数。
+- **指数数据源**: 创建专用 `_fetch_sina_index_raw()`，默认符号 `sh000001`（上证指数），不再复用个股代码映射。`config.yaml` 新增 `market_environment.index_symbol`。
+- **真实 RR1**: `target_1` 使用真实上方压力位（pivot/近期高点/平台顶），不再人工构造 2R 导致 RR1 恒为 2。找不到真实压力位时 RR1=0 → WAIT_RR。
+- **ATR 止损校验**: `RiskRewardResult.stop_too_close` 结构化状态，触发时阻塞 BUY_LOW 并返回 WAIT_ENTRY。
+- **Pivot 双边距离**: 新增 `near_pivot_below_pct` 下限（默认 10%），远低于 Pivot 不再误判为 WATCH_BREAKOUT。
+- **VCP 统一引擎**: `StrategyEngine.evaluate_at()` 不再在杯柄未命中时提前返回，统一运行 VCP 分析。移除 `engine.py` 中的重复 VCP 逻辑。
+- **历史回测统一引擎**: `backtester.py` 使用 `CupHandleStrategyEngine` + 逐日大盘数据切片，防止未来数据泄漏。
+- **数据源链顺序**: `_fetch_with_retry` 按 config 顺序迭代（baidu→sina→tencent），busy→跳过不标记为失败，主源用 `retry_attempts` 备源用 `fallback_attempts`。全部 busy→requeue，全部 fail→None。
 
 ### 前端
 
