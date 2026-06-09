@@ -13,9 +13,8 @@ Core approach:
 
 import logging
 from dataclasses import dataclass, field
-from scanner.pattern_detector import detect_cup_handle
-from scanner.scorer import score_cup_handle
-from analyzer.dry_stable import analyze_dry_stable
+from scanner.strategy_engine import CupHandleStrategyEngine
+from scanner.index_source import fetch_market_index_daily
 
 logger = logging.getLogger(__name__)
 
@@ -139,18 +138,16 @@ def run_backtest(
     """
     report = BacktestReport()
 
-    # Build pattern config
-    cup_cfg = config.get("cup", {})
-    handle_cfg = config.get("handle", {})
-    breakout_cfg = config.get("breakout", {})
-    handle_prefixed = {f"handle_{k}": v for k, v in handle_cfg.items()}
-    pattern_cfg = {**cup_cfg, **handle_prefixed, **breakout_cfg}
-
     all_results = []
     stocks_tested = 0
     stocks_with_patterns = 0
 
     stock_list = stocks[:max_stocks] if max_stocks else stocks
+
+    # Use the unified strategy engine (per plan-review: same config, same entry point)
+    engine = CupHandleStrategyEngine(config)
+    # Per-date market data: slice to only data known as of each evaluation date
+    market_data_full = fetch_market_index_daily() or []
 
     for stock in stock_list:
         stocks_tested += 1
@@ -172,31 +169,32 @@ def run_backtest(
         for i in range(window_min, n - 60):
             window_data = data[:i]
             future_data = data[i:]
+            detect_date = window_data[-1]["date"]
 
-            # Detect pattern using only data available at time i
-            result = detect_cup_handle(window_data, pattern_cfg)
-            if not result.found:
+            # Per-date market data (no future leakage)
+            market_window = [r for r in market_data_full if r["date"] <= detect_date]
+
+            # Unified strategy evaluation (handles cup_handle AND VCP)
+            evaluation = engine.evaluate_at(
+                window_data, code=code, name=name, market_data=market_window,
+            )
+            if not evaluation.passed:
                 continue
 
-            result.score = score_cup_handle(result)
-            if result.score < min_score:
-                continue
-
+            r = evaluation.result
+            dry = evaluation.dry_stable
             stock_has_pattern = True
-            result.code = code
-            result.name = name
-            dry = analyze_dry_stable(result, window_data)
 
             br = BacktestResult(
                 code=code,
                 name=name,
-                detect_date=window_data[-1]["date"],
-                score=result.score,
-                cup_depth_pct=result.cup_depth_pct,
-                cup_duration=result.cup_duration,
-                handle_depth_pct=result.handle_depth_pct,
-                handle_duration=result.handle_duration,
-                breakout_price=result.breakout_price,
+                detect_date=detect_date,
+                score=r.score,
+                cup_depth_pct=r.cup_depth_pct,
+                cup_duration=r.cup_duration,
+                handle_depth_pct=r.handle_depth_pct,
+                handle_duration=r.handle_duration,
+                breakout_price=r.breakout_price,
                 detect_close=window_data[-1]["close"],
                 verdict=dry["decision"]["verdict"],
                 volume_dry_score=dry["volume_dry"]["score"],
