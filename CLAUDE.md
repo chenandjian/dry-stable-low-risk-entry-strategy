@@ -39,10 +39,10 @@ npm --prefix web run preview
 
 ```
 入口层:    main.py (CLI)  /  server.py (FastAPI)  /  scheduler/scheduler.py
-引擎层:    scanner/engine.py (双线程扫描调度)
+引擎层:    scanner/engine.py (3 线程扫描调度)
 数据层:    scanner/db.py (SQLite 持久化)
-           scanner/data_source.py (互斥锁管理)
-           scanner/sina_source.py / tencent_source.py (HTTP抓取)
+           scanner/data_source.py (互斥锁管理 — baidu/sina/tencent)
+           scanner/sina_source.py / tencent_source.py / baidu_source.py (HTTP抓取)
            scanner/stock_pool.py (股票池)
 算法层:    scanner/pattern_detector.py (杯柄识别)
            scanner/liquidity_filter.py (流动性过滤)
@@ -55,7 +55,7 @@ npm --prefix web run preview
              ├─ analyzer/risk_reward.py (风险收益比 + 仓位建议)
              ├─ analyzer/invalid_rules.py (形态失效条件)
              ├─ analyzer/market_env.py (大盘环境评估)
-             └─ analyzer/decision.py (最终决策：可低吸/突破确认/观察/不建议买入)
+             └─ analyzer/decision.py (7 状态决策：REJECT/WAIT_VOLUME/WAIT_STABLE/WAIT_ENTRY/WAIT_RR/WATCH_BREAKOUT/BUY_LOW)
 回测层:    scanner/backtester.py (历史回测)
 指标层:    scanner/index_source.py (大盘指数数据)
 输出层:    output/csv_writer.py / json_writer.py
@@ -135,6 +135,45 @@ npm --prefix web run preview
 - **配置 API 会改写文件**: `PUT /api/config` 会 deep-merge 请求并直接重写根目录 `config.yaml`；调试配置变化时不要只看 git diff。
 - **前端实时状态是轮询**: 当前 Vue UI 主要轮询 `/api/scan/status`；`/ws/scan` 存在但前端未使用，且服务端在收到客户端消息后才发送状态快照。
 - **FastAPI 不托管构建产物**: `server.py` 只提供 API/WS，没有 mount `web/dist` 或 SPA history fallback；`npm --prefix web run preview` 也没有 dev server 的 `/api`/`/ws` proxy 配置。
+
+## Recent Changes (2026-06-07 ~ 2026-06-09)
+
+### 数据源拉取
+
+- **3 线程 + try_acquire_any**: worker_count=3，每线程抢空闲数据源。`DataSourceManager.try_acquire_any()` 随机 shuffle 后返回首个未锁定的源。不同线程自然分散到 baidu/sina/tencent。
+- **腾讯源修复**: volume 从手转股（×100），turnover 补回 ×100。最新一天用 `qt` 实时成交额。
+- **百度源加入锁管理**: 之前只有 sina/tencent 有锁，baidu 绕过互斥。已统一。
+- **日线窗口统一**: `db.get_ohlc(max_rows=kline_days)` 和 `_merge_data(max_rows=kline_days)` 确保所有股票分析数据长度一致。
+
+### 策略评分系统
+
+- **量干增强**: 缩量阴跌封顶、低位缩量封顶、放量滞涨封顶。输出 raw_score/caps/warnings/reject_reasons。
+- **价稳增强**: 收盘紧致度、收盘位置辅助指标、MA20 天数制、支撑跌破封顶。
+- **ATR 止损校验**: `risk_reward.py` 验证 risk_pct >= ATR14 × 1.2，过近则 warning。
+- **7 状态决策系统**: `decision.py` 输出 REJECT / WAIT_VOLUME / WAIT_STABLE / WAIT_ENTRY / WAIT_RR / WATCH_BREAKOUT / BUY_LOW。`CANDIDATE_KEYS` 和 `REJECT_KEYS` 在 `strategy_engine.py` 定义，扫描和回测共用。
+- **所有决策阈值可配**: `config.yaml` decision 段 + 前端决策规则区。
+- **VCP 支持**: 回测和扫描均接受 VCP 形态。`vcp_contractions` 字段显示 T 数。前端形态分行显示杯柄/VCP 各自得分。
+
+### 数据与配置
+
+- **DB 诊断字段**: candidates 表新增 verdict_key / positive_factors / warnings / reject_reasons / raw_* / score_caps 列，自动迁移。
+- **回测窗口独立配置**: `data.backtest_window_days` 独立于扫描的 `min_listing_days`，前端可配。
+- **重新扫描策略**: 已完成任务可点「重新扫描策略」按钮，用当前配置重跑策略不重拉数据。
+- **`daily_kline_days` 优先级**: 已从 config.yaml 移除显式值（否则 `or min_listing_days` 永远短路），`min_listing_days`（日线拉取天数）现在是主控参数。
+
+### 前端
+
+- **TaskCenter**: 「查看结果」带 task_id 跳转，ResultsRadar 预选对应任务。
+- **StockDetail**: 诊断信息（warnings/caps/reject）、VCP T 数、URL 保持 task_id 上下文。
+- **TopNav**: 手动 `isActive()` 替代 `router-link` 的 `active-class`。
+- **回测页**: 表格列改为首次发现/最后确认/类型/分数/决策/回撤。
+
+### Gotchas（新增）
+
+- **`upsert_candidate` 静默失败**: `on_progress` 中 upsert 异常会被 scan worker 吞掉，导致 candidates 表缺失但 task_stocks 有标记。已加 try/except + 扫描完成后自动 re_evaluate 兜底。
+- **`scan_all` candidate_by_code 丢失**: 扫描中进度回调标记了候选但 `scan_all` 返回值可能为空。服务端扫描完成后检测 task_stocks 候选数 > 0 时自动触发 `re_evaluate_task` 同步。
+- **并发 == 串行试源 + 锁自然分摊**: 不是"同一只股票并发拉 3 个源先到先得"，也不是"线程绑源"。每只股票串行试源，不同线程因锁竞争自然使用不同源。
+- **单股回测数据独立于扫描**: `ensure_backtest_data` 用默认 `max_rows=0`（不限），回测窗口由用户输入日期决定，不受 `kline_days` 限制。
 
 ## .gitignore Policy
 
