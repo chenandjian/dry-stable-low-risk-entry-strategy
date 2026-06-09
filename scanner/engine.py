@@ -177,6 +177,7 @@ def scan_all(
                         fallback_attempts=fetch_result.fallback_attempts,
                         primary_error=fetch_result.primary_error,
                         fallback_error=fetch_result.fallback_error,
+                        source_errors=str(fetch_result.source_errors) if fetch_result.source_errors else None,
                         finished_at=_now(),
                     )
                     db.refresh_scan_task_counts(task_id)
@@ -198,6 +199,7 @@ def scan_all(
                         status="skipped",
                         status_reason="上市天数不足",
                         kline_latest_date=latest_trade_date,
+                        source_errors=str(fetch_result.source_errors) if fetch_result.source_errors else None,
                         finished_at=_now(),
                     )
                     db.refresh_scan_task_counts(task_id)
@@ -219,6 +221,7 @@ def scan_all(
                         status="skipped",
                         status_reason="流动性过滤未通过",
                         kline_latest_date=latest_trade_date,
+                        source_errors=str(fetch_result.source_errors) if fetch_result.source_errors else None,
                         finished_at=_now(),
                     )
                     db.refresh_scan_task_counts(task_id)

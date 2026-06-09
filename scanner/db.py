@@ -195,6 +195,7 @@ def _ensure_task_stocks_table(conn: sqlite3.Connection):
             fallback_attempts INTEGER DEFAULT 0,
             primary_error TEXT,
             fallback_error TEXT,
+            source_errors TEXT,
             kline_latest_date TEXT,
             quote_status TEXT DEFAULT 'not_requested',
             quote_error TEXT,
@@ -427,6 +428,7 @@ def update_task_stock(task_id: str, code: str, **fields):
         "status", "status_reason", "error_detail", "primary_source", "fallback_source",
         "primary_attempts", "fallback_attempts", "primary_error", "fallback_error",
         "kline_latest_date", "quote_status", "quote_error", "started_at", "finished_at",
+        "source_errors",
     }
     updates = {k: v for k, v in fields.items() if k in allowed}
     if not updates:
