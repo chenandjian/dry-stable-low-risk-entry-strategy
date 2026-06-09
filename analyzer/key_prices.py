@@ -65,29 +65,61 @@ def calculate_key_prices(result, data: list[dict], pattern_type: str = "cup_hand
         recent_swing_low = min(d["low"] for d in data[-10:])
         r.stop_loss = round(min(last_low * 0.98, recent_swing_low - 0.5 * atr14), 2)
 
-    # Target 1 = 2R, capped by nearby resistance when available.
+    # Target 1: use real resistance above current price, NOT a fake 2R.
+    # Target 2: theoretical target (2R/3R or measured move for display).
     risk = r.current_price - r.stop_loss
     if risk > 0:
-        target_1 = r.current_price + 2 * risk
-        target_2 = r.current_price + 3 * risk
+        real_target = _find_real_target(data, r.current_price, r.pivot)
+        if real_target is not None and real_target > r.current_price:
+            r.target_1 = round(real_target, 2)
+        else:
+            r.target_1 = 0.0  # No real target above → RR1 = 0
+
+        r.target_2 = round(r.current_price + 3 * risk, 2)
         if pattern_type == "cup_handle":
             measured_target = r.pivot + (result.left_high_price - result.cup_low_price)
             if measured_target > r.current_price:
-                target_2 = min(target_2, measured_target)
+                r.target_2 = min(r.target_2, measured_target)
         elif pattern_type == "vcp":
             contractions = _find_vcp_contractions(data)
             if contractions:
                 largest = max(c["high"] - c["low"] for c in contractions)
                 measured_target = r.pivot + largest
                 if measured_target > r.current_price:
-                    target_2 = min(target_2, measured_target)
-        r.target_1 = round(target_1, 2)
-        r.target_2 = round(target_2, 2)
+                    r.target_2 = min(r.target_2, measured_target)
     else:
         r.target_1 = round(r.current_price * 1.10, 2)
         r.target_2 = round(r.current_price * 1.20, 2)
 
     return r
+
+
+def _find_real_target(data: list[dict], current_price: float, pivot: float) -> float | None:
+    """Find the nearest real resistance above current_price.
+
+    Priority:
+    1. pivot if it's above current price (杯口突破位, not yet broken)
+    2. Highest high in recent 60 days if above current price
+    3. Nearby platform top
+    Returns None if no resistance found above current price.
+    """
+    # 1. Pivot above current → it's the nearest real target
+    if pivot > current_price:
+        return pivot
+
+    # 2. Highest high in recent 60 days
+    if len(data) >= 60:
+        recent_high = max(d["high"] for d in data[-60:])
+        if recent_high > current_price:
+            return recent_high
+
+    # 3. Local highs above current
+    highs = [d["high"] for d in data[-120:]]
+    for h in sorted(set(highs)):
+        if h > current_price:
+            return h
+
+    return None  # No resistance found
 
 
 def _calc_atr(data, n=14):
