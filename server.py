@@ -620,7 +620,9 @@ async def get_candidate(code: str):
     ohlc = db.get_ohlc(code)
     if ohlc:
         pattern_result = _candidate_to_pattern_result(c)
-        dry = analyze_dry_stable(pattern_result, ohlc, market_data=fetch_market_index_daily(), config=load_config())
+        cfg = load_config()
+        market_idx = cfg.get("market_environment", {}).get("index_symbol")
+        dry = analyze_dry_stable(pattern_result, ohlc, market_data=fetch_market_index_daily(market_idx), config=cfg)
         trade_plan = dry.get("trade_plan", {})
 
     return {

@@ -88,8 +88,9 @@ def calculate_key_prices(result, data: list[dict], pattern_type: str = "cup_hand
                 if measured_target > r.current_price:
                     r.target_2 = min(r.target_2, measured_target)
     else:
-        r.target_1 = round(r.current_price * 1.10, 2)
-        r.target_2 = round(r.current_price * 1.20, 2)
+        # Stop loss invalid (>= current price) — no valid targets
+        r.target_1 = 0.0
+        r.target_2 = 0.0
 
     return r
 

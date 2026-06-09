@@ -237,11 +237,10 @@ def _canonical_handle_end_date(result, data: list[dict]) -> str:
 def _pattern_identity(pattern: dict) -> tuple[str, str, str, str]:
     kind = pattern.get("patternKind", "cup_handle")
     if kind == "vcp":
-        # VCP identity uses contraction dates from patternKind + detectedDate
         return (
             "vcp",
-            pattern.get("handleStartDate", "") or pattern.get("detectedDate", ""),
-            pattern.get("handleLowDate", "") or pattern.get("detectedDate", ""),
+            pattern.get("vcpStartDate", "") or pattern.get("handleStartDate", ""),
+            pattern.get("vcpEndDate", "") or pattern.get("handleLowDate", ""),
             str(pattern.get("vcpContractions", 0) or 0),
         )
     return (
@@ -257,8 +256,8 @@ def _pattern_id(code: str, pattern: dict) -> str:
     if kind == "vcp":
         return "vcp-{}-{}-{}-{}".format(
             code,
-            pattern.get("handleStartDate", "") or pattern.get("detectedDate", ""),
-            pattern.get("handleLowDate", "") or pattern.get("detectedDate", ""),
+            pattern.get("vcpStartDate", "") or pattern.get("handleStartDate", ""),
+            pattern.get("vcpEndDate", "") or pattern.get("handleLowDate", ""),
             pattern.get("vcpContractions", 0) or 0,
         )
     return "{}-{}-{}-{}".format(
@@ -285,9 +284,14 @@ def _serialize_rules(rules) -> list[dict]:
 def _build_pattern_entry(code: str, evaluation, window: list[dict]) -> dict:
     pattern = serialize_pattern_for_backtest(evaluation.result, window)
     pattern["handleEndDate"] = _canonical_handle_end_date(evaluation.result, window)
-    # Add VCP contraction count for identity
+    # Add VCP contraction info for identity
     if evaluation.dry_stable:
-        pattern["vcpContractions"] = evaluation.dry_stable.get("pattern_score", {}).get("vcp_contractions", 0)
+        pat = evaluation.dry_stable.get("pattern_score", {})
+        pattern["vcpContractions"] = pat.get("vcp_contractions", 0)
+        # VCP start/end dates from data window (contraction range)
+        if pat.get("key_pattern_type") == "vcp" and len(window) >= 2:
+            pattern["vcpStartDate"] = window[0]["date"]  # window start ≈ contraction start
+            pattern["vcpEndDate"] = window[-1]["date"]    # window end ≈ last contraction end
     detected_date = window[-1]["date"]
     return {
         "patternId": _pattern_id(code, pattern),

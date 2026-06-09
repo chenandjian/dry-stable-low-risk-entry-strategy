@@ -153,7 +153,8 @@ def run_backtest(
     # Use the unified strategy engine (per plan-review: same config, same entry point)
     engine = CupHandleStrategyEngine(config)
     # Per-date market data: slice to only data known as of each evaluation date
-    market_data_full = fetch_market_index_daily() or []
+    market_cfg = config.get("market_environment", {})
+    market_data_full = fetch_market_index_daily(market_cfg.get("index_symbol")) or []
 
     for stock in stock_list:
         stocks_tested += 1
@@ -219,7 +220,7 @@ def run_backtest(
             # Calculate forward returns
             detect_close = window_data[-1]["close"]
 
-            _calc_forward(br, detect_close, result.breakout_price, future_data)
+            _calc_forward(br, detect_close, r.breakout_price, future_data)
             all_results.append(br)
 
         if stock_has_pattern:
@@ -266,9 +267,11 @@ def _calc_forward(br: BacktestResult, detect_close: float, breakout_price: float
         min_low = min(future_lows)
         setattr(br, f"false_breakout_{label}", min_low < breakout_price * 0.97)
 
-        # Stop loss hit: use strategy's actual stop_loss
-        sl_price = br.actual_stop_loss if br.actual_stop_loss > 0 else breakout_price * 0.95
-        setattr(br, f"stop_loss_hit_{label}", min_low < sl_price)
+        # Stop loss hit: use strategy's actual stop_loss only
+        if br.actual_stop_loss > 0:
+            setattr(br, f"stop_loss_hit_{label}", min_low < br.actual_stop_loss)
+        else:
+            setattr(br, f"stop_loss_hit_{label}", False)
 
 
 def _aggregate(report: BacktestReport, results: list[BacktestResult]):

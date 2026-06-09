@@ -30,7 +30,12 @@ class FetchResult:
     fallback_attempts: int = 0
     primary_error: str | None = None
     fallback_error: str | None = None
+    source_errors: dict = None  # ds_name -> error string for ALL attempted sources
     from_cache: bool = False
+
+    def __post_init__(self):
+        if self.source_errors is None:
+            self.source_errors = {}
 
 
 def scan_all(
@@ -552,6 +557,7 @@ def _fetch_with_retry(
     chain = _normalize_source_chain(source_chain, primary_ds)
     cached = db.get_ohlc(code)
     saw_busy = False
+    source_errors: dict[str, str] = {}
     failed_sources: set[str] = set()
 
     for i, ds_name in enumerate(chain):
@@ -578,6 +584,7 @@ def _fetch_with_retry(
 
         if error:
             logger.warning("%s  %s  ✗ %s", code, ds_name, error)
+            source_errors[ds_name] = f"attempts={used_attempts} error={error}"
             if "data source busy" in str(error):
                 saw_busy = True
             failed_sources.add(ds_name)
@@ -601,9 +608,11 @@ def _fetch_with_retry(
                 fallback_source=ds_name if ds_name != chain[0] else chain[0],
                 primary_attempts=used_attempts if is_primary else 0,
                 fallback_attempts=used_attempts if not is_primary else 0,
+                source_errors=source_errors,
             )
 
-    result = FetchResult(data=None, primary_source=chain[0], fallback_source=chain[-1])
+    result = FetchResult(data=None, primary_source=chain[0], fallback_source=chain[-1],
+                         source_errors=source_errors)
     if saw_busy:
         result.fallback_error = "data source busy"
     return result
