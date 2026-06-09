@@ -379,8 +379,8 @@ def test_fetch_skips_busy_source_uses_next_free(monkeypatch, tmp_path):
 
     assert result.data is not None
     assert result.data[-1]["close"] == 14.0
-    # try_acquire_any skips busy (sina=False), returns tencent (ok=True)
-    assert mgr.acquire_calls == ["tencent"]
+    # tries sina first (config order), busy → skip → tencent wins
+    assert mgr.acquire_calls == ["sina", "tencent"]
 
 
 def test_fetch_all_busy_returns_none_after_retries(monkeypatch, tmp_path):
