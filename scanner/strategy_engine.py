@@ -103,36 +103,39 @@ class CupHandleStrategyEngine:
         market_data: list[dict] | None = None,
     ) -> StrategyEvaluation:
         result = detect_cup_handle(data_until_date, self.pattern_cfg)
-        if not result.found:
-            failed = diagnose_cup_handle(data_until_date, self.pattern_cfg).failed_rules
-            return StrategyEvaluation(
-                False,
-                CupHandleResult(found=False, code=code, name=name),
-                None,
-                self.strategy_version,
-                self.config_hash,
-                failed_rules=failed,
-                data=data_until_date,
-            )
-
         result.code = code
         result.name = name
-        result.score = score_cup_handle_advanced(
-            result,
-            data_until_date,
-            self.scoring_cfg,
-        )
+
+        if result.found:
+            result.score = score_cup_handle_advanced(result, data_until_date, self.scoring_cfg)
+            dry_stable = analyze_dry_stable(result, data_until_date, market_data=market_data, config=self.config)
+            passed_rules, failed_rules = self._candidate_rules(result, dry_stable)
+            return StrategyEvaluation(
+                not failed_rules, result, dry_stable,
+                self.strategy_version, self.config_hash,
+                passed_rules, failed_rules, data_until_date,
+            )
+
+        # Cup handle not found — try VCP-only
+        result.pattern_kind = "vcp"
         dry_stable = analyze_dry_stable(result, data_until_date, market_data=market_data, config=self.config)
-        passed_rules, failed_rules = self._candidate_rules(result, dry_stable)
+        pat20 = dry_stable.get("pattern_score", {}).get("score", 0)
+        key_type = dry_stable.get("pattern_score", {}).get("key_pattern_type", "")
+        if key_type == "vcp" and pat20 >= 13:
+            result.score = min(100, pat20 * 5)
+            passed_rules, failed_rules = self._candidate_rules(result, dry_stable)
+            return StrategyEvaluation(
+                not failed_rules, result, dry_stable,
+                self.strategy_version, self.config_hash,
+                passed_rules, failed_rules, data_until_date,
+            )
+
+        # Neither cup handle nor valid VCP
+        failed = diagnose_cup_handle(data_until_date, self.pattern_cfg).failed_rules
         return StrategyEvaluation(
-            not failed_rules,
-            result,
-            dry_stable,
-            self.strategy_version,
-            self.config_hash,
-            passed_rules,
-            failed_rules,
-            data_until_date,
+            False, CupHandleResult(found=False, code=code, name=name), dry_stable,
+            self.strategy_version, self.config_hash,
+            failed_rules=failed, data=data_until_date,
         )
 
     def diagnose_handle(

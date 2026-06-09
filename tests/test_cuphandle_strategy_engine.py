@@ -167,7 +167,11 @@ def test_evaluate_at_does_not_promote_vcp_only_result():
 
     assert evaluation.passed is False
     assert evaluation.result.found is False
-    assert evaluation.dry_stable is None
+    # VCP analysis runs even when cup handle not found (BUG-006)
+    # Flat data produces weak VCP (score < 13), so it doesn't promote
+    assert evaluation.dry_stable is not None
+    assert evaluation.dry_stable["pattern_score"]["key_pattern_type"] == "vcp"
+    assert evaluation.dry_stable["pattern_score"]["score"] < 13
 
 
 def test_diagnose_handle_returns_passed_and_failed_rule_arrays():

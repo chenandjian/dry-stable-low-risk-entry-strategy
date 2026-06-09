@@ -232,12 +232,6 @@ def scan_all(
                 )
                 result = evaluation.result
                 dry_stable = evaluation.dry_stable
-                if not result.found:
-                    result = CupHandleResult(found=False, code=code, name=stock.get("name", ""))
-                    dry_stable = analyze_dry_stable(result, data, market_data=market_data, config=config)
-                    pattern20 = dry_stable["pattern_score"]["score"]
-                    if dry_stable["pattern_score"].get("key_pattern_type") != "vcp" or pattern20 < 13:
-                        dry_stable = None
 
                 is_candidate = False
                 if dry_stable:
@@ -467,13 +461,6 @@ def re_evaluate_task(
             )
             result = evaluation.result
             dry_stable = evaluation.dry_stable
-
-            if not result.found:
-                result = CupHandleResult(found=False, code=code, name=name)
-                dry_stable = analyze_dry_stable(result, data, market_data=market_data, config=config)
-                pat20 = dry_stable["pattern_score"]["score"]
-                if dry_stable["pattern_score"].get("key_pattern_type") != "vcp" or pat20 < 13:
-                    dry_stable = None
 
             if dry_stable:
                 if result.score == 0:
