@@ -89,7 +89,7 @@ def _estimate_fetch_days(required_start_date: str, required_end_date: str) -> in
     start = datetime.strptime(required_start_date, "%Y-%m-%d")
     end = datetime.strptime(required_end_date, "%Y-%m-%d")
     calendar_span_days = max(1, (end - start).days + 1)
-    return max(250, calendar_span_days * 2 + 60)
+    return min(max(250, calendar_span_days * 2 + 60), 2000)
 
 
 def default_fresh_fetch(
@@ -167,12 +167,14 @@ def ensure_backtest_data(
             "availableRange": _range_for(merged),
         }
 
-    raise DataCoverageError(
-        code=code,
-        required_start_date=required_start_date,
-        required_end_date=required_end_date,
-        available_range=_range_for(merged),
-    )
+    # Partial coverage: return what we have, caller trims to available range
+    avail = _range_for(merged)
+    return merged, {
+        "source": "partial",
+        "availableRange": avail,
+        "requiredRange": {"startDate": required_start_date, "endDate": required_end_date},
+        "coverageWarning": True,
+    }
 
 
 def _parse_date(date_str: str) -> datetime:
@@ -326,7 +328,10 @@ def run_single_stock_cuphandle_backtest(
         fetch_fn=fetch_fn,
     )
 
-    working_data = _rows_between(data, required_start_date, end_date)
+    # If data doesn't fully cover the range, adjust to available start
+    avail_start = coverage.get("availableRange", {}).get("startDate", required_start_date)
+    effective_start = max(avail_start, required_start_date)
+    working_data = _rows_between(data, effective_start, end_date)
 
     # Backtest evaluation window: slide this many days across history
     data_cfg = config.get("data", {})

@@ -152,29 +152,25 @@ def test_ensure_backtest_data_injected_fetch_with_days_gets_span_aware_days(tmp_
     assert data[-1]["date"] == required_end_date
 
 
-def test_ensure_backtest_data_raises_when_fresh_data_still_incomplete(tmp_path):
+def test_ensure_backtest_data_returns_partial_when_incomplete(tmp_path):
+    """Should return partial data with coverageWarning instead of raising error."""
     db_path = tmp_path / "cuphandle.db"
     db.init_db(str(db_path))
 
     def fake_fetch(code):
         return rows_for_dates(["2025-01-10", "2025-01-11"])
 
-    try:
-        ensure_backtest_data(
-            "600000",
-            required_start_date="2025-01-01",
-            required_end_date="2025-01-20",
-            fetch_fn=fake_fetch,
-        )
-    except DataCoverageError as exc:
-        payload = exc.to_dict()
-    else:
-        raise AssertionError("DataCoverageError was not raised")
+    data, coverage = ensure_backtest_data(
+        "600000",
+        required_start_date="2025-01-01",
+        required_end_date="2025-01-20",
+        fetch_fn=fake_fetch,
+    )
 
-    assert payload["error"] == "Insufficient data coverage"
-    assert payload["requiredRange"] == {"startDate": "2025-01-01", "endDate": "2025-01-20"}
-    assert payload["availableRange"] == {"startDate": "2025-01-10", "endDate": "2025-01-11"}
-    assert payload["missingRanges"]
+    assert coverage["source"] == "partial"
+    assert coverage["coverageWarning"] is True
+    assert coverage["availableRange"] == {"startDate": "2025-01-10", "endDate": "2025-01-11"}
+    assert coverage["requiredRange"] == {"startDate": "2025-01-01", "endDate": "2025-01-20"}
 
 
 def test_run_single_stock_cuphandle_backtest_exists():
