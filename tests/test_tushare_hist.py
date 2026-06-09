@@ -11,7 +11,7 @@ import sys
 import traceback
 
 CODE = "002487"
-TOKEN = "c3ac2c577fbd814d72508e7f647f0c259ad94c210ac44ae92fd0cffb"
+TOKEN = ""  # 从环境变量 TUSHARE_TOKEN 读取，或在此填入你的 token
 
 
 def test_pro_daily():
