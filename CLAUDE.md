@@ -168,6 +168,10 @@ npm --prefix web run preview
 - **TopNav**: 手动 `isActive()` 替代 `router-link` 的 `active-class`。
 - **回测页**: 表格列改为首次发现/最后确认/类型/分数/决策/回撤。日期支持手动输入+日历选择+格式校验，股票代码必填校验。回测数据不足时显示黄色覆盖警告而非报错。
 - **回测数据拉取**: `_estimate_fetch_days` 上限 2000 天防 API 超限，数据覆盖不足时返回 partial 模式自动调整可用区间。
+- **量干评分升级**: 总分 10→12，核心维度 A/B/C 各 3 分，D/E 各 1.5 分。决策阈值按比例上调。前端 slider 同步更新。
+- **Baidu API 被限**: 百度 403 封禁，`_parse_payload` 加类型检查优雅降级，日志仅首次 WARNING，后续静默 fallback 到 sina/tencent。
+- **外部数据源测试**: `tests/test_akshare_hist.py` (东财可用/腾讯bug)、`tests/test_tushare_hist.py` (需付费)、`tests/test_yfinance_hist.py` (免费可用)。
+- **安全**: 清理了 tushare 测试文件中的硬编码 token。
 
 ### 扫描 vs 回测一致性
 
@@ -179,6 +183,8 @@ npm --prefix web run preview
 - **`scan_all` candidate_by_code 丢失**: 扫描中进度回调标记了候选但 `scan_all` 返回值可能为空。服务端扫描完成后检测 task_stocks 候选数 > 0 时自动触发 `re_evaluate_task` 同步。
 - **并发 == 串行试源 + 锁自然分摊**: 不是"同一只股票并发拉 3 个源先到先得"，也不是"线程绑源"。每只股票串行试源，不同线程因锁竞争自然使用不同源。
 - **单股回测数据独立于扫描**: `ensure_backtest_data` 用默认 `max_rows=0`（不限），回测窗口由用户输入日期决定，不受 `kline_days` 限制。
+- **Baidu API 403**: 百度已于 2026-06-09 封禁该接口。代码保留 baidu 在 source chain 首位，封禁期间快速失败静默跳过，解封即自动恢复。日志首次输出 WARNING，后续静默。
+- **量干评分满分 12**: 历史代码中硬编码的 volume_dry 阈值（如 `>= 7` 表示观察）需注意现在满分是 12 而非 10。决策默认值已同步更新。
 
 ## .gitignore Policy
 
