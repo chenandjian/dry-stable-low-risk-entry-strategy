@@ -251,7 +251,8 @@ async function loadStock(code) {
 }
 
 async function loadWatchlist() {
-  const taskId = stock.value.task_id
+  // Prefer URL query param (user context) over stock's own task_id
+  const taskId = route.query.task_id || stock.value.task_id
   const cands = taskId
     ? await getCandidates({ task_id: taskId })
     : await getCandidates()
