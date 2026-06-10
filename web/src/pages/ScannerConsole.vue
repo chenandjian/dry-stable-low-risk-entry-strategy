@@ -254,6 +254,10 @@ async function pollStatus() {
   try {
     const status = await getScanStatus()
     applyStats(status)
+    // RECHECK-S2-001: Restore activeStrategyType from backend on refresh
+    if (status.strategyType) {
+      activeStrategyType.value = status.strategyType
+    }
     // Progress log every ~50 stocks
     if (scanProgress.scanned - lastLogScanned >= 50) {
       lastLogScanned = scanProgress.scanned
@@ -298,17 +302,31 @@ async function pollStatus() {
 async function loadResults() {
   try {
     const isS2 = activeStrategyType.value === 'STRATEGY_2_EXTREME_DRY_STABLE'
-    const data = isS2
-      ? { candidates: [] }  // Strategy2 uses its own results page, don't load here
-      : await getCandidates()
-    discoveries.value = dedupeDiscoveries((data.candidates || []).map(c => ({
-      code: c.code,
-      name: c.name,
-      score: isS2 ? (c.total_score || 0) : (c.score || 0),
-      rating: isS2 ? (c.level || '') : (c.score >= 80 ? 'strong' : c.score >= 70 ? 'medium' : 'weak'),
-      status: isS2 ? (c.level || '') : statusFor(c),
-      detail: isS2 ? `量干${c.volume_dry_score || 0} 价稳${c.price_stable_score || 0} 风险${((c.risk_ratio || 0) * 100).toFixed(1)}%` : formatDetail(c),
-    })))
+    let candidates = []
+    if (isS2) {
+      // RECHECK-S2-001: Load strategy2 results from correct API
+      try {
+        const { getStrategy2Candidates } = useApi()
+        const res = await getStrategy2Candidates(scanProgress.taskId)
+        candidates = (res.candidates || []).map(c => ({
+          code: c.code, name: c.name,
+          score: c.total_score || 0,
+          rating: c.level || '',
+          status: c.level || '',
+          detail: `量干${c.volume_dry_score || 0} 价稳${c.price_stable_score || 0} 风险${((c.risk_ratio || 0) * 100).toFixed(1)}%`,
+        }))
+      } catch (e) { console.error('Failed to load strategy2 results:', e) }
+    } else {
+      const data = await getCandidates()
+      candidates = (data.candidates || []).map(c => ({
+        code: c.code, name: c.name,
+        score: c.score || 0,
+        rating: c.score >= 80 ? 'strong' : c.score >= 70 ? 'medium' : 'weak',
+        status: statusFor(c),
+        detail: formatDetail(c),
+      }))
+    }
+    discoveries.value = dedupeDiscoveries(candidates)
     updateMetrics()
   } catch (e) {
     console.error('Load results failed:', e)

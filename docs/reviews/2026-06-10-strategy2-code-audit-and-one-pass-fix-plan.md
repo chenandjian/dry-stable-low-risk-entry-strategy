@@ -13,7 +13,7 @@
 - `web/src/pages/ScannerConsole.vue`、`Strategy2Results.vue` 的策略隔离和结果展示。
 - 现有测试是否覆盖设计文档要求。
 
-审核分支：`codex/strategy2-extreme-dry-stable-design`  
+审核分支：`codex/strategy2-extreme-dry-stable-design`
 审核提交：`82e337a`
 
 ---

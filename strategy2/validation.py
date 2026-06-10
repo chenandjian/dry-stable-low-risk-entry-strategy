@@ -1,10 +1,13 @@
 # strategy2/validation.py
 """策略2共享校验与辅助函数 — 配置解析、行情验证、最近N日涨跌序列。
 
-所有策略2模块应通过此模块的共享函数执行数据校验和窗口处理，
-避免引擎、scanner、indicators 中各自实现边界逻辑。
+校验分为两级（RECHECK-S2-004）：
+  - validate_ohlc_structure: 只检查日期格式/排序/字段存在，用于完整输入。
+  - validate_ohlc_values: 检查 OHLC 数值和关系，仅用于截取后的策略窗口。
 """
 import logging
+import math
+from datetime import date, datetime
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -13,44 +16,25 @@ logger = logging.getLogger(__name__)
 # ── 配置校验 ────────────────────────────────────────────────────────────────
 
 def resolve_strategy2_config(full_config: dict) -> dict:
-    """严格解析并校验策略2配置。
-
-    接受两种形式的输入：
-    1. 完整 config.yaml（含 strategy2、liquidity 段）。
-    2. 直接策略2配置字典（如从 engine 构造传入）。
-
-    Args:
-        full_config: 配置字典。
-
-    Returns:
-        规范化并校验后的策略2配置字典。
-
-    Raises:
-        ValueError: 配置参数非法。
-    """
+    """严格解析并校验策略2配置。"""
     if not isinstance(full_config, dict):
         raise ValueError("strategy2 config must be a dict")
 
-    # 检测输入形式：有 strategy2 子段 → 完整配置；否则 → 直接配置
     if "strategy2" in full_config:
         s2 = full_config.get("strategy2", {})
         liquidity = full_config.get("liquidity", {})
-    elif "liquidity" in full_config or "strategy_window_days" in full_config:
-        # 可能是完整配置无 strategy2 段，或直接配置
-        if "liquidity" in full_config:
-            s2 = full_config.get("strategy2", {})
-            liquidity = full_config.get("liquidity", {})
-        else:
-            # 直接策略2配置 — 用默认 liquidity
-            s2 = full_config
-            liquidity = {}
+    elif "liquidity" in full_config:
+        s2 = full_config.get("strategy2", {})
+        liquidity = full_config.get("liquidity", {})
+    elif "strategy_window_days" in full_config:
+        s2 = full_config
+        liquidity = {}
     else:
         s2 = full_config
         liquidity = {}
 
     min_listing_days = liquidity.get("min_listing_days", 350) if isinstance(liquidity, dict) else 350
 
-    # 严格类型校验 — 拒绝 bool、字符串、浮点（整数参数）
     def _strict_int(value: Any, key: str, min_val: int | None = None, max_val: int | None = None) -> int:
         if isinstance(value, bool) or not isinstance(value, (int, float)):
             raise ValueError(f"strategy2.{key} must be an integer, got {type(value).__name__} ({value!r})")
@@ -82,22 +66,12 @@ def resolve_strategy2_config(full_config: dict) -> dict:
     buy_zone_max_premium = _strict_float(s2.get("buy_zone_max_premium", 0.03), "buy_zone_max_premium", min_val=0.0, max_val=0.20)
     stop_loss_buffer = _strict_float(s2.get("stop_loss_buffer", 0.03), "stop_loss_buffer", min_val=0.0, max_val=0.20)
 
-    # 窗口关系校验
     if strategy_window_days < minimum_required_days:
-        raise ValueError(
-            f"strategy2.strategy_window_days ({strategy_window_days}) must be >= "
-            f"strategy2.minimum_required_days ({minimum_required_days})"
-        )
+        raise ValueError(f"strategy2.strategy_window_days ({strategy_window_days}) must be >= strategy2.minimum_required_days ({minimum_required_days})")
     if strategy_window_days > min_listing_days:
-        raise ValueError(
-            f"strategy2.strategy_window_days ({strategy_window_days}) must be <= "
-            f"liquidity.min_listing_days ({min_listing_days})"
-        )
+        raise ValueError(f"strategy2.strategy_window_days ({strategy_window_days}) must be <= liquidity.min_listing_days ({min_listing_days})")
     if support_lookback_days >= strategy_window_days:
-        raise ValueError(
-            f"strategy2.support_lookback_days ({support_lookback_days}) must be < "
-            f"strategy2.strategy_window_days ({strategy_window_days})"
-        )
+        raise ValueError(f"strategy2.support_lookback_days ({support_lookback_days}) must be < strategy2.strategy_window_days ({strategy_window_days})")
 
     return {
         "strategy_window_days": strategy_window_days,
@@ -110,66 +84,78 @@ def resolve_strategy2_config(full_config: dict) -> dict:
     }
 
 
-# ── 行情数据校验 ────────────────────────────────────────────────────────────
+# ── 行情数据结构校验（完整输入用） ──────────────────────────────────────────
 
-def validate_ohlc_data(data: list[dict]) -> str | None:
-    """完整校验日线数据格式和内容。
+def validate_ohlc_structure(data: list[dict]) -> str | None:
+    """校验日线数据结构：日期格式/排序/字段存在（RECHECK-S2-004 + 007）。
 
-    校验内容:
-    - 非空列表。
-    - 每行必须包含 date/open/high/low/close/volume。
-    - 日期严格升序、不重复、可比较。
-    - OHLC 为有限正数，volume 为有限非负数。
-    - high >= max(open, close, low), low <= min(open, close, high)。
-    - 拒绝 bool 冒充数字。
+    仅检查确保可以安全截取尾部窗口所需的结构属性。
+    不检查 OHLC 数值（由 validate_ohlc_values 在截取后检查）。
 
     Returns:
-        None 表示数据有效，否则返回稳定错误码字符串。
+        None 表示结构有效，否则返回 "INVALID_MARKET_DATA"。
     """
     if not data or not isinstance(data, list):
         return "INVALID_MARKET_DATA"
 
-    required_fields = ("date", "open", "high", "low", "close", "volume")
     prev_date = None
-
-    for i, row in enumerate(data):
+    for row in data:
         if not isinstance(row, dict):
             return "INVALID_MARKET_DATA"
 
-        # 必需字段存在
-        for field in required_fields:
-            if field not in row:
-                return "INVALID_MARKET_DATA"
+        # RECHECK-S2-004: 字段存在性不在结构检查中验证
+        # （窗口外行的字段缺失不应阻断窗口内评估）
+        # 字段检查在 validate_ohlc_values 中仅在截取后的窗口上执行
 
-        # 日期校验
-        date = row["date"]
-        if not isinstance(date, str) or not date:
+        # 日期格式与排序 (RECHECK-S2-007)
+        date_str = row.get("date")
+        if not isinstance(date_str, str) or not date_str:
+            return "INVALID_MARKET_DATA"
+        try:
+            parsed = date.fromisoformat(date_str)
+        except (ValueError, TypeError):
             return "INVALID_MARKET_DATA"
         if prev_date is not None:
-            if date <= prev_date:
+            if parsed <= prev_date:
                 return "INVALID_MARKET_DATA"
-        prev_date = date
+        prev_date = parsed
 
-        # OHLC 校验
+    return None
+
+
+# ── 行情数据值校验（截取后窗口用） ──────────────────────────────────────────
+
+def validate_ohlc_values(data: list[dict]) -> str | None:
+    """校验 OHLC 数值和关系（RECHECK-S2-004）。
+
+    在截取后的策略窗口上执行，确保窗口内数据有效。
+    拒绝 NaN、Inf、零或负价格、bool 冒充数字、无效 OHLC 关系。
+
+    Returns:
+        None 表示数据有效，否则返回 "INVALID_MARKET_DATA"。
+    """
+    if not data:
+        return "INVALID_MARKET_DATA"
+
+    for row in data:
+        # OHLC 数值校验
         for field in ("open", "high", "low", "close"):
-            value = row[field]
+            value = row.get(field)
             if isinstance(value, bool):
                 return "INVALID_MARKET_DATA"
             if not isinstance(value, (int, float)):
                 return "INVALID_MARKET_DATA"
-            import math
             if math.isnan(value) or math.isinf(value):
                 return "INVALID_MARKET_DATA"
             if value <= 0:
                 return "INVALID_MARKET_DATA"
 
-        # volume 校验（允许为 0，但后续 V20=0 由引擎排除）
-        volume = row["volume"]
+        # volume 校验
+        volume = row.get("volume")
         if isinstance(volume, bool):
             return "INVALID_MARKET_DATA"
         if not isinstance(volume, (int, float)):
             return "INVALID_MARKET_DATA"
-        import math
         if math.isnan(volume) or math.isinf(volume):
             return "INVALID_MARKET_DATA"
         if volume < 0:
@@ -185,15 +171,20 @@ def validate_ohlc_data(data: list[dict]) -> str | None:
     return None
 
 
+# ── 兼容别名 ────────────────────────────────────────────────────────────────
+
+def validate_ohlc_data(data: list[dict]) -> str | None:
+    """完整校验（兼容旧接口）：先结构后值。"""
+    err = validate_ohlc_structure(data)
+    if err:
+        return err
+    return validate_ohlc_values(data)
+
+
 # ── 最近 N 日涨跌序列（共享） ────────────────────────────────────────────────
 
 def recent_daily_changes(data: list[dict], days: int = 5) -> list[dict]:
-    """计算最近 N 个交易日各自相对于前一日的涨跌幅。
-
-    要计算最近 5 日的每日涨跌，需要 6 个收盘价（data[-(days+1):]）。
-    返回 N 个元素的列表，每个元素为 {"row": row_dict, "change": float}。
-    数据不足时返回空列表。
-    """
+    """计算最近 N 个交易日各自相对于前一日的涨跌幅。"""
     if len(data) < days + 1:
         return []
     window = data[-(days + 1):]

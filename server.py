@@ -90,8 +90,8 @@ async def lifespan(app: FastAPI):
                 finally:
                     _clear_running()
             t = threading.Thread(target=resume_s2, daemon=True)
-        else:
-            # 策略1 或未知类型默认策略1恢复
+        elif s_type == "STRATEGY_1_CUP_HANDLE":
+            # 策略1恢复
             def resume_s1():
                 try:
                     def on_progress(stage, current, total, detail, discovery=None):
@@ -120,6 +120,17 @@ async def lifespan(app: FastAPI):
                 finally:
                     _clear_running()
             t = threading.Thread(target=resume_s1, daemon=True)
+        else:
+            # RECHECK-S2-005: 未知 strategy_type — 标记失败，不默认执行
+            logger.error(f"Unknown strategy_type '{s_type}' for interrupted task {interrupted['id']} — marking as failed")
+            conn = db.get_conn()
+            conn.execute(
+                "UPDATE scan_tasks SET status='failed', error=? WHERE id=?",
+                (f"UNKNOWN_STRATEGY_TYPE: {s_type}", interrupted["id"]),
+            )
+            conn.commit()
+            _clear_running()
+            return
         t.start()
     logger.info(f"Database initialized at {db_path}")
 
@@ -439,8 +450,9 @@ async def list_tasks():
             "duration": "",
         })
     # Add completed scans from DB (skip the running one already added above)
+    # RECHECK-S2-003: default to strategy1 only
     running_id = _running.get("task_id") if _running["running"] else None
-    db_tasks = db.get_scan_tasks()
+    db_tasks = db.get_scan_tasks(strategy_type="STRATEGY_1_CUP_HANDLE")
     for t in db_tasks:
         if t["id"] != running_id:
             # Compute stats from candidates
@@ -1025,10 +1037,20 @@ async def strategy2_tasks():
 
 @app.get("/api/strategy2/candidates")
 async def strategy2_candidates(task_id: str = None):
-    """查询策略2候选列表。"""
+    """查询策略2候选列表（RECHECK-S2-003: 验证任务类型）。"""
     config = load_config()
     db_path = config.get("data", {}).get("database_path", "data/cuphandle.db")
     db.init_db(db_path)
+
+    if task_id:
+        s_type = db.get_task_strategy_type(task_id)
+        if s_type is None:
+            return JSONResponse({"error": "TASK_NOT_FOUND", "message": "任务不存在"}, status_code=404)
+        if s_type != "STRATEGY_2_EXTREME_DRY_STABLE":
+            return JSONResponse(
+                {"error": "TASK_STRATEGY_MISMATCH", "message": f"任务 {task_id} 不是策略2任务"},
+                status_code=400,
+            )
 
     if _running["running"] and _running.get("strategy_type") == "STRATEGY_2_EXTREME_DRY_STABLE" and not task_id:
         ds = _running.get("stats", {}).get("discoveries") or []
@@ -1040,10 +1062,20 @@ async def strategy2_candidates(task_id: str = None):
 
 @app.get("/api/strategy2/candidates/{code}")
 async def strategy2_candidate_detail(code: str, task_id: str = None):
-    """查询策略2候选详情。"""
+    """查询策略2候选详情（RECHECK-S2-003: 验证任务类型）。"""
     config = load_config()
     db_path = config.get("data", {}).get("database_path", "data/cuphandle.db")
     db.init_db(db_path)
+
+    if task_id:
+        s_type = db.get_task_strategy_type(task_id)
+        if s_type is None:
+            return JSONResponse({"error": "TASK_NOT_FOUND", "message": "任务不存在"}, status_code=404)
+        if s_type != "STRATEGY_2_EXTREME_DRY_STABLE":
+            return JSONResponse(
+                {"error": "TASK_STRATEGY_MISMATCH", "message": f"任务 {task_id} 不是策略2任务"},
+                status_code=400,
+            )
 
     c = db.get_strategy2_candidate(code, task_id=task_id)
     if not c:

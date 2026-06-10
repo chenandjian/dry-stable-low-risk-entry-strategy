@@ -17,7 +17,8 @@ from strategy2.rejection import check_rejection_rules
 from strategy2.risk import compute_key_support, compute_risk
 from strategy2.validation import (
     resolve_strategy2_config,
-    validate_ohlc_data,
+    validate_ohlc_structure,
+    validate_ohlc_values,
     recent_daily_changes,
 )
 
@@ -74,28 +75,37 @@ class ExtremeDryStableStrategyEngine:
         Returns:
             Strategy2Evaluation — passed=True 表示满足所有入选条件。
         """
-        # 1. 完整行情校验 (BUG-S2-005)
+        # 1. 结构校验 — 日期格式/排序/字段存在（RECHECK-S2-004/007）
         if not data or not isinstance(data, list):
             return Strategy2Evaluation(
                 passed=False, code=code, name=name,
                 evaluation_date="",
                 status_reason="INVALID_MARKET_DATA",
             )
-        ohlc_error = validate_ohlc_data(data)
-        if ohlc_error is not None:
+        struct_error = validate_ohlc_structure(data)
+        if struct_error is not None:
             return Strategy2Evaluation(
                 passed=False, code=code, name=name,
-                evaluation_date=data[-1].get("date", "") if data else "",
-                status_reason=ohlc_error,
+                evaluation_date="",
+                status_reason=struct_error,
             )
 
-        # 2. 策略窗口截取 (BUG-S2-002) — 唯一裁剪点
+        # 2. 策略窗口截取 — 唯一裁剪点
         if len(data) > self.strategy_window_days:
             strategy_data = data[-self.strategy_window_days:]
         else:
             strategy_data = data
 
-        # 3. 最低有效数据检查
+        # 3. 窗口内值校验 — OHLC 数值和关系（RECHECK-S2-004）
+        values_error = validate_ohlc_values(strategy_data)
+        if values_error is not None:
+            return Strategy2Evaluation(
+                passed=False, code=code, name=name,
+                evaluation_date="",
+                status_reason=values_error,
+            )
+
+        # 4. 最低有效数据检查
         if len(strategy_data) < self.min_required:
             return Strategy2Evaluation(
                 passed=False, code=code, name=name,
@@ -106,10 +116,10 @@ class ExtremeDryStableStrategyEngine:
         evaluation_date = strategy_data[-1]["date"]
         current_close = strategy_data[-1]["close"]
 
-        # 4. 指标计算
+        # 5. 指标计算
         ind = compute_indicators(strategy_data)
 
-        # 5. V20=0 排除 (BUG-S2-004)
+        # 6. V20=0 排除
         if ind.v20 <= 0:
             return Strategy2Evaluation(
                 passed=False, code=code, name=name,
@@ -118,7 +128,7 @@ class ExtremeDryStableStrategyEngine:
                 status_reason="INVALID_MARKET_DATA",
             )
 
-        # 6. 风险计算
+        # 7. 风险计算
         key_support = compute_key_support(strategy_data, self.support_lookback_days)
         if key_support is None:
             return Strategy2Evaluation(
@@ -135,11 +145,11 @@ class ExtremeDryStableStrategyEngine:
             stop_loss_buffer=self.stop_loss_buffer,
         )
 
-        # 7. 最近5日涨跌（共享函数 — BUG-S2-003）
+        # 8. 最近5日涨跌
         changes_5 = recent_daily_changes(strategy_data, days=5)
         has_big_drop = any(ch["change"] < -0.03 for ch in changes_5)
 
-        # 8. 一票否决
+        # 9. 一票否决
         reject_reasons = check_rejection_rules(
             ind, strategy_data,
             key_support=key_support,
@@ -148,7 +158,7 @@ class ExtremeDryStableStrategyEngine:
             daily_changes=changes_5,
         )
 
-        # 9. 评分
+        # 10. 评分
         close_above_support = current_close >= key_support
         score = compute_total_score(
             ind,
@@ -156,7 +166,7 @@ class ExtremeDryStableStrategyEngine:
             close_above_support=close_above_support,
         )
 
-        # 10. 入选条件判断
+        # 11. 入选条件判断
         score_ok = score.total_score >= self.candidate_min_score
         rejection_ok = len(reject_reasons) == 0
         risk_ok = risk.risk_ratio <= self.max_risk_ratio

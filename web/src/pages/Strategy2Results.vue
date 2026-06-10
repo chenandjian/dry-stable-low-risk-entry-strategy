@@ -45,54 +45,54 @@
         </tr>
       </thead>
       <tbody>
-        <tr v-for="c in candidates" :key="c.code"
-            :class="{ 'golden': c.total_score >= 80, 'expanded': expandedCode === c.code }"
-            @click="toggleDetail(c)">
-          <td>
-            <span class="code-link">{{ c.code }}</span>
-            <span class="name">{{ c.name }}</span>
-          </td>
-          <td class="score">{{ c.total_score }}</td>
-          <td><span class="level-badge" :class="levelClass(c.level)">{{ c.level || '--' }}</span></td>
-          <td>{{ c.volume_dry_score }}</td>
-          <td>{{ c.price_stable_score }}</td>
-          <td>{{ formatPct(c.risk_ratio) }}</td>
-          <td>{{ c.risk_level }}</td>
-          <td>{{ c.key_support?.toFixed(2) }}</td>
-          <td>{{ c.stop_loss?.toFixed(2) }}</td>
-          <td class="expand-cell">▸</td>
-        </tr>
-        <!-- Detail row -->
-        <tr v-if="expandedCode === c.code" class="detail-row">
-          <td colspan="10">
-            <div class="detail-panel">
-              <div class="detail-grid">
-                <div class="detail-section">
-                  <h4>指标</h4>
-                  <div>V3: {{ fmtNum(c.v3) }} &nbsp; V5: {{ fmtNum(c.v5) }} &nbsp; V10: {{ fmtNum(c.v10) }} &nbsp; V20: {{ fmtNum(c.v20) }}</div>
-                  <div>V5/V20: {{ c.volume_ratio_5_20?.toFixed(3) }} &nbsp; 分位: {{ c.volume_percentile?.toFixed(1) }}% ({{ c.volume_percentile_days }}日)</div>
-                  <div>range_5: {{ formatPct(c.range_5) }} &nbsp; close_range_5: {{ formatPct(c.close_range_5) }}</div>
-                  <div>return_3: {{ formatPct(c.return_3) }} &nbsp; return_5: {{ formatPct(c.return_5) }}</div>
-                </div>
-                <div class="detail-section">
-                  <h4>风险</h4>
-                  <div>买入: {{ c.buy_zone_low?.toFixed(2) }} ~ {{ c.buy_zone_high?.toFixed(2) }}</div>
-                  <div>止损: {{ c.stop_loss?.toFixed(2) }} &nbsp; 风险比: {{ formatPct(c.risk_ratio) }}</div>
-                  <div>评估日: {{ c.evaluation_date }}</div>
-                </div>
-                <div class="detail-section">
-                  <h4>评分原因</h4>
-                  <div v-for="(r, i) in (c.score_reasons || [])" :key="'sr'+i" class="reason-line">✓ {{ r }}</div>
-                  <div v-if="!c.score_reasons?.length" class="muted">无评分原因</div>
-                </div>
-                <div class="detail-section" v-if="c.reject_reasons?.length">
-                  <h4>否决原因</h4>
-                  <div v-for="(r, i) in (c.reject_reasons || [])" :key="'rr'+i" class="reason-line reject">✗ {{ r }}</div>
+        <template v-for="c in candidates" :key="c.code">
+          <tr :class="{ 'golden': c.total_score >= 80, 'expanded': expandedCode === c.code }"
+              @click="toggleDetail(c)">
+            <td>
+              <span class="code-link">{{ c.code }}</span>
+              <span class="name">{{ c.name }}</span>
+            </td>
+            <td class="score">{{ c.total_score }}</td>
+            <td><span class="level-badge" :class="levelClass(c.level)">{{ c.level || '--' }}</span></td>
+            <td>{{ c.volume_dry_score }}</td>
+            <td>{{ c.price_stable_score }}</td>
+            <td>{{ formatPct(c.risk_ratio) }}</td>
+            <td>{{ c.risk_level }}</td>
+            <td>{{ c.key_support?.toFixed(2) }}</td>
+            <td>{{ c.stop_loss?.toFixed(2) }}</td>
+            <td class="expand-cell">{{ expandedCode === c.code ? '▾' : '▸' }}</td>
+          </tr>
+          <tr v-if="expandedCode === c.code" class="detail-row">
+            <td colspan="10">
+              <div class="detail-panel">
+                <div class="detail-grid">
+                  <div class="detail-section">
+                    <h4>指标</h4>
+                    <div>V3: {{ fmtNum(c.v3) }} &nbsp; V5: {{ fmtNum(c.v5) }} &nbsp; V10: {{ fmtNum(c.v10) }} &nbsp; V20: {{ fmtNum(c.v20) }}</div>
+                    <div>V5/V20: {{ c.volume_ratio_5_20?.toFixed(3) }} &nbsp; 分位: {{ c.volume_percentile?.toFixed(1) }}% ({{ c.volume_percentile_days }}日)</div>
+                    <div>range_5: {{ formatPct(c.range_5) }} &nbsp; close_range_5: {{ formatPct(c.close_range_5) }}</div>
+                    <div>return_3: {{ formatPct(c.return_3) }} &nbsp; return_5: {{ formatPct(c.return_5) }}</div>
+                  </div>
+                  <div class="detail-section">
+                    <h4>风险</h4>
+                    <div>买入: {{ c.buy_zone_low?.toFixed(2) }} ~ {{ c.buy_zone_high?.toFixed(2) }}</div>
+                    <div>止损: {{ c.stop_loss?.toFixed(2) }} &nbsp; 风险比: {{ formatPct(c.risk_ratio) }}</div>
+                    <div>评估日: {{ c.evaluation_date }}</div>
+                  </div>
+                  <div class="detail-section">
+                    <h4>评分原因</h4>
+                    <div v-for="(r, i) in (c.score_reasons || [])" :key="'sr'+i" class="reason-line">✓ {{ r }}</div>
+                    <div v-if="!c.score_reasons?.length" class="muted">无评分原因</div>
+                  </div>
+                  <div class="detail-section" v-if="c.reject_reasons?.length">
+                    <h4>否决原因</h4>
+                    <div v-for="(r, i) in (c.reject_reasons || [])" :key="'rr'+i" class="reason-line reject">✗ {{ r }}</div>
+                  </div>
                 </div>
               </div>
-            </div>
-          </td>
-        </tr>
+            </td>
+          </tr>
+        </template>
       </tbody>
     </table>
 

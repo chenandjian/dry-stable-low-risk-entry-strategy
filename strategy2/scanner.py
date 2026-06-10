@@ -68,7 +68,8 @@ def scan_strategy2_all(
         stock_queue.put(stock)
 
     mgr = DataSourceManager()
-    engine = ExtremeDryStableStrategyEngine(strategy2_cfg)
+    # RECHECK-S2-005: 传完整配置，使引擎校验跨配置关系（strategy_window_days <= min_listing_days）
+    engine = ExtremeDryStableStrategyEngine(config)
     candidate_by_code = {}
     candidate_lock = threading.Lock()
     scanned_count = [0]
@@ -82,6 +83,26 @@ def scan_strategy2_all(
 
     def _now() -> str:
         return time.strftime("%Y-%m-%d %H:%M:%S")
+
+    def _finish_stock(code, status, status_reason=None, error_detail=None,
+                      kline_latest_date=None, source_errors=None):
+        """RECHECK-S2-006: 统一终态处理 — 更新 DB + 刷新统计 + 发送进度回调。"""
+        db.update_task_stock(
+            task_id, code, status=status,
+            status_reason=status_reason,
+            error_detail=error_detail,
+            kline_latest_date=kline_latest_date,
+            source_errors=source_errors,
+            finished_at=_now(),
+        )
+        summary = db.refresh_scan_task_counts(task_id)
+        if progress_callback:
+            progress_callback(
+                "scanning",
+                summary["processed"],
+                summary["total_stocks"],
+                f"{code} {stock.get('name', '')}",
+            )
 
     def worker(thread_name: str):
         while not stock_queue.empty():
@@ -113,25 +134,17 @@ def scan_strategy2_all(
                             stock_queue.put(stock)
                             time.sleep(0.1)
                             continue
-                        db.update_task_stock(
-                            task_id, code, status="failed",
-                            status_reason="数据源忙，超过重试次数",
-                            finished_at=_now(),
-                        )
-                        db.refresh_scan_task_counts(task_id)
+                        _finish_stock(code, "failed",
+                                       status_reason="数据源忙，超过重试次数")
                         with stats_lock:
                             failed_count[0] += 1
                             skip_count[0] += 1
                         with busy_retry_lock:
                             busy_retries_by_code.pop(code, None)
                         continue
-                    db.update_task_stock(
-                        task_id, code, status="failed",
-                        status_reason="ALL_DATA_SOURCES_FAILED",
-                        source_errors=encode_source_errors(fetch_result.source_errors),
-                        finished_at=_now(),
-                    )
-                    db.refresh_scan_task_counts(task_id)
+                    _finish_stock(code, "failed",
+                                  status_reason="ALL_DATA_SOURCES_FAILED",
+                                  source_errors=encode_source_errors(fetch_result.source_errors))
                     with stats_lock:
                         failed_count[0] += 1
                         skip_count[0] += 1
@@ -143,13 +156,9 @@ def scan_strategy2_all(
 
                 # 全局流动性过滤
                 if not passes_liquidity_filter(data, liquidity_cfg):
-                    db.update_task_stock(
-                        task_id, code, status="skipped",
-                        status_reason="LIQUIDITY_FILTER_REJECTED",
-                        kline_latest_date=latest_trade_date,
-                        finished_at=_now(),
-                    )
-                    db.refresh_scan_task_counts(task_id)
+                    _finish_stock(code, "skipped",
+                                  status_reason="LIQUIDITY_FILTER_REJECTED",
+                                  kline_latest_date=latest_trade_date)
                     with stats_lock:
                         skip_count[0] += 1
                     with busy_retry_lock:
@@ -168,14 +177,10 @@ def scan_strategy2_all(
                         logger.error(
                             "Failed to upsert strategy2 candidate %s: %s", code, exc,
                         )
-                        db.update_task_stock(
-                            task_id, code, status="failed",
-                            status_reason="STRATEGY2_CANDIDATE_PERSIST_FAILED",
-                            error_detail=str(exc),
-                            kline_latest_date=latest_trade_date,
-                            finished_at=_now(),
-                        )
-                        db.refresh_scan_task_counts(task_id)
+                        _finish_stock(code, "failed",
+                                      status_reason="STRATEGY2_CANDIDATE_PERSIST_FAILED",
+                                      error_detail=str(exc),
+                                      kline_latest_date=latest_trade_date)
                         with stats_lock:
                             failed_count[0] += 1
                             skip_count[0] += 1
@@ -198,34 +203,20 @@ def scan_strategy2_all(
                             discovery,
                         )
                 else:
-                    db.update_task_stock(
-                        task_id, code, status="scanned",
-                        status_reason=evaluation.status_reason,
-                        kline_latest_date=latest_trade_date,
-                        finished_at=_now(),
-                    )
+                    _finish_stock(code, "scanned",
+                                  status_reason=evaluation.status_reason,
+                                  kline_latest_date=latest_trade_date)
 
-                db.refresh_scan_task_counts(task_id)
                 with stats_lock:
                     scanned_count[0] += 1
                 with busy_retry_lock:
                     busy_retries_by_code.pop(code, None)
 
-                if progress_callback:
-                    progress_callback(
-                        "scanning", scanned_count[0], len(stocks),
-                        f"{code} {stock.get('name', '')}",
-                    )
-
             except Exception as e:
                 logger.error("Strategy2 error scanning %s: %s", code, e)
-                db.update_task_stock(
-                    task_id, code, status="failed",
-                    status_reason="STRATEGY2_EVALUATION_ERROR",
-                    error_detail=str(e),
-                    finished_at=_now(),
-                )
-                db.refresh_scan_task_counts(task_id)
+                _finish_stock(code, "failed",
+                              status_reason="STRATEGY2_EVALUATION_ERROR",
+                              error_detail=str(e))
                 with stats_lock:
                     failed_count[0] += 1
                     skip_count[0] += 1

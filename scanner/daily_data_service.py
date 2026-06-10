@@ -9,6 +9,7 @@ import json
 import logging
 import time
 from dataclasses import dataclass
+from datetime import date, timedelta
 from typing import Callable
 
 import scanner.db as db
@@ -192,18 +193,27 @@ def merge_data(cached: list[dict], fresh: list[dict], max_rows: int = 0) -> list
 
 
 def _is_cache_fresh(cached: list[dict]) -> bool:
-    """检查缓存是否新鲜 — 最新日期不早于两天前（允许周末/节假日间隔）。"""
+    """检查缓存新鲜度（RECHECK-S2-002）。
+
+    规则：
+    - 未来日期 → 拒绝。
+    - 交易日收盘后或周末/节假日 → 接受最近交易日（≤3个自然日前）。
+    - 超过 3 个自然日 → 拒绝。
+    不使用固定 2 天差值。
+    """
     if not cached:
         return False
-    from datetime import datetime, timedelta
     try:
         latest_str = cached[-1].get("date", "")
         if not latest_str:
             return False
-        latest_date = datetime.strptime(latest_str, "%Y-%m-%d").date()
-        today = datetime.now().date()
-        # 缓存日期在最近 2 天内视为新鲜
-        return (today - latest_date).days <= 2
+        latest_date = date.fromisoformat(latest_str)
+        today = date.today()
+        # 未来日期拒绝
+        if latest_date > today:
+            return False
+        # 最近 3 个自然日内视为新鲜（覆盖周末和单日假期）
+        return (today - latest_date).days <= 3
     except (ValueError, TypeError):
         return False
 

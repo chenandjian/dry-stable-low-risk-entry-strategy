@@ -588,15 +588,59 @@ def refresh_scan_task_counts(task_id: str) -> dict:
     }
 
 
-def get_scan_tasks() -> list[dict]:
-    """Get all scan tasks, most recent first."""
+def get_scan_task(task_id: str) -> dict | None:
+    """Get a single scan task by ID (RECHECK-S2-003)."""
     conn = get_conn()
-    rows = conn.execute(
-        """SELECT id, started_at, finished_at, status, total_stocks, scanned, skipped,
-                  candidates_count, elapsed_seconds, failed_count, stock_pool_source,
-                  latest_trade_date, strategy_type
-           FROM scan_tasks ORDER BY started_at DESC"""
-    ).fetchall()
+    row = conn.execute(
+        "SELECT id, started_at, finished_at, status, total_stocks, scanned, skipped, "
+        "candidates_count, elapsed_seconds, failed_count, stock_pool_source, "
+        "latest_trade_date, strategy_type "
+        "FROM scan_tasks WHERE id=?",
+        (task_id,),
+    ).fetchone()
+    if not row:
+        return None
+    return {
+        "id": row[0], "date": row[1] or "", "finished_at": row[2],
+        "running": row[3] == 'running', "status": row[3],
+        "total_stocks": row[4], "scanned": row[5], "total": row[4],
+        "skipped": row[6], "candidates": row[7], "elapsed_seconds": row[8],
+        "duration": f"{row[8]:.0f}s" if row[8] is not None else None,
+        "failed": row[9], "stock_pool_source": row[10], "latest_trade_date": row[11],
+        "strategy_type": row[12] or "STRATEGY_1_CUP_HANDLE",
+    }
+
+
+def get_task_strategy_type(task_id: str) -> str | None:
+    """Return the strategy_type for a task, or None if not found (RECHECK-S2-003)."""
+    conn = get_conn()
+    row = conn.execute(
+        "SELECT strategy_type FROM scan_tasks WHERE id=?", (task_id,),
+    ).fetchone()
+    if not row:
+        return None
+    return row[0] or "STRATEGY_1_CUP_HANDLE"
+
+
+def get_scan_tasks(strategy_type: str = None) -> list[dict]:
+    """Get scan tasks, optionally filtered by strategy_type (RECHECK-S2-003)."""
+    conn = get_conn()
+    if strategy_type:
+        rows = conn.execute(
+            """SELECT id, started_at, finished_at, status, total_stocks, scanned, skipped,
+                      candidates_count, elapsed_seconds, failed_count, stock_pool_source,
+                      latest_trade_date, strategy_type
+               FROM scan_tasks WHERE (strategy_type=? OR (strategy_type IS NULL AND ?='STRATEGY_1_CUP_HANDLE'))
+               ORDER BY started_at DESC""",
+            (strategy_type, strategy_type),
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            """SELECT id, started_at, finished_at, status, total_stocks, scanned, skipped,
+                      candidates_count, elapsed_seconds, failed_count, stock_pool_source,
+                      latest_trade_date, strategy_type
+               FROM scan_tasks ORDER BY started_at DESC"""
+        ).fetchall()
     return [
         {"id": r[0], "date": r[1] or "", "finished_at": r[2],
          "running": r[3] == 'running', "status": r[3], "scope": f"全市场 · {r[4]}只",

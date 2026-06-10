@@ -79,6 +79,13 @@
 - Direct reproductions also confirmed Strategy2 interrupted tasks lose their strategy type, Strategy2 completion can hide default Strategy1 candidates, Strategy2 JSON list fields are returned as strings, and Strategy1 task IDs are silently accepted by Strategy2 candidate queries.
 - Verification: Strategy2 tests passed with 104 tests; offline suite passed with 354 tests; compileall and frontend build passed. Full suite had 356 passed and one external Dongcai connection failure.
 
+## 2026-06-10 (Strategy2 Fix Recheck)
+
+- Rechecked fix commit `136e48f` and added `docs/reviews/2026-06-10-strategy2-fix-recheck.md`.
+- Confirmed the recent-five-day boundary, V20=0 rejection, candidate persistence ordering, JSON list deserialization, and stable candidate ordering fixes.
+- Direct reproductions found seven remaining issues: Strategy2 frontend refresh/detail runtime failures, future cache accepted as fresh, incomplete task/API isolation, invalid prefix data still affecting the strategy window, missing scanner/unknown-task final defenses, missing terminal progress callbacks, and non-date strings accepted as valid dates.
+- Verification: targeted suites passed with 78 tests; offline suite passed with 396 tests; full suite had 400 passed and one external Dongcai connection failure; compileall and frontend build passed. Commit diff check fails on one trailing whitespace line in the prior audit document.
+
 ### Commit history
 ```
 eff4597 feat(strategy2): full implementation — engine, scanner, DB, API, frontend
