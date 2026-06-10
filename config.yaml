@@ -13,12 +13,13 @@ data:
   - baidu
   - sina
   - tencent
+  - yfinance
   start_date: '2025-01-01'
   end_date: null
   use_fq: true
-  scan_window_days: 250
+  scan_window_days: 300
   backtest_window_days: 250
-  worker_count: 3
+  worker_count: 4
 liquidity:
   enabled: true
   avg_turnover_days: 20
@@ -26,7 +27,7 @@ liquidity:
   min_avg_volume: 5000000
   min_latest_turnover: 80000000
   min_stock_price: 10
-  min_listing_days: 351
+  min_listing_days: 500
 cup:
   min_duration: 35
   max_duration: 180

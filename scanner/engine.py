@@ -13,6 +13,7 @@ from scanner.mootdx_source import fetch_mootdx_daily
 from scanner.baidu_source import fetch_baidu_daily
 from scanner.sina_source import fetch_sina_daily
 from scanner.tencent_source import fetch_tencent_daily
+from scanner.yfinance_source import fetch_yfinance_daily
 from scanner.index_source import fetch_market_index_daily
 from scanner.liquidity_filter import passes_liquidity_filter
 from scanner.pattern_detector import CupHandleResult
@@ -51,9 +52,9 @@ def scan_all(
     task_id: str = None,
     stocks: list[dict] = None,
     retry_policy: str = "normal",
-    worker_count: int = 3,
+    worker_count: int = 4,
 ) -> dict:
-    """双线程全市场扫描。"""
+    """多线程全市场扫描。"""
     from scanner.stock_pool import get_a_stock_pool
 
     db_path = config.get("data", {}).get("database_path", "data/cuphandle.db")
@@ -82,8 +83,8 @@ def scan_all(
         fallback_attempts = 2
 
     configured_workers = config.get("data", {}).get("worker_count")
-    if configured_workers is not None and worker_count == 2:
-        worker_count = configured_workers
+    if configured_workers is not None:
+        worker_count = int(configured_workers)
     worker_count = max(1, worker_count)
 
     stock_queue = Queue()
@@ -103,6 +104,15 @@ def scan_all(
     liquidity_cfg = config.get("liquidity", {})
     daily_sources = config.get("data", {}).get("daily_sources") or DEFAULT_DAILY_SOURCES
     windows = resolve_strategy_windows(config)
+
+    # 并发不足警告
+    num_sources = len(daily_sources)
+    if worker_count < num_sources:
+        logger.warning(
+            "工作线程数 %d 小于启用数据源数 %d，无法保证所有数据源同时参与拉取。",
+            worker_count, num_sources,
+        )
+    logger.info("数据源列表: %s, 工作线程: %d", daily_sources, worker_count)
     kline_days = windows.min_listing_days
     scan_window_days = windows.scan_window_days
     logger.info(
@@ -544,7 +554,7 @@ def re_evaluate_task(
     }
 
 
-DEFAULT_DAILY_SOURCES = ["baidu", "sina", "tencent"]
+DEFAULT_DAILY_SOURCES = ["baidu", "sina", "tencent", "yfinance"]
 
 
 def _daily_fetch_fn(ds_name: str):
@@ -553,6 +563,7 @@ def _daily_fetch_fn(ds_name: str):
         "baidu": fetch_baidu_daily,
         "sina": fetch_sina_daily,
         "tencent": fetch_tencent_daily,
+        "yfinance": fetch_yfinance_daily,
     }
     if ds_name not in fetchers:
         raise ValueError(f"Unknown daily data source: {ds_name}")
