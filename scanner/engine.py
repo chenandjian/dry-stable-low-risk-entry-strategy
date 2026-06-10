@@ -65,10 +65,12 @@ def scan_all(
 
     start_offset = 0
     if stocks is None and resume_task_id:
-        info = db.get_interrupted_task()
-        if info:
-            start_offset = info.get("scanned", 0)
-            stocks = db.get_pending_stocks(resume_task_id, from_idx=start_offset)
+        # 直接按 resume_task_id 查询，不依赖 get_interrupted_task() 的最新任务匹配
+        stocks = db.get_pending_stocks(resume_task_id, from_idx=start_offset)
+        if stocks:
+            # 估算已扫描数：总数 - 剩余待处理数
+            total = len(db.get_task_stocks(resume_task_id, limit=100000))
+            start_offset = max(0, total - len(stocks))
 
     if stocks is None:
         stocks = get_a_stock_pool(config)

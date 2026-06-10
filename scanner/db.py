@@ -379,7 +379,9 @@ def finish_scan_task(task_id: str, finished_at: str, candidates_count: int,
 
 def mark_dead_tasks_as_failed():
     """Mark any running tasks as failed — they were interrupted by server restart.
-    Also reset fetching stocks to pending so auto-resume can re-process them."""
+    Also reset fetching stocks to pending so auto-resume can re-process them.
+    Also handle crashed tasks (failed without finished_at) by resetting their
+    fetching stocks so they can be picked up by get_interrupted_task()."""
     conn = get_conn()
     running_ids = conn.execute(
         "SELECT id FROM scan_tasks WHERE status='running'"
@@ -393,16 +395,35 @@ def mark_dead_tasks_as_failed():
     conn.execute(
         "UPDATE scan_tasks SET status='failed', error='Interrupted by current server startup' WHERE status='running'"
     )
+    # Also reset fetching stocks for crashed tasks (status=failed but never finished)
+    crashed = conn.execute(
+        "SELECT id FROM scan_tasks WHERE status='failed' AND finished_at IS NULL"
+    ).fetchall()
+    for (task_id,) in crashed:
+        conn.execute(
+            "UPDATE task_stocks SET status='pending', status_reason=NULL, error_detail=NULL "
+            "WHERE task_id=? AND status='fetching'",
+            (task_id,),
+        )
+    conn.commit()
     conn.commit()
 
 
 def get_interrupted_task() -> dict | None:
-    """Get the most recent interrupted task for resume (server restart or user stop)."""
+    """Get the most recent interrupted task for resume.
+
+    Returns any task that didn't finish all stocks (scanned < total_stocks)
+    regardless of the specific error string.  This covers:
+    - Server restart (mark_dead_tasks_as_failed)
+    - User stop (cancelled)
+    - Code bugs caught by the scan thread
+    - Unexpected process termination
+    """
     conn = get_conn()
     row = conn.execute(
         "SELECT id, scanned, total_stocks FROM scan_tasks "
-        "WHERE (status='failed' AND error='Interrupted by current server startup') "
-        "   OR (status='cancelled' AND error='User stopped') "
+        "WHERE (status='failed' OR status='cancelled') "
+        "  AND finished_at IS NULL "
         "ORDER BY started_at DESC LIMIT 1"
     ).fetchone()
     if not row or row[1] >= row[2]:

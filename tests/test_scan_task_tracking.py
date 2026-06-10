@@ -379,7 +379,8 @@ def test_get_pending_stocks_resume_includes_low_idx_unfinished_rows(tmp_path):
     assert [row["code"] for row in pending] == ["000001", "600036"]
 
 
-def test_get_interrupted_task_ignores_stale_server_restarted_history(tmp_path):
+def test_get_interrupted_task_returns_unfinished_failed_task(tmp_path):
+    """Any failed/cancelled task with remaining stocks (finished_at=NULL) is resumable."""
     db.init_db(str(tmp_path / "cuphandle.db"))
     db.create_scan_task("old-failed", "2026-06-04 09:30:00", total_stocks=2)
     db.save_task_stocks("old-failed", [
@@ -392,6 +393,25 @@ def test_get_interrupted_task_ignores_stale_server_restarted_history(tmp_path):
     conn.execute("UPDATE scan_tasks SET status='failed', error='Server restarted' WHERE id=?", ("old-failed",))
     conn.commit()
 
+    # Unfinished (scanned=1 < total=2, finished_at=NULL) → resumable
+    result = db.get_interrupted_task()
+    assert result is not None
+    assert result["id"] == "old-failed"
+
+
+def test_get_interrupted_task_ignores_finished_failed_task(tmp_path):
+    """A failed task with finished_at set is completed, not resumable."""
+    db.init_db(str(tmp_path / "cuphandle.db"))
+    db.create_scan_task("done-failed", "2026-06-04 09:30:00", total_stocks=2)
+    db.save_task_stocks("done-failed", [
+        {"code": "000001", "name": "平安银行", "market": "深证主板"},
+        {"code": "000002", "name": "万科A", "market": "深证主板"},
+    ])
+    db.update_task_stock("done-failed", "000001", status="scanned")
+    db.refresh_scan_task_counts("done-failed")
+    conn = db.get_conn()
+    conn.execute("UPDATE scan_tasks SET status='failed', error='Some error', finished_at='2026-06-04 10:00:00' WHERE id=?", ("done-failed",))
+    conn.commit()
     assert db.get_interrupted_task() is None
 
 
