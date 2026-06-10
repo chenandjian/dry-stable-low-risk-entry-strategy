@@ -434,6 +434,13 @@ def test_resolve_strategy_windows_rejects_zero():
         resolve_strategy_windows({"data": {"scan_window_days": 0}})
 
 
+def test_resolve_strategy_windows_rejects_min_listing_days_zero():
+    """RECHECK-002: min_listing_days=0 must be rejected, not treated as missing."""
+    import pytest
+    with pytest.raises(ValueError, match="must be >= 30"):
+        resolve_strategy_windows({"liquidity": {"min_listing_days": 0}})
+
+
 def test_resolve_strategy_windows_rejects_negative():
     import pytest
     with pytest.raises(ValueError, match="must be >= 30"):
@@ -455,6 +462,28 @@ def test_resolve_strategy_windows_rejects_float():
     import pytest
     with pytest.raises(ValueError, match="must be an integer"):
         resolve_strategy_windows({"data": {"scan_window_days": 2.5}})
+
+
+def test_resolve_strategy_windows_rejects_integer_float():
+    """RECHECK-002: 50.0 (float) must be rejected, not silently converted."""
+    import pytest
+    with pytest.raises(ValueError, match="must be an integer"):
+        resolve_strategy_windows({
+            "data": {"scan_window_days": 50.0},
+            "liquidity": {"min_listing_days": 100},
+        })
+
+
+def test_resolve_strategy_windows_rejects_float_min_listing():
+    import pytest
+    with pytest.raises(ValueError, match="must be an integer"):
+        resolve_strategy_windows({"liquidity": {"min_listing_days": 50.0}})
+
+
+def test_resolve_strategy_windows_rejects_float_backtest():
+    import pytest
+    with pytest.raises(ValueError, match="must be an integer"):
+        resolve_strategy_windows({"data": {"backtest_window_days": 50.0}})
 
 
 def test_resolve_strategy_windows_rejects_string():

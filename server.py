@@ -631,8 +631,9 @@ async def get_candidate(code: str):
     if ohlc:
         cfg = load_config()
         market_idx = cfg.get("market_environment", {}).get("index_symbol")
-        scan_window_days = cfg.get("data", {}).get("scan_window_days") or 250
-        strategy_data = select_strategy_window(ohlc, scan_window_days)
+        # RECHECK-002: use unified resolver, not manual config read
+        windows = resolve_strategy_windows(cfg)
+        strategy_data = select_strategy_window(ohlc, windows.scan_window_days)
         if strategy_data is not None:
             engine = CupHandleStrategyEngine(cfg)
             evaluation = engine.evaluate_at(

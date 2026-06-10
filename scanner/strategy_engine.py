@@ -38,21 +38,19 @@ def resolve_strategy_windows(config: dict) -> StrategyWindows:
     data_cfg = config.get("data", {}) if isinstance(config, dict) else {}
     liquidity_cfg = config.get("liquidity", {}) if isinstance(config, dict) else {}
 
-    raw_min = liquidity_cfg.get("min_listing_days") or WINDOW_DEFAULT
+    raw_min = liquidity_cfg.get("min_listing_days")
     raw_scan = data_cfg.get("scan_window_days")
     raw_backtest = data_cfg.get("backtest_window_days")
 
     def _int_or_default(value, default: int, label: str) -> int:
         if value is None:
             return default
-        if isinstance(value, bool) or not isinstance(value, (int, float)):
-            raise ValueError(f"{label} must be an integer, got {type(value).__name__}")
-        if isinstance(value, float) and not float(value).is_integer():
-            raise ValueError(f"{label} must be an integer, got float {value}")
-        result = int(value)
-        if result < WINDOW_MIN:
-            raise ValueError(f"{label} must be >= {WINDOW_MIN}, got {result}")
-        return result
+        # RECHECK-002: strict int only — reject bool, float, str
+        if type(value) is not int:
+            raise ValueError(f"{label} must be an integer, got {type(value).__name__} ({value!r})")
+        if value < WINDOW_MIN:
+            raise ValueError(f"{label} must be >= {WINDOW_MIN}, got {value}")
+        return value
 
     min_listing_days = _int_or_default(raw_min, WINDOW_DEFAULT, "min_listing_days")
     scan_window_days = _int_or_default(raw_scan, WINDOW_DEFAULT, "scan_window_days")

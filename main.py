@@ -75,26 +75,23 @@ def cmd_analyze(args):
     from scanner.sina_source import fetch_sina_daily
     from scanner.tencent_source import fetch_tencent_daily
     from scanner.index_source import fetch_market_index_daily
-    from scanner.strategy_engine import CupHandleStrategyEngine, select_strategy_window
+    from scanner.strategy_engine import (
+        CupHandleStrategyEngine,
+        resolve_strategy_windows,
+        select_strategy_window,
+    )
     from output.json_writer import write_single_analysis_json
+
+    # Read window config via unified resolver (RECHECK-001: before any fetch)
+    windows = resolve_strategy_windows(config)
+    kline_days = windows.min_listing_days
+    scan_window_days = windows.scan_window_days
 
     # Fetch data with fallback (BUG-006: pass min_listing_days)
     data = fetch_sina_daily(code, days=kline_days)
     if data is None:
         logger.info("Sina failed, trying Tencent...")
         data = fetch_tencent_daily(code, days=kline_days)
-
-    if data is None:
-        logger.error(f"Cannot fetch data for {code}")
-        return
-
-    logger.info(f"Got {len(data)} days of data")
-
-    # Read scan window config via unified resolver
-    from scanner.strategy_engine import resolve_strategy_windows
-    windows = resolve_strategy_windows(config)
-    kline_days = windows.min_listing_days
-    scan_window_days = windows.scan_window_days
 
     # Truncate to fixed strategy window
     strategy_data = select_strategy_window(data, scan_window_days)
