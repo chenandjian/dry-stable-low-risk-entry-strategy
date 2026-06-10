@@ -49,3 +49,9 @@
 - Acceptance verification: targeted suites passed with 122 tests; offline suite passed with 222 tests; full suite passed with 225 tests and 3 warnings; compileall and frontend build passed. Remaining non-business cleanup is to add non-conditional scenario assertions to the four-path consistency tests and remove one trailing blank line reported by commit-level diff check.
 - Rechecked cleanup commit `ab22fb3` and added `docs/reviews/2026-06-10-scan-window-unified-strategy-final-completion.md`. Confirmed the four scenario assertions now prove their named cases and no new business-code or strategy issues remain.
 - Final completion verification: backtester suite passed with 22 tests; offline suite passed with 222 tests; full suite had 224 passed and 1 external Dongcai connection failure; compileall and frontend build passed. The only remaining cleanup is a trailing blank line in the newly committed acceptance-recheck document, which still causes commit-level diff check to fail.
+- Created worktree `.claude/worktrees/strategy2-extreme-dry-stable`.
+- Created branch `codex/strategy2-extreme-dry-stable-design` from commit `d3b36a1`.
+- Reviewed the requested strategy document and current scan, database, API, and frontend configuration structures.
+- Confirmed product and architecture decisions with the user.
+- Added the Strategy 2 independent full-market scan development design document.
+- No strategy implementation code was changed in this phase.
