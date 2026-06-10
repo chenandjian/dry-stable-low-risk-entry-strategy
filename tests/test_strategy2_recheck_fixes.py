@@ -15,7 +15,6 @@ from strategy2.engine import ExtremeDryStableStrategyEngine
 from scanner.daily_data_service import (
     fetch_with_retry,
     FetchResult,
-    _is_cache_fresh,
 )
 import scanner.db as db
 
@@ -144,51 +143,6 @@ class TestWindowIsolationAndDateValidation:
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # RECHECK-S2-002: 缓存新鲜度
-# ═══════════════════════════════════════════════════════════════════════════════
-
-class TestCacheFreshnessRealPath:
-    def test_future_date_cache_rejected(self):
-        """RECHECK-S2-002: Future date in cache → not fresh."""
-        from datetime import datetime, timedelta
-        future = (datetime.now() + timedelta(days=30)).strftime("%Y-%m-%d")
-        cached = [{"date": future, "close": 10.0}]
-        assert not _is_cache_fresh(cached)
-
-    def test_monday_accepts_friday_cache(self, monkeypatch):
-        """RECHECK-S2-002: Monday reads Friday cache → fresh."""
-        # Mock today as a Monday (2026-06-15 is Monday)
-        from datetime import date
-        class FakeDate(date):
-            @classmethod
-            def today(cls):
-                return cls(2026, 6, 15)  # Monday
-        monkeypatch.setattr("scanner.daily_data_service.date", FakeDate)
-        cached = [{"date": "2026-06-12"}]  # Friday
-        assert _is_cache_fresh(cached)
-
-    def test_weekend_accepts_friday_cache(self, monkeypatch):
-        """RECHECK-S2-002: Weekend reads Friday cache → fresh."""
-        from datetime import date
-        class FakeDate(date):
-            @classmethod
-            def today(cls):
-                return cls(2026, 6, 13)  # Saturday
-        monkeypatch.setattr("scanner.daily_data_service.date", FakeDate)
-        cached = [{"date": "2026-06-12"}]  # Friday
-        assert _is_cache_fresh(cached)
-
-    def test_wednesday_rejects_last_friday(self, monkeypatch):
-        """RECHECK-S2-002: Wednesday should NOT accept last Friday cache (3 trading days stale)."""
-        from datetime import date
-        class FakeDate(date):
-            @classmethod
-            def today(cls):
-                return cls(2026, 6, 17)  # Wednesday
-        monkeypatch.setattr("scanner.daily_data_service.date", FakeDate)
-        cached = [{"date": "2026-06-12"}]  # Previous Friday
-        assert not _is_cache_fresh(cached)
-
-
 # ═══════════════════════════════════════════════════════════════════════════════
 # RECHECK-S2-003: 任务/API 类型隔离
 # ═══════════════════════════════════════════════════════════════════════════════

@@ -632,8 +632,8 @@ async def get_candidates(task_id: str = None):
     # If a specific task is requested, always query DB
     if task_id:
         cands = db.get_candidates(task_id=task_id)
-    elif _running["running"]:
-        # Return real-time discoveries during active scan
+    elif _running.get("running") and _running.get("strategy_type") == "STRATEGY_1_CUP_HANDLE":
+        # ACCEPT-S2-002: Only return S1 discoveries during S1 scan
         ds = _running.get("stats", {}).get("discoveries") or []
         return {"candidates": ds, "total": len(ds)}
     else:
@@ -730,12 +730,13 @@ async def get_stock_ohlc(code: str):
 async def get_candidate(code: str):
     c = db.get_candidate(code)
     if not c:
-        # Check in-memory discoveries during active scan
-        ds = (_running.get("stats", {}).get("discoveries") or []) if _running.get("running") else []
-        for d in ds:
-            if d.get("code") == code:
-                c = d
-                break
+        # ACCEPT-S2-002: Only search S1 discoveries during S1 scan
+        if _running.get("running") and _running.get("strategy_type") == "STRATEGY_1_CUP_HANDLE":
+            ds = _running.get("stats", {}).get("discoveries") or []
+            for d in ds:
+                if d.get("code") == code:
+                    c = d
+                    break
     if not c:
         return JSONResponse({"error": "Not found"}, status_code=404)
     trade_plan = {}

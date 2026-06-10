@@ -556,7 +556,7 @@ def re_evaluate_task(
     }
 
 
-DEFAULT_DAILY_SOURCES = ["baidu", "sina", "tencent", "yfinance"]
+DEFAULT_DAILY_SOURCES = ["baidu", "sina", "tencent"]
 
 
 def _daily_fetch_fn(ds_name: str):

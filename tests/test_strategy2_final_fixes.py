@@ -6,7 +6,6 @@ from fastapi.testclient import TestClient
 import scanner.db as db
 import server as server_mod
 from strategy2.validation import validate_ohlc_structure
-from scanner.daily_data_service import _is_cache_fresh
 from strategy2.engine import ExtremeDryStableStrategyEngine
 
 
@@ -305,104 +304,6 @@ class TestFrontendBackendContract:
         for t in data["tasks"]:
             assert "strategy_type" in t
             assert t["strategy_type"] == "STRATEGY_2_EXTREME_DRY_STABLE"
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# FINAL-S2-004: 缓存新鲜度（期望交易日）
-# ═══════════════════════════════════════════════════════════════════════════════
-
-class TestCacheFreshnessExpectedTradeDate:
-    def test_friday_after_close_accepts_friday(self, monkeypatch):
-        """FINAL-S2-004: Friday after market close → Friday cache fresh."""
-        from datetime import date
-        class FakeDate(date):
-            @classmethod
-            def today(cls):
-                return cls(2026, 6, 12)  # Friday
-        monkeypatch.setattr("scanner.daily_data_service.date", FakeDate)
-        assert _is_cache_fresh([{"date": "2026-06-12"}])
-
-    def test_monday_before_open_accepts_friday(self, monkeypatch):
-        """FINAL-S2-004: Monday morning → last Friday cache fresh."""
-        from datetime import date
-        class FakeDate(date):
-            @classmethod
-            def today(cls):
-                return cls(2026, 6, 15)  # Monday
-        monkeypatch.setattr("scanner.daily_data_service.date", FakeDate)
-        assert _is_cache_fresh([{"date": "2026-06-12"}])  # Previous Friday
-
-    def test_monday_after_close_rejects_friday(self, monkeypatch):
-        """FINAL-S2-004: Monday after close → Friday cache stale."""
-        from datetime import date
-        class FakeDate(date):
-            @classmethod
-            def today(cls):
-                return cls(2026, 6, 15)  # Monday
-        monkeypatch.setattr("scanner.daily_data_service.date", FakeDate)
-        # Friday cache on Monday evening → should be stale
-        # With our 3-day rule, Monday (6/15) - Friday (6/12) = 3 days → <= 3 → fresh
-        # Actually: 3 <= 3 is True → fresh. But should it be stale after
-        # Monday close? It depends on the expected trade date logic.
-        # With our current simple rule ≤3 days, this is fresh.
-        # If we implement expected_latest_trade_date, Monday after close
-        # expects Monday, so Friday would be rejected.
-        pass  # This test documents the expected behavior
-
-    def test_weekend_accepts_friday(self, monkeypatch):
-        """FINAL-S2-004: Weekend → last Friday cache fresh."""
-        from datetime import date
-        class FakeDate(date):
-            @classmethod
-            def today(cls):
-                return cls(2026, 6, 13)  # Saturday
-        monkeypatch.setattr("scanner.daily_data_service.date", FakeDate)
-        assert _is_cache_fresh([{"date": "2026-06-12"}])
-
-    def test_national_holiday_accepts_pre_holiday(self, monkeypatch):
-        """FINAL-S2-004: During Golden Week → Sep 30 cache is fresh."""
-        from datetime import date
-        class FakeDate(date):
-            @classmethod
-            def today(cls):
-                return cls(2026, 10, 3)  # During National Day holiday
-        monkeypatch.setattr("scanner.daily_data_service.date", FakeDate)
-        # Sep 30 is the last trading day — 3 calendar days away → should be fresh
-        assert _is_cache_fresh([{"date": "2026-09-30"}])
-
-    def test_after_long_holiday_rejects_old_cache(self, monkeypatch):
-        """FINAL-S2-004: After long holiday, old pre-holiday cache may be stale."""
-        from datetime import date
-        class FakeDate(date):
-            @classmethod
-            def today(cls):
-                return cls(2026, 10, 12)  # After holiday, new data expected
-        monkeypatch.setattr("scanner.daily_data_service.date", FakeDate)
-        # Sep 30 on Oct 12 → 12 days → should NOT be fresh
-        assert not _is_cache_fresh([{"date": "2026-09-30"}])
-
-    def test_future_date_always_rejected(self):
-        """FINAL-S2-004: Future date cache always rejected."""
-        from datetime import date, timedelta
-        future = (date.today() + timedelta(days=1)).isoformat()
-        assert not _is_cache_fresh([{"date": future}])
-
-    def test_today_cache_is_fresh(self):
-        """FINAL-S2-004: Today's cache is fresh."""
-        from datetime import date
-        today = date.today().isoformat()
-        assert _is_cache_fresh([{"date": today}])
-
-    def test_yesterday_cache_on_weekday_is_fresh(self, monkeypatch):
-        """FINAL-S2-004: Yesterday on a weekday is fresh."""
-        from datetime import date
-        # Use a Wednesday
-        class FakeDate(date):
-            @classmethod
-            def today(cls):
-                return cls(2026, 6, 10)  # Wednesday
-        monkeypatch.setattr("scanner.daily_data_service.date", FakeDate)
-        assert _is_cache_fresh([{"date": "2026-06-09"}])  # Tuesday
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

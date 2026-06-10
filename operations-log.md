@@ -94,6 +94,18 @@
 - Confirmed remaining issues in candidate terminal progress callbacks, frontend refresh/result-task restoration, long-holiday cache freshness, and current-running task list isolation.
 - Verification: targeted suites passed with 87 tests; offline suite passed with 417 tests; full suite had 421 passed and one external Yahoo Finance 429 failure; compileall, frontend build, and diff check passed.
 
+## 2026-06-10 (Strategy2 Final Acceptance Recheck)
+
+- Reviewed final fix commit `1f8e3d5` and guide commit `b427df1`; added `docs/reviews/2026-06-10-strategy2-final-acceptance-recheck.md` and a separate repair-AI prompt document.
+- Confirmed task-id API isolation, task-list isolation, candidate processed callback, frontend load ordering, route task selection, and prior strategy-window validation fixes.
+- Direct reproduction found that all-source-failed and evaluation-exception paths call `_finish_stock` with the old signature, crash the worker, and leave stocks permanently in `fetching`.
+- Direct API reproduction confirmed Strategy1 live candidate list/detail endpoints still return Strategy2 discoveries when Strategy2 is running.
+- Confirmed cache freshness is still a fixed three-calendar-day heuristic; a 2026-09-30 cache is rejected on 2026-10-08, and the Monday-after-close test is an unconditional `pass`.
+- Confirmed the production source chain still includes yfinance and retains mootdx registration despite the user-confirmed baidu/sina/tencent-only scope.
+- Verification: final-fix tests passed 26 but contain coverage gaps; targeted suites passed 87; offline suite passed 443; full suite had 446 passed and two external-network failures; compileall and frontend build passed; commit-range diff check reported one EOF whitespace issue.
+- User decision after review: remove cache fallback entirely. When all online data sources fail, both strategies must mark the stock failed and must not use local OHLC cache; trading-day/holiday freshness logic is no longer required.
+- User requirement added: failed stocks must be visible in the frontend with a clear Chinese reason, per-source errors, accurate total count, and a historical Strategy2 failure-list entry point. Strategy2 must not expose the Strategy1-only retry action.
+
 ### Commit history
 ```
 eff4597 feat(strategy2): full implementation — engine, scanner, DB, API, frontend

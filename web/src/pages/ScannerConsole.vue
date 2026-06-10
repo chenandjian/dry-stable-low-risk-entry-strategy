@@ -73,16 +73,26 @@
       />
     </div>
 
-    <div class="panel failure-panel" v-if="scanProgress.taskId && failures.length > 0">
+    <div class="panel failure-panel" v-if="scanProgress.taskId && failuresTotal > 0">
       <div class="panel-header">
-        <span>失败股票 · {{ failures.length }}</span>
-        <button class="retry-btn" :disabled="scanning" @click="handleRetryFailed">重新拉取</button>
+        <span>失败股票 · {{ failuresTotal }} <span v-if="failuresTotal > failures.length" class="page-hint">当前显示 {{ failures.length }} 只</span></span>
+        <div class="failure-header-actions">
+          <button v-if="failuresTotal > failures.length" class="load-more-btn" @click="loadMoreFailures">加载更多</button>
+          <button v-if="activeStrategyType === 'STRATEGY_1_CUP_HANDLE'" class="retry-btn" :disabled="scanning" @click="handleRetryFailed">重新拉取</button>
+        </div>
       </div>
-      <div v-for="f in failures" :key="f.code" class="failure-row">
+      <div v-for="f in failures" :key="f.code" class="failure-row" @click="toggleFailureDetail(f)">
         <span class="code">{{ f.code }}</span>
         <span>{{ f.name }}</span>
-        <span class="muted">{{ f.status_reason || f.error_detail || '--' }}</span>
+        <span class="reason">{{ reasonLabel(f.status_reason) || f.error_detail || '--' }}</span>
         <span class="muted">主源 {{ f.primary_attempts || 0 }} · 备源 {{ f.fallback_attempts || 0 }}</span>
+        <span class="expand-icon">{{ expandedFailures[f.code] ? '▾' : '▸' }}</span>
+      </div>
+      <div v-if="expandedFailures[f.code]" class="failure-detail">
+        <div><strong>错误码:</strong> {{ f.status_reason || '--' }}</div>
+        <div><strong>详情:</strong> {{ f.error_detail || '--' }}</div>
+        <div v-if="f.source_errors"><strong>数据源:</strong> {{ formatSourceErrors(f.source_errors) }}</div>
+        <div>主源: {{ f.primary_source || '--' }} · 备源: {{ f.fallback_source || '--' }}</div>
       </div>
     </div>
   </div>
@@ -155,6 +165,26 @@ const scanProgress = reactive({
 const logLines = ref([])
 const discoveries = ref([])
 const failures = ref([])
+const failuresTotal = ref(0)
+const expandedFailures = reactive({})
+const FAILURE_REASON_LABELS = {
+  ALL_DATA_SOURCES_FAILED: '所有数据源拉取失败，未使用本地缓存',
+  STRATEGY2_EVALUATION_ERROR: '策略计算失败',
+  STRATEGY2_CANDIDATE_PERSIST_FAILED: '候选结果保存失败',
+  LIQUIDITY_FILTER_REJECTED: '流动性过滤未通过',
+}
+function reasonLabel(code) {
+  return FAILURE_REASON_LABELS[code] || ''
+}
+function toggleFailureDetail(f) {
+  expandedFailures[f.code] = !expandedFailures[f.code]
+}
+function formatSourceErrors(errors) {
+  try {
+    const obj = typeof errors === 'string' ? JSON.parse(errors) : errors
+    return Object.entries(obj).map(([k, v]) => `${k}: ${v}`).join(' · ')
+  } catch { return String(errors) }
+}
 const metrics = reactive({ candidates: 0, aGrade: 0, breakout: 0, nearBreakout: 0, volumeOk: 0, topScore: 0 })
 
 const topSignalSub = computed(() => discoveries.value.filter(d => d.score >= 80).map(d => d.name).slice(0, 3).join(' · ') || '--')
@@ -336,10 +366,22 @@ async function loadResults() {
 async function loadFailures() {
   if (!scanProgress.taskId) return
   try {
-    const data = await getTaskStocks(scanProgress.taskId, { status: 'failed', page_size: 20 })
+    const data = await getTaskStocks(scanProgress.taskId, { status: 'failed', page_size: 50, page: 1 })
     failures.value = data.stocks || []
+    failuresTotal.value = data.total || 0
   } catch (e) {
     console.error('Load failures failed:', e)
+  }
+}
+async function loadMoreFailures() {
+  if (!scanProgress.taskId) return
+  try {
+    const nextPage = Math.floor(failures.value.length / 50) + 1
+    const data = await getTaskStocks(scanProgress.taskId, { status: 'failed', page_size: 50, page: nextPage })
+    if (data.stocks?.length) failures.value = [...failures.value, ...data.stocks]
+    failuresTotal.value = data.total || failuresTotal.value
+  } catch (e) {
+    console.error('Load more failures failed:', e)
   }
 }
 
@@ -461,10 +503,19 @@ onUnmounted(() => {
   color: var(--up-red); font-size: 13px;
 }
 .failure-panel { margin-top: 12px; }
+.failure-header-actions { display: flex; gap: 8px; }
+.load-more-btn { background: transparent; color: var(--text-secondary); border: 1px solid var(--border); border-radius: 4px; padding: 4px 10px; cursor: pointer; font-size: 11px; }
+.load-more-btn:hover { border-color: var(--accent); color: var(--accent); }
+.page-hint { font-weight: 400; font-size: 11px; color: var(--text-muted); }
 .retry-btn { background: transparent; color: var(--accent); border: 1px solid var(--accent); border-radius: 4px; padding: 4px 10px; cursor: pointer; }
 .retry-btn:disabled { opacity: 0.4; cursor: not-allowed; }
-.failure-row { display: grid; grid-template-columns: 90px 120px 1fr 140px; gap: 8px; padding: 8px 16px; border-top: 1px solid var(--border); font-size: 12px; }
+.failure-row { display: grid; grid-template-columns: 90px 120px 1fr 140px 30px; gap: 8px; padding: 8px 16px; border-top: 1px solid var(--border); font-size: 12px; cursor: pointer; }
+.failure-row:hover { background: #1a1a1a; }
 .failure-row .code { color: var(--accent); font-family: var(--font-mono); }
+.failure-row .reason { color: #e88; }
+.expand-icon { color: #666; text-align: center; }
+.failure-detail { padding: 10px 16px 10px 40px; background: #111; border-top: 1px solid #222; font-size: 11px; color: #aaa; line-height: 1.6; }
+.failure-detail strong { color: #ccc; }
 .muted { color: var(--text-muted); }
 .status-bar {
   display: flex; align-items: center; justify-content: flex-end; gap: 10px;

@@ -14,15 +14,13 @@ from typing import Callable
 
 import scanner.db as db
 from scanner.data_source import DataSourceManager
-from scanner.mootdx_source import fetch_mootdx_daily
 from scanner.baidu_source import fetch_baidu_daily
 from scanner.sina_source import fetch_sina_daily
 from scanner.tencent_source import fetch_tencent_daily
-from scanner.yfinance_source import fetch_yfinance_daily
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_DAILY_SOURCES = ["baidu", "sina", "tencent", "yfinance"]
+DEFAULT_DAILY_SOURCES = ["baidu", "sina", "tencent"]
 
 
 @dataclass
@@ -46,11 +44,9 @@ class FetchResult:
 def _daily_fetch_fn(ds_name: str):
     """Map data source name to fetch function."""
     fetchers = {
-        "mootdx": fetch_mootdx_daily,
         "baidu": fetch_baidu_daily,
         "sina": fetch_sina_daily,
         "tencent": fetch_tencent_daily,
-        "yfinance": fetch_yfinance_daily,
     }
     if ds_name not in fetchers:
         raise ValueError(f"Unknown daily data source: {ds_name}")
@@ -141,17 +137,7 @@ def fetch_with_retry(
                 selected_source=ds_name, selected_attempts=used_attempts,
             )
 
-    # BUG-S2-008: 全数据源失败时回退新鲜缓存
-    if cached and _is_cache_fresh(cached):
-        logger.info("%s  All sources failed, falling back to fresh cache (%d rows)", code, len(cached))
-        return FetchResult(
-            data=cached,
-            primary_source=chain[0],
-            fallback_source="cache",
-            source_errors=source_errors,
-            from_cache=True,
-        )
-
+    # ACCEPT-S2-003: All sources failed — never use cache for a new scan.
     return _build_all_failed_result(chain, source_errors)
 
 
@@ -190,32 +176,6 @@ def is_transient_source_busy(fetch_result: FetchResult) -> bool:
 def merge_data(cached: list[dict], fresh: list[dict], max_rows: int = 0) -> list[dict]:
     """合并缓存和新数据，去重按日期排序。"""
     return _merge_data(cached, fresh, max_rows)
-
-
-def _is_cache_fresh(cached: list[dict]) -> bool:
-    """检查缓存新鲜度（RECHECK-S2-002）。
-
-    规则：
-    - 未来日期 → 拒绝。
-    - 交易日收盘后或周末/节假日 → 接受最近交易日（≤3个自然日前）。
-    - 超过 3 个自然日 → 拒绝。
-    不使用固定 2 天差值。
-    """
-    if not cached:
-        return False
-    try:
-        latest_str = cached[-1].get("date", "")
-        if not latest_str:
-            return False
-        latest_date = date.fromisoformat(latest_str)
-        today = date.today()
-        # 未来日期拒绝
-        if latest_date > today:
-            return False
-        # 最近 3 个自然日内视为新鲜（覆盖周末和单日假期）
-        return (today - latest_date).days <= 3
-    except (ValueError, TypeError):
-        return False
 
 
 def encode_source_errors(source_errors: dict | None) -> str | None:

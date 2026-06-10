@@ -143,7 +143,7 @@ def scan_strategy2_all(
                         with busy_retry_lock:
                             busy_retries_by_code.pop(code, None)
                         continue
-                    _finish_stock(code, "failed",
+                    _finish_stock(code, stock_name, "failed",
                                   status_reason="ALL_DATA_SOURCES_FAILED",
                                   source_errors=encode_source_errors(fetch_result.source_errors))
                     with stats_lock:
@@ -213,7 +213,7 @@ def scan_strategy2_all(
 
             except Exception as e:
                 logger.error("Strategy2 error scanning %s: %s", code, e)
-                _finish_stock(code, "failed",
+                _finish_stock(code, stock_name, "failed",
                               status_reason="STRATEGY2_EVALUATION_ERROR",
                               error_detail=str(e))
                 with stats_lock:
