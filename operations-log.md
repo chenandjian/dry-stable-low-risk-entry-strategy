@@ -55,3 +55,27 @@
 - Confirmed product and architecture decisions with the user.
 - Added the Strategy 2 independent full-market scan development design document.
 - No strategy implementation code was changed in this phase.
+
+## 2026-06-10 (Strategy2 Development)
+
+- Implemented strategy2「极致量干价稳」independent full-market scan.
+- **Core modules** (strategy2/): models (5 dataclasses), indicators (V3-V20, percentile, range, returns), scorer (vol 50pts + price 50pts + levels), rejection (5 one-vote rules), risk (key_support/buy_zone/stop_loss/risk_ratio), engine (ExtremeDryStableStrategyEngine), scanner (multi-thread orchestrator).
+- **Shared infrastructure**: `scanner/daily_data_service.py` — extracted 4-source fetch chain with lock/retry/cache, strategy-agnostic.
+- **Database**: Added `strategy_type` to `scan_tasks` (backward-compatible), new `strategy2_candidates` table with 27 columns and 2 indexes.
+- **API**: 5 strategy2 endpoints (POST /api/strategy2/scans, GET status/tasks/candidates/candidate detail). Enhanced global scan mutex with strategyType in 409 responses.
+- **Frontend**: Strategy2Results.vue page (task selector, candidates table with level/score/risk), dual strategy buttons in ScanEngine.vue, strategy2 nav link, API composable extensions, router addition.
+- **Independence verified**: `strategy2/` never imports strategy1 pattern/analysis modules (5 test assertions).
+- Test results: **267 passed, 0 failed** (all strategy2 + strategy1 regression).
+- Frontend build: **✓ built in 1.62s** (Strategy2Results included).
+- **Config**: `config.yaml` strategy2 section with 8 parameters.
+- **Known gaps**: StrategyConfig.vue strategy2 UI section not yet added; re-evaluate/backtest/CSV export not in scope; scanner/engine.py still uses inline fetch (strategy1 stability preserved).
+
+### Commit history
+```
+eff4597 feat(strategy2): full implementation — engine, scanner, DB, API, frontend
+538c5ea test(strategy2): add independence boundary checks
+965b385 feat(strategy2): add ExtremeDryStableStrategyEngine
+b262c8b feat(strategy2): add scorer, rejection rules, and risk calculator
+68d6c26 feat(strategy2): add indicator computation module
+905f733 feat(strategy2): add data models for extreme dry-stable strategy
+```
