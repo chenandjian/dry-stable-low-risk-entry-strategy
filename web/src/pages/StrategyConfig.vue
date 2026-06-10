@@ -224,6 +224,69 @@
       </div>
     </section>
 
+    <!-- 策略2：极致量干价稳 -->
+    <section class="section strategy2-section">
+      <h3 class="section-title strategy2-title">策略2 · 极致量干价稳</h3>
+      <p class="section-hint">
+        策略2 独立扫描全部股票，不依赖杯柄/VCP 形态识别。日线拉取天数沿用全局配置；本期不支持回测。
+      </p>
+
+      <!-- 启停开关 -->
+      <div class="toggle-grid" style="margin-bottom:16px">
+        <label class="toggle-item">
+          <span class="toggle-label">启用策略2</span>
+          <button class="toggle" :class="{ active: config.strategy2?.enabled !== false }"
+            @click="toggleStrategy2('enabled')">{{ config.strategy2?.enabled !== false ? '开' : '关' }}</button>
+        </label>
+      </div>
+
+      <div class="param-grid">
+        <div class="param">
+          <label title="策略2计算仅使用最近 N 个有效交易日的数据">策略计算天数 <span class="unit">交易日</span></label>
+          <input type="number" v-model.number="config.strategy2.strategy_window_days"
+            @input="markDirty" step="10" min="60" />
+          <span class="default">默认 120 · 须 ≥ 最低有效数据天数</span>
+        </div>
+        <div class="param">
+          <label title="有效数据不足此天数时跳过该股票">最低有效数据天数 <span class="unit">交易日</span></label>
+          <input type="number" v-model.number="config.strategy2.minimum_required_days"
+            @input="markDirty" step="5" min="60" />
+          <span class="default">默认 60 · ≥ 60</span>
+        </div>
+        <div class="param">
+          <label title="总分 ≥ 此值且无否决且风险比达标才入选">候选最低分</label>
+          <input type="number" v-model.number="config.strategy2.candidate_min_score"
+            @input="markDirty" min="0" max="100" />
+          <span class="default">默认 70 · 0-100</span>
+        </div>
+        <div class="param">
+          <label title="风险比超过此值强制排除。风险比 = (收盘价 - 止损) / 收盘价">最大风险比 <span class="unit">%</span></label>
+          <input type="range" min="1" max="10" step="0.5" v-model.number="maxRiskRatioPct" @input="markDirty" />
+          <div class="range-val">{{ maxRiskRatioPct }}%</div>
+        </div>
+        <div class="param">
+          <label title="关键支撑 = 不含评估日的前 N 个交易日最低收盘价">支撑回看天数 <span class="unit">交易日</span></label>
+          <input type="number" v-model.number="config.strategy2.support_lookback_days"
+            @input="markDirty" min="2" />
+          <span class="default">默认 10 · ≥ 2</span>
+        </div>
+        <div class="param">
+          <label title="买入区间上限 = 关键支撑 × (1 + 溢价比例)">买入区间溢价 <span class="unit">%</span></label>
+          <input type="range" min="1" max="10" step="0.5" v-model.number="buyZonePremiumPct" @input="markDirty" />
+          <div class="range-val">{{ buyZonePremiumPct }}%</div>
+        </div>
+        <div class="param">
+          <label title="止损价 = 关键支撑 × (1 - 缓冲比例)">止损缓冲比例 <span class="unit">%</span></label>
+          <input type="range" min="1" max="10" step="0.5" v-model.number="stopLossBufferPct" @input="markDirty" />
+          <div class="range-val">{{ stopLossBufferPct }}%</div>
+        </div>
+      </div>
+
+      <div class="info-msg">
+        ⓘ 日线拉取天数使用全局配置 ({{ config.liquidity?.min_listing_days || '--' }} 天) · 策略2不使用杯柄/VCP判断 · 本期不支持回测
+      </div>
+    </section>
+
     <!-- Actions -->
     <div class="actions-bar">
       <div v-if="saved" class="saved-msg">✓ 配置已保存</div>
@@ -255,6 +318,11 @@ const config = reactive({
   volume_dry: { bad_shrink_max_score: 7, low_position_max_score: 7, volume_stall_max_score: 7, big_bear_max_score: 6 },
   price_stable: { close_tightness_strong_pct: 3, support_break_max_score: 5 },
   risk_reward: { atr_stop_multiplier: 1.2 },
+  strategy2: {
+    enabled: true, strategy_window_days: 120, minimum_required_days: 60,
+    candidate_min_score: 70, max_risk_ratio: 0.05, support_lookback_days: 10,
+    buy_zone_max_premium: 0.03, stop_loss_buffer: 0.03,
+  },
 })
 
 const dirty = ref(false)
@@ -301,6 +369,25 @@ const maxRiskPercent = computed({
   set: (v) => { config.decision.max_risk_percent = v },
 })
 
+// Strategy2 computed: percentage sliders
+const maxRiskRatioPct = computed({
+  get: () => Math.round((config.strategy2?.max_risk_ratio ?? 0.05) * 100),
+  set: (v) => { config.strategy2.max_risk_ratio = v / 100 },
+})
+const buyZonePremiumPct = computed({
+  get: () => Math.round((config.strategy2?.buy_zone_max_premium ?? 0.03) * 100),
+  set: (v) => { config.strategy2.buy_zone_max_premium = v / 100 },
+})
+const stopLossBufferPct = computed({
+  get: () => Math.round((config.strategy2?.stop_loss_buffer ?? 0.03) * 100),
+  set: (v) => { config.strategy2.stop_loss_buffer = v / 100 },
+})
+
+function toggleStrategy2(key) {
+  config.strategy2[key] = !config.strategy2[key]
+  markDirty()
+}
+
 const markets = [
   { key: 'include_sh', label: '沪市主板', tip: '上证主板股票，代码 60xxxx' },
   { key: 'include_sz', label: '深市主板', tip: '深证主板股票，代码 00xxxx/002xxx/003xxx' },
@@ -345,6 +432,17 @@ function validate() {
   if (dataCfg.backtest_window_days < 30) errors.push('回测分析天数最低 30天')
   if (dataCfg.scan_window_days > liq.min_listing_days) errors.push('扫描分析天数不能超过日线拉取天数')
 
+  // Strategy2 validation
+  const s2 = config.strategy2 || {}
+  if (s2.strategy_window_days < s2.minimum_required_days) errors.push('策略2: 计算天数不能小于最低有效数据天数')
+  if (s2.minimum_required_days < 60) errors.push('策略2: 最低有效数据天数 ≥ 60')
+  if (s2.strategy_window_days > (liq.min_listing_days || 250)) errors.push('策略2: 计算天数不能超过日线拉取天数')
+  if (s2.candidate_min_score < 0 || s2.candidate_min_score > 100) errors.push('策略2: 候选最低分需在 0-100')
+  if (s2.max_risk_ratio <= 0 || s2.max_risk_ratio >= 1) errors.push('策略2: 最大风险比需在 (0, 1) 之间')
+  if (s2.support_lookback_days < 2) errors.push('策略2: 支撑回看天数 ≥ 2')
+  if (s2.buy_zone_max_premium <= 0 || s2.buy_zone_max_premium > 0.2) errors.push('策略2: 买入溢价需在 (0, 20%] 之间')
+  if (s2.stop_loss_buffer <= 0 || s2.stop_loss_buffer > 0.2) errors.push('策略2: 止损缓冲需在 (0, 20%] 之间')
+
   return errors
 }
 
@@ -383,6 +481,7 @@ async function saveConfig() {
       volume_dry: { ...config.volume_dry },
       price_stable: { ...config.price_stable },
       risk_reward: { ...config.risk_reward },
+      strategy2: { ...config.strategy2 },
     }
     const res = await updateConfig(payload)
     if (res.status === 'ok') {
@@ -484,5 +583,15 @@ onMounted(async () => {
 }
 .btn-save.dirty {
   background: var(--accent); color: #fff;
+}
+
+/* Strategy2 section */
+.strategy2-section { border-color: rgba(255, 215, 0, 0.2); }
+.strategy2-title { color: #ffd700; }
+.section-hint { font-size: 12px; color: var(--text-muted); margin: -10px 0 16px; line-height: 1.5; }
+.info-msg {
+  margin-top: 16px; padding: 10px 14px; border-radius: 4px;
+  background: rgba(255, 215, 0, 0.06); border: 1px solid rgba(255, 215, 0, 0.15);
+  font-size: 12px; color: var(--text-muted); line-height: 1.5;
 }
 </style>
