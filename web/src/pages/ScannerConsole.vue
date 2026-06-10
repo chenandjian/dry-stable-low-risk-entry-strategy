@@ -69,6 +69,7 @@
         :stockPoolSource="scanProgress.stockPoolSource"
         :logLines="logLines"
         @start="handleStartScan"
+        @start-strategy2="handleStartStrategy2Scan"
       />
     </div>
 
@@ -97,7 +98,7 @@ import ScanEngine from '../components/ScanEngine.vue'
 
 const router = useRouter()
 const route = useRoute()
-const { startScan, getScanStatus, getCandidates, getTaskStocks, retryFailedStocks } = useApi()
+const { startScan, startStrategy2Scan, getScanStatus, getCandidates, getTaskStocks, retryFailedStocks } = useApi()
 
 // Market status & clock
 const currentTime = ref('')
@@ -182,7 +183,7 @@ async function handleStartScan() {
     const res = await startScan()
     if (!res.ok || res.error) {
       if (res.statusCode === 409) {
-        scanError.value = `扫描已在运行中：${res.running_task_id || '--'}`
+        scanError.value = `扫描已在运行中：${res.runningTaskId || res.running_task_id || '--'}`
       } else {
         scanError.value = res.error || '启动扫描失败'
       }
@@ -201,6 +202,34 @@ async function handleStartScan() {
   } catch (e) {
     scanError.value = '无法连接到后端服务，请确认 python main.py serve 已启动'
     console.error('Start scan failed:', e)
+  }
+}
+
+async function handleStartStrategy2Scan() {
+  scanError.value = ''
+  try {
+    const res = await startStrategy2Scan()
+    if (!res.ok || res.error) {
+      if (res.statusCode === 409) {
+        scanError.value = `策略2扫描冲突：${res.message || res.runningTaskId || '--'}`
+      } else {
+        scanError.value = res.message || res.error || '策略2启动扫描失败'
+      }
+      return
+    }
+    scanProgress.taskId = res.taskId
+    scanProgress.total = 0
+    scanProgress.stockPoolSource = ''
+    failures.value = []
+    logLines.value = []
+    lastLogScanned = 0
+    scanning.value = true
+    addLog('info', `策略2扫描启动 · taskId ${res.taskId}`)
+    if (pollTimer) clearInterval(pollTimer)
+    pollTimer = setInterval(pollStatus, 1000)
+  } catch (e) {
+    scanError.value = '无法连接到后端服务'
+    console.error('Strategy2 start scan failed:', e)
   }
 }
 

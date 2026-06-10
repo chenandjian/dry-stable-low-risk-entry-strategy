@@ -71,6 +71,7 @@ class Strategy2Evaluation:
     score_reasons: list[str] = field(default_factory=list)
     reject_reasons: list[str] = field(default_factory=list)
     risk: Strategy2Risk = None
+    current_close: float = 0.0
     status_reason: str | None = None
 
     def __post_init__(self):

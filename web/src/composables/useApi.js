@@ -77,9 +77,41 @@ export function useApi() {
     return { ...body, ok: res.ok, statusCode: res.status }
   }
 
+  // Strategy2 API
+  async function startStrategy2Scan() {
+    const res = await fetch(`${API_BASE}/strategy2/scans`, { method: 'POST' })
+    const body = await res.json()
+    return { ...body, ok: res.ok, statusCode: res.status }
+  }
+
+  async function getStrategy2ScanStatus() {
+    const res = await fetch(`${API_BASE}/strategy2/scans/status`)
+    return res.json()
+  }
+
+  async function getStrategy2Tasks() {
+    const res = await fetch(`${API_BASE}/strategy2/tasks`)
+    return res.json()
+  }
+
+  async function getStrategy2Candidates(taskId) {
+    const qs = taskId ? `?task_id=${taskId}` : ''
+    const res = await fetch(`${API_BASE}/strategy2/candidates${qs}`)
+    return res.json()
+  }
+
+  async function getStrategy2Candidate(code, taskId) {
+    const qs = taskId ? `?task_id=${taskId}` : ''
+    const res = await fetch(`${API_BASE}/strategy2/candidates/${code}${qs}`)
+    if (!res.ok) return null
+    return res.json()
+  }
+
   return {
     startScan, getScanStatus, getCandidates, getCandidate, getScanTasks,
     getTaskStocks, retryFailedStocks, reEvaluateTask, getConfig, updateConfig,
     runCupHandleBacktest,
+    startStrategy2Scan, getStrategy2ScanStatus, getStrategy2Tasks,
+    getStrategy2Candidates, getStrategy2Candidate,
   }
 }

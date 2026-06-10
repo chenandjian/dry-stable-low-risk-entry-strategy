@@ -17,8 +17,8 @@ def test_start_scan_rejects_when_db_task_running(monkeypatch, tmp_path):
     res = client.get("/api/scan/start")
 
     assert res.status_code == 409
-    assert res.json()["error"] == "Scan already running"
-    assert res.json()["running_task_id"] == "running-1"
+    assert res.json()["error"] == "SCAN_ALREADY_RUNNING"
+    assert res.json()["runningTaskId"] == "running-1"
 
 
 def test_startup_resume_failure_clears_in_memory_running_state(monkeypatch, tmp_path):

@@ -185,6 +185,7 @@ class ExtremeDryStableStrategyEngine:
             score_reasons=score.score_reasons,
             reject_reasons=reject_reasons,
             risk=risk,
+            current_close=current_close,
             status_reason=status_reason,
         )
 

@@ -16,6 +16,7 @@ import yaml
 
 import scanner.db as db
 from scanner.engine import scan_all, re_evaluate_task
+from strategy2.scanner import scan_strategy2_all
 from scanner.strategy_engine import (
     CupHandleStrategyEngine,
     resolve_strategy_windows,
@@ -117,6 +118,7 @@ app.add_middleware(
 _running = {
     "running": False,
     "task_id": None,
+    "strategy_type": None,
     "stats": {},
 }
 
@@ -131,21 +133,34 @@ def _get_running_task_id() -> str | None:
         return None
 
 
+def _get_running_strategy_type() -> str | None:
+    """Return the active scan's strategy type."""
+    if _running.get("running") and _running.get("strategy_type"):
+        return _running["strategy_type"]
+    return None
+
+
 def _scan_conflict_response():
     """Return a 409 response if any scan process is already running."""
     running_id = _get_running_task_id()
     if running_id:
         return JSONResponse(
-            {"error": "Scan already running", "running_task_id": running_id},
+            {
+                "error": "SCAN_ALREADY_RUNNING",
+                "message": "当前已有全市场扫描任务正在运行",
+                "runningTaskId": running_id,
+                "runningStrategyType": _running.get("strategy_type", "STRATEGY_1_CUP_HANDLE"),
+            },
             status_code=409,
         )
     return None
 
 
-def _set_running(task_id: str, mode: str):
+def _set_running(task_id: str, mode: str, strategy_type: str = "STRATEGY_1_CUP_HANDLE"):
     _running["running"] = True
     _running["task_id"] = task_id
     _running["mode"] = mode
+    _running["strategy_type"] = strategy_type
     _running["stats"] = {}
 
 
@@ -193,8 +208,9 @@ async def start_scan():
 
     task_id = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
     started_at = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    db.create_scan_task(task_id, started_at, total_stocks=0, retry_mode="full")
-    _set_running(task_id, "full")
+    db.create_scan_task(task_id, started_at, total_stocks=0, retry_mode="full",
+                        strategy_type="STRATEGY_1_CUP_HANDLE")
+    _set_running(task_id, "full", strategy_type="STRATEGY_1_CUP_HANDLE")
     _running["started_at"] = started_at
     _running["stats"] = {
         "total_stocks": 0,
@@ -360,12 +376,14 @@ async def scan_status():
             "running": True,
             "task_id": _running["task_id"],
             "mode": _running.get("mode", "full"),
+            "strategyType": _running.get("strategy_type", "STRATEGY_1_CUP_HANDLE"),
             "stats": {**_running.get("stats", {}), **summary},
         }
     running_id = db.get_running_task_id()
     if running_id:
-        return {"running": True, "task_id": running_id, "mode": "unknown", "stats": {}}
-    return {"running": False, "task_id": None, "stats": {}}
+        return {"running": True, "task_id": running_id, "mode": "unknown",
+                "strategyType": "STRATEGY_1_CUP_HANDLE", "stats": {}}
+    return {"running": False, "task_id": None, "strategyType": None, "stats": {}}
 
 
 @app.get("/api/scan/tasks")
@@ -793,3 +811,191 @@ async def scan_ws(websocket: WebSocket):
             })
     except WebSocketDisconnect:
         pass
+
+
+# ====== Strategy2 API ======
+
+@app.post("/api/strategy2/scans")
+async def start_strategy2_scan():
+    """启动策略2全市场扫描。"""
+    import datetime
+    from scanner.stock_pool import get_a_stock_pool_result
+
+    config = load_config()
+    db_path = config.get("data", {}).get("database_path", "data/cuphandle.db")
+    db.init_db(db_path)
+
+    strategy2_cfg = config.get("strategy2", {})
+    if not strategy2_cfg.get("enabled", True):
+        return JSONResponse(
+            {"error": "STRATEGY2_DISABLED", "message": "策略2未启用"},
+            status_code=400,
+        )
+
+    conflict = _scan_conflict_response()
+    if conflict:
+        return conflict
+
+    task_id = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+    started_at = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    db.create_scan_task(task_id, started_at, total_stocks=0, retry_mode="full",
+                        strategy_type="STRATEGY_2_EXTREME_DRY_STABLE")
+    _set_running(task_id, "full", strategy_type="STRATEGY_2_EXTREME_DRY_STABLE")
+    _running["started_at"] = started_at
+    _running["stats"] = {"total_stocks": 0, "current_code": "--", "current_name": "获取股票池中…"}
+
+    def run():
+        pool_result = get_a_stock_pool_result(config)
+        stocks = pool_result["stocks"]
+        if not stocks:
+            _running["stats"] = {"error": "No stock pool available"}
+            conn = db.get_conn()
+            conn.execute("UPDATE scan_tasks SET status='failed', error=? WHERE id=?", ("No stock pool", task_id))
+            conn.commit()
+            _clear_running()
+            return
+        db.update_scan_task_total(task_id, len(stocks), pool_result["source"])
+        db.save_task_stocks(task_id, stocks)
+        _running["stats"] = {
+            "total_stocks": len(stocks),
+            "stock_pool_source": pool_result["source"],
+            "current_code": "--",
+            "current_name": "初始化中",
+        }
+        try:
+            def on_progress(stage, current, total, detail, discovery=None):
+                stats = _running.get("stats", {})
+                if stage == "discovery" and discovery:
+                    found = stats.get("candidates_found", 0) + 1
+                    discoveries = list(stats.get("discoveries") or [])
+                    discoveries.insert(0, {
+                        "code": discovery["code"],
+                        "name": discovery["name"],
+                        "total_score": discovery["total_score"],
+                        "level": discovery["level"],
+                        "volume_dry_score": discovery["volume_dry_score"],
+                        "price_stable_score": discovery["price_stable_score"],
+                        "risk_ratio": discovery["risk_ratio"],
+                    })
+                    _running["stats"] = {**stats, "discoveries": discoveries[:20], "candidates_found": found}
+                else:
+                    code = detail.split()[0] if detail else ""
+                    s = stats.copy()
+                    s.update({
+                        "scanned": current, "processed": current, "total_stocks": total,
+                        "current_code": code,
+                        "current_name": detail[len(code):].strip() if len(detail) > len(code) else detail,
+                    })
+                    s.setdefault("candidates_found", 0)
+                    s.setdefault("skipped", 0)
+                    s.setdefault("failed", 0)
+                    _running["stats"] = s
+                db.update_scan_progress(
+                    task_id,
+                    scanned=_running["stats"].get("scanned", 0),
+                    skipped=_running["stats"].get("skipped", 0),
+                    candidates_count=_running["stats"].get("candidates_found", 0),
+                )
+
+            result = scan_strategy2_all(config, progress_callback=on_progress, task_id=task_id, stocks=stocks)
+            s = result["stats"]
+            _running["stats"] = s
+            db.finish_scan_task(
+                task_id,
+                finished_at=datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                candidates_count=s.get("candidates_found", 0),
+                elapsed_seconds=s.get("elapsed_seconds", 0),
+                scanned=s.get("scanned", 0),
+                skipped=s.get("skipped", 0),
+            )
+            db.refresh_scan_task_counts(task_id)
+        except Exception as e:
+            import traceback
+            logger.error(f"Strategy2 scan failed: {e}\n{traceback.format_exc()}")
+            _running["stats"] = {"error": str(e)}
+            conn = db.get_conn()
+            conn.execute("UPDATE scan_tasks SET status='failed', error=? WHERE id=?", (str(e), task_id))
+            conn.commit()
+        finally:
+            _clear_running()
+
+    t = threading.Thread(target=run, daemon=True)
+    t.start()
+
+    return {
+        "taskId": task_id,
+        "strategyType": "STRATEGY_2_EXTREME_DRY_STABLE",
+        "status": "running",
+    }
+
+
+@app.get("/api/strategy2/scans/status")
+async def strategy2_scan_status():
+    """查询策略2扫描状态。"""
+    if _running["running"] and _running.get("strategy_type") == "STRATEGY_2_EXTREME_DRY_STABLE":
+        summary = db.refresh_scan_task_counts(_running["task_id"]) if _running.get("task_id") else {}
+        return {
+            "running": True,
+            "taskId": _running["task_id"],
+            "strategyType": "STRATEGY_2_EXTREME_DRY_STABLE",
+            "stats": {**_running.get("stats", {}), **summary},
+        }
+    # Check DB for running strategy2 tasks
+    conn = db.get_conn()
+    row = conn.execute(
+        "SELECT id FROM scan_tasks WHERE status='running' AND strategy_type='STRATEGY_2_EXTREME_DRY_STABLE' ORDER BY started_at DESC LIMIT 1"
+    ).fetchone()
+    if row:
+        return {"running": True, "taskId": row[0], "strategyType": "STRATEGY_2_EXTREME_DRY_STABLE", "stats": {}}
+    return {"running": False, "taskId": None, "strategyType": "STRATEGY_2_EXTREME_DRY_STABLE", "stats": {}}
+
+
+@app.get("/api/strategy2/tasks")
+async def strategy2_tasks():
+    """查询策略2任务列表。"""
+    conn = db.get_conn()
+    rows = conn.execute(
+        "SELECT id, started_at, finished_at, status, total_stocks, scanned, skipped, "
+        "candidates_count, elapsed_seconds, failed_count, stock_pool_source, latest_trade_date, strategy_type "
+        "FROM scan_tasks WHERE strategy_type='STRATEGY_2_EXTREME_DRY_STABLE' ORDER BY started_at DESC"
+    ).fetchall()
+    tasks = []
+    for r in rows:
+        tasks.append({
+            "id": r[0], "date": r[1] or "", "finished_at": r[2],
+            "running": r[3] == 'running', "status": r[3],
+            "total_stocks": r[4], "scanned": r[5], "total": r[4],
+            "skipped": r[6], "candidates": r[7], "elapsed_seconds": r[8],
+            "duration": f"{r[8]:.0f}s" if r[8] is not None else None,
+            "failed": r[9], "stock_pool_source": r[10], "latest_trade_date": r[11],
+            "strategy_type": r[12] or "STRATEGY_2_EXTREME_DRY_STABLE",
+        })
+    return {"tasks": tasks}
+
+
+@app.get("/api/strategy2/candidates")
+async def strategy2_candidates(task_id: str = None):
+    """查询策略2候选列表。"""
+    config = load_config()
+    db_path = config.get("data", {}).get("database_path", "data/cuphandle.db")
+    db.init_db(db_path)
+
+    if _running["running"] and _running.get("strategy_type") == "STRATEGY_2_EXTREME_DRY_STABLE" and not task_id:
+        ds = _running.get("stats", {}).get("discoveries") or []
+        return {"candidates": ds, "total": len(ds)}
+
+    cands = db.get_strategy2_candidates(task_id=task_id)
+    return {"candidates": cands, "total": len(cands)}
+
+
+@app.get("/api/strategy2/candidates/{code}")
+async def strategy2_candidate_detail(code: str, task_id: str = None):
+    """查询策略2候选详情。"""
+    config = load_config()
+    db_path = config.get("data", {}).get("database_path", "data/cuphandle.db")
+    db.init_db(db_path)
+
+    c = db.get_strategy2_candidate(code, task_id=task_id)
+    if not c:
+        return JSONResponse({"error": "Not found"}, status_code=404)
+    return c

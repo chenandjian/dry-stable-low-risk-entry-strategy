@@ -99,3 +99,12 @@ scheduler:
   skip_if_running: true
   on_complete: log
   webhook_url: null
+strategy2:
+  enabled: true
+  strategy_window_days: 120
+  minimum_required_days: 60
+  candidate_min_score: 70
+  max_risk_ratio: 0.05
+  support_lookback_days: 10
+  buy_zone_max_premium: 0.03
+  stop_loss_buffer: 0.03
