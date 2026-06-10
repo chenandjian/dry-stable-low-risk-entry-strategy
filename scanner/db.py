@@ -426,17 +426,23 @@ def get_interrupted_task() -> dict | None:
     - User stop (cancelled)
     - Code bugs caught by the scan thread
     - Unexpected process termination
+
+    Returns dict with id, scanned, total_stocks, strategy_type.
+    NULL strategy_type → STRATEGY_1_CUP_HANDLE.
     """
     conn = get_conn()
     row = conn.execute(
-        "SELECT id, scanned, total_stocks FROM scan_tasks "
+        "SELECT id, scanned, total_stocks, strategy_type FROM scan_tasks "
         "WHERE (status='failed' OR status='cancelled') "
         "  AND finished_at IS NULL "
         "ORDER BY started_at DESC LIMIT 1"
     ).fetchone()
     if not row or row[1] >= row[2]:
         return None
-    return {"id": row[0], "scanned": row[1], "total_stocks": row[2]}
+    return {
+        "id": row[0], "scanned": row[1], "total_stocks": row[2],
+        "strategy_type": row[3] or "STRATEGY_1_CUP_HANDLE",
+    }
 
 
 def save_task_stocks(task_id: str, stocks: list[dict]):
@@ -610,6 +616,17 @@ def get_running_task_id() -> str | None:
         "SELECT id FROM scan_tasks WHERE status='running' ORDER BY started_at DESC LIMIT 1"
     ).fetchone()
     return row[0] if row else None
+
+
+def get_running_task() -> dict | None:
+    """Get the currently running scan task with strategy type, if any."""
+    conn = get_conn()
+    row = conn.execute(
+        "SELECT id, strategy_type FROM scan_tasks WHERE status='running' ORDER BY started_at DESC LIMIT 1"
+    ).fetchone()
+    if not row:
+        return None
+    return {"id": row[0], "strategy_type": row[1] or "STRATEGY_1_CUP_HANDLE"}
 
 
 # ====== Candidates ======
@@ -801,9 +818,11 @@ def get_candidates(task_id: str = None) -> list[dict]:
             "SELECT * FROM candidates WHERE task_id = ? ORDER BY score DESC", (task_id,)
         ).fetchall()
     else:
-        # Get latest completed task's candidates
+        # Get latest completed STRATEGY1 task's candidates (BUG-S2-007)
         latest = conn.execute(
-            "SELECT id FROM scan_tasks WHERE status='completed' ORDER BY started_at DESC LIMIT 1"
+            "SELECT id FROM scan_tasks WHERE status='completed' "
+            "AND (strategy_type IS NULL OR strategy_type='STRATEGY_1_CUP_HANDLE') "
+            "ORDER BY started_at DESC LIMIT 1"
         ).fetchone()
         if not latest:
             return []
@@ -927,11 +946,16 @@ def upsert_strategy2_candidate(task_id: str, d: dict):
 
 
 def get_strategy2_candidates(task_id: str = None) -> list[dict]:
-    """Get strategy2 candidates, optionally filtered by task_id."""
+    """Get strategy2 candidates, optionally filtered by task_id.
+
+    Returns JSON array fields as deserialized lists (BUG-S2-011).
+    Sorted by total_score DESC, risk_ratio ASC, code ASC (BUG-S2-011).
+    """
     conn = get_conn()
     if task_id:
         rows = conn.execute(
-            "SELECT * FROM strategy2_candidates WHERE task_id=? ORDER BY total_score DESC",
+            "SELECT * FROM strategy2_candidates WHERE task_id=? "
+            "ORDER BY total_score DESC, risk_ratio ASC, code ASC",
             (task_id,),
         ).fetchall()
     else:
@@ -941,15 +965,19 @@ def get_strategy2_candidates(task_id: str = None) -> list[dict]:
         if not latest:
             return []
         rows = conn.execute(
-            "SELECT * FROM strategy2_candidates WHERE task_id=? ORDER BY total_score DESC",
+            "SELECT * FROM strategy2_candidates WHERE task_id=? "
+            "ORDER BY total_score DESC, risk_ratio ASC, code ASC",
             (latest[0],),
         ).fetchall()
     col_names = [d[1] for d in conn.execute("PRAGMA table_info(strategy2_candidates)").fetchall()]
-    return [dict(zip(col_names, r)) for r in rows]
+    return [_deserialize_strategy2_candidate(dict(zip(col_names, r))) for r in rows]
 
 
 def get_strategy2_candidate(code: str, task_id: str = None) -> dict | None:
-    """Get single strategy2 candidate detail."""
+    """Get single strategy2 candidate detail.
+
+    Returns JSON array fields as deserialized lists (BUG-S2-011).
+    """
     conn = get_conn()
     if task_id:
         row = conn.execute(
@@ -964,4 +992,20 @@ def get_strategy2_candidate(code: str, task_id: str = None) -> dict | None:
     if not row:
         return None
     col_names = [d[1] for d in conn.execute("PRAGMA table_info(strategy2_candidates)").fetchall()]
-    return dict(zip(col_names, row))
+    return _deserialize_strategy2_candidate(dict(zip(col_names, row)))
+
+
+def _deserialize_strategy2_candidate(row: dict) -> dict:
+    """Convert JSON string fields to Python lists (BUG-S2-011)."""
+    json_fields = ("score_reasons", "reject_reasons")
+    for field in json_fields:
+        value = row.get(field)
+        if isinstance(value, str) and value:
+            try:
+                import json
+                row[field] = json.loads(value)
+            except (json.JSONDecodeError, TypeError):
+                row[field] = []
+        elif not value:
+            row[field] = []
+    return row

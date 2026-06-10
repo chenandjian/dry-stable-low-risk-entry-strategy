@@ -17,6 +17,7 @@ import yaml
 import scanner.db as db
 from scanner.engine import scan_all, re_evaluate_task
 from strategy2.scanner import scan_strategy2_all
+from strategy2.validation import resolve_strategy2_config
 from scanner.strategy_engine import (
     CupHandleStrategyEngine,
     resolve_strategy_windows,
@@ -43,52 +44,82 @@ async def lifespan(app: FastAPI):
     # 自动恢复中断的扫描
     interrupted = db.get_interrupted_task()
     if interrupted:
-        logger.info(f"Resuming interrupted scan: {interrupted['id']} at {interrupted['scanned']}/{interrupted['total_stocks']}")
+        s_type = interrupted.get("strategy_type", "STRATEGY_1_CUP_HANDLE")
+        logger.info(f"Resuming interrupted {s_type} scan: {interrupted['id']} at {interrupted['scanned']}/{interrupted['total_stocks']}")
         import threading, datetime
-        _running["running"] = True
-        _running["task_id"] = interrupted["id"]
-        _running["mode"] = "resume"
+        _set_running(interrupted["id"], "resume", strategy_type=s_type)
         _running["started_at"] = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         _running["stats"] = {
             "total_stocks": interrupted["total_stocks"],
             "current_code": "--",
             "current_name": "恢复扫描中",
         }
-        def resume_scan():
-            try:
-                def on_progress(stage, current, total, detail, discovery=None):
-                    stats = _running.get("stats", {})
-                    if stage == "discovery" and discovery:
-                        found = stats.get("candidates_found", 0) + 1
-                        discoveries = list(stats.get("discoveries") or [])
-                        discoveries.insert(0, {"code": discovery["code"], "name": discovery["name"], "score": discovery["score"]})
-                        _running["stats"] = {**stats, "discoveries": discoveries[:20], "candidates_found": found}
-                    else:
-                        code = detail.split()[0] if detail else ""
-                        _running["stats"] = {**stats, "scanned": current, "processed": current, "total_stocks": total, "current_code": code, "current_name": detail[len(code):].strip() if len(detail) > len(code) else detail}
-                result = scan_all(config, progress_callback=on_progress, resume_task_id=interrupted["id"])
-                _running["stats"] = result["stats"]
-                _running["candidates"] = result["candidates"]
-                s = result["stats"]
-                db.finish_scan_task(
-                    interrupted["id"],
-                    finished_at=datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                    candidates_count=s.get("candidates_found", 0),
-                    elapsed_seconds=s.get("elapsed_seconds", 0),
-                    scanned=s.get("scanned", 0),
-                    skipped=s.get("skipped", 0),
-                )
-                db.refresh_scan_task_counts(interrupted["id"])
-            except Exception as e:
-                import traceback
-                logger.error(f"Resume scan failed: {e}\n{traceback.format_exc()}")
-                _running["stats"] = {"error": str(e)}
-                conn = db.get_conn()
-                conn.execute("UPDATE scan_tasks SET status='failed', error=? WHERE id=?", (str(e), interrupted["id"]))
-                conn.commit()
-            finally:
-                _clear_running()
-        t = threading.Thread(target=resume_scan, daemon=True)
+
+        if s_type == "STRATEGY_2_EXTREME_DRY_STABLE":
+            # BUG-S2-001: 策略2恢复
+            def resume_s2():
+                try:
+                    pending = db.get_pending_stocks(interrupted["id"])
+                    def on_progress(stage, current, total, detail, discovery=None):
+                        stats = _running.get("stats", {})
+                        if stage == "discovery" and discovery:
+                            found = stats.get("candidates_found", 0) + 1
+                            discoveries = list(stats.get("discoveries") or [])
+                            discoveries.insert(0, {
+                                "code": discovery["code"], "name": discovery["name"],
+                                "total_score": discovery["total_score"],
+                                "level": discovery["level"],
+                                "risk_ratio": discovery["risk_ratio"],
+                            })
+                            _running["stats"] = {**stats, "discoveries": discoveries[:20], "candidates_found": found}
+                        else:
+                            code = detail.split()[0] if detail else ""
+                            _running["stats"] = {**stats, "scanned": current, "processed": current, "total_stocks": total, "current_code": code, "current_name": detail[len(code):].strip() if len(detail) > len(code) else detail}
+                    result = scan_strategy2_all(config, progress_callback=on_progress, task_id=interrupted["id"], stocks=pending)
+                    _running["stats"] = result["stats"]
+                    s = result["stats"]
+                    db.finish_scan_task(interrupted["id"], finished_at=datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"), candidates_count=s.get("candidates_found", 0), elapsed_seconds=s.get("elapsed_seconds", 0), scanned=s.get("scanned", 0), skipped=s.get("skipped", 0))
+                    db.refresh_scan_task_counts(interrupted["id"])
+                except Exception as e:
+                    import traceback
+                    logger.error(f"Strategy2 resume failed: {e}\n{traceback.format_exc()}")
+                    _running["stats"] = {"error": str(e)}
+                    conn = db.get_conn()
+                    conn.execute("UPDATE scan_tasks SET status='failed', error=? WHERE id=?", (str(e), interrupted["id"]))
+                    conn.commit()
+                finally:
+                    _clear_running()
+            t = threading.Thread(target=resume_s2, daemon=True)
+        else:
+            # 策略1 或未知类型默认策略1恢复
+            def resume_s1():
+                try:
+                    def on_progress(stage, current, total, detail, discovery=None):
+                        stats = _running.get("stats", {})
+                        if stage == "discovery" and discovery:
+                            found = stats.get("candidates_found", 0) + 1
+                            discoveries = list(stats.get("discoveries") or [])
+                            discoveries.insert(0, {"code": discovery["code"], "name": discovery["name"], "score": discovery["score"]})
+                            _running["stats"] = {**stats, "discoveries": discoveries[:20], "candidates_found": found}
+                        else:
+                            code = detail.split()[0] if detail else ""
+                            _running["stats"] = {**stats, "scanned": current, "processed": current, "total_stocks": total, "current_code": code, "current_name": detail[len(code):].strip() if len(detail) > len(code) else detail}
+                    result = scan_all(config, progress_callback=on_progress, resume_task_id=interrupted["id"])
+                    _running["stats"] = result["stats"]
+                    _running["candidates"] = result["candidates"]
+                    s = result["stats"]
+                    db.finish_scan_task(interrupted["id"], finished_at=datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"), candidates_count=s.get("candidates_found", 0), elapsed_seconds=s.get("elapsed_seconds", 0), scanned=s.get("scanned", 0), skipped=s.get("skipped", 0))
+                    db.refresh_scan_task_counts(interrupted["id"])
+                except Exception as e:
+                    import traceback
+                    logger.error(f"Resume scan failed: {e}\n{traceback.format_exc()}")
+                    _running["stats"] = {"error": str(e)}
+                    conn = db.get_conn()
+                    conn.execute("UPDATE scan_tasks SET status='failed', error=? WHERE id=?", (str(e), interrupted["id"]))
+                    conn.commit()
+                finally:
+                    _clear_running()
+            t = threading.Thread(target=resume_s1, daemon=True)
         t.start()
     logger.info(f"Database initialized at {db_path}")
 
@@ -379,10 +410,10 @@ async def scan_status():
             "strategyType": _running.get("strategy_type", "STRATEGY_1_CUP_HANDLE"),
             "stats": {**_running.get("stats", {}), **summary},
         }
-    running_id = db.get_running_task_id()
-    if running_id:
-        return {"running": True, "task_id": running_id, "mode": "unknown",
-                "strategyType": "STRATEGY_1_CUP_HANDLE", "stats": {}}
+    running_task = db.get_running_task()
+    if running_task:
+        return {"running": True, "task_id": running_task["id"], "mode": "unknown",
+                "strategyType": running_task.get("strategy_type", "STRATEGY_1_CUP_HANDLE"), "stats": {}}
     return {"running": False, "task_id": None, "strategyType": None, "stats": {}}
 
 
@@ -788,6 +819,16 @@ async def update_config(data: dict):
             status_code=400,
         )
 
+    # Validate strategy2 config before saving (BUG-S2-006)
+    if config.get("strategy2", {}).get("enabled", True):
+        try:
+            resolve_strategy2_config(config)
+        except ValueError as e:
+            return JSONResponse(
+                {"status": "error", "message": f"Invalid strategy2 config: {e}"},
+                status_code=400,
+            )
+
     # Write back to config.yaml
     with open("config.yaml", "w", encoding="utf-8") as f:
         yaml.dump(config, f, allow_unicode=True, default_flow_style=False, sort_keys=False)
@@ -829,6 +870,15 @@ async def start_strategy2_scan():
     if not strategy2_cfg.get("enabled", True):
         return JSONResponse(
             {"error": "STRATEGY2_DISABLED", "message": "策略2未启用"},
+            status_code=400,
+        )
+
+    # Validate strategy2 config before creating task (BUG-S2-006)
+    try:
+        resolve_strategy2_config(config)
+    except ValueError as e:
+        return JSONResponse(
+            {"error": "INVALID_CONFIG", "message": f"策略2配置无效: {e}"},
             status_code=400,
         )
 

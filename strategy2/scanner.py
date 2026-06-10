@@ -160,19 +160,36 @@ def scan_strategy2_all(
                 evaluation = engine.evaluate_at(data, code=code, name=stock.get("name", ""))
 
                 if evaluation.passed:
-                    with candidate_lock:
-                        candidate_by_code[code] = evaluation
+                    # BUG-S2-009: 先持久化，成功后再标记和广播
+                    discovery = _build_strategy2_discovery(evaluation, fetch_result)
+                    try:
+                        db.upsert_strategy2_candidate(task_id, discovery)
+                    except Exception as exc:
+                        logger.error(
+                            "Failed to upsert strategy2 candidate %s: %s", code, exc,
+                        )
+                        db.update_task_stock(
+                            task_id, code, status="failed",
+                            status_reason="STRATEGY2_CANDIDATE_PERSIST_FAILED",
+                            error_detail=str(exc),
+                            kline_latest_date=latest_trade_date,
+                            finished_at=_now(),
+                        )
+                        db.refresh_scan_task_counts(task_id)
+                        with stats_lock:
+                            failed_count[0] += 1
+                            skip_count[0] += 1
+                        with busy_retry_lock:
+                            busy_retries_by_code.pop(code, None)
+                        continue
+
                     db.update_task_stock(
                         task_id, code, status="candidate",
                         kline_latest_date=latest_trade_date,
                         finished_at=_now(),
                     )
-                    # upsert to strategy2_candidates
-                    try:
-                        discovery = _build_strategy2_discovery(evaluation, fetch_result)
-                        db.upsert_strategy2_candidate(task_id, discovery)
-                    except Exception as exc:
-                        logger.error("Failed to upsert strategy2 candidate %s: %s", code, exc)
+                    with candidate_lock:
+                        candidate_by_code[code] = evaluation
 
                     if progress_callback:
                         progress_callback(

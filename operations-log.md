@@ -71,6 +71,14 @@
 - **Known gaps**: re-evaluate/backtest/CSV export not in scope; scanner/engine.py still uses inline fetch (strategy1 stability preserved).
 - **Frontend config**: StrategyConfig.vue strategy2 section completed (commit `70a930a`) — 7 parameters, enable toggle, front-end validation, gold-toned visual distinction.
 
+## 2026-06-10 (Strategy2 Third-Party Code Audit)
+
+- Audited Strategy2 implementation at commit `82e337a` against `docs/superpowers/specs/2026-06-10-strategy2-extreme-dry-stable-design.md`.
+- Added `docs/reviews/2026-06-10-strategy2-code-audit-and-one-pass-fix-plan.md` with 11 evidence-backed findings and an ordered one-pass repair plan.
+- Direct reproductions confirmed that the strategy window is not applied, the first day in the recent-five-day drop window is skipped, and all-zero volume data can pass as an 80-point candidate.
+- Direct reproductions also confirmed Strategy2 interrupted tasks lose their strategy type, Strategy2 completion can hide default Strategy1 candidates, Strategy2 JSON list fields are returned as strings, and Strategy1 task IDs are silently accepted by Strategy2 candidate queries.
+- Verification: Strategy2 tests passed with 104 tests; offline suite passed with 354 tests; compileall and frontend build passed. Full suite had 356 passed and one external Dongcai connection failure.
+
 ### Commit history
 ```
 eff4597 feat(strategy2): full implementation — engine, scanner, DB, API, frontend

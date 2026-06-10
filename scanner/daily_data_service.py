@@ -140,6 +140,17 @@ def fetch_with_retry(
                 selected_source=ds_name, selected_attempts=used_attempts,
             )
 
+    # BUG-S2-008: 全数据源失败时回退新鲜缓存
+    if cached and _is_cache_fresh(cached):
+        logger.info("%s  All sources failed, falling back to fresh cache (%d rows)", code, len(cached))
+        return FetchResult(
+            data=cached,
+            primary_source=chain[0],
+            fallback_source="cache",
+            source_errors=source_errors,
+            from_cache=True,
+        )
+
     return _build_all_failed_result(chain, source_errors)
 
 
@@ -178,6 +189,23 @@ def is_transient_source_busy(fetch_result: FetchResult) -> bool:
 def merge_data(cached: list[dict], fresh: list[dict], max_rows: int = 0) -> list[dict]:
     """合并缓存和新数据，去重按日期排序。"""
     return _merge_data(cached, fresh, max_rows)
+
+
+def _is_cache_fresh(cached: list[dict]) -> bool:
+    """检查缓存是否新鲜 — 最新日期不早于两天前（允许周末/节假日间隔）。"""
+    if not cached:
+        return False
+    from datetime import datetime, timedelta
+    try:
+        latest_str = cached[-1].get("date", "")
+        if not latest_str:
+            return False
+        latest_date = datetime.strptime(latest_str, "%Y-%m-%d").date()
+        today = datetime.now().date()
+        # 缓存日期在最近 2 天内视为新鲜
+        return (today - latest_date).days <= 2
+    except (ValueError, TypeError):
+        return False
 
 
 def encode_source_errors(source_errors: dict | None) -> str | None:

@@ -35,20 +35,21 @@
           <th>股票</th>
           <th>总分</th>
           <th>等级</th>
-          <th>量干分</th>
-          <th>价稳分</th>
+          <th>量干</th>
+          <th>价稳</th>
           <th>风险比</th>
           <th>风险等级</th>
-          <th>支撑价</th>
-          <th>买入区间</th>
-          <th>止损价</th>
+          <th>支撑</th>
+          <th>止损</th>
+          <th>详情</th>
         </tr>
       </thead>
       <tbody>
         <tr v-for="c in candidates" :key="c.code"
-            :class="{ 'golden': c.total_score >= 80 }">
+            :class="{ 'golden': c.total_score >= 80, 'expanded': expandedCode === c.code }"
+            @click="toggleDetail(c)">
           <td>
-            <router-link :to="`/stock/${c.code}`">{{ c.code }}</router-link>
+            <span class="code-link">{{ c.code }}</span>
             <span class="name">{{ c.name }}</span>
           </td>
           <td class="score">{{ c.total_score }}</td>
@@ -58,8 +59,39 @@
           <td>{{ formatPct(c.risk_ratio) }}</td>
           <td>{{ c.risk_level }}</td>
           <td>{{ c.key_support?.toFixed(2) }}</td>
-          <td>{{ c.buy_zone_low?.toFixed(2) }}~{{ c.buy_zone_high?.toFixed(2) }}</td>
           <td>{{ c.stop_loss?.toFixed(2) }}</td>
+          <td class="expand-cell">▸</td>
+        </tr>
+        <!-- Detail row -->
+        <tr v-if="expandedCode === c.code" class="detail-row">
+          <td colspan="10">
+            <div class="detail-panel">
+              <div class="detail-grid">
+                <div class="detail-section">
+                  <h4>指标</h4>
+                  <div>V3: {{ fmtNum(c.v3) }} &nbsp; V5: {{ fmtNum(c.v5) }} &nbsp; V10: {{ fmtNum(c.v10) }} &nbsp; V20: {{ fmtNum(c.v20) }}</div>
+                  <div>V5/V20: {{ c.volume_ratio_5_20?.toFixed(3) }} &nbsp; 分位: {{ c.volume_percentile?.toFixed(1) }}% ({{ c.volume_percentile_days }}日)</div>
+                  <div>range_5: {{ formatPct(c.range_5) }} &nbsp; close_range_5: {{ formatPct(c.close_range_5) }}</div>
+                  <div>return_3: {{ formatPct(c.return_3) }} &nbsp; return_5: {{ formatPct(c.return_5) }}</div>
+                </div>
+                <div class="detail-section">
+                  <h4>风险</h4>
+                  <div>买入: {{ c.buy_zone_low?.toFixed(2) }} ~ {{ c.buy_zone_high?.toFixed(2) }}</div>
+                  <div>止损: {{ c.stop_loss?.toFixed(2) }} &nbsp; 风险比: {{ formatPct(c.risk_ratio) }}</div>
+                  <div>评估日: {{ c.evaluation_date }}</div>
+                </div>
+                <div class="detail-section">
+                  <h4>评分原因</h4>
+                  <div v-for="(r, i) in (c.score_reasons || [])" :key="'sr'+i" class="reason-line">✓ {{ r }}</div>
+                  <div v-if="!c.score_reasons?.length" class="muted">无评分原因</div>
+                </div>
+                <div class="detail-section" v-if="c.reject_reasons?.length">
+                  <h4>否决原因</h4>
+                  <div v-for="(r, i) in (c.reject_reasons || [])" :key="'rr'+i" class="reason-line reject">✗ {{ r }}</div>
+                </div>
+              </div>
+            </div>
+          </td>
         </tr>
       </tbody>
     </table>
@@ -79,6 +111,7 @@ export default {
       candidates: [],
       selectedTaskId: '',
       loading: false,
+      expandedCode: null,
       levels: ['终极状态', '极致量干价稳', '重点观察', '普通观察'],
     }
   },
@@ -125,6 +158,15 @@ export default {
       if (v == null) return '--'
       return (v * 100).toFixed(2) + '%'
     },
+    fmtNum(v) {
+      if (v == null) return '--'
+      if (v >= 1e6) return (v / 1e6).toFixed(2) + 'M'
+      if (v >= 1e4) return (v / 1e4).toFixed(1) + '万'
+      return v.toFixed(0)
+    },
+    toggleDetail(c) {
+      this.expandedCode = this.expandedCode === c.code ? null : c.code
+    },
   },
 }
 </script>
@@ -152,4 +194,16 @@ tr.golden { border-left: 3px solid #ffd700; }
 .level-badge { padding: 2px 8px; border-radius: 3px; font-size: 0.8rem; }
 .name { color: #888; margin-left: 8px; font-size: 0.8rem; }
 .loading { text-align: center; padding: 40px; color: #666; }
+.code-link { color: var(--accent); font-family: var(--font-mono); cursor: pointer; }
+.expand-cell { color: #666; font-size: 1.2rem; text-align: center; cursor: pointer; }
+tr.expanded { background: #1a1a2e; }
+tr.expanded .expand-cell { color: var(--accent); }
+.detail-row td { padding: 0; }
+.detail-panel { padding: 16px 20px; background: #111; border-top: 1px solid #333; }
+.detail-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.detail-section h4 { font-size: 0.8rem; color: #888; margin-bottom: 6px; text-transform: uppercase; }
+.detail-section div { font-size: 0.8rem; color: #ccc; line-height: 1.6; }
+.reason-line { font-size: 0.8rem; color: #aa8; padding: 1px 0; }
+.reason-line.reject { color: #e44; }
+.muted { color: #666; }
 </style>

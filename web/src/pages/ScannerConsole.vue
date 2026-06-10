@@ -139,6 +139,7 @@ function updateTime() {
 
 const scanning = ref(false)
 const scanError = ref('')
+const activeStrategyType = ref(null)  // BUG-S2-010: track which strategy is running
 const scanProgress = reactive({
   taskId: '',
   scanned: 0,
@@ -196,6 +197,7 @@ async function handleStartScan() {
     logLines.value = []
     lastLogScanned = 0
     scanning.value = true
+    activeStrategyType.value = 'STRATEGY_1_CUP_HANDLE'
     addLog('info', `扫描启动 · 全市场 ${scanProgress.total} 只 · 数据源 ${scanProgress.stockPoolSource || '--'}`)
     if (pollTimer) clearInterval(pollTimer)
     pollTimer = setInterval(pollStatus, 1000)
@@ -224,6 +226,7 @@ async function handleStartStrategy2Scan() {
     logLines.value = []
     lastLogScanned = 0
     scanning.value = true
+    activeStrategyType.value = 'STRATEGY_2_EXTREME_DRY_STABLE'
     addLog('info', `策略2扫描启动 · taskId ${res.taskId}`)
     if (pollTimer) clearInterval(pollTimer)
     pollTimer = setInterval(pollStatus, 1000)
@@ -264,18 +267,22 @@ async function pollStatus() {
       await loadResults()
       await loadFailures()
     }
-    // 实时更新候选发现
+    // 实时更新候选发现 (BUG-S2-010: 按策略类型映射)
     if (status.stats?.discoveries) {
+      const isS2 = activeStrategyType.value === 'STRATEGY_2_EXTREME_DRY_STABLE'
       status.stats.discoveries.forEach(d => {
         if (!discoveries.value.find(e => e.code === d.code)) {
-          discoveries.value.unshift({
+          const item = {
             code: d.code,
             name: d.name,
-            score: d.score,
-            rating: d.score >= 80 ? 'strong' : d.score >= 70 ? 'medium' : 'weak',
-            status: statusFor(d),
-            detail: formatDetail(d),
-          })
+            score: isS2 ? (d.total_score || 0) : (d.score || 0),
+            rating: '',
+            status: isS2 ? (d.level || '') : statusFor(d),
+            detail: isS2 ? `量干${d.volume_dry_score || 0} 价稳${d.price_stable_score || 0} 风险${((d.risk_ratio || 0) * 100).toFixed(1)}%` : formatDetail(d),
+          }
+          const sc = item.score
+          item.rating = sc >= 80 ? 'strong' : sc >= 70 ? 'medium' : 'weak'
+          discoveries.value.unshift(item)
         }
       })
       discoveries.value = dedupeDiscoveries(discoveries.value)
@@ -290,14 +297,17 @@ async function pollStatus() {
 
 async function loadResults() {
   try {
-    const data = await getCandidates()
+    const isS2 = activeStrategyType.value === 'STRATEGY_2_EXTREME_DRY_STABLE'
+    const data = isS2
+      ? { candidates: [] }  // Strategy2 uses its own results page, don't load here
+      : await getCandidates()
     discoveries.value = dedupeDiscoveries((data.candidates || []).map(c => ({
       code: c.code,
       name: c.name,
-      score: c.score,
-      rating: c.score >= 80 ? 'strong' : c.score >= 70 ? 'medium' : 'weak',
-      status: statusFor(c),
-      detail: formatDetail(c),
+      score: isS2 ? (c.total_score || 0) : (c.score || 0),
+      rating: isS2 ? (c.level || '') : (c.score >= 80 ? 'strong' : c.score >= 70 ? 'medium' : 'weak'),
+      status: isS2 ? (c.level || '') : statusFor(c),
+      detail: isS2 ? `量干${c.volume_dry_score || 0} 价稳${c.price_stable_score || 0} 风险${((c.risk_ratio || 0) * 100).toFixed(1)}%` : formatDetail(c),
     })))
     updateMetrics()
   } catch (e) {
