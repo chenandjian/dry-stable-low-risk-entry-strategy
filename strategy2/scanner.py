@@ -84,9 +84,9 @@ def scan_strategy2_all(
     def _now() -> str:
         return time.strftime("%Y-%m-%d %H:%M:%S")
 
-    def _finish_stock(code, status, status_reason=None, error_detail=None,
+    def _finish_stock(code, name, status, status_reason=None, error_detail=None,
                       kline_latest_date=None, source_errors=None):
-        """RECHECK-S2-006: 统一终态处理 — 更新 DB + 刷新统计 + 发送进度回调。"""
+        """FINAL-S2-002: 统一终态处理 — DB更新 + 刷新统计 + 发送 processed 进度。"""
         db.update_task_stock(
             task_id, code, status=status,
             status_reason=status_reason,
@@ -101,7 +101,7 @@ def scan_strategy2_all(
                 "scanning",
                 summary["processed"],
                 summary["total_stocks"],
-                f"{code} {stock.get('name', '')}",
+                f"{code} {name}",
             )
 
     def worker(thread_name: str):
@@ -112,6 +112,7 @@ def scan_strategy2_all(
                 break
 
             code = stock["code"]
+            stock_name = stock.get("name", "")
             try:
                 db.update_task_stock(
                     task_id, code, status="fetching",
@@ -134,7 +135,7 @@ def scan_strategy2_all(
                             stock_queue.put(stock)
                             time.sleep(0.1)
                             continue
-                        _finish_stock(code, "failed",
+                        _finish_stock(code, stock_name, "failed",
                                        status_reason="数据源忙，超过重试次数")
                         with stats_lock:
                             failed_count[0] += 1
@@ -156,7 +157,7 @@ def scan_strategy2_all(
 
                 # 全局流动性过滤
                 if not passes_liquidity_filter(data, liquidity_cfg):
-                    _finish_stock(code, "skipped",
+                    _finish_stock(code, stock_name, "skipped",
                                   status_reason="LIQUIDITY_FILTER_REJECTED",
                                   kline_latest_date=latest_trade_date)
                     with stats_lock:
@@ -169,7 +170,7 @@ def scan_strategy2_all(
                 evaluation = engine.evaluate_at(data, code=code, name=stock.get("name", ""))
 
                 if evaluation.passed:
-                    # BUG-S2-009: 先持久化，成功后再标记和广播
+                    # FINAL-S2-002: 持久化 → 内存候选 → _finish_stock (processed) → discovery
                     discovery = _build_strategy2_discovery(evaluation, fetch_result)
                     try:
                         db.upsert_strategy2_candidate(task_id, discovery)
@@ -177,7 +178,7 @@ def scan_strategy2_all(
                         logger.error(
                             "Failed to upsert strategy2 candidate %s: %s", code, exc,
                         )
-                        _finish_stock(code, "failed",
+                        _finish_stock(code, stock_name, "failed",
                                       status_reason="STRATEGY2_CANDIDATE_PERSIST_FAILED",
                                       error_detail=str(exc),
                                       kline_latest_date=latest_trade_date)
@@ -188,13 +189,11 @@ def scan_strategy2_all(
                             busy_retries_by_code.pop(code, None)
                         continue
 
-                    db.update_task_stock(
-                        task_id, code, status="candidate",
-                        kline_latest_date=latest_trade_date,
-                        finished_at=_now(),
-                    )
                     with candidate_lock:
                         candidate_by_code[code] = evaluation
+
+                    _finish_stock(code, stock_name, "candidate",
+                                  kline_latest_date=latest_trade_date)
 
                     if progress_callback:
                         progress_callback(
@@ -203,7 +202,7 @@ def scan_strategy2_all(
                             discovery,
                         )
                 else:
-                    _finish_stock(code, "scanned",
+                    _finish_stock(code, stock_name, "scanned",
                                   status_reason=evaluation.status_reason,
                                   kline_latest_date=latest_trade_date)
 

@@ -86,6 +86,14 @@
 - Direct reproductions found seven remaining issues: Strategy2 frontend refresh/detail runtime failures, future cache accepted as fresh, incomplete task/API isolation, invalid prefix data still affecting the strategy window, missing scanner/unknown-task final defenses, missing terminal progress callbacks, and non-date strings accepted as valid dates.
 - Verification: targeted suites passed with 78 tests; offline suite passed with 396 tests; full suite had 400 passed and one external Dongcai connection failure; compileall and frontend build passed. Commit diff check fails on one trailing whitespace line in the prior audit document.
 
+## 2026-06-10 (Strategy2 Final Fix Recheck)
+
+- Rechecked fix commit `d20dc4b` against `136e48f` and added `docs/reviews/2026-06-10-strategy2-final-fix-recheck.md`.
+- Confirmed fixes for strategy-window validation, ISO date validation, unknown interrupted-task rejection, and several Strategy2 API isolation paths.
+- Direct API reproduction confirmed that a Strategy2 failed task is still accepted by the generic retry endpoint and is incorrectly marked/routed as `STRATEGY_1_CUP_HANDLE`; Strategy2 tasks are also accepted by Strategy1 re-evaluate and candidate endpoints.
+- Confirmed remaining issues in candidate terminal progress callbacks, frontend refresh/result-task restoration, long-holiday cache freshness, and current-running task list isolation.
+- Verification: targeted suites passed with 87 tests; offline suite passed with 417 tests; full suite had 421 passed and one external Yahoo Finance 429 failure; compileall, frontend build, and diff check passed.
+
 ### Commit history
 ```
 eff4597 feat(strategy2): full implementation — engine, scanner, DB, API, frontend

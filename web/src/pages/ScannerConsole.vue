@@ -402,26 +402,28 @@ function updateMetrics() {
 }
 
 onMounted(async () => {
-  // If navigated from TaskCenter with ?task=..., load failures for that task
+  // FINAL-S2-003: Get status first to know which strategy is running
   const queryTaskId = route.query.task
   if (queryTaskId) {
     scanProgress.taskId = queryTaskId
-    await loadFailures()
   }
 
-  await loadResults()
-  // Check if a scan is already running
   try {
     const status = await getScanStatus()
     applyStats(status)
+    // Restore strategy type before loading results
+    if (status.strategyType) {
+      activeStrategyType.value = status.strategyType
+    }
     if (status.running) {
       scanning.value = true
       pollTimer = setInterval(pollStatus, 1000)
     }
-    if (!queryTaskId) {
-      await loadFailures()
-    }
+    await loadFailures()
   } catch (e) { console.error('Check status on mount failed:', e) }
+
+  // Load results AFTER strategy type is known
+  await loadResults()
   updateTime()
   clockTimer = setInterval(updateTime, 1000)
 })

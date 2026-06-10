@@ -212,6 +212,33 @@ def _clear_running():
     _running["started_at"] = None
 
 
+def _require_task_strategy(task_id: str, expected: str):
+    """FINAL-S2-001: 统一任务类型校验。所有绑定策略的接口必须复用。
+
+    Returns:
+        (actual_type, None) on match, or (None, error_response) on mismatch.
+    """
+    if not task_id:
+        return None, None
+    actual = db.get_task_strategy_type(task_id)
+    if actual is None:
+        return None, JSONResponse(
+            {"error": "TASK_NOT_FOUND", "task_id": task_id},
+            status_code=404,
+        )
+    if actual != expected:
+        return None, JSONResponse(
+            {
+                "error": "TASK_STRATEGY_MISMATCH",
+                "task_id": task_id,
+                "expected_strategy_type": expected,
+                "actual_strategy_type": actual,
+            },
+            status_code=400,
+        )
+    return actual, None
+
+
 def load_config(path: str = "config.yaml") -> dict:
     with open(path, "r", encoding="utf-8") as f:
         return yaml.safe_load(f)
@@ -430,9 +457,10 @@ async def scan_status():
 
 @app.get("/api/scan/tasks")
 async def list_tasks():
+    """FINAL-S2-005: Strategy1 task list — only S1 running + S1 DB tasks."""
     tasks = []
-    # Include current scan if running
-    if _running["running"]:
+    # Only include running S1 task
+    if _running["running"] and _running.get("strategy_type") == "STRATEGY_1_CUP_HANDLE":
         s = _running.get("stats", {})
         tasks.append({
             "id": _running.get("task_id", "current"),
@@ -448,9 +476,9 @@ async def list_tasks():
             "stock_pool_source": s.get("stock_pool_source", ""),
             "latest_trade_date": s.get("latest_trade_date", ""),
             "duration": "",
+            "strategy_type": "STRATEGY_1_CUP_HANDLE",
         })
     # Add completed scans from DB (skip the running one already added above)
-    # RECHECK-S2-003: default to strategy1 only
     running_id = _running.get("task_id") if _running["running"] else None
     db_tasks = db.get_scan_tasks(strategy_type="STRATEGY_1_CUP_HANDLE")
     for t in db_tasks:
@@ -487,9 +515,14 @@ async def get_task_stocks(task_id: str, status: str = None, page: int = 1, page_
 
 @app.post("/api/scan/tasks/{task_id}/retry-failed")
 async def retry_failed_stocks(task_id: str):
+    """FINAL-S2-001: 只接受 Strategy1 任务。Strategy2 返回明确错误。"""
     config = load_config()
     db_path = config.get("data", {}).get("database_path", "data/cuphandle.db")
     db.init_db(db_path)
+
+    _, type_err = _require_task_strategy(task_id, "STRATEGY_1_CUP_HANDLE")
+    if type_err is not None:
+        return type_err
 
     conflict = _scan_conflict_response()
     if conflict:
@@ -536,10 +569,17 @@ async def retry_failed_stocks(task_id: str):
 
 @app.post("/api/scan/tasks/{task_id}/re-evaluate")
 async def re_evaluate_task_endpoint(task_id: str):
-    """Re-run strategy evaluation on existing OHLC data without re-fetching."""
+    """Re-run strategy evaluation on existing OHLC data.
+
+    FINAL-S2-001: 只接受 Strategy1 任务。Strategy2 重评不在本期范围。
+    """
     config = load_config()
     db_path = config.get("data", {}).get("database_path", "data/cuphandle.db")
     db.init_db(db_path)
+
+    _, type_err = _require_task_strategy(task_id, "STRATEGY_1_CUP_HANDLE")
+    if type_err is not None:
+        return type_err
 
     conn = db.get_conn()
     task = conn.execute("SELECT id FROM scan_tasks WHERE id=?", (task_id,)).fetchone()
@@ -579,9 +619,16 @@ async def re_evaluate_task_endpoint(task_id: str):
 
 @app.get("/api/candidates")
 async def get_candidates(task_id: str = None):
+    """FINAL-S2-001: 如果指定 task_id，只接受 Strategy1。"""
     config = load_config()
     db_path = config.get("data", {}).get("database_path", "data/cuphandle.db")
     db.init_db(db_path)
+
+    if task_id:
+        _, type_err = _require_task_strategy(task_id, "STRATEGY_1_CUP_HANDLE")
+        if type_err is not None:
+            return type_err
+
     # If a specific task is requested, always query DB
     if task_id:
         cands = db.get_candidates(task_id=task_id)
@@ -1014,15 +1061,35 @@ async def strategy2_scan_status():
 
 @app.get("/api/strategy2/tasks")
 async def strategy2_tasks():
-    """查询策略2任务列表。"""
+    """查询策略2任务列表（FINAL-S2-005: 隔离S1运行中任务）。"""
+    tasks = []
+    # Only include running S2 task
+    if _running["running"] and _running.get("strategy_type") == "STRATEGY_2_EXTREME_DRY_STABLE":
+        s = _running.get("stats", {})
+        tasks.append({
+            "id": _running.get("task_id", "current"),
+            "date": _running.get("started_at", ""),
+            "scope": f"全市场 · {s.get('total_stocks', '--')}只",
+            "running": True,
+            "status": "running",
+            "candidates": s.get("candidates_found", 0),
+            "total": s.get("total_stocks", 0),
+            "scanned": s.get("scanned", 0),
+            "skipped": s.get("skipped", 0),
+            "failed": s.get("failed", 0),
+            "strategy_type": "STRATEGY_2_EXTREME_DRY_STABLE",
+        })
+
+    running_id = _running.get("task_id") if _running["running"] else None
     conn = db.get_conn()
     rows = conn.execute(
         "SELECT id, started_at, finished_at, status, total_stocks, scanned, skipped, "
         "candidates_count, elapsed_seconds, failed_count, stock_pool_source, latest_trade_date, strategy_type "
         "FROM scan_tasks WHERE strategy_type='STRATEGY_2_EXTREME_DRY_STABLE' ORDER BY started_at DESC"
     ).fetchall()
-    tasks = []
     for r in rows:
+        if r[0] == running_id:
+            continue
         tasks.append({
             "id": r[0], "date": r[1] or "", "finished_at": r[2],
             "running": r[3] == 'running', "status": r[3],

@@ -128,6 +128,12 @@ export default {
     } catch (e) {
       console.error('Failed to load strategy2 tasks:', e)
     }
+    // FINAL-S2-003: Auto-select task from query parameter
+    const queryTaskId = this.$route.query.task
+    if (queryTaskId && this.tasks.some(t => t.id === queryTaskId)) {
+      this.selectedTaskId = queryTaskId
+      await this.loadCandidates()
+    }
   },
   methods: {
     async loadCandidates() {
