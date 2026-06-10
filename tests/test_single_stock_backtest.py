@@ -386,3 +386,187 @@ def test_run_backtest_includes_specified_handle_diagnosis(monkeypatch, tmp_path)
     assert diagnosis_windows == [(12, "2025-01-10", "2025-01-12")]
     assert result["specifiedDiagnosis"] == {"passed": True, "matchedPatternId": "p1"}
 
+
+def test_vcp_identity_stable_across_adjacent_detection_days(monkeypatch, tmp_path):
+    """ROUND5-004: Adjacent VCP windows produce identical patternId and identity."""
+    from analyzer.pattern_score import _find_vcp_contractions
+
+    db_path = tmp_path / "cuphandle.db"
+    db.init_db(str(db_path))
+    # VCP data: uptrend → 3 contractions → recovery (decreasing depth, decreasing volume)
+    dates = _make_vcp_3ct_data(300)
+
+    config = {
+        "data": {"database_path": str(db_path), "backtest_window_days": 250},
+        "cup": {"max_duration": 60}, "handle": {"max_duration": 20},
+        "breakout": {}, "scoring": {"medium_threshold": 70},
+        "output": {"output_dir": str(tmp_path / "output_data")},
+    }
+    engine = single_stock_backtest.CupHandleStrategyEngine(config)
+
+    window_a = dates[:250]
+    window_b = dates[:251]
+
+    # Unconditional: both windows must produce >= 2 contractions
+    ca = _find_vcp_contractions(window_a)
+    cb = _find_vcp_contractions(window_b)
+    assert len(ca) >= 2, f"Window A must have >= 2 contractions, got {len(ca)}"
+    assert len(cb) >= 2, f"Window B must have >= 2 contractions, got {len(cb)}"
+
+    ev_a = engine.evaluate_at(window_a, code="600000", name="test")
+    ev_b = engine.evaluate_at(window_b, code="600000", name="test")
+
+    entry_a = single_stock_backtest._build_pattern_entry("600000", ev_a, window_a)
+    entry_b = single_stock_backtest._build_pattern_entry("600000", ev_b, window_b)
+
+    # Unconditional: same VCP → identical identity
+    assert entry_a["patternId"] == entry_b["patternId"], \
+        f"Adjacent windows must produce same patternId: {entry_a['patternId']} vs {entry_b['patternId']}"
+    assert single_stock_backtest._pattern_identity(entry_a) == single_stock_backtest._pattern_identity(entry_b)
+    assert entry_a["vcpStartDate"] == entry_b["vcpStartDate"]
+    assert entry_a["vcpEndDate"] == entry_b["vcpEndDate"]
+
+
+def _make_vcp_3ct_data(n):
+    """Return n rows of VCP-like data with 3 contractions near the end."""
+    base = 10.0
+    rows = []
+    # Place 3 contractions so they end within last 120 days for n >= 200
+    c_start = max(60, n - 140)  # contractions span c_start..c_start+100
+    for i in range(n):
+        t = i - c_start
+        if t < 0:
+            close = base + i * 0.03
+        elif t < 20:
+            close = base + 5.0 - t * 0.08  # pullback 1
+        elif t < 40:
+            close = base + 3.4 + (t - 20) * 0.04  # recovery 1
+        elif t < 55:
+            close = base + 4.2 - (t - 40) * 0.06  # pullback 2
+        elif t < 70:
+            close = base + 3.3 + (t - 55) * 0.04  # recovery 2
+        elif t < 90:
+            close = base + 3.9 - (t - 70) * 0.04  # pullback 3 (least deep)
+        else:
+            close = base + 3.1 + (t - 90) * 0.02  # final recovery
+        d = i + 1
+        month = (d - 1) // 28 + 1
+        dom = (d - 1) % 28 + 1
+        rows.append({
+            "date": f"2025-{month:02d}-{dom:02d}",
+            "open": close - 0.1, "high": close + 0.3, "low": close - 0.3,
+            "close": close, "volume": 1_000_000 - (i % 50) * 10_000,
+            "turnover": close * (1_000_000 - (i % 50) * 10_000),
+        })
+    return rows
+
+
+def _make_vcp_2ct_data(n):
+    """Return n rows of VCP-like data with 2 contractions near the end."""
+    base = 10.0
+    rows = []
+    # Place 2 contractions so they end within last 120 days
+    c_start = max(60, n - 100)
+    for i in range(n):
+        t = i - c_start
+        if t < 0:
+            close = base + i * 0.03
+        elif t < 20:
+            close = base + 4.8 - t * 0.07  # pullback 1
+        elif t < 35:
+            close = base + 3.4 + (t - 20) * 0.04  # recovery 1
+        elif t < 55:
+            close = base + 4.0 - (t - 35) * 0.05  # pullback 2
+        else:
+            close = base + 3.0 + (t - 55) * 0.015  # final recovery
+        d = i + 1
+        month = (d - 1) // 28 + 1
+        dom = (d - 1) % 28 + 1
+        rows.append({
+            "date": f"2025-{month:02d}-{dom:02d}",
+            "open": close - 0.1, "high": close + 0.3, "low": close - 0.3,
+            "close": close, "volume": 1_000_000 - (i % 40) * 8_000,
+            "turnover": close * (1_000_000 - (i % 40) * 8_000),
+        })
+    return rows
+
+
+def test_vcp_identity_differs_for_different_structures(monkeypatch, tmp_path):
+    """ROUND5-004: Two structurally different VCPs produce different identities."""
+    from analyzer.pattern_score import _find_vcp_contractions
+
+    db_path = tmp_path / "cuphandle.db"
+    db.init_db(str(db_path))
+
+    dates1 = _make_vcp_3ct_data(260)
+    dates2 = _make_vcp_2ct_data(300)
+
+    config = {
+        "data": {"database_path": str(db_path), "backtest_window_days": 250},
+        "cup": {"max_duration": 60}, "handle": {"max_duration": 20},
+        "breakout": {}, "scoring": {"medium_threshold": 70},
+        "output": {"output_dir": str(tmp_path / "output_data")},
+    }
+    engine = single_stock_backtest.CupHandleStrategyEngine(config)
+
+    # Unconditional: both datasets must produce contractions
+    c1 = _find_vcp_contractions(dates1)
+    c2 = _find_vcp_contractions(dates2)
+    assert len(c1) >= 2, f"Dataset 1 must have >= 2 contractions, got {len(c1)}"
+    assert len(c2) >= 2, f"Dataset 2 must have >= 2 contractions, got {len(c2)}"
+
+    ev1 = engine.evaluate_at(dates1, code="600000", name="test")
+    ev2 = engine.evaluate_at(dates2, code="000001", name="test")
+
+    entry1 = single_stock_backtest._build_pattern_entry("600000", ev1, dates1)
+    entry2 = single_stock_backtest._build_pattern_entry("000001", ev2, dates2)
+
+    # Unconditional: different structures → different identities
+    assert entry1["patternId"] != entry2["patternId"], \
+        f"Different VCP structures must have different patternIds: {entry1['patternId']} == {entry2['patternId']}"
+    assert single_stock_backtest._pattern_identity(entry1) != single_stock_backtest._pattern_identity(entry2)
+
+
+def test_vcp_identity_uses_real_contraction_dates_not_window_bounds(monkeypatch, tmp_path):
+    """ROUND5-004: vcpStartDate/vcpEndDate come from contraction structures, not window bounds."""
+    from analyzer.pattern_score import _find_vcp_contractions
+
+    db_path = tmp_path / "cuphandle.db"
+    db.init_db(str(db_path))
+    dates = _make_vcp_3ct_data(260)
+    db.save_ohlc("600000", dates)
+
+    window_a = dates[:250]
+    window_b = dates[:251]
+
+    contractions_a = _find_vcp_contractions(window_a)
+    contractions_b = _find_vcp_contractions(window_b)
+
+    # GUARD: test data must produce VCP contractions
+    assert len(contractions_a) >= 2, \
+        f"Window A must produce >= 2 VCP contractions, got {len(contractions_a)}"
+    assert len(contractions_b) >= 2, \
+        f"Window B must produce >= 2 VCP contractions, got {len(contractions_b)}"
+
+    # The start date is from first contraction's high_idx, not window[0]
+    date_a_start = window_a[contractions_a[0]["high_idx"]]["date"]
+    date_b_start = window_b[contractions_b[0]["high_idx"]]["date"]
+    assert date_a_start != window_a[0]["date"], \
+        f"vcpStartDate ({date_a_start}) should not equal window[0] ({window_a[0]['date']})"
+    assert date_b_start != window_b[0]["date"], \
+        f"vcpStartDate ({date_b_start}) should not equal window[0] ({window_b[0]['date']})"
+
+    # The end date is from last contraction's low_idx, not window[-1]
+    date_a_end = window_a[contractions_a[-1]["low_idx"]]["date"]
+    date_b_end = window_b[contractions_b[-1]["low_idx"]]["date"]
+    assert date_a_end != window_a[-1]["date"], \
+        f"vcpEndDate ({date_a_end}) should not equal window[-1] ({window_a[-1]['date']})"
+    assert date_b_end != window_b[-1]["date"], \
+        f"vcpEndDate ({date_b_end}) should not equal window[-1] ({window_b[-1]['date']})"
+
+    # Adjacent windows should produce the same contraction dates
+    assert date_a_start == date_b_start, \
+        f"Adjacent windows should have same vcpStartDate: {date_a_start} vs {date_b_start}"
+    assert date_a_end == date_b_end, \
+        f"Adjacent windows should have same vcpEndDate: {date_a_end} vs {date_b_end}"
+

@@ -493,6 +493,319 @@ def test_normalize_source_chain_deduplicates_primary_and_preserves_order():
     assert engine._normalize_source_chain(["sina", "baidu", "sina", "tencent", "baidu"], "sina") == ["sina", "baidu", "tencent"]
 
 
+def test_all_sources_fail_backfills_compatibility_fields(monkeypatch, tmp_path):
+    """ROUND4-002: When all sources fail, primary_attempts/error are backfilled from source_errors."""
+    db.init_db(str(tmp_path / "cuphandle.db"))
+
+    def fake_fetch_fails(code, days=250):
+        raise RuntimeError("timeout")
+
+    monkeypatch.setattr(engine, "fetch_baidu_daily", fake_fetch_fails, raising=False)
+    monkeypatch.setattr(engine, "fetch_sina_daily", fake_fetch_fails)
+    monkeypatch.setattr(engine, "fetch_tencent_daily", lambda code, days=250: None)
+
+    result = engine._fetch_with_retry(
+        "600000", "baidu",
+        retry_attempts=2, fallback_attempts=3,
+        sleep_fn=lambda _: None,
+        source_chain=["baidu", "sina", "tencent"],
+    )
+
+    assert result.data is None
+    # Compatibility fields should be backfilled
+    assert result.primary_attempts > 0, f"primary_attempts should >0, got {result.primary_attempts}"
+    assert result.primary_error is not None
+    assert "timeout" in result.primary_error
+    assert result.fallback_attempts > 0
+    assert result.fallback_error is not None
+    # source_errors should still have all three entries
+    assert len(result.source_errors) == 3
+
+
+def test_all_sources_busy_backfills_primary_error(monkeypatch, tmp_path):
+    """ROUND4-002: When all sources are busy, primary_error indicates 'data source busy'."""
+    db.init_db(str(tmp_path / "cuphandle.db"))
+    mgr = FakeManager({"baidu": False, "sina": False, "tencent": False})
+
+    monkeypatch.setattr(engine, "fetch_baidu_daily", lambda code, days=250: [_row("2026-06-04", close=12.0)], raising=False)
+    monkeypatch.setattr(engine, "fetch_sina_daily", lambda code, days=250: [_row("2026-06-04", close=13.0)])
+    monkeypatch.setattr(engine, "fetch_tencent_daily", lambda code, days=250: [_row("2026-06-04", close=14.0)])
+
+    result = engine._fetch_with_retry(
+        "600000", "baidu",
+        retry_attempts=1, fallback_attempts=1,
+        sleep_fn=lambda _: None, mgr=mgr,
+        source_chain=["baidu", "sina", "tencent"],
+    )
+
+    assert result.data is None
+    assert result.primary_error == "data source busy"
+    assert result.fallback_error == "data source busy"
+    assert engine._is_transient_source_busy(result) is True
+
+
+def test_source_errors_includes_busy_sources(monkeypatch, tmp_path):
+    """ROUND3-005: Source busy recorded as 'busy' in source_errors dict."""
+    import json
+    db.init_db(str(tmp_path / "cuphandle.db"))
+    mgr = FakeManager({"baidu": False, "sina": False, "tencent": False})  # all busy
+
+    monkeypatch.setattr(engine, "fetch_baidu_daily", lambda code, days=250: [_row("2026-06-04", close=12.0)], raising=False)
+    monkeypatch.setattr(engine, "fetch_sina_daily", lambda code, days=250: [_row("2026-06-04", close=13.0)])
+    monkeypatch.setattr(engine, "fetch_tencent_daily", lambda code, days=250: [_row("2026-06-04", close=14.0)])
+
+    result = engine._fetch_with_retry(
+        "600000", "baidu",
+        retry_attempts=1, fallback_attempts=1,
+        sleep_fn=lambda _: None, mgr=mgr,
+        source_chain=["baidu", "sina", "tencent"],
+    )
+
+    assert result.data is None
+    assert result.source_errors == {"baidu": "busy", "sina": "busy", "tencent": "busy"}
+    # Verify JSON encoding
+    encoded = engine._encode_source_errors(result.source_errors)
+    parsed = json.loads(encoded)
+    assert parsed == {"baidu": "busy", "sina": "busy", "tencent": "busy"}
+
+
+# ---- ROUND5-002/003: source compatibility field test matrix ----
+
+
+def _fr(**kw):
+    """Shorthand: FetchResult with defaults for testing."""
+    defaults = dict(data=None, primary_source="", fallback_source="", source_errors={})
+    defaults.update(kw)
+    return engine.FetchResult(**defaults)
+
+
+def test_compat_primary_first_try_succeeds(monkeypatch, tmp_path):
+    """ROUND5-002: primary source succeeds on first try — correct compat fields."""
+    db.init_db(str(tmp_path / "cuphandle.db"))
+    monkeypatch.setattr(engine, "fetch_sina_daily", lambda code, days=250: [_row("2026-06-04", close=10.0)])
+    monkeypatch.setattr(engine, "fetch_tencent_daily", lambda code, days=250: None)
+
+    result = engine._fetch_with_retry(
+        "600000", "sina", retry_attempts=2, fallback_attempts=3,
+        sleep_fn=lambda _: None, source_chain=["sina", "tencent"],
+    )
+
+    assert result.data is not None
+    assert result.primary_source == "sina"
+    assert result.primary_attempts == 1
+    assert result.primary_error is None
+    assert result.fallback_source == "sina"
+    assert result.fallback_attempts == 0
+    assert result.fallback_error is None
+    assert result.source_errors == {}
+
+
+def test_compat_primary_fails_fallback_succeeds(monkeypatch, tmp_path):
+    """ROUND5-002: primary fails, fallback succeeds — primary errors backfilled."""
+    db.init_db(str(tmp_path / "cuphandle.db"))
+
+    def fail_then_succeed(code, days=250):
+        raise RuntimeError("timeout")
+
+    monkeypatch.setattr(engine, "fetch_baidu_daily", fail_then_succeed, raising=False)
+    monkeypatch.setattr(engine, "fetch_sina_daily", lambda code, days=250: [_row("2026-06-04", close=13.0)])
+    monkeypatch.setattr(engine, "fetch_tencent_daily", lambda code, days=250: None)
+
+    result = engine._fetch_with_retry(
+        "600000", "baidu", retry_attempts=2, fallback_attempts=3,
+        sleep_fn=lambda _: None, source_chain=["baidu", "sina", "tencent"],
+    )
+
+    assert result.data is not None
+    assert result.primary_source == "baidu"
+    assert result.primary_attempts == 2
+    assert result.primary_error == "timeout"
+    assert result.fallback_source == "sina"
+    assert result.fallback_attempts == 1
+    assert result.fallback_error is None  # success
+    assert "baidu" in result.source_errors
+    assert "timeout" in result.source_errors["baidu"]
+
+
+def test_compat_primary_busy_fallback_succeeds(monkeypatch, tmp_path):
+    """ROUND5-002: primary busy, fallback succeeds — primary_error='data source busy'."""
+    db.init_db(str(tmp_path / "cuphandle.db"))
+    mgr = FakeManager({"baidu": False, "sina": True})
+
+    monkeypatch.setattr(engine, "fetch_baidu_daily", lambda code, days=250: [_row("2026-06-04", close=12.0)], raising=False)
+    monkeypatch.setattr(engine, "fetch_sina_daily", lambda code, days=250: [_row("2026-06-04", close=13.0)])
+    monkeypatch.setattr(engine, "fetch_tencent_daily", lambda code, days=250: None)
+
+    result = engine._fetch_with_retry(
+        "600000", "baidu", retry_attempts=1, fallback_attempts=1,
+        sleep_fn=lambda _: None, mgr=mgr,
+        source_chain=["baidu", "sina", "tencent"],
+    )
+
+    assert result.data is not None
+    assert result.primary_source == "baidu"
+    assert result.primary_attempts == 0  # busy — no network attempt
+    assert result.primary_error == "data source busy"
+    assert result.fallback_source == "sina"
+    assert result.fallback_error is None
+    assert result.source_errors == {"baidu": "busy"}
+
+
+def test_compat_two_fail_third_succeeds(monkeypatch, tmp_path):
+    """ROUND5-003: two fail, third succeeds — fallback points to third (success)."""
+    db.init_db(str(tmp_path / "cuphandle.db"))
+
+    monkeypatch.setattr(engine, "fetch_baidu_daily", lambda code, days=250: None, raising=False)
+    def fail_sina(code, days=250):
+        raise RuntimeError("sina timeout")
+    monkeypatch.setattr(engine, "fetch_sina_daily", fail_sina)
+    monkeypatch.setattr(engine, "fetch_tencent_daily", lambda code, days=250: [_row("2026-06-04", close=14.0)])
+
+    result = engine._fetch_with_retry(
+        "600000", "baidu", retry_attempts=2, fallback_attempts=2,
+        sleep_fn=lambda _: None, source_chain=["baidu", "sina", "tencent"],
+    )
+
+    assert result.data is not None
+    assert result.primary_source == "baidu"
+    assert result.primary_error is not None
+    assert result.fallback_source == "tencent"
+    assert result.fallback_attempts == 1
+    assert result.fallback_error is None
+    assert "baidu" in result.source_errors
+    assert "sina" in result.source_errors
+
+
+def test_compat_two_fail_third_busy_fallback_points_to_second(monkeypatch, tmp_path):
+    """ROUND5-003: two fail, third busy — fallback points to last actual failure (second)."""
+    db.init_db(str(tmp_path / "cuphandle.db"))
+    mgr = FakeManager({"baidu": True, "sina": True, "tencent": False})
+
+    monkeypatch.setattr(engine, "fetch_baidu_daily", lambda code, days=250: None, raising=False)
+    def fail_sina(code, days=250):
+        raise RuntimeError("sina error")
+    monkeypatch.setattr(engine, "fetch_sina_daily", fail_sina)
+    monkeypatch.setattr(engine, "fetch_tencent_daily", lambda code, days=250: [_row("2026-06-04", close=14.0)])
+
+    result = engine._fetch_with_retry(
+        "600000", "baidu", retry_attempts=2, fallback_attempts=2,
+        sleep_fn=lambda _: None, mgr=mgr,
+        source_chain=["baidu", "sina", "tencent"],
+    )
+
+    assert result.data is None
+    assert result.fallback_source == "sina"  # last actual failure, NOT tencent (busy)
+    assert result.fallback_error == "sina error"
+    assert result.source_errors["tencent"] == "busy"
+
+
+def test_compat_three_all_fail_consistency(monkeypatch, tmp_path):
+    """ROUND5-002/003: three all fail — fallback points to last actual failure."""
+    db.init_db(str(tmp_path / "cuphandle.db"))
+
+    monkeypatch.setattr(engine, "fetch_baidu_daily", lambda code, days=250: None, raising=False)
+    def fail_sina(code, days=250):
+        raise RuntimeError("sina down")
+    monkeypatch.setattr(engine, "fetch_sina_daily", fail_sina)
+    def fail_tencent(code, days=250):
+        raise RuntimeError("tencent timeout")
+    monkeypatch.setattr(engine, "fetch_tencent_daily", fail_tencent)
+
+    result = engine._fetch_with_retry(
+        "600000", "baidu", retry_attempts=2, fallback_attempts=3,
+        sleep_fn=lambda _: None, source_chain=["baidu", "sina", "tencent"],
+    )
+
+    assert result.data is None
+    assert result.primary_source == "baidu"
+    assert result.primary_attempts > 0
+    assert result.primary_error == "empty response"
+    assert result.fallback_source == "tencent"  # last actual failure
+    assert result.fallback_attempts > 0
+    assert result.fallback_error == "tencent timeout"
+    assert len(result.source_errors) == 3
+
+
+def test_compat_three_all_busy(monkeypatch, tmp_path):
+    """ROUND5-002: three all busy — all errors = 'data source busy', attempts = 0."""
+    db.init_db(str(tmp_path / "cuphandle.db"))
+    mgr = FakeManager({"baidu": False, "sina": False, "tencent": False})
+
+    monkeypatch.setattr(engine, "fetch_baidu_daily", lambda code, days=250: [_row("2026-06-04", close=12.0)], raising=False)
+    monkeypatch.setattr(engine, "fetch_sina_daily", lambda code, days=250: [_row("2026-06-04", close=13.0)])
+    monkeypatch.setattr(engine, "fetch_tencent_daily", lambda code, days=250: [_row("2026-06-04", close=14.0)])
+
+    result = engine._fetch_with_retry(
+        "600000", "baidu", retry_attempts=1, fallback_attempts=1,
+        sleep_fn=lambda _: None, mgr=mgr,
+        source_chain=["baidu", "sina", "tencent"],
+    )
+
+    assert result.data is None
+    assert result.primary_source == "baidu"
+    assert result.primary_attempts == 0
+    assert result.primary_error == "data source busy"
+    assert result.fallback_source == "tencent"
+    assert result.fallback_attempts == 0
+    assert result.fallback_error == "data source busy"
+    assert result.source_errors == {"baidu": "busy", "sina": "busy", "tencent": "busy"}
+    assert engine._is_transient_source_busy(result) is True
+
+
+def test_primary_failed_all_fallbacks_busy_has_consistent_compatibility_fields(monkeypatch, tmp_path):
+    """FINAL-001: primary fails, all fallbacks busy → fallback points to last busy source."""
+    db.init_db(str(tmp_path / "cuphandle.db"))
+    mgr = FakeManager({"baidu": True, "sina": False, "tencent": False})
+
+    def fail_baidu(code, days=250):
+        raise RuntimeError("timeout")
+    monkeypatch.setattr(engine, "fetch_baidu_daily", fail_baidu, raising=False)
+    monkeypatch.setattr(engine, "fetch_sina_daily", lambda code, days=250: [_row("2026-06-04", close=13.0)])
+    monkeypatch.setattr(engine, "fetch_tencent_daily", lambda code, days=250: [_row("2026-06-04", close=14.0)])
+
+    result = engine._fetch_with_retry(
+        "600000", "baidu", retry_attempts=2, fallback_attempts=1,
+        sleep_fn=lambda _: None, mgr=mgr,
+        source_chain=["baidu", "sina", "tencent"],
+    )
+
+    assert result.data is None
+    assert result.primary_source == "baidu"
+    assert result.primary_attempts == 2
+    assert result.primary_error == "timeout"
+
+    assert result.fallback_source == "tencent"
+    assert result.fallback_attempts == 0
+    assert result.fallback_error == "data source busy"
+
+    assert result.source_errors == {
+        "baidu": "attempts=2 error=timeout",
+        "sina": "busy",
+        "tencent": "busy",
+    }
+
+
+def test_single_source_chain_failure_truly_mirrors_primary(monkeypatch, tmp_path):
+    """FINAL-001: single-source chain → fallback truly mirrors primary (same error, attempts)."""
+    db.init_db(str(tmp_path / "cuphandle.db"))
+
+    def fail_baidu(code, days=250):
+        raise RuntimeError("timeout")
+    monkeypatch.setattr(engine, "fetch_baidu_daily", fail_baidu, raising=False)
+
+    result = engine._fetch_with_retry(
+        "600000", "baidu", retry_attempts=2, fallback_attempts=1,
+        sleep_fn=lambda _: None, source_chain=["baidu"],
+    )
+
+    assert result.data is None
+    assert result.primary_source == "baidu"
+    assert result.primary_error == "timeout"
+    assert result.fallback_source == "baidu"
+    assert result.fallback_attempts == 2  # truly mirrors primary
+    assert result.fallback_error == "timeout"
+
+
 def test_scan_all_passes_configured_daily_sources_to_fetch(monkeypatch, tmp_path):
     config = {
         "data": {

@@ -54,6 +54,7 @@ def test_init_db_migrates_legacy_task_stocks_table(tmp_path):
     assert "status" in stock_columns
     assert "status_reason" in stock_columns
     assert "primary_attempts" in stock_columns
+    assert "source_errors" in stock_columns
     assert rows == [
         {
             "task_id": "task-legacy",
@@ -71,6 +72,7 @@ def test_init_db_migrates_legacy_task_stocks_table(tmp_path):
             "fallback_attempts": 0,
             "primary_error": None,
             "fallback_error": None,
+            "source_errors": None,
             "kline_latest_date": None,
             "quote_status": "not_requested",
             "quote_error": None,
@@ -79,6 +81,201 @@ def test_init_db_migrates_legacy_task_stocks_table(tmp_path):
             "updated_at": None,
         }
     ]
+
+
+def test_init_db_migrates_source_errors_to_legacy_task_stocks(tmp_path):
+    """ROUND3-001: Old task_stocks without source_errors column gets it on upgrade."""
+    import json
+    db_path = tmp_path / "cuphandle.db"
+    # Create old-style task_stocks WITHOUT source_errors
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            """
+            CREATE TABLE task_stocks (
+                task_id TEXT NOT NULL,
+                idx INTEGER NOT NULL,
+                code TEXT NOT NULL,
+                name TEXT NOT NULL,
+                status TEXT DEFAULT 'pending',
+                primary_source TEXT,
+                fallback_source TEXT,
+                primary_attempts INTEGER DEFAULT 0,
+                fallback_attempts INTEGER DEFAULT 0,
+                primary_error TEXT,
+                fallback_error TEXT,
+                kline_latest_date TEXT
+            )
+            """
+        )
+        conn.execute(
+            "INSERT INTO task_stocks (task_id, idx, code, name, status) VALUES (?, ?, ?, ?, ?)",
+            ("task-1", 0, "600000", "浦发银行", "pending"),
+        )
+        conn.commit()
+
+    db.init_db(str(db_path))
+
+    with db.get_conn() as conn:
+        stock_columns = {r[1] for r in conn.execute("PRAGMA table_info(task_stocks)").fetchall()}
+
+    assert "source_errors" in stock_columns
+
+    # Verify update with source_errors works
+    db.update_task_stock("task-1", "600000", status="failed", source_errors='{"sina":"busy"}')
+    row = db.get_task_stocks("task-1")[0]
+    assert row["source_errors"] == '{"sina":"busy"}'
+
+
+def test_source_errors_persisted_as_valid_json_by_encode_helper():
+    """ROUND3-005: _encode_source_errors outputs valid JSON, not str(dict)."""
+    import json
+    from scanner.engine import _encode_source_errors
+
+    source_errors = {"sina": "busy", "baidu": "attempts=2 error=timeout"}
+    encoded = _encode_source_errors(source_errors)
+
+    assert encoded is not None
+    # Must be valid JSON
+    parsed = json.loads(encoded)
+    assert parsed == source_errors
+    # Must NOT use Python repr format (single quotes)
+    assert "'" not in encoded
+
+
+def test_source_errors_persisted_for_all_status_branches(monkeypatch, tmp_path):
+    """ROUND3-005: source_errors persisted in skipped/candidate/scanned/failed branches."""
+    import json
+    db_path = tmp_path / "cuphandle.db"
+    from scanner import engine as engine_mod
+    from scanner import stock_pool
+
+    config = {
+        "data": {"database_path": str(db_path), "worker_count": 1},
+        "liquidity": {"enabled": False, "min_listing_days": 250},
+        "scoring": {"medium_threshold": 70},
+    }
+    stocks = [
+        {"code": "000001", "name": "StockA", "market": "SZ"},
+        {"code": "000002", "name": "StockB", "market": "SZ"},
+        {"code": "000003", "name": "StockC", "market": "SZ"},
+    ]
+
+    db.init_db(str(db_path))
+    db.create_scan_task("task-src", "2026-06-09 09:00:00", total_stocks=len(stocks))
+    db.save_task_stocks("task-src", stocks)
+
+    source_errors_seen = []
+
+    class FakeManager:
+        def acquire(self, ds_name):
+            return True
+        def release(self, ds_name):
+            pass
+
+    fetch_call = [0]
+
+    def fake_fetch_with_retry(code, ds, *args, mgr=None, source_chain=None, kline_days=None, **kwargs):
+        fetch_call[0] += 1
+        call_num = fetch_call[0]
+        if call_num == 1:
+            # StockA: successful fetch but with prior source errors
+            return engine_mod.FetchResult(
+                data=_rrows(260, close=20.0),
+                primary_source="baidu",
+                fallback_source="sina",
+                primary_attempts=1,
+                source_errors={"sina": "busy"},
+            )
+        elif call_num == 2:
+            # StockB: insufficient listing days
+            return engine_mod.FetchResult(
+                data=[{"date": "2026-06-09", "open": 10, "high": 10, "low": 10, "close": 10, "volume": 1_000_000, "turnover": 10_000_000}],
+                primary_source="baidu",
+                fallback_source="baidu",
+                primary_attempts=1,
+                source_errors={"sina": "attempts=2 error=timeout", "tencent": "busy"},
+            )
+        else:
+            # StockC: all sources failed
+            return engine_mod.FetchResult(
+                data=None,
+                primary_source="baidu",
+                fallback_source="tencent",
+                primary_attempts=2,
+                fallback_attempts=2,
+                primary_error="timeout",
+                fallback_error="empty response",
+                source_errors={"baidu": "attempts=2 error=timeout", "sina": "busy", "tencent": "attempts=2 error=empty response"},
+            )
+
+    def fake_row(day, close=10.0):
+        return {"date": day, "open": close, "high": close, "low": close, "close": close, "volume": 10_000_000, "turnover": close * 10_000_000}
+
+    def _rrows(count, close=10.0):
+        rows = []
+        for day in range(1, count + 1):
+            month = ((day - 1) // 28) + 1
+            dom = ((day - 1) % 28) + 1
+            rows.append(fake_row(f"2026-{month:02d}-{dom:02d}", close=close))
+        return rows
+
+    monkeypatch.setattr(engine_mod, "DataSourceManager", FakeManager)
+    monkeypatch.setattr(engine_mod.threading, "Thread", type("ImmediateThread", (), {
+        "__init__": lambda self, target=None, args=(), daemon=None: setattr(self, "target", target) or setattr(self, "args", args),
+        "start": lambda self: self.target(*self.args) if self.target else None,
+        "join": lambda self: None,
+    }))
+    monkeypatch.setattr(engine_mod, "_fetch_with_retry", fake_fetch_with_retry)
+    monkeypatch.setattr(stock_pool, "get_a_stock_pool", lambda config: stocks)
+    monkeypatch.setattr(engine_mod, "fetch_market_index_daily", lambda symbol=None: [])
+
+    class FakeStrategyEngine:
+        def __init__(self, config):
+            pass
+        def evaluate_at(self, data, code="", name="", market_data=None):
+            result = engine_mod.CupHandleResult(found=False, code=code, name=name)
+            dry = {
+                "decision": {"verdict": "不建议买入", "verdict_key": "REJECT", "summary": ""},
+                "volume_dry": {"score": 5},
+                "price_stable": {"score": 5},
+                "pattern_score": {"score": 0, "type": "无有效形态", "key_pattern_type": "other"},
+                "risk_reward": {"risk_percent": 0, "rr1": 0, "position_advice": ""},
+                "key_prices": {"entry_zone_low": 0, "entry_zone_high": 0, "pivot": 0, "stop_loss": 0, "target_1": 0, "target_2": 0},
+                "market_environment": {"status": "", "position_advice": ""},
+            }
+            return type("Eval", (), {"result": result, "dry_stable": dry, "passed": False})()
+
+    monkeypatch.setattr(engine_mod, "CupHandleStrategyEngine", FakeStrategyEngine)
+    monkeypatch.setattr(engine_mod, "passes_liquidity_filter", lambda data, cfg: True)
+
+    engine_mod.scan_all(config, task_id="task-src", worker_count=1)
+
+    all_rows = db.get_task_stocks("task-src")
+    assert len(all_rows) == 3
+
+    # Find each stock by code
+    by_code = {r["code"]: r for r in all_rows}
+
+    # StockA: scanned (successful fetch with prior source busy on sina)
+    assert by_code["000001"]["status"] == "scanned"
+    assert by_code["000001"]["source_errors"] is not None
+    parsed_a = json.loads(by_code["000001"]["source_errors"])
+    assert parsed_a == {"sina": "busy"}
+
+    # StockB: skipped (insufficient listing days, but source_errors saved)
+    assert by_code["000002"]["status"] == "skipped"
+    assert by_code["000002"]["source_errors"] is not None
+    parsed_b = json.loads(by_code["000002"]["source_errors"])
+    assert "sina" in parsed_b
+    assert "tencent" in parsed_b
+
+    # StockC: failed (all sources failed)
+    assert by_code["000003"]["status"] == "failed"
+    assert by_code["000003"]["source_errors"] is not None
+    parsed_c = json.loads(by_code["000003"]["source_errors"])
+    assert "baidu" in parsed_c
+    assert "sina" in parsed_c
+    assert "tencent" in parsed_c
 
 
 def test_save_and_update_task_stocks(tmp_path):

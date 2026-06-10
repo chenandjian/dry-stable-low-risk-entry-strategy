@@ -284,14 +284,17 @@ def _serialize_rules(rules) -> list[dict]:
 def _build_pattern_entry(code: str, evaluation, window: list[dict]) -> dict:
     pattern = serialize_pattern_for_backtest(evaluation.result, window)
     pattern["handleEndDate"] = _canonical_handle_end_date(evaluation.result, window)
-    # Add VCP contraction info for identity
+    # Add VCP contraction info for identity (use real structure dates, not window bounds)
     if evaluation.dry_stable:
         pat = evaluation.dry_stable.get("pattern_score", {})
         pattern["vcpContractions"] = pat.get("vcp_contractions", 0)
-        # VCP start/end dates from data window (contraction range)
-        if pat.get("key_pattern_type") == "vcp" and len(window) >= 2:
-            pattern["vcpStartDate"] = window[0]["date"]  # window start ≈ contraction start
-            pattern["vcpEndDate"] = window[-1]["date"]    # window end ≈ last contraction end
+        if pat.get("key_pattern_type") == "vcp":
+            # Get real contraction dates from the data
+            from analyzer.pattern_score import _find_vcp_contractions
+            contractions = _find_vcp_contractions(window)
+            if contractions:
+                pattern["vcpStartDate"] = window[contractions[0]["high_idx"]]["date"]
+                pattern["vcpEndDate"] = window[contractions[-1]["low_idx"]]["date"]
     detected_date = window[-1]["date"]
     return {
         "patternId": _pattern_id(code, pattern),

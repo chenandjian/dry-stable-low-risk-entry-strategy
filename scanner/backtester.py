@@ -45,17 +45,17 @@ class BacktestResult:
     ret_20d: float | None = None
     ret_60d: float | None = None
 
-    # Success flags
-    hit_5d: bool = False     # ret > 0
-    hit_10d: bool = False
-    hit_20d: bool = False
-    hit_60d: bool = False
+    # Success flags: None = insufficient future data (not observed)
+    hit_5d: bool | None = None
+    hit_10d: bool | None = None
+    hit_20d: bool | None = None
+    hit_60d: bool | None = None
 
-    # False breakout: price drops below breakout_price within N days
-    false_breakout_5d: bool = False
-    false_breakout_10d: bool = False
-    false_breakout_20d: bool = False
-    false_breakout_60d: bool = False
+    # False breakout: None = insufficient future data / not applicable
+    false_breakout_5d: bool | None = None
+    false_breakout_10d: bool | None = None
+    false_breakout_20d: bool | None = None
+    false_breakout_60d: bool | None = None
 
     # Strategy actual stop-loss (from unified engine, not breakout_price * 0.95)
     actual_stop_loss: float = 0.0
@@ -63,11 +63,11 @@ class BacktestResult:
     entry_zone_high: float = 0.0
     pattern_kind: str = ""
 
-    # Stop loss hit: price drops below actual_stop_loss
-    stop_loss_hit_5d: bool = False
-    stop_loss_hit_10d: bool = False
-    stop_loss_hit_20d: bool = False
-    stop_loss_hit_60d: bool = False
+    # Stop loss hit: None = not computable (no valid stop), False = valid stop not hit, True = hit
+    stop_loss_hit_5d: bool | None = None
+    stop_loss_hit_10d: bool | None = None
+    stop_loss_hit_20d: bool | None = None
+    stop_loss_hit_60d: bool | None = None
 
 
 @dataclass
@@ -128,6 +128,7 @@ def run_backtest(
     window_min: int = 250,
     min_score: int = 60,
     max_stocks: int | None = None,  # Limit for testing
+    market_data: list[dict] | None = None,  # Inject fixed market data (None = auto-fetch)
 ) -> BacktestReport:
     """Run historical backtest across a stock universe.
 
@@ -138,6 +139,8 @@ def run_backtest(
         window_min: minimum data points before starting detection
         min_score: minimum pattern score to include
         max_stocks: limit number of stocks (for speed)
+        market_data: optional pre-fetched market index data for reproducibility.
+                     When None (default), fetches live via fetch_market_index_daily.
 
     Returns:
         BacktestReport with aggregated statistics
@@ -152,9 +155,12 @@ def run_backtest(
 
     # Use the unified strategy engine (per plan-review: same config, same entry point)
     engine = CupHandleStrategyEngine(config)
-    # Per-date market data: slice to only data known as of each evaluation date
-    market_cfg = config.get("market_environment", {})
-    market_data_full = fetch_market_index_daily(market_cfg.get("index_symbol")) or []
+    # Per-date market data: use injected data if provided, else fetch live
+    if market_data is not None:
+        market_data_full = market_data
+    else:
+        market_cfg = config.get("market_environment", {})
+        market_data_full = fetch_market_index_daily(market_cfg.get("index_symbol")) or []
 
     for stock in stock_list:
         stocks_tested += 1
@@ -261,17 +267,17 @@ def _calc_forward(br: BacktestResult, detect_close: float, breakout_price: float
         setattr(br, f"ret_{label}", round(ret, 2))
         setattr(br, f"hit_{label}", ret > 0)
 
-        # False breakout: price dropped below breakout_price * 0.97
-        # (within the 3% buffer, meaning the breakout failed)
+        # False breakout: only for cup_handle with valid breakout_price
         future_lows = [d["low"] for d in future[:days]]
         min_low = min(future_lows)
-        setattr(br, f"false_breakout_{label}", min_low < breakout_price * 0.97)
+        if br.pattern_kind == "cup_handle" and breakout_price > 0:
+            setattr(br, f"false_breakout_{label}", min_low < breakout_price * 0.97)
+        else:
+            setattr(br, f"false_breakout_{label}", None)
 
         # Stop loss hit: use strategy's actual stop_loss only
         if br.actual_stop_loss > 0:
             setattr(br, f"stop_loss_hit_{label}", min_low < br.actual_stop_loss)
-        else:
-            setattr(br, f"stop_loss_hit_{label}", False)
 
 
 def _aggregate(report: BacktestReport, results: list[BacktestResult]):
@@ -322,18 +328,37 @@ def _score_stratify(report: BacktestReport, results: list[BacktestResult]):
 
 
 def summarize_by_verdict(rows: list) -> dict:
-    """Group backtest rows by dry-stable verdict."""
+    """Group backtest rows by dry-stable verdict.
+
+    Returns per-verdict dict with:
+      - count: total samples (including unobservable)
+      - observed_10d_count: samples with valid 10-day forward data
+      - avg_ret_10d: average of observed returns, or None if none observable
+    """
     grouped = {}
     for row in rows:
         verdict = row.get("verdict", "未知") if isinstance(row, dict) else getattr(row, "verdict", "未知")
-        ret_10d = row.get("ret_10d", 0.0) if isinstance(row, dict) else getattr(row, "ret_10d", 0.0)
-        grouped.setdefault(verdict or "未知", {"count": 0, "returns": []})
-        grouped[verdict or "未知"]["count"] += 1
-        grouped[verdict or "未知"]["returns"].append(ret_10d or 0.0)
+        ret_10d = row.get("ret_10d") if isinstance(row, dict) else getattr(row, "ret_10d", None)
+        key = verdict or "未知"
+
+        group = grouped.setdefault(
+            key,
+            {"count": 0, "observed_10d_count": 0, "returns": []},
+        )
+        group["count"] += 1
+        if ret_10d is not None:
+            group["observed_10d_count"] += 1
+            group["returns"].append(ret_10d)
+
     return {
         k: {
             "count": v["count"],
-            "avg_ret_10d": round(sum(v["returns"]) / len(v["returns"]), 2) if v["returns"] else 0.0,
+            "observed_10d_count": v["observed_10d_count"],
+            "avg_ret_10d": (
+                round(sum(v["returns"]) / len(v["returns"]), 2)
+                if v["returns"]
+                else None
+            ),
         }
         for k, v in grouped.items()
     }

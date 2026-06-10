@@ -196,6 +196,20 @@ npm --prefix web run preview
 - **Baidu API 403**: 百度已于 2026-06-09 封禁该接口。代码保留 baidu 在 source chain 首位，封禁期间快速失败静默跳过，解封即自动恢复。日志首次输出 WARNING，后续静默。
 - **量干评分满分 12**: 历史代码中硬编码的 volume_dry 阈值（如 `>= 7` 表示观察）需注意现在满分是 12 而非 10。决策默认值已同步更新。
 
+### Gotchas（2026-06-10 新增）
+
+- **回测不可观察数据 ≠ 默认值**: `BacktestResult` 的 `hit_*`/`false_breakout_*` 默认 `None`（不是 `False`），`ret_*` 默认 `None`。未来数据不足时这些字段不被设置，聚合统计自动排除。新增代码中禁止使用 `False` 或 `0` 作为"无数据"的默认值。
+- **`summarize_by_verdict` 返回 `avg_ret_10d=None`**: 没有可观察收益时返回 `None` 而非 `0.0`。前端/输出层需要处理 `None`（建议显示 `--`）。新增 `observed_10d_count` 字段。
+- **数据源兼容字段一致性**: `fallback_source`/`fallback_attempts`/`fallback_error` 必须指向同一个源。主源失败备用源成功时，主源错误也已回填。使用 `_apply_source_compatibility_fields()` 统一 helper，不要在成功/失败路径分别拼接。
+- **VCP ID 依赖真实收缩日期**: 不再使用滑动窗口边界，改用 `_find_vcp_contractions()` 返回的 `high_idx`/`low_idx` 生成 `vcpStartDate`/`vcpEndDate`。两个相邻窗口的同一 VCP 必须生成相同 ID。
+- **候选排除已突破**: `scan_all` 和 `re_evaluate_task` 均检查 `not result.is_breakout`，已突破杯口的股票不会进入候选。修改候选过滤条件时需同步两个位置。
+- **第一止盈 = 最近阻力位**: `target_1` 取 pivot（杯口上方，未突破时）和最近 120 天 swing high 中的最小值，不再是人工构造的 2R。找不到上方阻力时 `target_1=0` 导致 `rr1=0` → WAIT_RR。
+
+## Design Specs（新增）
+
+- 第三~六轮代码复查报告: `docs/reviews/2026-06-09-bug-fix-recheck-round*.md`
+- 最终复查: `docs/reviews/2026-06-09-bug-fix-final-recheck.md`
+
 ## .gitignore Policy
 
 向 `.gitignore` 新增条目前，先告知用户确认。当前已忽略: Python 产物、虚拟环境、IDE 配置、`output_data/`、`logs/`、`cache/`、`data/`、`node_modules/`、`.superpowers/`。

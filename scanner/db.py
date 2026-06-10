@@ -218,6 +218,7 @@ def _ensure_task_stocks_table(conn: sqlite3.Connection):
         "fallback_attempts": "INTEGER DEFAULT 0",
         "primary_error": "TEXT",
         "fallback_error": "TEXT",
+        "source_errors": "TEXT",
         "kline_latest_date": "TEXT",
         "quote_status": "TEXT DEFAULT 'not_requested'",
         "quote_error": "TEXT",
