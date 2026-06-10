@@ -17,7 +17,12 @@ from scanner.index_source import fetch_market_index_daily
 from scanner.liquidity_filter import passes_liquidity_filter
 from scanner.pattern_detector import CupHandleResult
 from analyzer.dry_stable import analyze_dry_stable
-from scanner.strategy_engine import CupHandleStrategyEngine, select_strategy_window, resolve_strategy_windows
+from scanner.strategy_engine import (
+    CupHandleStrategyEngine,
+    resolve_strategy_windows,
+    select_market_window,
+    select_strategy_window,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -259,11 +264,13 @@ def scan_all(
                         progress_callback("scanning", start_offset + failed_count[0] + skip_count[0] + scanned_count[0], start_offset + len(stocks), f"{code} {stock.get('name', '')}")
                     continue
 
+                decision_date = strategy_data[-1]["date"]
+                market_window = select_market_window(market_data, decision_date)
                 evaluation = strategy_engine.evaluate_at(
                     strategy_data,
                     code=code,
                     name=stock.get("name", ""),
-                    market_data=market_data,
+                    market_data=market_window,
                 )
                 result = evaluation.result
                 dry_stable = evaluation.dry_stable
@@ -494,8 +501,10 @@ def re_evaluate_task(
             if strategy_data is None:
                 continue
 
+            decision_date = strategy_data[-1]["date"]
+            market_window = select_market_window(market_data, decision_date)
             evaluation = strategy_engine.evaluate_at(
-                strategy_data, code=code, name=name, market_data=market_data,
+                strategy_data, code=code, name=name, market_data=market_window,
             )
             result = evaluation.result
             dry_stable = evaluation.dry_stable

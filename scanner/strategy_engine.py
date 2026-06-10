@@ -397,6 +397,23 @@ def select_strategy_window(
     return data[-window_days:]
 
 
+def select_market_window(
+    market_data: list[dict] | None,
+    decision_date: str,
+) -> list[dict]:
+    """Return market rows available on or before the stock decision date.
+
+    All strategy entry points must use this function to prevent
+    future market data from leaking into the strategy engine.
+    """
+    if not market_data:
+        return []
+    return [
+        row for row in market_data
+        if row.get("date") and row["date"] <= decision_date
+    ]
+
+
 def diagnose_cup_handle(
     data: list[dict],
     pattern_cfg: dict,

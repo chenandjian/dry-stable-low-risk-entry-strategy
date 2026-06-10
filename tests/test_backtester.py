@@ -4,6 +4,10 @@ from scanner.backtester import (
     BacktestResult, BacktestReport, _calc_forward,
     _aggregate, run_backtest, backtest_report_to_dict,
 )
+from tests.test_cuphandle_strategy_engine import (
+    build_cup_handle_closes,
+    make_ohlc_from_closes,
+)
 
 
 def test_calc_forward_returns():
@@ -495,9 +499,9 @@ def test_scan_backtest_consistent_core_results_same_judgment_date(monkeypatch, t
                         lambda *args, **kwargs: engine.FetchResult(
                             data=list(decision_data), primary_source="sina",
                             fallback_source="sina", primary_attempts=1))
-    # Scan path market data: only up to decision date
-    market_for_scan = [r for r in market_full if r["date"] <= decision_date]
-    monkeypatch.setattr(engine, "fetch_market_index_daily", lambda symbol=None: list(market_for_scan))
+    # COMPLETION-001: scan mock returns FULL market data (including future dates).
+    # The real scan_all code must truncate it via select_market_window().
+    monkeypatch.setattr(engine, "fetch_market_index_daily", lambda symbol=None: list(market_full))
     monkeypatch.setattr(engine, "passes_liquidity_filter", lambda data, cfg: True)
     monkeypatch.setattr(stock_pool, "get_a_stock_pool",
                         lambda config: [{"code": "600000", "name": "Test"}])
@@ -696,3 +700,225 @@ def test_cmd_analyze_both_sources_fail_returns_cleanly(monkeypatch, tmp_path, ca
     # Must not raise TypeError / UnboundLocalError
     main.cmd_analyze(Args())
     assert "Cannot fetch data" in caplog.text
+
+
+# ── COMPLETION-002: 四类场景一致性测试 ─────────────────────────────
+
+def _run_scan_backtest_consistency(
+    monkeypatch, tmp_path, ohlc, market_full, config,
+):
+    """Shared executor: run scan_all + run_backtest, return captured calls."""
+    from scanner import engine, backtester, db as db_mod, stock_pool
+    from scanner.strategy_engine import CupHandleStrategyEngine as RealEngine
+
+    db_path = tmp_path / "cuphandle.db"
+    db_mod.init_db(str(db_path))
+    db_mod.save_ohlc("600000", ohlc)
+
+    config = {**config, "data": {**config.get("data", {}), "database_path": str(db_path)}}
+
+    window_days = config["data"]["scan_window_days"]
+
+    # ── Scan path ──────────────────────────────────────────
+    scan_calls = []
+
+    class ScanCapturingEngine(RealEngine):
+        def evaluate_at(self, data, code="", name="", market_data=None):
+            evaluation = super().evaluate_at(data, code=code, name=name, market_data=market_data)
+            scan_calls.append({
+                "stock_dates": [row["date"] for row in data],
+                "market_dates": [row["date"] for row in (market_data or [])],
+                "core": _evaluation_core(evaluation),
+            })
+            return evaluation
+
+    class ImmediateThread:
+        def __init__(self, target=None, args=(), daemon=None):
+            self.target = target
+            self.args = args
+        def start(self):
+            if self.target:
+                self.target(*self.args)
+        def join(self):
+            return None
+
+    monkeypatch.setattr(engine, "CupHandleStrategyEngine", ScanCapturingEngine)
+    monkeypatch.setattr(engine, "DataSourceManager", type("FakeMgr", (), {}))
+    monkeypatch.setattr(engine.threading, "Thread", ImmediateThread)
+    monkeypatch.setattr(engine, "_fetch_with_retry",
+                        lambda *args, **kwargs: engine.FetchResult(
+                            data=list(ohlc[:window_days]), primary_source="sina",
+                            fallback_source="sina", primary_attempts=1))
+    monkeypatch.setattr(engine, "fetch_market_index_daily", lambda symbol=None: list(market_full))
+    monkeypatch.setattr(engine, "passes_liquidity_filter", lambda data, cfg: True)
+    monkeypatch.setattr(stock_pool, "get_a_stock_pool",
+                        lambda config: [{"code": "600000", "name": "Test"}])
+
+    engine.scan_all(config, worker_count=1)
+    assert len(scan_calls) >= 1
+
+    # ── Backtest path ──────────────────────────────────────
+    backtest_calls = []
+
+    class BacktestCapturingEngine(RealEngine):
+        def evaluate_at(self, data, code="", name="", market_data=None):
+            evaluation = super().evaluate_at(data, code=code, name=name, market_data=market_data)
+            backtest_calls.append({
+                "stock_dates": [row["date"] for row in data],
+                "market_dates": [row["date"] for row in (market_data or [])],
+                "core": _evaluation_core(evaluation),
+            })
+            return evaluation
+
+    monkeypatch.setattr(backtester, "CupHandleStrategyEngine", BacktestCapturingEngine)
+    monkeypatch.setattr(backtester, "fetch_market_index_daily", lambda symbol=None: list(market_full))
+
+    def fake_fetch_fn(code):
+        return db_mod.get_ohlc(code)
+
+    backtester.run_backtest(
+        [{"code": "600000", "name": "Test"}],
+        fake_fetch_fn, config, max_stocks=1,
+    )
+
+    decision_date = scan_calls[0]["stock_dates"][-1]
+    bt_same = [c for c in backtest_calls if c["stock_dates"][-1] == decision_date]
+    assert len(bt_same) >= 1, f"No backtest call at decision date {decision_date}"
+
+    return scan_calls[0], bt_same[0]
+
+
+def _make_market_full(ohlc):
+    return [{"date": d["date"], "open": 3000, "high": 3010, "low": 2990, "close": 3005, "volume": 1_000_000} for d in ohlc]
+
+
+def test_consistency_cup_handle_scenario(monkeypatch, tmp_path):
+    """COMPLETION-002-1: cup_handle pattern consistent across scan/backtest."""
+    window_days = 150
+    forward_days = 60
+    closes = build_cup_handle_closes()
+    ohlc = make_ohlc_from_closes(closes)
+    if len(ohlc) < window_days + forward_days:
+        base_len = len(ohlc)
+        for j in range(window_days + forward_days - base_len):
+            last = ohlc[-1]
+            ohlc.append({
+                "date": f"2026-{(j // 28) + 1:02d}-{(j % 28) + 1:02d}",
+                "open": last["close"], "high": last["close"] + 0.2,
+                "low": last["close"] - 0.2, "close": last["close"] + 0.05,
+                "volume": 10_000_000, "turnover": last["close"] * 10_000_000,
+            })
+    ohlc = ohlc[: window_days + forward_days]
+    market_full = _make_market_full(ohlc)
+
+    config = {
+        "data": {"scan_window_days": window_days, "backtest_window_days": window_days},
+        "liquidity": {"enabled": False, "min_listing_days": window_days},
+        "scoring": {"medium_threshold": 70},
+        "cup": {"min_duration": 35, "max_duration": 180, "min_depth": 0.12, "max_depth": 0.45,
+                "max_lip_deviation": 0.12, "min_bottom_roundness": 0.10},
+        "handle": {"min_duration": 5, "max_duration": 30, "max_depth": 0.18, "max_vs_right_rally": 0.50},
+        "breakout": {"buffer_pct": 0.02, "volume_multiplier": 1.5},
+        "market_environment": {"index_symbol": "000001"},
+    }
+
+    scan_call, bt_call = _run_scan_backtest_consistency(
+        monkeypatch, tmp_path, ohlc, market_full, config,
+    )
+
+    # Same stock window dates
+    assert scan_call["stock_dates"] == bt_call["stock_dates"]
+    # Same core results
+    assert scan_call["core"] == bt_call["core"]
+    # No future market data in either path
+    decision_date = scan_call["stock_dates"][-1]
+    assert all(date <= decision_date for date in scan_call["market_dates"])
+    assert all(date <= decision_date for date in bt_call["market_dates"])
+
+
+def test_consistency_vcp_only_scenario(monkeypatch, tmp_path):
+    """COMPLETION-002-2: VCP-only pattern consistent across scan/backtest."""
+    from tests.test_single_stock_backtest import _make_vcp_3ct_data
+
+    window_days = 250
+    forward_days = 60
+    ohlc = _make_vcp_3ct_data(window_days + forward_days)
+    market_full = _make_market_full(ohlc)
+
+    config = {
+        "data": {"scan_window_days": window_days, "backtest_window_days": window_days},
+        "liquidity": {"enabled": False, "min_listing_days": window_days},
+        "scoring": {"medium_threshold": 70},
+        "cup": {"min_duration": 35, "max_duration": 180},
+        "handle": {"min_duration": 5, "max_duration": 30, "max_depth": 0.18},
+        "breakout": {"buffer_pct": 0.02, "volume_multiplier": 1.5},
+        "market_environment": {"index_symbol": "000001"},
+    }
+
+    scan_call, bt_call = _run_scan_backtest_consistency(
+        monkeypatch, tmp_path, ohlc, market_full, config,
+    )
+
+    assert scan_call["stock_dates"] == bt_call["stock_dates"]
+    assert scan_call["core"] == bt_call["core"]
+    # VCP data should end up with key_pattern_type involved (even if not passed)
+    decision_date = scan_call["stock_dates"][-1]
+    assert all(date <= decision_date for date in scan_call["market_dates"])
+    assert all(date <= decision_date for date in bt_call["market_dates"])
+
+
+def test_consistency_breakout_excluded_scenario(monkeypatch, tmp_path):
+    """COMPLETION-002-3: breakout pattern excluded, consistent across paths."""
+    import scanner.strategy_engine as strategy_engine
+    import scanner.backtester as backtester_mod
+
+    window_days = 150
+    forward_days = 60
+    closes = build_cup_handle_closes()
+    ohlc = make_ohlc_from_closes(closes)
+    # Extend if needed (fixture may be shorter than window+forward)
+    if len(ohlc) < window_days + forward_days:
+        base_len = len(ohlc)
+        for j in range(window_days + forward_days - base_len):
+            last = ohlc[-1]
+            ohlc.append({
+                "date": f"2026-{(j // 28) + 1:02d}-{(j % 28) + 1:02d}",
+                "open": last["close"], "high": last["close"] + 0.2,
+                "low": last["close"] - 0.2, "close": last["close"] + 0.05,
+                "volume": 10_000_000, "turnover": last["close"] * 10_000_000,
+            })
+    ohlc = ohlc[: window_days + forward_days]
+    market_full = _make_market_full(ohlc)
+
+    # Monkeypatch detect_cup_handle to force is_breakout=True in both paths
+    original_detect = strategy_engine.detect_cup_handle
+
+    def fake_detect(data, pattern_cfg):
+        result = original_detect(data, pattern_cfg)
+        result.is_breakout = True
+        return result
+
+    monkeypatch.setattr(strategy_engine, "detect_cup_handle", fake_detect)
+
+    config = {
+        "data": {"scan_window_days": window_days, "backtest_window_days": window_days},
+        "liquidity": {"enabled": False, "min_listing_days": window_days},
+        "scoring": {"medium_threshold": 70},
+        "cup": {"min_duration": 35, "max_duration": 180, "min_depth": 0.12, "max_depth": 0.45,
+                "max_lip_deviation": 0.12, "min_bottom_roundness": 0.10},
+        "handle": {"min_duration": 5, "max_duration": 30, "max_depth": 0.18, "max_vs_right_rally": 0.50},
+        "breakout": {"buffer_pct": 0.02, "volume_multiplier": 1.5},
+        "market_environment": {"index_symbol": "000001"},
+    }
+
+    scan_call, bt_call = _run_scan_backtest_consistency(
+        monkeypatch, tmp_path, ohlc, market_full, config,
+    )
+
+    assert scan_call["stock_dates"] == bt_call["stock_dates"]
+    assert scan_call["core"] == bt_call["core"]
+    # Breakout exclusion → both paths should have passed=False
+    assert scan_call["core"]["passed"] is False
+    decision_date = scan_call["stock_dates"][-1]
+    assert all(date <= decision_date for date in scan_call["market_dates"])
+    assert all(date <= decision_date for date in bt_call["market_dates"])

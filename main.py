@@ -78,6 +78,7 @@ def cmd_analyze(args):
     from scanner.strategy_engine import (
         CupHandleStrategyEngine,
         resolve_strategy_windows,
+        select_market_window,
         select_strategy_window,
     )
     from output.json_writer import write_single_analysis_json
@@ -107,9 +108,10 @@ def cmd_analyze(args):
 
     logger.info(f"策略分析窗口: {len(strategy_data)} 日 (配置 {scan_window_days} 日)")
 
-    # Market data
+    # Market data (COMPLETION-001: truncate to stock decision date)
     market_cfg = config.get("market_environment", {})
-    market_data = fetch_market_index_daily(market_cfg.get("index_symbol"))
+    market_data_full = fetch_market_index_daily(market_cfg.get("index_symbol"))
+    market_data = select_market_window(market_data_full, strategy_data[-1]["date"])
 
     # Unified strategy evaluation
     engine = CupHandleStrategyEngine(config)

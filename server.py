@@ -19,6 +19,7 @@ from scanner.engine import scan_all, re_evaluate_task
 from scanner.strategy_engine import (
     CupHandleStrategyEngine,
     resolve_strategy_windows,
+    select_market_window,
     select_strategy_window,
 )
 from scanner.index_source import fetch_market_index_daily
@@ -646,9 +647,14 @@ async def get_candidate(code: str):
         strategy_data = select_strategy_window(ohlc, windows.scan_window_days)
         if strategy_data is not None:
             engine = CupHandleStrategyEngine(cfg)
+            # COMPLETION-001: truncate market data to stock decision date
+            market_data_full = fetch_market_index_daily(market_idx)
+            market_data = select_market_window(
+                market_data_full, strategy_data[-1]["date"],
+            )
             evaluation = engine.evaluate_at(
                 strategy_data, code=code, name=c.get("name", ""),
-                market_data=fetch_market_index_daily(market_idx),
+                market_data=market_data,
             )
             if evaluation.dry_stable:
                 trade_plan = evaluation.dry_stable.get("trade_plan", {})

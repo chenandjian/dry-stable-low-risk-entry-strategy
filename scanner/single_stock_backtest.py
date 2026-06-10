@@ -9,7 +9,13 @@ from scanner import db
 from scanner.engine import _merge_data
 from scanner.baidu_source import fetch_baidu_daily
 from scanner.sina_source import fetch_sina_daily
-from scanner.strategy_engine import CupHandleStrategyEngine, select_strategy_window, resolve_strategy_windows, serialize_pattern_for_backtest
+from scanner.strategy_engine import (
+    CupHandleStrategyEngine,
+    resolve_strategy_windows,
+    select_market_window,
+    select_strategy_window,
+    serialize_pattern_for_backtest,
+)
 from scanner.tencent_source import fetch_tencent_daily
 
 
@@ -392,7 +398,7 @@ def run_single_stock_cuphandle_backtest(
         if eval_window is None:
             continue
         # Per-date market data (no future leakage)
-        market_window = [r for r in market_data_full if r["date"] <= row["date"]]
+        market_window = select_market_window(market_data_full, row["date"])
         evaluation = engine.evaluate_at(eval_window, code=code, name=name, market_data=market_window)
         if not evaluation.passed:
             continue
@@ -412,7 +418,7 @@ def run_single_stock_cuphandle_backtest(
         diagnosis_window = select_strategy_window(raw_diag_window, backtest_window)
         if diagnosis_window is not None:
             # Per-date market data for diagnosis (no future leakage)
-            diag_market = [r for r in market_data_full if r["date"] <= handle_end_date]
+            diag_market = select_market_window(market_data_full, handle_end_date)
             diagnosis = engine.diagnose_handle(
                 diagnosis_window,
                 handle_start_date,

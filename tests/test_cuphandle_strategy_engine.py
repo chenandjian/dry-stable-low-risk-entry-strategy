@@ -6,6 +6,7 @@ from scanner.strategy_engine import (
     build_pattern_config,
     compute_config_hash,
     resolve_strategy_windows,
+    select_market_window,
     select_strategy_window,
     WINDOW_DEFAULT,
     WINDOW_MIN,
@@ -585,3 +586,35 @@ def test_re_evaluate_same_window_as_scan_produces_same_result(monkeypatch):
     assert e1.passed == e2.passed
     assert e1.result.score == e2.result.score
     assert e1.result.pattern_kind == e2.result.pattern_kind
+
+
+# ── select_market_window (COMPLETION-001) ───────────────────────────
+
+def test_select_market_window_excludes_future_rows():
+    rows = [
+        {"date": "2026-01-29"},
+        {"date": "2026-01-30"},
+        {"date": "2026-02-01"},
+    ]
+    result = select_market_window(rows, "2026-01-30")
+    assert [row["date"] for row in result] == ["2026-01-29", "2026-01-30"]
+
+
+def test_select_market_window_handles_none():
+    assert select_market_window(None, "2026-01-30") == []
+
+
+def test_select_market_window_handles_empty():
+    assert select_market_window([], "2026-01-30") == []
+
+
+def test_select_market_window_all_within_decision_date():
+    rows = [{"date": "2026-01-28"}, {"date": "2026-01-29"}]
+    result = select_market_window(rows, "2026-01-30")
+    assert len(result) == 2
+
+
+def test_select_market_window_all_future_returns_empty():
+    rows = [{"date": "2026-02-01"}, {"date": "2026-02-02"}]
+    result = select_market_window(rows, "2026-01-30")
+    assert result == []

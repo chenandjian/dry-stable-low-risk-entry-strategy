@@ -13,7 +13,12 @@ Core approach:
 
 import logging
 from dataclasses import dataclass, field
-from scanner.strategy_engine import CupHandleStrategyEngine, select_strategy_window, resolve_strategy_windows
+from scanner.strategy_engine import (
+    CupHandleStrategyEngine,
+    resolve_strategy_windows,
+    select_market_window,
+    select_strategy_window,
+)
 from scanner.index_source import fetch_market_index_daily
 
 logger = logging.getLogger(__name__)
@@ -228,7 +233,7 @@ def run_backtest(
                 continue
 
             # Per-date market data (no future leakage)
-            market_window = [r for r in market_data_full if r["date"] <= detect_date]
+            market_window = select_market_window(market_data_full, detect_date)
 
             # Unified strategy evaluation (handles cup_handle AND VCP)
             evaluation = engine.evaluate_at(
