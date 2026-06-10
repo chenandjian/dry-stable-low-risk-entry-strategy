@@ -95,6 +95,27 @@
         <div class="kv"><span class="k">柄部低点</span><span class="v">{{ stock.handle_low_date || '--' }}</span></div>
       </div>
 
+      <!-- Current Config Re-analysis (BUG-007) -->
+      <div class="section-label" v-if="stock.current_analysis">当前配置重新分析</div>
+      <div class="reanalysis-notice" v-if="stock.analysis_notice">
+        ⓘ {{ stock.analysis_notice }}
+      </div>
+      <div class="kv-list" v-if="stock.current_analysis">
+        <div class="kv"><span class="k">策略结论</span><span class="v" :class="stock.current_analysis.passed ? 'blue' : 'red'">{{ stock.current_analysis.passed ? '✓ 通过' : '✗ 不通过' }}</span></div>
+        <div class="kv"><span class="k">形态评分</span><span class="v">{{ stock.current_analysis.score ?? '--' }}</span></div>
+        <div class="kv" v-if="stock.current_analysis.pattern">
+          <span class="k">形态类型</span><span class="v">{{ stock.current_analysis.pattern.patternKind || '--' }}</span>
+        </div>
+        <div class="kv" v-if="stock.current_analysis.dryStable">
+          <span class="k">干稳结论</span><span class="v">{{ stock.current_analysis.dryStable.decision?.verdict || '--' }}</span>
+        </div>
+      </div>
+      <div v-if="stock.current_analysis?.failedRules?.length" class="diagnostics">
+        <div class="diag-item reject" v-for="r in stock.current_analysis.failedRules" :key="r.ruleName">
+          ✗ {{ r.ruleName }}: {{ r.explanation }}
+        </div>
+      </div>
+
       <RiskBox>
         本页面为技术形态筛选工具，不构成投资建议。形态识别存在假突破可能，请结合基本面和其他技术指标综合判断。
       </RiskBox>
@@ -712,5 +733,6 @@ onUnmounted(() => {
 .diag-item.reject { color: var(--up-red); }
 .diag-item.cap { color: var(--text-muted); }
 .diag-item.raw { color: var(--accent); font-family: var(--font-mono); }
+.reanalysis-notice { font-size: 11px; color: var(--text-muted); padding: 6px 12px; background: rgba(59,130,246,0.08); border-radius: 4px; margin-bottom: 8px; line-height: 1.5; }
 .sub { font-size: 10px; color: var(--text-muted); margin-left: 6px; }
 </style>

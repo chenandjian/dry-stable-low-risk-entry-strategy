@@ -8,6 +8,69 @@ from analyzer.dry_stable import analyze_dry_stable
 from scanner.pattern_detector import CupHandleResult, detect_cup_handle
 from scanner.scorer import score_cup_handle_advanced
 
+# ── 统一策略窗口配置 ────────────────────────────────────────────────
+
+WINDOW_DEFAULT = 250
+WINDOW_MIN = 30
+
+
+@dataclass(frozen=True)
+class StrategyWindows:
+    """Frozen, validated strategy window configuration.
+
+    All fields are positive ints >= WINDOW_MIN.
+    scan_window_days <= min_listing_days is enforced.
+    """
+    min_listing_days: int
+    scan_window_days: int
+    backtest_window_days: int
+
+
+def resolve_strategy_windows(config: dict) -> StrategyWindows:
+    """Parse and validate strategy window config from a raw config dict.
+
+    Rules:
+    - Missing values → fixed default 250 (never cascade to min_listing_days).
+    - All values must be int >= 30.
+    - scan_window_days <= min_listing_days.
+    - Never uses ``value or 250`` to avoid swallowing 0.
+    """
+    data_cfg = config.get("data", {}) if isinstance(config, dict) else {}
+    liquidity_cfg = config.get("liquidity", {}) if isinstance(config, dict) else {}
+
+    raw_min = liquidity_cfg.get("min_listing_days") or WINDOW_DEFAULT
+    raw_scan = data_cfg.get("scan_window_days")
+    raw_backtest = data_cfg.get("backtest_window_days")
+
+    def _int_or_default(value, default: int, label: str) -> int:
+        if value is None:
+            return default
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise ValueError(f"{label} must be an integer, got {type(value).__name__}")
+        if isinstance(value, float) and not float(value).is_integer():
+            raise ValueError(f"{label} must be an integer, got float {value}")
+        result = int(value)
+        if result < WINDOW_MIN:
+            raise ValueError(f"{label} must be >= {WINDOW_MIN}, got {result}")
+        return result
+
+    min_listing_days = _int_or_default(raw_min, WINDOW_DEFAULT, "min_listing_days")
+    scan_window_days = _int_or_default(raw_scan, WINDOW_DEFAULT, "scan_window_days")
+    backtest_window_days = _int_or_default(raw_backtest, WINDOW_DEFAULT, "backtest_window_days")
+
+    if scan_window_days > min_listing_days:
+        raise ValueError(
+            f"scan_window_days ({scan_window_days}) must not exceed "
+            f"min_listing_days ({min_listing_days})"
+        )
+
+    return StrategyWindows(
+        min_listing_days=min_listing_days,
+        scan_window_days=scan_window_days,
+        backtest_window_days=backtest_window_days,
+    )
+
+
 # Single source of truth for which verdict_keys qualify as candidates
 CANDIDATE_KEYS = frozenset({"BUY_LOW", "WATCH_BREAKOUT", "WAIT_ENTRY"})
 REJECT_KEYS = frozenset({"REJECT", "不建议买入"})

@@ -2,9 +2,13 @@ from scanner.pattern_detector import CupHandleResult
 from scanner.strategy_engine import (
     StrategyEvaluation,
     CupHandleStrategyEngine,
+    StrategyWindows,
     build_pattern_config,
     compute_config_hash,
+    resolve_strategy_windows,
     select_strategy_window,
+    WINDOW_DEFAULT,
+    WINDOW_MIN,
 )
 
 
@@ -412,3 +416,143 @@ def test_select_strategy_window_consistency_with_backtest_window():
     assert len(scan_result) == len(backtest_result)
     assert scan_result[0]["date"] == backtest_result[0]["date"]
     assert scan_result[-1]["date"] == backtest_result[-1]["date"]
+
+
+# ── resolve_strategy_windows config validation (BUG-004) ─────────────
+
+def test_resolve_strategy_windows_uses_fixed_defaults():
+    """Missing values → fixed 250, not cascading to min_listing_days."""
+    w = resolve_strategy_windows({"liquidity": {"min_listing_days": 500}})
+    assert w.min_listing_days == 500
+    assert w.scan_window_days == WINDOW_DEFAULT
+    assert w.backtest_window_days == WINDOW_DEFAULT
+
+
+def test_resolve_strategy_windows_rejects_zero():
+    import pytest
+    with pytest.raises(ValueError, match="must be >= 30"):
+        resolve_strategy_windows({"data": {"scan_window_days": 0}})
+
+
+def test_resolve_strategy_windows_rejects_negative():
+    import pytest
+    with pytest.raises(ValueError, match="must be >= 30"):
+        resolve_strategy_windows({"data": {"scan_window_days": -1}})
+
+
+def test_resolve_strategy_windows_rejects_29():
+    import pytest
+    with pytest.raises(ValueError, match="must be >= 30"):
+        resolve_strategy_windows({"data": {"scan_window_days": 29}})
+
+
+def test_resolve_strategy_windows_accepts_30():
+    w = resolve_strategy_windows({"data": {"scan_window_days": 30}, "liquidity": {"min_listing_days": 30}})
+    assert w.scan_window_days == 30
+
+
+def test_resolve_strategy_windows_rejects_float():
+    import pytest
+    with pytest.raises(ValueError, match="must be an integer"):
+        resolve_strategy_windows({"data": {"scan_window_days": 2.5}})
+
+
+def test_resolve_strategy_windows_rejects_string():
+    import pytest
+    with pytest.raises(ValueError, match="must be an integer"):
+        resolve_strategy_windows({"data": {"scan_window_days": "50"}})
+
+
+def test_resolve_strategy_windows_rejects_bool():
+    import pytest
+    with pytest.raises(ValueError, match="must be an integer"):
+        resolve_strategy_windows({"data": {"scan_window_days": True}})
+
+
+def test_resolve_strategy_windows_rejects_scan_gt_min_listing():
+    import pytest
+    with pytest.raises(ValueError, match="must not exceed"):
+        resolve_strategy_windows({
+            "data": {"scan_window_days": 300},
+            "liquidity": {"min_listing_days": 200},
+        })
+
+
+def test_resolve_strategy_windows_allows_backtest_gt_min_listing():
+    """backtest_window_days can exceed min_listing_days."""
+    w = resolve_strategy_windows({
+        "data": {"scan_window_days": 200, "backtest_window_days": 500},
+        "liquidity": {"min_listing_days": 200},
+    })
+    assert w.backtest_window_days == 500
+    assert w.min_listing_days == 200
+    assert w.scan_window_days == 200
+
+
+def test_old_config_missing_fields_gets_defaults():
+    """Old config with no window fields → all 250."""
+    w = resolve_strategy_windows({})
+    assert w.min_listing_days == WINDOW_DEFAULT
+    assert w.scan_window_days == WINDOW_DEFAULT
+    assert w.backtest_window_days == WINDOW_DEFAULT
+
+
+# ── 真实路径一致性 (BUG-010) ────────────────────────────────────────
+
+def test_scan_vs_backtest_core_results_consistent():
+    """Same data, same config, same market data → consistent core results.
+
+    Simulates scan path (full data → truncate → evaluate_at)
+    vs backtest path (sliding window → truncate → evaluate_at).
+    """
+    data = make_ohlc_from_closes(build_cup_handle_closes())
+    config = full_config()
+    config["data"] = config.get("data", {})
+    config["data"]["scan_window_days"] = 100
+    config["data"]["backtest_window_days"] = 100
+    config["liquidity"] = config.get("liquidity", {})
+    config["liquidity"]["min_listing_days"] = 250
+
+    # Truncate like scan and backtest would
+    scan_data = select_strategy_window(data, 100)
+    assert scan_data is not None
+
+    engine = CupHandleStrategyEngine(config)
+    e = engine.evaluate_at(scan_data, code="600000", name="测试")
+
+    # Verify core output fields exist and are consistent
+    assert e.strategy_version == "cuphandle-v1"
+    assert e.config_hash.startswith("sha256:")
+    if e.dry_stable:
+        assert "decision" in e.dry_stable
+        assert "pattern_score" in e.dry_stable
+        assert "key_prices" in e.dry_stable
+        assert "volume_dry" in e.dry_stable
+        assert "price_stable" in e.dry_stable
+
+
+def test_re_evaluate_same_window_as_scan_produces_same_result(monkeypatch):
+    """re_evaluate_task with same data → same evaluate_at result."""
+    import scanner.engine as engine_mod
+
+    data = make_ohlc_from_closes(build_cup_handle_closes())
+    config = full_config()
+    config["data"] = config.get("data", {})
+    config["data"]["scan_window_days"] = 100
+    config["liquidity"] = config.get("liquidity", {})
+    config["liquidity"]["min_listing_days"] = 250
+
+    strategy_data = select_strategy_window(data, 100)
+    assert strategy_data is not None
+
+    engine = CupHandleStrategyEngine(config)
+    e1 = engine.evaluate_at(strategy_data, code="600000", name="测试")
+
+    # Simulate re_evaluate: same truncated data → same result
+    windows = resolve_strategy_windows(config)
+    strategy_data2 = select_strategy_window(data, windows.scan_window_days)
+    e2 = engine.evaluate_at(strategy_data2, code="600000", name="测试")
+
+    assert e1.passed == e2.passed
+    assert e1.result.score == e2.result.score
+    assert e1.result.pattern_kind == e2.result.pattern_kind

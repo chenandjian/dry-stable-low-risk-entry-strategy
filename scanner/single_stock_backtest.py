@@ -9,7 +9,7 @@ from scanner import db
 from scanner.engine import _merge_data
 from scanner.baidu_source import fetch_baidu_daily
 from scanner.sina_source import fetch_sina_daily
-from scanner.strategy_engine import CupHandleStrategyEngine, select_strategy_window, serialize_pattern_for_backtest
+from scanner.strategy_engine import CupHandleStrategyEngine, select_strategy_window, resolve_strategy_windows, serialize_pattern_for_backtest
 from scanner.tencent_source import fetch_tencent_daily
 
 
@@ -341,13 +341,22 @@ def run_single_stock_cuphandle_backtest(
     handle_end_date=None,
     context_days=None,
     fetch_fn=default_fresh_fetch,
+    market_data: list[dict] | None = None,
 ):
     _validate_request(start_date, end_date, handle_start_date, handle_end_date)
 
     db_path = config.get("data", {}).get("database_path", "data/cuphandle.db")
     db.init_db(db_path)
 
-    context_days_used = _derive_context_days(config) if context_days is None else max(0, int(context_days))
+    # Unified window config (BUG-005: fixed default 250, never cascade to min_listing_days)
+    windows = resolve_strategy_windows(config)
+    backtest_window = windows.backtest_window_days
+
+    # Context days must cover at least backtest_window trading days (BUG-005)
+    derived_context = _derive_context_days(config)
+    context_calendar_min = int(backtest_window * 1.6) + 30
+    context_calendar = max(derived_context, context_calendar_min)
+    context_days_used = context_calendar if context_days is None else max(0, int(context_days))
     required_start_date = _subtract_days(start_date, context_days_used) if context_days_used else start_date
     data, coverage = ensure_backtest_data(
         code,
@@ -361,11 +370,13 @@ def run_single_stock_cuphandle_backtest(
     effective_start = max(avail_start, required_start_date)
     working_data = _rows_between(data, effective_start, end_date)
 
-    # Backtest evaluation window: slide this many days across history
-    data_cfg = config.get("data", {})
-    liquidity_cfg = config.get("liquidity", {})
-    kline_days = data_cfg.get("daily_kline_days") or liquidity_cfg.get("min_listing_days", 250)
-    backtest_window = data_cfg.get("backtest_window_days") or kline_days
+    # Market data (BUG-003): fetch if not injected, slice to judgment date
+    if market_data is not None:
+        market_data_full = market_data
+    else:
+        from scanner.index_source import fetch_market_index_daily
+        market_cfg = config.get("market_environment", {})
+        market_data_full = fetch_market_index_daily(market_cfg.get("index_symbol")) or []
 
     name = _lookup_stock_name(code)
     engine = CupHandleStrategyEngine(config)
@@ -380,10 +391,10 @@ def run_single_stock_cuphandle_backtest(
         eval_window = select_strategy_window(window, backtest_window)
         if eval_window is None:
             continue
-        evaluation = engine.evaluate_at(eval_window, code=code, name=name)
-        has_pattern = getattr(evaluation.result, "found", False)
-        is_vcp = (evaluation.dry_stable or {}).get("pattern_score", {}).get("key_pattern_type") == "vcp"
-        if (not has_pattern and not is_vcp) or not getattr(evaluation, "passed", False):
+        # Per-date market data (no future leakage)
+        market_window = [r for r in market_data_full if r["date"] <= row["date"]]
+        evaluation = engine.evaluate_at(eval_window, code=code, name=name, market_data=market_window)
+        if not evaluation.passed:
             continue
         entry = _build_pattern_entry(code, evaluation, window)
         identity = _pattern_identity(entry)
@@ -400,12 +411,15 @@ def run_single_stock_cuphandle_backtest(
         raw_diag_window = _rows_until(working_data, handle_end_date)
         diagnosis_window = select_strategy_window(raw_diag_window, backtest_window)
         if diagnosis_window is not None:
+            # Per-date market data for diagnosis (no future leakage)
+            diag_market = [r for r in market_data_full if r["date"] <= handle_end_date]
             diagnosis = engine.diagnose_handle(
                 diagnosis_window,
                 handle_start_date,
                 handle_end_date,
                 code=code,
                 name=name,
+                market_data=diag_market,
             )
             specified_diagnosis = diagnosis.to_dict() if hasattr(diagnosis, "to_dict") else diagnosis
 

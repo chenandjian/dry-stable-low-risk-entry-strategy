@@ -17,7 +17,7 @@ from scanner.index_source import fetch_market_index_daily
 from scanner.liquidity_filter import passes_liquidity_filter
 from scanner.pattern_detector import CupHandleResult
 from analyzer.dry_stable import analyze_dry_stable
-from scanner.strategy_engine import CupHandleStrategyEngine, select_strategy_window
+from scanner.strategy_engine import CupHandleStrategyEngine, select_strategy_window, resolve_strategy_windows
 
 logger = logging.getLogger(__name__)
 
@@ -97,17 +97,12 @@ def scan_all(
 
     liquidity_cfg = config.get("liquidity", {})
     daily_sources = config.get("data", {}).get("daily_sources") or DEFAULT_DAILY_SOURCES
-    kline_days = config.get("data", {}).get("daily_kline_days") or liquidity_cfg.get("min_listing_days", 250) or 250
-    scan_window_days = config.get("data", {}).get("scan_window_days") or 250
-    min_listing_days_val = liquidity_cfg.get("min_listing_days", 250) or 250
-    if scan_window_days > min_listing_days_val:
-        raise ValueError(
-            f"scan_window_days ({scan_window_days}) must not exceed "
-            f"min_listing_days ({min_listing_days_val})"
-        )
+    windows = resolve_strategy_windows(config)
+    kline_days = windows.min_listing_days
+    scan_window_days = windows.scan_window_days
     logger.info(
-        "窗口配置: min_listing_days=%s, scan_window_days=%s",
-        min_listing_days_val, scan_window_days,
+        "窗口配置: min_listing_days=%s, scan_window_days=%s, backtest_window_days=%s",
+        windows.min_listing_days, windows.scan_window_days, windows.backtest_window_days,
     )
     strategy_engine = CupHandleStrategyEngine(config)
     max_busy_retries = config.get("data", {}).get("source_busy_max_retries", 3)
@@ -274,7 +269,7 @@ def scan_all(
                 result = evaluation.result
                 dry_stable = evaluation.dry_stable
 
-                if evaluation.passed and dry_stable:
+                if evaluation.passed:
                     if result.score == 0:
                         result.score = min(100, dry_stable["pattern_score"]["score"] * 5)
                     stock["dry_stable"] = dry_stable
@@ -474,8 +469,9 @@ def re_evaluate_task(
         return {"task_id": task_id, "status": "no_stocks", "candidates_found": 0}
 
     liquidity_cfg = config.get("liquidity", {})
-    kline_days = config.get("data", {}).get("daily_kline_days") or liquidity_cfg.get("min_listing_days", 250) or 250
-    scan_window_days = config.get("data", {}).get("scan_window_days") or 250
+    windows = resolve_strategy_windows(config)
+    kline_days = windows.min_listing_days
+    scan_window_days = windows.scan_window_days
     strategy_engine = CupHandleStrategyEngine(config)
     market_cfg = config.get("market_environment", {})
     market_data = fetch_market_index_daily(market_cfg.get("index_symbol"))
@@ -505,7 +501,7 @@ def re_evaluate_task(
             result = evaluation.result
             dry_stable = evaluation.dry_stable
 
-            if evaluation.passed and dry_stable:
+            if evaluation.passed:
                 if result.score == 0:
                     result.score = min(100, dry_stable["pattern_score"]["score"] * 5)
                 latest_close = data[-1]["close"]

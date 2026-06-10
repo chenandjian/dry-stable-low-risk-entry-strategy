@@ -177,6 +177,15 @@ async def start_scan():
     if conflict:
         return conflict
 
+    # Validate strategy windows before creating task (BUG-004)
+    try:
+        resolve_strategy_windows(config)
+    except ValueError as e:
+        return JSONResponse(
+            {"error": f"Invalid window config: {e}"},
+            status_code=400,
+        )
+
     task_id = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
     started_at = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     db.create_scan_task(task_id, started_at, total_stocks=0, retry_mode="full")
@@ -734,6 +743,15 @@ async def update_config(data: dict):
 
     # Deep merge: only update provided keys
     _deep_merge(config, data)
+
+    # Validate strategy windows before saving (BUG-004)
+    try:
+        resolve_strategy_windows(config)
+    except ValueError as e:
+        return JSONResponse(
+            {"status": "error", "message": f"Invalid window config: {e}"},
+            status_code=400,
+        )
 
     # Write back to config.yaml
     with open("config.yaml", "w", encoding="utf-8") as f:

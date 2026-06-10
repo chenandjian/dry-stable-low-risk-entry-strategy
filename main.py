@@ -78,11 +78,11 @@ def cmd_analyze(args):
     from scanner.strategy_engine import CupHandleStrategyEngine, select_strategy_window
     from output.json_writer import write_single_analysis_json
 
-    # Fetch data with fallback
-    data = fetch_sina_daily(code)
+    # Fetch data with fallback (BUG-006: pass min_listing_days)
+    data = fetch_sina_daily(code, days=kline_days)
     if data is None:
         logger.info("Sina failed, trying Tencent...")
-        data = fetch_tencent_daily(code)
+        data = fetch_tencent_daily(code, days=kline_days)
 
     if data is None:
         logger.error(f"Cannot fetch data for {code}")
@@ -90,11 +90,11 @@ def cmd_analyze(args):
 
     logger.info(f"Got {len(data)} days of data")
 
-    # Read scan window config
-    data_cfg = config.get("data", {})
-    liquidity_cfg = config.get("liquidity", {})
-    kline_days = data_cfg.get("daily_kline_days") or liquidity_cfg.get("min_listing_days", 250) or 250
-    scan_window_days = data_cfg.get("scan_window_days") or 250
+    # Read scan window config via unified resolver
+    from scanner.strategy_engine import resolve_strategy_windows
+    windows = resolve_strategy_windows(config)
+    kline_days = windows.min_listing_days
+    scan_window_days = windows.scan_window_days
 
     # Truncate to fixed strategy window
     strategy_data = select_strategy_window(data, scan_window_days)
@@ -226,8 +226,8 @@ def cmd_backtest(args):
 
     logger.info(f"Testing {len(stocks)} stocks...")
 
-    # Deprecation warning for --min-score
-    if args.min_score != 60:  # 非默认值时打印警告
+    # Deprecation warning for --min-score (only when user explicitly sets it)
+    if args.min_score is not None:
         logger.warning(
             "WARNING: --min-score 已废弃，仅用于回测报告展示过滤，"
             "不参与策略候选判断；下一版本将删除。"
@@ -312,7 +312,7 @@ def main():
     p_backtest.add_argument("--config", default="config.yaml", help="配置文件路径")
     p_backtest.add_argument("--sample", default=None, help="采样前N只股票（用于快速测试）")
     p_backtest.add_argument("--max-stocks", type=int, default=None, help="最多测试股票数")
-    p_backtest.add_argument("--min-score", type=int, default=60, help="最低形态评分")
+    p_backtest.add_argument("--min-score", type=int, default=None, help="[已废弃] 最低形态评分，仅报告展示过滤")
     p_backtest.set_defaults(func=cmd_backtest)
 
     args = parser.parse_args()

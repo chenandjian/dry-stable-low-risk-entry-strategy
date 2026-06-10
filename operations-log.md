@@ -31,3 +31,10 @@
 - Final recheck verification: targeted suites passed with 16, 47, and 13 tests respectively; offline suite passed with 172 tests and 1 warning; compileall passed.
 - Completed the final completion recheck and added `docs/reviews/2026-06-09-bug-fix-completion-recheck.md`. Confirmed FINAL-001 is fixed: primary-failed/all-fallbacks-busy fields are consistent, and single-source failure truly mirrors primary fields. No new required fixes were found.
 - Completion verification: source/task targeted tests passed with 49 tests; strategy/backtest targeted tests passed with 29 tests; offline suite passed with 174 tests; compileall and diff check passed. Full suite had 175 passed and 2 external-network failures (Dongcai proxy connection and Yahoo Finance rate limiting).
+
+## 2026-06-10
+
+- Reviewed commit `c2c6e9c` against `docs/superpowers/specs/2026-06-10-scan-window-unified-strategy-design.md`.
+- Added `docs/reviews/2026-06-10-scan-window-unified-strategy-code-review.md` with evidence-backed findings and a one-pass repair plan.
+- Confirmed major remaining issues: batch backtest does not request `backtest_window_days + 60`, excludes the exact window-plus-60 boundary, single-stock backtest omits historical market data and lacks enough context, invalid window configs are accepted, `daily_kline_days` still overrides the intended fetch source of truth, candidate detail UI does not display current analysis, and real scan/backtest path consistency tests are missing.
+- Verification: offline backend suite passed with 183 tests and 1 warning; frontend production build passed; commit diff check passed. Direct reproductions confirmed the batch fetch, loop-boundary, invalid-config, single-stock-context, and missing-UI behaviors.

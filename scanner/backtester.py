@@ -13,7 +13,7 @@ Core approach:
 
 import logging
 from dataclasses import dataclass, field
-from scanner.strategy_engine import CupHandleStrategyEngine, select_strategy_window
+from scanner.strategy_engine import CupHandleStrategyEngine, select_strategy_window, resolve_strategy_windows
 from scanner.index_source import fetch_market_index_daily
 
 logger = logging.getLogger(__name__)
@@ -120,6 +120,24 @@ class BacktestReport:
     # Parameter suggestions
     parameter_suggestions: dict = field(default_factory=dict)
 
+    # Report filter metadata (BUG-009)
+    report_filter: dict | None = None
+
+
+def _call_backtest_fetch(fetch_fn, code: str, days: int) -> list[dict] | None:
+    """Call fetch_fn with days if supported, fall back to no-arg call."""
+    import inspect
+    try:
+        sig = inspect.signature(fetch_fn)
+        if "days" in sig.parameters:
+            return fetch_fn(code, days=days)
+    except (TypeError, ValueError):
+        pass
+    try:
+        return fetch_fn(code)
+    except TypeError:
+        return fetch_fn(code, days=days)
+
 
 def run_backtest(
     stocks: list[dict],
@@ -161,10 +179,11 @@ def run_backtest(
 
     stock_list = stocks[:max_stocks] if max_stocks else stocks
 
-    # Read backtest window config
-    data_cfg = config.get("data", {})
-    backtest_window_days = data_cfg.get("backtest_window_days") or 250
+    # Read backtest window config via unified resolver
+    windows = resolve_strategy_windows(config)
+    backtest_window_days = windows.backtest_window_days
     min_forward_days = 60
+    required_days = backtest_window_days + min_forward_days
 
     # Use the unified strategy engine (per plan-review: same config, same entry point)
     engine = CupHandleStrategyEngine(config)
@@ -181,18 +200,24 @@ def run_backtest(
         name = stock.get("name", "")
 
         try:
-            data = fetch_fn(code)
+            data = _call_backtest_fetch(fetch_fn, code, required_days)
         except Exception:
             continue
 
-        if not data or len(data) < backtest_window_days + min_forward_days:
+        if not data or len(data) < required_days:
+            if data and len(data) < required_days:
+                logger.info(
+                    "Backtest data insufficient for %s: need %s days, got %s",
+                    code, required_days, len(data),
+                )
             continue
 
         n = len(data)
         stock_has_pattern = False
 
         # Slide window: detect at each position from backtest_window_days to n-min_forward_days
-        for i in range(backtest_window_days, n - min_forward_days):
+        # +1 ensures the last position with 60 full forward days is included
+        for i in range(backtest_window_days, n - min_forward_days + 1):
             history_data = data[:i]
             future_data = data[i:]
             detect_date = history_data[-1]["date"]
@@ -260,6 +285,10 @@ def run_backtest(
     report.stocks_with_patterns = stocks_with_patterns
     report.total_patterns = len(all_results)
     report.results = all_results
+    if min_score is not None:
+        report.report_filter = {"min_score": min_score, "applied": True}
+    else:
+        report.report_filter = {"applied": False}
 
     if all_results:
         _aggregate(report, all_results)
@@ -451,6 +480,7 @@ def backtest_report_to_dict(report: BacktestReport) -> dict:
         "by_dry_stable_verdict": report.by_dry_stable_verdict,
         "results": [_backtest_result_to_dict(r) for r in report.results],
         "parameter_suggestions": report.parameter_suggestions,
+        "report_filter": report.report_filter,
     }
 
 

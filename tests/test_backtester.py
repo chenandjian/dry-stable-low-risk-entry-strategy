@@ -254,3 +254,152 @@ def test_score_stratify_excludes_insufficient_data_hits():
     assert report.by_score_range[0]["count"] == 2
     # hit_rate uses only the 1 sample with valid hit_10d
     assert report.by_score_range[0]["hit_rate_10d"] == 100.0
+
+
+# ── BUG-002: backtest loop boundaries ───────────────────────────────
+
+def test_backtest_loop_boundary_exact_fit_evaluates_once(monkeypatch, tmp_path):
+    """Data length = backtest_window + 60 → one strategy evaluation.
+
+    BUG-002: range(250, 310) was empty for len=310, now range(250, 311) yields 1.
+    """
+    from scanner import backtester, db as db_mod
+
+    db_path = tmp_path / "cuphandle.db"
+    db_mod.init_db(str(db_path))
+
+    backtest_window = 250
+    min_forward = 60
+    total_rows = backtest_window + min_forward  # 310
+
+    dates = [f"2025-{(i // 28) + 1:02d}-{(i % 28) + 1:02d}" for i in range(total_rows)]
+    ohlc = [{"date": d, "open": 10.0, "high": 10.5, "low": 9.5, "close": 10.2, "volume": 1_000_000, "turnover": 10_200_000} for d in dates]
+    db_mod.save_ohlc("600000", ohlc)
+
+    eval_calls = []
+
+    class FakeEngine:
+        def __init__(self, config): pass
+        def evaluate_at(self, data, code="", name="", market_data=None):
+            eval_calls.append(len(data))
+            return type("Eval", (), {"passed": False, "result": type("R", (), {"score": 0})(), "dry_stable": None})()
+
+    monkeypatch.setattr(backtester, "CupHandleStrategyEngine", FakeEngine)
+    monkeypatch.setattr(backtester, "fetch_market_index_daily", lambda symbol=None: [])
+
+    config = {
+        "data": {"database_path": str(db_path), "backtest_window_days": backtest_window},
+        "liquidity": {"min_listing_days": backtest_window},
+        "cup": {"max_duration": 60},
+        "handle": {"max_duration": 20},
+        "breakout": {},
+        "scoring": {"medium_threshold": 70},
+    }
+
+    def fake_fetch(code):
+        return db_mod.get_ohlc(code)
+
+    report = backtester.run_backtest(
+        [{"code": "600000", "name": "Test"}],
+        fake_fetch,
+        config,
+        max_stocks=1,
+    )
+    assert report.total_stocks_tested == 1
+    assert len(eval_calls) == 1
+
+
+def test_backtest_loop_boundary_one_short_skips(monkeypatch, tmp_path):
+    """Data length = backtest_window + 59 → no evaluation (insufficient forward)."""
+    from scanner import backtester, db as db_mod
+
+    db_path = tmp_path / "cuphandle.db"
+    db_mod.init_db(str(db_path))
+
+    backtest_window = 250
+    total_rows = backtest_window + 59  # 309
+
+    dates = [f"2025-{(i // 28) + 1:02d}-{(i % 28) + 1:02d}" for i in range(total_rows)]
+    ohlc = [{"date": d, "open": 10.0, "high": 10.5, "low": 9.5, "close": 10.2, "volume": 1_000_000, "turnover": 10_200_000} for d in dates]
+    db_mod.save_ohlc("600001", ohlc)
+
+    eval_calls = []
+
+    class FakeEngine:
+        def __init__(self, config): pass
+        def evaluate_at(self, data, code="", name="", market_data=None):
+            eval_calls.append(len(data))
+            return type("Eval", (), {"passed": False, "result": type("R", (), {"score": 0})(), "dry_stable": None})()
+
+    monkeypatch.setattr(backtester, "CupHandleStrategyEngine", FakeEngine)
+    monkeypatch.setattr(backtester, "fetch_market_index_daily", lambda symbol=None: [])
+
+    config = {
+        "data": {"database_path": str(db_path), "backtest_window_days": backtest_window},
+        "liquidity": {"min_listing_days": backtest_window},
+        "cup": {"max_duration": 60},
+        "handle": {"max_duration": 20},
+        "breakout": {},
+        "scoring": {"medium_threshold": 70},
+    }
+
+    def fake_fetch(code):
+        return db_mod.get_ohlc(code)
+
+    report = backtester.run_backtest(
+        [{"code": "600001", "name": "Test"}],
+        fake_fetch,
+        config,
+        max_stocks=1,
+    )
+    # len(data) = 309 < 250 + 60 → skipped before loop
+    assert len(eval_calls) == 0
+
+
+def test_backtest_loop_boundary_two_fits_evaluates_twice(monkeypatch, tmp_path):
+    """Data length = backtest_window + 61 → two strategy evaluations."""
+    from scanner import backtester, db as db_mod
+
+    db_path = tmp_path / "cuphandle.db"
+    db_mod.init_db(str(db_path))
+
+    backtest_window = 250
+    total_rows = backtest_window + 61  # 311
+
+    dates = [f"2025-{(i // 28) + 1:02d}-{(i % 28) + 1:02d}" for i in range(total_rows)]
+    ohlc = [{"date": d, "open": 10.0, "high": 10.5, "low": 9.5, "close": 10.2, "volume": 1_000_000, "turnover": 10_200_000} for d in dates]
+    db_mod.save_ohlc("600002", ohlc)
+
+    eval_calls = []
+
+    class FakeEngine:
+        def __init__(self, config): pass
+        def evaluate_at(self, data, code="", name="", market_data=None):
+            eval_calls.append(len(data))
+            return type("Eval", (), {"passed": False, "result": type("R", (), {"score": 0})(), "dry_stable": None})()
+
+    monkeypatch.setattr(backtester, "CupHandleStrategyEngine", FakeEngine)
+    monkeypatch.setattr(backtester, "fetch_market_index_daily", lambda symbol=None: [])
+
+    config = {
+        "data": {"database_path": str(db_path), "backtest_window_days": backtest_window},
+        "liquidity": {"min_listing_days": backtest_window},
+        "cup": {"max_duration": 60},
+        "handle": {"max_duration": 20},
+        "breakout": {},
+        "scoring": {"medium_threshold": 70},
+    }
+
+    def fake_fetch(code):
+        return db_mod.get_ohlc(code)
+
+    report = backtester.run_backtest(
+        [{"code": "600002", "name": "Test"}],
+        fake_fetch,
+        config,
+        max_stocks=1,
+    )
+    assert report.total_stocks_tested == 1
+    # range(250, 251) → 1; range(250, 252) → 2 — wait, n=311, range(250, 311-60+1)=range(250,252) → 2
+    # Actually: n=311, n-min_forward_days+1 = 311-60+1 = 252, range(250, 252) → [250, 251] → 2 calls
+    assert len(eval_calls) == 2

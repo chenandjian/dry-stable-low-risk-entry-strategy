@@ -850,17 +850,18 @@ def test_scan_all_passes_configured_daily_sources_to_fetch(monkeypatch, tmp_path
 
 
 
-def test_scan_all_uses_daily_kline_days_config(monkeypatch, tmp_path):
+def test_scan_all_fetches_min_listing_days(monkeypatch, tmp_path):
+    """BUG-006: min_listing_days controls fetch days, not daily_kline_days."""
     config = {
-        "data": {"database_path": str(tmp_path / "cuphandle.db"), "daily_kline_days": 320},
-        "liquidity": {"enabled": False, "min_listing_days": 250},
+        "data": {"database_path": str(tmp_path / "cuphandle.db")},
+        "liquidity": {"enabled": False, "min_listing_days": 350},
         "scoring": {"medium_threshold": 70},
     }
     seen = []
 
     def fake_fetch_with_retry(code, ds, *args, kline_days=None, **kwargs):
         seen.append(kline_days)
-        return engine.FetchResult(data=_rows(320), primary_source=ds, fallback_source="sina", primary_attempts=1)
+        return engine.FetchResult(data=_rows(350), primary_source=ds, fallback_source="sina", primary_attempts=1)
 
     monkeypatch.setattr(engine, "DataSourceManager", FakeScanManager)
     monkeypatch.setattr(engine.threading, "Thread", ImmediateThread)
@@ -873,20 +874,46 @@ def test_scan_all_uses_daily_kline_days_config(monkeypatch, tmp_path):
             pass
         def evaluate_at(self, data, code='', name='', market_data=None):
             result = engine.CupHandleResult(found=False, code=code, name=name)
-            return type('Eval', (), {'result': result, 'dry_stable': None})()
+            return type('Eval', (), {'result': result, 'dry_stable': None, 'passed': False})()
     monkeypatch.setattr(engine, "CupHandleStrategyEngine", FakeStrategyEngine)
-    monkeypatch.setattr(
-        engine,
-        "analyze_dry_stable",
-        lambda result, data, market_data=None: {
-            "pattern_score": {"score": 0, "key_pattern_type": "other", "type": "other"},
-            "decision": {"verdict": "不建议买入", "summary": ""},
-        },
-    )
 
     engine.scan_all(config, worker_count=1)
 
-    assert seen == [320]
+    # min_listing_days=350 → fetch with 350
+    assert seen == [350]
+
+
+def test_daily_kline_days_does_not_override_min_listing_days(monkeypatch, tmp_path):
+    """BUG-006: daily_kline_days config is ignored; min_listing_days controls fetch."""
+    config = {
+        "data": {"database_path": str(tmp_path / "cuphandle.db"), "daily_kline_days": 999},
+        "liquidity": {"enabled": False, "min_listing_days": 400},
+        "scoring": {"medium_threshold": 70},
+    }
+    seen = []
+
+    def fake_fetch_with_retry(code, ds, *args, kline_days=None, **kwargs):
+        seen.append(kline_days)
+        return engine.FetchResult(data=_rows(400), primary_source=ds, fallback_source="sina", primary_attempts=1)
+
+    monkeypatch.setattr(engine, "DataSourceManager", FakeScanManager)
+    monkeypatch.setattr(engine.threading, "Thread", ImmediateThread)
+    monkeypatch.setattr(engine, "_fetch_with_retry", fake_fetch_with_retry)
+    monkeypatch.setattr(stock_pool, "get_a_stock_pool", lambda config: [{"code": "600000", "name": "PF Bank"}])
+    monkeypatch.setattr(engine, "fetch_market_index_daily", lambda symbol=None: [])
+    monkeypatch.setattr(engine, "passes_liquidity_filter", lambda data, cfg: True)
+    class FakeStrategyEngine:
+        def __init__(self, config):
+            pass
+        def evaluate_at(self, data, code='', name='', market_data=None):
+            result = engine.CupHandleResult(found=False, code=code, name=name)
+            return type('Eval', (), {'result': result, 'dry_stable': None, 'passed': False})()
+    monkeypatch.setattr(engine, "CupHandleStrategyEngine", FakeStrategyEngine)
+
+    engine.scan_all(config, worker_count=1)
+
+    # daily_kline_days=999 should NOT override min_listing_days=400
+    assert seen == [400]
 
 
 def test_scan_all_reports_progress_when_stock_skipped_for_insufficient_listing_days(monkeypatch, tmp_path):
