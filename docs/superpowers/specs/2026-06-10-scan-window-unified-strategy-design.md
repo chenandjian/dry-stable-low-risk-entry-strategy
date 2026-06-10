@@ -100,7 +100,7 @@ data:
 5. 日线数据按日期升序排列。
 6. 扫描与回测的一致性要求建立在相同配置、相同 OHLC、相同市场指数数据和相同判断日期基础上。
 7. 缓存可以保留超过 `min_listing_days` 的历史数据，但策略调用前必须按配置截取窗口。
-8. 为兼容旧配置，缺少 `scan_window_days` 时回退到 `min_listing_days`；缺少 `backtest_window_days` 时同样回退到 `min_listing_days`。
+8. 为兼容旧配置，缺少 `scan_window_days` 或 `backtest_window_days` 时使用固定默认值 `250`，不得回退到 `min_listing_days`，避免策略窗口随拉取范围变化。
 
 ---
 
@@ -134,7 +134,7 @@ data:
 ### 4.3 交互规则
 
 - 三个字段必须为正整数且不低于 30。
-- `scan_window_days` 不得大于 `min_listing_days`。
+- `scan_window_days` 不得大于 `min_listing_days`；前端保存和后端启动扫描时都必须校验，非法时拒绝保存或启动。
 - `backtest_window_days` 可以大于 `min_listing_days`，因为回测可能根据用户日期范围拉取更长历史；但回测数据不足时不得静默缩短策略窗口。
 - 保存配置后，下次扫描和回测生效。
 - 运行中的扫描任务继续使用启动时已加载的配置对象。
@@ -221,13 +221,18 @@ not result.is_breakout
 在 `scanner/strategy_engine.py` 提供无业务副作用的共享函数：
 
 ```python
-def select_strategy_window(data: list[dict], window_days: int) -> list[dict]:
+def select_strategy_window(
+    data: list[dict],
+    window_days: int,
+) -> list[dict] | None:
     if window_days <= 0:
         raise ValueError("window_days must be a positive integer")
+    if len(data) < window_days:
+        return None
     return data[-window_days:]
 ```
 
-该函数只负责窗口截取，不读取场景配置。扫描和回测调用方分别传入自己的窗口天数。
+该函数不读取场景配置。数据不足固定窗口时返回 `None`，强制调用方显式处理，禁止静默使用缩短窗口执行策略。扫描和回测调用方分别传入自己的窗口天数。
 
 ### 5.5 状态设计
 
@@ -302,12 +307,38 @@ PUT /api/config
 }
 ```
 
+候选详情接口路径保持不变：
+
+```http
+GET /api/candidate/{code}
+```
+
+在保留现有顶层原扫描字段的基础上，增量返回：
+
+```json
+{
+  "analysis_notice": "详情分析基于当前策略配置重新计算，可能与扫描任务产生时的结果不同。",
+  "current_analysis": {
+    "passed": true,
+    "strategyVersion": "cuphandle-v1",
+    "configHash": "sha256:...",
+    "score": 82,
+    "pattern": {},
+    "dryStable": {},
+    "passedRules": [],
+    "failedRules": []
+  }
+}
+```
+
+现有顶层候选字段继续表示原扫描任务保存结果；`current_analysis` 表示当前配置重新分析结果。
+
 ### 7.3 接口兼容要求
 
-- 旧配置不存在 `scan_window_days` 时，后端回退到 `min_listing_days`。
-- 旧配置不存在 `backtest_window_days` 时，后端回退到 `min_listing_days`。
+- 旧配置不存在 `scan_window_days` 时，后端使用固定默认值 `250`。
+- 旧配置不存在 `backtest_window_days` 时，后端使用固定默认值 `250`。
 - 不修改扫描启动、扫描状态、候选列表和回测接口的 URL。
-- 不改变现有候选响应结构。
+- 候选详情响应仅做增量扩展，不删除或改变现有顶层原扫描字段语义。
 
 ---
 
@@ -339,6 +370,7 @@ liquidity:
 需要实现：
 
 - 新增 `select_strategy_window()`。
+- 数据不足固定窗口时 `select_strategy_window()` 返回 `None`，所有调用方必须显式处理。
 - 将 `not result.is_breakout` 纳入 `_candidate_rules()`。
 - 保证 `evaluation.passed` 是最终候选资格唯一结论。
 - 保留 `CANDIDATE_KEYS`、`REJECT_KEYS` 作为策略引擎内部规则，不允许业务调用方重复使用它们判断候选。
@@ -362,11 +394,12 @@ CupHandleStrategyEngine.evaluate_at()
 1. 从 liquidity.min_listing_days 读取 kline_days。
 2. 数据源调用必须传入 kline_days。
 3. 使用完整 data 执行上市天数检查和流动性过滤。
-4. 读取 scan_window_days，缺失时回退 min_listing_days。
-5. 数据不足 scan_window_days 时记录 skipped。
+4. 读取 scan_window_days，缺失时使用固定默认值 250。
+5. 校验 scan_window_days 不得大于 min_listing_days，非法时拒绝启动扫描。
 6. strategy_data = select_strategy_window(data, scan_window_days)。
-7. 调用 strategy_engine.evaluate_at(strategy_data, ...)。
-8. 仅使用 evaluation.passed 决定 candidate/scanned。
+7. strategy_data 为 None 时记录 skipped。
+8. 调用 strategy_engine.evaluate_at(strategy_data, ...)。
+9. 仅使用 evaluation.passed 决定 candidate/scanned。
 ```
 
 删除扫描层重复候选判断，不再直接使用 `CANDIDATE_KEYS` 和 `REJECT_KEYS` 判断候选。
@@ -382,19 +415,20 @@ CupHandleStrategyEngine.evaluate_at()
 
 - 保留逐日无未来数据的窗口构建方式。
 - 使用共享 `select_strategy_window(window, backtest_window_days)`。
-- 数据不足 `backtest_window_days` 时不调用策略引擎。
+- `select_strategy_window()` 返回 `None` 时不调用策略引擎。
 - 仅根据 `evaluation.passed` 记录策略结果。
 - 指定柄诊断也应使用截至柄结束日的最后 `backtest_window_days` 日，避免诊断与自动回测窗口不一致。
 
 #### `scanner/backtester.py`
 
-- 读取 `backtest_window_days`，缺失时回退 `min_listing_days`。
+- 读取 `backtest_window_days`，缺失时使用固定默认值 `250`。
+- 从 `run_backtest()` 公共函数签名中删除 `window_min` 参数，使用内部常量 `min_forward_days = 60` 表示未来收益最大观察期。
 - 批量回测拉取的数据量必须至少覆盖 `backtest_window_days + 最大未来收益观察天数`，不能继续依赖数据源默认 250 日。
 - 每个判断时点将 `data[:i]` 截取为最后 `backtest_window_days` 日。
 - 仅根据 `evaluation.passed` 记录策略结果。
-- 删除 `run_backtest()` 中作为候选资格门槛的 `min_score` 参数和判断。
-- 删除或废弃 CLI `--min-score` 参数，避免调用方继续改变统一策略结论。
-- 如未来需要按分数筛选报告，必须在策略结果生成后新增名称明确的报告过滤功能，不得复用策略候选概念。
+- 删除 `run_backtest()` 中作为候选资格门槛的 `min_score` 判断。
+- 本版本保留 CLI `--min-score` 参数并打印废弃警告，但只允许在策略判断完成后作为回测报告展示过滤条件生效。
+- 回测报告必须明确标记使用了报告过滤；下一版本删除 `--min-score`。
 - 未来收益、命中率和止损统计继续由回测模块计算，不放入策略引擎。
 
 #### `main.py`
@@ -413,7 +447,10 @@ CLI 单股分析：
 - 使用 `scan_window_days` 截取 OHLC。
 - 调用 `CupHandleStrategyEngine.evaluate_at()` 获取统一分析结果。
 - 不直接调用 `analyze_dry_stable()` 重新编排策略。
-- 如果当前配置与扫描时配置不同，详情属于“按当前配置重新分析”；本次不新增历史配置快照。
+- 当前配置重算结果不得覆盖数据库中保存的原扫描结果。
+- 接口同时返回原扫描任务保存结果、当前配置重新分析结果和提示文案。
+- UI 必须展示：“详情分析基于当前策略配置重新计算，可能与扫描任务产生时的结果不同。”
+- 本次不新增历史配置快照。
 
 #### 并发控制
 
@@ -481,7 +518,7 @@ data: {
 ### 9.2 异常处理
 
 - `scan_window_days <= 0`：拒绝启动扫描并返回明确配置错误。
-- `scan_window_days > min_listing_days`：拒绝保存前端配置；后端仍需防御性校验。
+- `scan_window_days > min_listing_days`：前端拒绝保存，后端拒绝启动扫描并返回明确配置错误。
 - 单只股票数据不足 `scan_window_days`：跳过该股票，不中断扫描。
 - 单只股票策略计算异常：保持现有单只失败不中断整体任务规则。
 - 回测判断时点数据不足 `backtest_window_days`：跳过该判断时点，不使用缩短窗口计算。
@@ -495,9 +532,9 @@ data: {
 
 `scanner/strategy_engine.py`：
 
-- `select_strategy_window()` 返回最后 N 日。
+- `select_strategy_window()` 在数据充足时返回最后 N 日。
 - 输入数据等于 N 日时原样返回。
-- 输入数据少于 N 日时返回现有数据，由调用方负责不足判断。
+- 输入数据少于 N 日时返回 `None`。
 - 非正整数窗口抛出明确错误。
 - `is_breakout=True` 时 `evaluation.passed=False`。
 - 评分、主导形态、决策状态和突破排除均只在策略引擎中决定。
@@ -530,7 +567,9 @@ data: {
 
 - 批量回测使用 `backtest_window_days`。
 - 批量回测拉取数据长度满足 `backtest_window_days + 60`。
-- 批量回测不再通过额外 `min_score` 改变候选资格，相关参数已移除或废弃。
+- 批量回测不再通过额外 `min_score` 改变候选资格。
+- `window_min` 不再参与策略窗口或最低数据要求计算。
+- CLI `--min-score` 仅作报告展示过滤，并输出废弃警告。
 - 市场指数数据只包含判断日期及以前数据。
 
 ### 10.2 接口测试
@@ -540,6 +579,7 @@ data: {
 - 缺少 `scan_window_days` 的旧配置仍可启动扫描。
 - 非法窗口配置返回明确错误，不启动扫描。
 - 扫描任务状态接口可展示“策略计算数据不足”原因。
+- 候选详情响应同时包含原扫描结果、当前配置重算结果和语义提示。
 
 ### 10.3 集成测试
 
@@ -567,6 +607,7 @@ data: {
 - `scan_window_days < 30` 时显示校验错误。
 - 修改扫描窗口不会修改回测窗口。
 - 修改回测窗口不会修改扫描窗口。
+- 候选详情页明确区分原扫描结果与当前配置重新分析结果。
 
 ### 10.5 回归测试
 
@@ -601,8 +642,9 @@ cd web && npm run build
 7. 调用方仅根据 `evaluation.passed` 判断策略候选。
 8. 相同窗口、配置、数据和判断日期下，扫描与回测核心结果完全一致。
 9. 数据不足时有明确跳过原因，不静默使用缩短窗口。
-10. 不破坏数据源回退、缓存、任务恢复和现有前端展示。
+10. 不破坏数据源回退、缓存、任务恢复和现有前端核心展示；候选详情按本方案增量增加当前配置重算区域和提示。
 11. 所有新增和回归测试通过。
+12. 本次一次性完成配置、统一策略引擎、扫描、全部回测入口、CLI、候选详情和一致性测试五个 Phase，不保留策略旁路。
 
 ---
 
@@ -622,6 +664,7 @@ cd web && npm run build
 8. 每完成一个入口改造，增加对应窗口和一致性测试。
 9. 对扫描和回测使用同一固定数据集做对照验证。
 10. 如发现本文档与目标代码结构冲突，以“只有一个策略判断入口”和“窗口职责分离”为不可变目标，采用最小改动适配现有代码。
+11. 按 Phase 1-5 小步实施和验证，但必须在本次开发中完成全部 Phase。
 
 ---
 
@@ -639,3 +682,20 @@ cd web && npm run build
 8. 前端构建结果。
 9. 是否存在仍绕过统一策略引擎的入口。
 10. 是否存在需要后续实现的任务配置快照问题。
+
+---
+
+## 14. 已确认实施决策
+
+本章节记录开发前已确认、不得再次自由选择的实施决策。完整确认记录见：
+
+```text
+docs/superpowers/specs/2026-06-10-scan-window-unified-strategy-decisions.md
+```
+
+1. `select_strategy_window()` 数据不足时返回 `None`。
+2. 批量回测废弃 `window_min`，使用 `backtest_window_days` 与 `min_forward_days = 60` 分离职责。
+3. CLI `--min-score` 本版本标记废弃，仅作报告展示过滤，不参与策略候选判断，下一版本删除。
+4. 候选详情按当前配置重新分析，接口和 UI 必须区分原扫描结果与当前重算结果。
+5. `scan_window_days` 默认值固定为 `250`，不跟随当前 `min_listing_days=351`；非法配置必须拒绝启动。
+6. 本次一次性完成全部 Phase 1-5，并按 Phase 分步测试。
