@@ -68,7 +68,8 @@
 - Test results: **267 passed, 0 failed** (all strategy2 + strategy1 regression).
 - Frontend build: **✓ built in 1.62s** (Strategy2Results included).
 - **Config**: `config.yaml` strategy2 section with 8 parameters.
-- **Known gaps**: StrategyConfig.vue strategy2 UI section not yet added; re-evaluate/backtest/CSV export not in scope; scanner/engine.py still uses inline fetch (strategy1 stability preserved).
+- **Known gaps**: re-evaluate/backtest/CSV export not in scope; scanner/engine.py still uses inline fetch (strategy1 stability preserved).
+- **Frontend config**: StrategyConfig.vue strategy2 section completed (commit `70a930a`) — 7 parameters, enable toggle, front-end validation, gold-toned visual distinction.
 
 ### Commit history
 ```
