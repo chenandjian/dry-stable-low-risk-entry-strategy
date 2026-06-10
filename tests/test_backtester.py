@@ -433,11 +433,13 @@ def _evaluation_core(evaluation):
         "passed": evaluation.passed,
         "score": evaluation.result.score,
         "pattern_kind": evaluation.result.pattern_kind,
+        "is_breakout": evaluation.result.is_breakout,
         "verdict_key": dry.get("decision", {}).get("verdict_key"),
         "key_pattern_type": dry.get("pattern_score", {}).get("key_pattern_type"),
         "stop_loss": dry.get("key_prices", {}).get("stop_loss"),
         "entry_zone_low": dry.get("key_prices", {}).get("entry_zone_low"),
         "entry_zone_high": dry.get("key_prices", {}).get("entry_zone_high"),
+        "failed_rules": [rule.ruleName for rule in evaluation.failed_rules],
     }
 
 
@@ -558,6 +560,12 @@ def test_scan_backtest_consistent_core_results_same_judgment_date(monkeypatch, t
 
     # Same core results
     assert scan_call["core"] == bt_call["core"]
+
+    # ACCEPTANCE-001: rejected scenario — passed=False, verdict not candidate
+    assert scan_call["core"]["passed"] is False
+    assert scan_call["core"]["verdict_key"] not in {
+        "BUY_LOW", "WATCH_BREAKOUT", "WAIT_ENTRY",
+    }
 
     # No future data in market window
     assert all(date <= decision_date for date in bt_call["market_dates"])
@@ -830,6 +838,13 @@ def test_consistency_cup_handle_scenario(monkeypatch, tmp_path):
     assert scan_call["stock_dates"] == bt_call["stock_dates"]
     # Same core results
     assert scan_call["core"] == bt_call["core"]
+    # ACCEPTANCE-001: cup_handle scenario — must actually be cup_handle
+    assert scan_call["core"]["pattern_kind"] == "cup_handle"
+    assert scan_call["core"]["key_pattern_type"] == "cup_handle"
+    assert scan_call["core"]["verdict_key"] is not None
+    assert scan_call["core"]["stop_loss"] is not None
+    assert scan_call["core"]["entry_zone_low"] is not None
+    assert scan_call["core"]["entry_zone_high"] is not None
     # No future market data in either path
     decision_date = scan_call["stock_dates"][-1]
     assert all(date <= decision_date for date in scan_call["market_dates"])
@@ -861,7 +876,11 @@ def test_consistency_vcp_only_scenario(monkeypatch, tmp_path):
 
     assert scan_call["stock_dates"] == bt_call["stock_dates"]
     assert scan_call["core"] == bt_call["core"]
-    # VCP data should end up with key_pattern_type involved (even if not passed)
+    # ACCEPTANCE-001: VCP-only scenario — must actually be vcp
+    assert scan_call["core"]["pattern_kind"] == "vcp"
+    assert scan_call["core"]["key_pattern_type"] == "vcp"
+    assert scan_call["core"]["verdict_key"] is not None
+    assert scan_call["core"]["stop_loss"] is not None
     decision_date = scan_call["stock_dates"][-1]
     assert all(date <= decision_date for date in scan_call["market_dates"])
     assert all(date <= decision_date for date in bt_call["market_dates"])
@@ -917,8 +936,10 @@ def test_consistency_breakout_excluded_scenario(monkeypatch, tmp_path):
 
     assert scan_call["stock_dates"] == bt_call["stock_dates"]
     assert scan_call["core"] == bt_call["core"]
-    # Breakout exclusion → both paths should have passed=False
+    # ACCEPTANCE-001: breakout excluded scenario
+    assert scan_call["core"]["is_breakout"] is True
     assert scan_call["core"]["passed"] is False
+    assert "突破状态排除" in scan_call["core"]["failed_rules"]
     decision_date = scan_call["stock_dates"][-1]
     assert all(date <= decision_date for date in scan_call["market_dates"])
     assert all(date <= decision_date for date in bt_call["market_dates"])
