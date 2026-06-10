@@ -93,6 +93,10 @@ def cmd_analyze(args):
         logger.info("Sina failed, trying Tencent...")
         data = fetch_tencent_daily(code, days=kline_days)
 
+    if data is None:
+        logger.error("Cannot fetch data for %s", code)
+        return
+
     # Truncate to fixed strategy window
     strategy_data = select_strategy_window(data, scan_window_days)
     if strategy_data is None:

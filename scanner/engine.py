@@ -197,8 +197,7 @@ def scan_all(
                     continue
 
                 latest_trade_date = data[-1].get("date") if data else None
-                min_listing = liquidity_cfg.get("min_listing_days", 250)
-                if len(data) < min_listing:
+                if len(data) < kline_days:
                     db.update_task_stock(
                         task_id,
                         code,

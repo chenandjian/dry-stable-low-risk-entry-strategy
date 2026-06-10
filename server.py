@@ -16,7 +16,11 @@ import yaml
 
 import scanner.db as db
 from scanner.engine import scan_all, re_evaluate_task
-from scanner.strategy_engine import CupHandleStrategyEngine, select_strategy_window
+from scanner.strategy_engine import (
+    CupHandleStrategyEngine,
+    resolve_strategy_windows,
+    select_strategy_window,
+)
 from scanner.index_source import fetch_market_index_daily
 from scanner.pattern_detector import CupHandleResult
 from scanner.single_stock_backtest import (
@@ -632,7 +636,13 @@ async def get_candidate(code: str):
         cfg = load_config()
         market_idx = cfg.get("market_environment", {}).get("index_symbol")
         # RECHECK-002: use unified resolver, not manual config read
-        windows = resolve_strategy_windows(cfg)
+        try:
+            windows = resolve_strategy_windows(cfg)
+        except ValueError as exc:
+            return JSONResponse(
+                {"error": f"Invalid window config: {exc}"},
+                status_code=400,
+            )
         strategy_data = select_strategy_window(ohlc, windows.scan_window_days)
         if strategy_data is not None:
             engine = CupHandleStrategyEngine(cfg)

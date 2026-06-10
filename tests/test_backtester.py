@@ -422,54 +422,62 @@ def _make_ohlc_window(n_days: int, base_price: float = 20.0):
     return rows
 
 
-def test_scan_backtest_real_paths_call_strategy_engine_consistently(monkeypatch, tmp_path):
-    """RECHECK-003: scan_all + run_backtest both route through evaluate_at.
+def _evaluation_core(evaluation):
+    """Extract core strategy result fields for cross-path comparison."""
+    dry = evaluation.dry_stable or {}
+    return {
+        "passed": evaluation.passed,
+        "score": evaluation.result.score,
+        "pattern_kind": evaluation.result.pattern_kind,
+        "verdict_key": dry.get("decision", {}).get("verdict_key"),
+        "key_pattern_type": dry.get("pattern_score", {}).get("key_pattern_type"),
+        "stop_loss": dry.get("key_prices", {}).get("stop_loss"),
+        "entry_zone_low": dry.get("key_prices", {}).get("entry_zone_low"),
+        "entry_zone_high": dry.get("key_prices", {}).get("entry_zone_high"),
+    }
 
-    Verifies that scan and batch backtest paths feed the strategy engine
-    with same-length windows and no future data leakage.
+
+def test_scan_backtest_consistent_core_results_same_judgment_date(monkeypatch, tmp_path):
+    """FINAL-003: scan_all + run_backtest produce identical core results.
+
+    Uses real CupHandleStrategyEngine.  Scan and backtest look at the same
+    judgment date with the same stock window and market data.
     """
-    from scanner import engine, backtester, db as db_mod
-    from scanner import stock_pool
+    from scanner import engine, backtester, db as db_mod, stock_pool
+    from scanner.strategy_engine import CupHandleStrategyEngine as RealEngine
 
     db_path = tmp_path / "cuphandle.db"
     db_mod.init_db(str(db_path))
 
-    scan_window = 100
-    backtest_window = 100
-    min_forward = 60
-    total_rows = backtest_window + min_forward  # 160
-
+    window_days = 120
+    forward_days = 60
+    total_rows = window_days + forward_days  # 180
     ohlc = _make_ohlc_window(total_rows)
     db_mod.save_ohlc("600000", ohlc)
 
-    # Track what scan_all passes to evaluate_at
-    scan_eval_args = []
+    # judgment date = last day of the first window_days
+    decision_data = ohlc[:window_days]
+    decision_date = decision_data[-1]["date"]
 
-    class RecordingEngine:
-        def __init__(self, config):
-            self.config = config
-            self.strategy_version = "test-v1"
-            self.config_hash = "sha256:test"
+    # Non-empty fixed market data covering full range
+    market_full = [
+        {"date": d["date"], "open": 3000, "high": 3010, "low": 2990, "close": 3005, "volume": 1_000_000}
+        for d in ohlc
+    ]
 
+    # ── Scan path ──────────────────────────────────────────────
+    scan_calls = []
+
+    class ScanCapturingEngine(RealEngine):
         def evaluate_at(self, data, code="", name="", market_data=None):
-            scan_eval_args.append({
-                "window_len": len(data),
-                "first_date": data[0]["date"],
-                "last_date": data[-1]["date"],
-                "code": code,
-                "market_data_len": len(market_data) if market_data else 0,
+            evaluation = super().evaluate_at(data, code=code, name=name, market_data=market_data)
+            scan_calls.append({
+                "stock_dates": [row["date"] for row in data],
+                "market_dates": [row["date"] for row in (market_data or [])],
+                "core": _evaluation_core(evaluation),
             })
-            from scanner.pattern_detector import CupHandleResult
-            r = CupHandleResult(found=False, code=code, name=name)
-            r.pattern_kind = "none"
-            r.score = 0
-            return type("Eval", (), {
-                "passed": False, "result": r, "dry_stable": None,
-                "strategy_version": "test-v1", "config_hash": "sha256:test",
-                "passed_rules": [], "failed_rules": [],
-            })()
+            return evaluation
 
-    # Mock scan_all dependencies — use ImmediateThread to run worker inline
     class ImmediateThread:
         def __init__(self, target=None, args=(), daemon=None):
             self.target = target
@@ -480,84 +488,76 @@ def test_scan_backtest_real_paths_call_strategy_engine_consistently(monkeypatch,
         def join(self):
             return None
 
-    monkeypatch.setattr(engine, "CupHandleStrategyEngine", RecordingEngine)
+    monkeypatch.setattr(engine, "CupHandleStrategyEngine", ScanCapturingEngine)
     monkeypatch.setattr(engine, "DataSourceManager", type("FakeMgr", (), {}))
     monkeypatch.setattr(engine.threading, "Thread", ImmediateThread)
-
-    # Mock _fetch_with_retry to return scan_window days
-    scan_data = ohlc[-scan_window:]
-    def fake_fetch(*args, **kwargs):
-        return engine.FetchResult(
-            data=list(scan_data),
-            primary_source="sina",
-            fallback_source="sina",
-            primary_attempts=1,
-        )
-    monkeypatch.setattr(engine, "_fetch_with_retry", fake_fetch)
-    monkeypatch.setattr(engine, "fetch_market_index_daily", lambda symbol=None: [])
+    monkeypatch.setattr(engine, "_fetch_with_retry",
+                        lambda *args, **kwargs: engine.FetchResult(
+                            data=list(decision_data), primary_source="sina",
+                            fallback_source="sina", primary_attempts=1))
+    # Scan path market data: only up to decision date
+    market_for_scan = [r for r in market_full if r["date"] <= decision_date]
+    monkeypatch.setattr(engine, "fetch_market_index_daily", lambda symbol=None: list(market_for_scan))
     monkeypatch.setattr(engine, "passes_liquidity_filter", lambda data, cfg: True)
-    monkeypatch.setattr(stock_pool, "get_a_stock_pool", lambda config: [{"code": "600000", "name": "Test"}])
+    monkeypatch.setattr(stock_pool, "get_a_stock_pool",
+                        lambda config: [{"code": "600000", "name": "Test"}])
 
     config = {
-        "data": {
-            "database_path": str(db_path),
-            "scan_window_days": scan_window,
-            "backtest_window_days": backtest_window,
-        },
-        "liquidity": {"enabled": False, "min_listing_days": scan_window},
+        "data": {"database_path": str(db_path),
+                 "scan_window_days": window_days, "backtest_window_days": window_days},
+        "liquidity": {"enabled": False, "min_listing_days": window_days},
         "scoring": {"medium_threshold": 70},
         "cup": {"max_duration": 60},
         "handle": {"max_duration": 20},
         "breakout": {},
+        "market_environment": {"index_symbol": "000001"},
     }
 
     engine.scan_all(config, worker_count=1)
 
-    # Scan path should have passed exactly scan_window days to evaluate_at
-    assert len(scan_eval_args) >= 1
-    scan_call = scan_eval_args[0]
-    assert scan_call["window_len"] == scan_window
+    assert len(scan_calls) >= 1
 
-    # Now backtest path
-    backtest_eval_args = []
+    # ── Backtest path ──────────────────────────────────────────
+    backtest_calls = []
 
-    class RecordingBTEngine:
-        def __init__(self, config):
-            self.config = config
-
+    class BacktestCapturingEngine(RealEngine):
         def evaluate_at(self, data, code="", name="", market_data=None):
-            backtest_eval_args.append({
-                "window_len": len(data),
-                "first_date": data[0]["date"],
-                "last_date": data[-1]["date"],
-                "code": code,
-                "market_data_len": len(market_data) if market_data else 0,
+            evaluation = super().evaluate_at(data, code=code, name=name, market_data=market_data)
+            backtest_calls.append({
+                "stock_dates": [row["date"] for row in data],
+                "market_dates": [row["date"] for row in (market_data or [])],
+                "core": _evaluation_core(evaluation),
             })
-            r = type("R", (), {"found": False, "score": 0, "pattern_kind": "none"})()
-            return type("Eval", (), {
-                "passed": False, "result": r, "dry_stable": None,
-            })()
+            return evaluation
 
-    monkeypatch.setattr(backtester, "CupHandleStrategyEngine", RecordingBTEngine)
-    monkeypatch.setattr(backtester, "fetch_market_index_daily", lambda symbol=None: [])
+    monkeypatch.setattr(backtester, "CupHandleStrategyEngine", BacktestCapturingEngine)
+    monkeypatch.setattr(backtester, "fetch_market_index_daily", lambda symbol=None: list(market_full))
 
     def fake_fetch_fn(code):
         return db_mod.get_ohlc(code)
 
-    report = backtester.run_backtest(
+    backtester.run_backtest(
         [{"code": "600000", "name": "Test"}],
-        fake_fetch_fn,
-        config,
-        max_stocks=1,
+        fake_fetch_fn, config, max_stocks=1,
     )
 
-    # Both scan and backtest should feed backtest_window days
-    for bt_call in backtest_eval_args:
-        assert bt_call["window_len"] == backtest_window
+    # Find backtest call at same judgment date
+    bt_same = [c for c in backtest_calls if c["stock_dates"][-1] == decision_date]
+    assert len(bt_same) >= 1
+    bt_call = bt_same[0]
 
-    # Market data must not contain future data (> last_date in window)
-    for bt_call in backtest_eval_args:
-        assert bt_call["market_data_len"] == 0  # we injected []
+    # ── Assertions ─────────────────────────────────────────────
+    scan_call = scan_calls[0]
+
+    # Same stock window dates
+    assert scan_call["stock_dates"] == bt_call["stock_dates"]
+
+    # Same core results
+    assert scan_call["core"] == bt_call["core"]
+
+    # No future data in market window
+    assert all(date <= decision_date for date in bt_call["market_dates"])
+    assert all(date <= decision_date for date in scan_call["market_dates"])
 
 
 def test_scan_all_respects_min_listing_days_fetch(monkeypatch, tmp_path):
@@ -614,15 +614,10 @@ def test_scan_all_respects_min_listing_days_fetch(monkeypatch, tmp_path):
     assert fetch_kline_days == [350]
 
 
-def test_cmd_analyze_passes_min_listing_days_to_fetch(monkeypatch, tmp_path):
-    """RECHECK-001: cmd_analyze resolves windows before fetch, passes days."""
-    import main
-    from scanner import sina_source, tencent_source, index_source
-
-    db_path = tmp_path / "cuphandle.db"
+def _analyze_config(tmp_path):
     from scanner import db as db_mod
+    db_path = tmp_path / "cuphandle.db"
     db_mod.init_db(str(db_path))
-
     config_path = tmp_path / "config.yaml"
     import yaml
     cfg = {
@@ -635,30 +630,69 @@ def test_cmd_analyze_passes_min_listing_days_to_fetch(monkeypatch, tmp_path):
     (tmp_path / "output").mkdir(exist_ok=True)
     with open(config_path, "w", encoding="utf-8") as f:
         yaml.dump(cfg, f)
+    return config_path
 
+
+def test_cmd_analyze_sina_success_passes_min_listing_days(monkeypatch, tmp_path):
+    """FINAL-002-1: Sina succeeds → only sina called with min_listing_days."""
+    import main
+    from scanner import sina_source, tencent_source, index_source
+
+    config_path = _analyze_config(tmp_path)
     fetch_args = []
 
-    def fake_sina(code, days=None):
-        fetch_args.append(("sina", days))
-        data = _make_ohlc_window(days)
-        return data
-
-    def fake_tencent(code, days=None):
-        fetch_args.append(("tencent", days))
-        return None
-
-    monkeypatch.setattr(sina_source, "fetch_sina_daily", fake_sina)
-    monkeypatch.setattr(tencent_source, "fetch_tencent_daily", fake_tencent)
+    monkeypatch.setattr(sina_source, "fetch_sina_daily",
+                        lambda code, days=None: (fetch_args.append(("sina", days)), _make_ohlc_window(days))[-1])
+    monkeypatch.setattr(tencent_source, "fetch_tencent_daily",
+                        lambda code, days=None: (fetch_args.append(("tencent", days)), None)[-1])
     monkeypatch.setattr(index_source, "fetch_market_index_daily", lambda symbol=None: [])
 
-    # Simulate argparse namespace
     class Args:
         config = str(config_path)
         stock = "600000"
 
     main.cmd_analyze(Args())
-
-    # Both sources should receive min_listing_days=351
     assert ("sina", 351) in fetch_args
-    # Verify kline_days was resolved before fetch (no UnboundLocalError)
-    assert len(fetch_args) >= 1
+
+
+def test_cmd_analyze_sina_fails_tencent_succeeds(monkeypatch, tmp_path):
+    """FINAL-002-2: Sina fails → tencent called with same min_listing_days."""
+    import main
+    from scanner import sina_source, tencent_source, index_source
+
+    config_path = _analyze_config(tmp_path)
+    fetch_args = []
+
+    monkeypatch.setattr(sina_source, "fetch_sina_daily",
+                        lambda code, days=None: (fetch_args.append(("sina", days)), None)[-1])
+    monkeypatch.setattr(tencent_source, "fetch_tencent_daily",
+                        lambda code, days=None: (fetch_args.append(("tencent", days)), _make_ohlc_window(days))[-1])
+    monkeypatch.setattr(index_source, "fetch_market_index_daily", lambda symbol=None: [])
+
+    class Args:
+        config = str(config_path)
+        stock = "600000"
+
+    main.cmd_analyze(Args())
+    assert ("sina", 351) in fetch_args
+    assert ("tencent", 351) in fetch_args
+
+
+def test_cmd_analyze_both_sources_fail_returns_cleanly(monkeypatch, tmp_path, caplog):
+    """FINAL-002-3: Both sources fail → clean exit with error log, no TypeError."""
+    import main
+    from scanner import sina_source, tencent_source, index_source
+
+    config_path = _analyze_config(tmp_path)
+
+    monkeypatch.setattr(sina_source, "fetch_sina_daily", lambda code, days=None: None)
+    monkeypatch.setattr(tencent_source, "fetch_tencent_daily", lambda code, days=None: None)
+    monkeypatch.setattr(index_source, "fetch_market_index_daily", lambda symbol=None: [])
+
+    class Args:
+        config = str(config_path)
+        stock = "600000"
+
+    # Must not raise TypeError / UnboundLocalError
+    main.cmd_analyze(Args())
+    assert "Cannot fetch data" in caplog.text
