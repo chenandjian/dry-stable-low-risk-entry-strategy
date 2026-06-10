@@ -14,3 +14,5 @@
 - Updated the unified strategy design document with six confirmed implementation decisions.
 - Resolved documentation ambiguities: fixed-window selection returns `None` on insufficient data, `window_min` is removed from `run_backtest()`, `--min-score` is report-only and deprecated, and candidate detail responses distinguish persisted scan results from current-config analysis.
 - Documentation verification: placeholder and contradiction scans completed; `git diff --check` passed.
+- Added the yfinance four-source daily K-line design, preserving the existing model where independent data-source locks process different stocks concurrently.
+- Defined yfinance A-share symbol mapping, explicit adjusted-price behavior, normalized SQLite OHLC fields, rate-limit propagation, four-source concurrency tests, and offline CI boundaries.
