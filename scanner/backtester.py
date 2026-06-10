@@ -13,7 +13,7 @@ Core approach:
 
 import logging
 from dataclasses import dataclass, field
-from scanner.strategy_engine import CupHandleStrategyEngine
+from scanner.strategy_engine import CupHandleStrategyEngine, select_strategy_window
 from scanner.index_source import fetch_market_index_daily
 
 logger = logging.getLogger(__name__)
@@ -125,8 +125,8 @@ def run_backtest(
     stocks: list[dict],
     fetch_fn,
     config: dict,
-    window_min: int = 250,
-    min_score: int = 60,
+    window_min: int = None,
+    min_score: int = None,
     max_stocks: int | None = None,  # Limit for testing
     market_data: list[dict] | None = None,  # Inject fixed market data (None = auto-fetch)
 ) -> BacktestReport:
@@ -136,8 +136,8 @@ def run_backtest(
         stocks: list of {code, name} stock dicts
         fetch_fn: function(code) -> list[dict] OHLC data
         config: full config dict
-        window_min: minimum data points before starting detection
-        min_score: minimum pattern score to include
+        window_min: [deprecated] use backtest_window_days from config instead
+        min_score: [deprecated] only used for report display filtering
         max_stocks: limit number of stocks (for speed)
         market_data: optional pre-fetched market index data for reproducibility.
                      When None (default), fetches live via fetch_market_index_daily.
@@ -145,6 +145,14 @@ def run_backtest(
     Returns:
         BacktestReport with aggregated statistics
     """
+    if window_min is not None:
+        logger.warning("window_min 参数已废弃，使用 config.data.backtest_window_days 替代")
+    if min_score is not None:
+        logger.warning(
+            "WARNING: --min-score 已废弃，仅用于回测报告展示过滤，"
+            "不参与策略候选判断；下一版本将删除。"
+        )
+
     report = BacktestReport()
 
     all_results = []
@@ -152,6 +160,11 @@ def run_backtest(
     stocks_with_patterns = 0
 
     stock_list = stocks[:max_stocks] if max_stocks else stocks
+
+    # Read backtest window config
+    data_cfg = config.get("data", {})
+    backtest_window_days = data_cfg.get("backtest_window_days") or 250
+    min_forward_days = 60
 
     # Use the unified strategy engine (per plan-review: same config, same entry point)
     engine = CupHandleStrategyEngine(config)
@@ -172,17 +185,22 @@ def run_backtest(
         except Exception:
             continue
 
-        if not data or len(data) < window_min + 60:
+        if not data or len(data) < backtest_window_days + min_forward_days:
             continue
 
         n = len(data)
         stock_has_pattern = False
 
-        # Slide window: detect at each position from window_min to n-60
-        for i in range(window_min, n - 60):
-            window_data = data[:i]
+        # Slide window: detect at each position from backtest_window_days to n-min_forward_days
+        for i in range(backtest_window_days, n - min_forward_days):
+            history_data = data[:i]
             future_data = data[i:]
-            detect_date = window_data[-1]["date"]
+            detect_date = history_data[-1]["date"]
+
+            # Truncate to fixed backtest window
+            window_data = select_strategy_window(history_data, backtest_window_days)
+            if window_data is None:
+                continue
 
             # Per-date market data (no future leakage)
             market_window = [r for r in market_data_full if r["date"] <= detect_date]
@@ -195,7 +213,8 @@ def run_backtest(
                 continue
 
             r = evaluation.result
-            if r.score < min_score:
+            # Deprecated min_score: used only as report display filter
+            if min_score is not None and r.score < min_score:
                 continue
             dry = evaluation.dry_stable
             stock_has_pattern = True

@@ -38,6 +38,12 @@
           <span class="default">默认 250天</span>
         </div>
         <div class="param">
+          <label title="扫描时传入统一策略引擎的最近交易日数量，用于杯柄/VCP形态检测和干稳低吸分析">扫描分析天数 <span class="unit">交易日</span></label>
+          <input type="number" v-model.number="config.data.scan_window_days"
+            @input="markDirty" step="50" min="30" />
+          <span class="default">默认 250天</span>
+        </div>
+        <div class="param">
           <label title="回测时每次形态分析使用的交易日数，逐日滑动评估历史数据中的每个交易日">回测分析天数 <span class="unit">交易日</span></label>
           <input type="number" v-model.number="config.data.backtest_window_days"
             @input="markDirty" step="50" min="30" />
@@ -241,7 +247,7 @@ const { getConfig, updateConfig } = useApi()
 const config = reactive({
   market: {},
   liquidity: {},
-  data: { backtest_window_days: 250 },
+  data: { scan_window_days: 250, backtest_window_days: 250 },
   cup: {},
   handle: {},
   breakout: {},
@@ -331,9 +337,13 @@ function validate() {
   if (handle.max_depth < 0.08 || handle.max_depth > 0.25) errors.push('柄部最大回撤需在 8%-25% 之间')
 
   const liq = config.liquidity
+  const dataCfg = config.data || {}
   if (liq.min_avg_turnover < 10000000) errors.push('成交额阈值最低 1000万')
   if (liq.min_stock_price < 1) errors.push('最低股价不能低于 1元')
   if (liq.min_listing_days < 30) errors.push('拉取天数最低 30天')
+  if (dataCfg.scan_window_days < 30) errors.push('扫描分析天数最低 30天')
+  if (dataCfg.backtest_window_days < 30) errors.push('回测分析天数最低 30天')
+  if (dataCfg.scan_window_days > liq.min_listing_days) errors.push('扫描分析天数不能超过日线拉取天数')
 
   return errors
 }

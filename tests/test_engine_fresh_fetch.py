@@ -323,7 +323,7 @@ def test_scan_all_deduplicates_candidates(monkeypatch, tmp_path):
 
         def evaluate_at(self, data, code='', name='', market_data=None):
             result = engine.CupHandleResult(found=True, code=code, name=name, score=80)
-            return type('Eval', (), {'result': result, 'dry_stable': dry_stable})()
+            return type('Eval', (), {'result': result, 'dry_stable': dry_stable, 'passed': True})()
 
     monkeypatch.setattr(engine, 'CupHandleStrategyEngine', FakeStrategyEngine)
 
@@ -933,8 +933,8 @@ def test_re_evaluate_finds_candidates_on_existing_data(monkeypatch, tmp_path):
     """Should find cup-handle candidates from DB-stored OHLC without re-fetching."""
     db_path = tmp_path / "cuphandle.db"
     config = {
-        "data": {"database_path": str(db_path)},
-        "liquidity": {"enabled": False, "min_listing_days": 5},
+        "data": {"database_path": str(db_path), "scan_window_days": 50},
+        "liquidity": {"enabled": False, "min_listing_days": 260},
         "scoring": {"medium_threshold": 70},
     }
     db.init_db(str(db_path))
@@ -962,7 +962,7 @@ def test_re_evaluate_finds_candidates_on_existing_data(monkeypatch, tmp_path):
                                "stop_loss": 18, "target_1": 25, "target_2": 28},
                 "market_environment": {"status": "一般", "position_advice": "轻仓"},
             }
-            return type("Eval", (), {"result": r, "dry_stable": dry})()
+            return type("Eval", (), {"result": r, "dry_stable": dry, "passed": True})()
 
     monkeypatch.setattr(engine, "CupHandleStrategyEngine", FakeEngine)
     # Make passes_liquidity_filter always return True
@@ -982,8 +982,8 @@ def test_re_evaluate_replaces_old_candidates(monkeypatch, tmp_path):
     """Old candidates should be removed, new ones take their place."""
     db_path = tmp_path / "cuphandle.db"
     config = {
-        "data": {"database_path": str(db_path)},
-        "liquidity": {"enabled": False, "min_listing_days": 5},
+        "data": {"database_path": str(db_path), "scan_window_days": 50},
+        "liquidity": {"enabled": False, "min_listing_days": 260},
         "scoring": {"medium_threshold": 70},
     }
     db.init_db(str(db_path))
@@ -1011,7 +1011,7 @@ def test_re_evaluate_replaces_old_candidates(monkeypatch, tmp_path):
                                "stop_loss": 18, "target_1": 25, "target_2": 30},
                 "market_environment": {"status": "良好", "position_advice": "正常"},
             }
-            return type("Eval", (), {"result": r, "dry_stable": dry})()
+            return type("Eval", (), {"result": r, "dry_stable": dry, "passed": True})()
 
     monkeypatch.setattr(engine, "CupHandleStrategyEngine", FakeEngine)
 

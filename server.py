@@ -16,7 +16,7 @@ import yaml
 
 import scanner.db as db
 from scanner.engine import scan_all, re_evaluate_task
-from analyzer.dry_stable import analyze_dry_stable
+from scanner.strategy_engine import CupHandleStrategyEngine, select_strategy_window
 from scanner.index_source import fetch_market_index_daily
 from scanner.pattern_detector import CupHandleResult
 from scanner.single_stock_backtest import (
@@ -617,13 +617,22 @@ async def get_candidate(code: str):
     if not c:
         return JSONResponse({"error": "Not found"}, status_code=404)
     trade_plan = {}
+    current_analysis = None
     ohlc = db.get_ohlc(code)
     if ohlc:
-        pattern_result = _candidate_to_pattern_result(c)
         cfg = load_config()
         market_idx = cfg.get("market_environment", {}).get("index_symbol")
-        dry = analyze_dry_stable(pattern_result, ohlc, market_data=fetch_market_index_daily(market_idx), config=cfg)
-        trade_plan = dry.get("trade_plan", {})
+        scan_window_days = cfg.get("data", {}).get("scan_window_days") or 250
+        strategy_data = select_strategy_window(ohlc, scan_window_days)
+        if strategy_data is not None:
+            engine = CupHandleStrategyEngine(cfg)
+            evaluation = engine.evaluate_at(
+                strategy_data, code=code, name=c.get("name", ""),
+                market_data=fetch_market_index_daily(market_idx),
+            )
+            if evaluation.dry_stable:
+                trade_plan = evaluation.dry_stable.get("trade_plan", {})
+            current_analysis = evaluation.to_dict()
 
     return {
         "task_id": c.get("task_id", ""),
@@ -676,6 +685,8 @@ async def get_candidate(code: str):
         "raw_price_stable_score": c.get("raw_price_stable_score", 0),
         "score_caps": c.get("score_caps", ""),
         "trade_plan": trade_plan,
+        "analysis_notice": "详情分析基于当前策略配置重新计算，可能与扫描任务产生时的结果不同。",
+        "current_analysis": current_analysis,
     }
 
 

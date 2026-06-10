@@ -9,7 +9,7 @@ from scanner import db
 from scanner.engine import _merge_data
 from scanner.baidu_source import fetch_baidu_daily
 from scanner.sina_source import fetch_sina_daily
-from scanner.strategy_engine import CupHandleStrategyEngine, serialize_pattern_for_backtest
+from scanner.strategy_engine import CupHandleStrategyEngine, select_strategy_window, serialize_pattern_for_backtest
 from scanner.tencent_source import fetch_tencent_daily
 
 
@@ -377,7 +377,9 @@ def run_single_stock_cuphandle_backtest(
         if not window:
             continue
         # Cap evaluation window to backtest_window_days for sliding-window consistency
-        eval_window = window[-backtest_window:] if len(window) > backtest_window else window
+        eval_window = select_strategy_window(window, backtest_window)
+        if eval_window is None:
+            continue
         evaluation = engine.evaluate_at(eval_window, code=code, name=name)
         has_pattern = getattr(evaluation.result, "found", False)
         is_vcp = (evaluation.dry_stable or {}).get("pattern_score", {}).get("key_pattern_type") == "vcp"
@@ -395,15 +397,17 @@ def run_single_stock_cuphandle_backtest(
 
     specified_diagnosis = None
     if handle_start_date and handle_end_date:
-        diagnosis_window = _rows_until(working_data, handle_end_date)
-        diagnosis = engine.diagnose_handle(
-            diagnosis_window,
-            handle_start_date,
-            handle_end_date,
-            code=code,
-            name=name,
-        )
-        specified_diagnosis = diagnosis.to_dict() if hasattr(diagnosis, "to_dict") else diagnosis
+        raw_diag_window = _rows_until(working_data, handle_end_date)
+        diagnosis_window = select_strategy_window(raw_diag_window, backtest_window)
+        if diagnosis_window is not None:
+            diagnosis = engine.diagnose_handle(
+                diagnosis_window,
+                handle_start_date,
+                handle_end_date,
+                code=code,
+                name=name,
+            )
+            specified_diagnosis = diagnosis.to_dict() if hasattr(diagnosis, "to_dict") else diagnosis
 
     result = {
         "code": code,

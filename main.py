@@ -74,10 +74,8 @@ def cmd_analyze(args):
 
     from scanner.sina_source import fetch_sina_daily
     from scanner.tencent_source import fetch_tencent_daily
-    from scanner.pattern_detector import detect_cup_handle
-    from scanner.scorer import score_cup_handle_advanced
     from scanner.index_source import fetch_market_index_daily
-    from analyzer.dry_stable import analyze_dry_stable
+    from scanner.strategy_engine import CupHandleStrategyEngine, select_strategy_window
     from output.json_writer import write_single_analysis_json
 
     # Fetch data with fallback
@@ -92,27 +90,39 @@ def cmd_analyze(args):
 
     logger.info(f"Got {len(data)} days of data")
 
-    # Cup handle detection
-    cup_cfg = config.get("cup", {})
-    handle_cfg = config.get("handle", {})
-    breakout_cfg = config.get("breakout", {})
-    handle_prefixed = {f"handle_{k}": v for k, v in handle_cfg.items()}
-    pattern_cfg = {**cup_cfg, **handle_prefixed, **breakout_cfg}
+    # Read scan window config
+    data_cfg = config.get("data", {})
+    liquidity_cfg = config.get("liquidity", {})
+    kline_days = data_cfg.get("daily_kline_days") or liquidity_cfg.get("min_listing_days", 250) or 250
+    scan_window_days = data_cfg.get("scan_window_days") or 250
 
-    result = detect_cup_handle(data, pattern_cfg)
+    # Truncate to fixed strategy window
+    strategy_data = select_strategy_window(data, scan_window_days)
+    if strategy_data is None:
+        logger.error(
+            f"策略计算数据不足：需要 {scan_window_days} 日，实际 {len(data)} 日"
+        )
+        return
 
-    if not result.found:
+    logger.info(f"策略分析窗口: {len(strategy_data)} 日 (配置 {scan_window_days} 日)")
+
+    # Market data
+    market_cfg = config.get("market_environment", {})
+    market_data = fetch_market_index_daily(market_cfg.get("index_symbol"))
+
+    # Unified strategy evaluation
+    engine = CupHandleStrategyEngine(config)
+    evaluation = engine.evaluate_at(
+        strategy_data, code=code, name="", market_data=market_data,
+    )
+
+    if not evaluation.result.found and not evaluation.dry_stable:
         logger.info(f"{code}: 未发现杯柄形态")
         return
 
-    # Scoring
-    score = score_cup_handle_advanced(result, data)
-    result.score = score
-
-    # Dry-stable analysis
-    market_cfg = config.get("market_environment", {})
-    market_data = fetch_market_index_daily(market_cfg.get("index_symbol"))
-    dry_stable = analyze_dry_stable(result, data, market_data=market_data, config=config)
+    result = evaluation.result
+    dry_stable = evaluation.dry_stable
+    score = result.score
 
     # Build analysis output
     analysis = {
@@ -120,18 +130,18 @@ def cmd_analyze(args):
         "name": result.name,
         "analysis_date": __import__('time').strftime("%Y-%m-%d %H:%M"),
         "conclusion": {
-            "verdict": dry_stable["decision"]["verdict"],
-            "summary": dry_stable["decision"]["summary"],
+            "verdict": dry_stable["decision"]["verdict"] if dry_stable else "无结论",
+            "summary": dry_stable["decision"]["summary"] if dry_stable else "",
             "score": score,
             "rating": "强候选" if score >= 80 else "中等候选" if score >= 70 else "弱候选",
-            "pattern_type": dry_stable["pattern_score"]["type"],
+            "pattern_type": dry_stable["pattern_score"]["type"] if dry_stable else "",
         },
-        "volume_dry": dry_stable["volume_dry"],
-        "price_stable": dry_stable["price_stable"],
-        "pattern_score": dry_stable["pattern_score"],
-        "key_prices": dry_stable["key_prices"],
-        "risk_reward": dry_stable["risk_reward"],
-        "dry_stable_decision": dry_stable["decision"],
+        "volume_dry": dry_stable.get("volume_dry", {}) if dry_stable else {},
+        "price_stable": dry_stable.get("price_stable", {}) if dry_stable else {},
+        "pattern_score": dry_stable.get("pattern_score", {}) if dry_stable else {},
+        "key_prices": dry_stable.get("key_prices", {}) if dry_stable else {},
+        "risk_reward": dry_stable.get("risk_reward", {}) if dry_stable else {},
+        "dry_stable_decision": dry_stable.get("decision", {}) if dry_stable else {},
         "pattern_details": {
             "cup_depth_pct": result.cup_depth_pct,
             "cup_duration": result.cup_duration,
@@ -158,9 +168,10 @@ def cmd_analyze(args):
     # Print summary
     print(f"\n{'='*60}")
     print(f"  {code} {result.name}  形态评分: {score}")
-    print(f"  量干评分: {dry_stable['volume_dry']['score']}/10  价稳评分: {dry_stable['price_stable']['score']}/10")
-    print(f"  形态评级: {dry_stable['pattern_score']['type']} ({dry_stable['pattern_score']['score']}/20)")
-    print(f"  风险等级: {dry_stable['risk_reward']['risk_level']}  仓位建议: {dry_stable['risk_reward']['position_advice']}")
+    if dry_stable:
+        print(f"  量干评分: {dry_stable['volume_dry']['score']}/10  价稳评分: {dry_stable['price_stable']['score']}/10")
+        print(f"  形态评级: {dry_stable['pattern_score']['type']} ({dry_stable['pattern_score']['score']}/20)")
+        print(f"  风险等级: {dry_stable['risk_reward']['risk_level']}  仓位建议: {dry_stable['risk_reward']['position_advice']}")
     print(f"  最终结论: {analysis['conclusion']['verdict']}")
     print(f"{'='*60}\n")
 
@@ -214,6 +225,13 @@ def cmd_backtest(args):
         logger.info(f"Sampling first {sample_n} stocks")
 
     logger.info(f"Testing {len(stocks)} stocks...")
+
+    # Deprecation warning for --min-score
+    if args.min_score != 60:  # 非默认值时打印警告
+        logger.warning(
+            "WARNING: --min-score 已废弃，仅用于回测报告展示过滤，"
+            "不参与策略候选判断；下一版本将删除。"
+        )
 
     result = run_backtest(
         stocks=stocks,

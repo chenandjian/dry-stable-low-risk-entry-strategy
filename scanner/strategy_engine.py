@@ -214,6 +214,29 @@ class CupHandleStrategyEngine:
     ) -> tuple[list[RuleDiagnostic], list[RuleDiagnostic]]:
         passed: list[RuleDiagnostic] = []
         failed: list[RuleDiagnostic] = []
+
+        # 突破状态排除：已突破的形态不应再作为候选
+        if not result.is_breakout:
+            passed.append(
+                RuleDiagnostic(
+                    "突破状态排除",
+                    "形态未被突破",
+                    "未突破",
+                    "info",
+                    "该形态尚未完成突破，属于候选观察。",
+                )
+            )
+        else:
+            failed.append(
+                RuleDiagnostic(
+                    "突破状态排除",
+                    "形态未被突破",
+                    "已突破",
+                    "high",
+                    "该形态已完成突破，按规则排除。",
+                )
+            )
+
         threshold = self.scoring_cfg.get("medium_threshold", 70) - 10
         if result.score >= threshold:
             passed.append(
@@ -295,6 +318,22 @@ class CupHandleStrategyEngine:
             )
 
         return passed, failed
+
+
+def select_strategy_window(
+    data: list[dict],
+    window_days: int,
+) -> list[dict] | None:
+    """截取最近 window_days 个交易日的数据窗口。
+
+    数据不足固定窗口时返回 None，强制调用方显式处理。
+    不接受非正整数窗口。
+    """
+    if window_days <= 0:
+        raise ValueError("window_days must be a positive integer")
+    if len(data) < window_days:
+        return None
+    return data[-window_days:]
 
 
 def diagnose_cup_handle(

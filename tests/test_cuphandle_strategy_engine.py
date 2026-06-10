@@ -4,6 +4,7 @@ from scanner.strategy_engine import (
     CupHandleStrategyEngine,
     build_pattern_config,
     compute_config_hash,
+    select_strategy_window,
 )
 
 
@@ -269,3 +270,145 @@ def test_evaluate_at_rejects_unknown_dry_stable_verdict(monkeypatch):
     assert evaluation.passed is False
     verdict_rule = next(rule for rule in evaluation.failed_rules if rule.ruleName == "最终策略结论")
     assert verdict_rule.actualValue == "神秘状态"
+
+
+# ── select_strategy_window ────────────────────────────────────────────
+
+def test_select_strategy_window_returns_last_n():
+    data = [{"date": f"2025-01-{i+1:02d}"} for i in range(100)]
+    result = select_strategy_window(data, 50)
+    assert result is not None
+    assert len(result) == 50
+    assert result[0]["date"] == "2025-01-51"
+    assert result[-1]["date"] == "2025-01-100"
+
+
+def test_select_strategy_window_exact_count_returns_all():
+    data = [{"date": f"2025-01-{i+1:02d}"} for i in range(50)]
+    result = select_strategy_window(data, 50)
+    assert result is not None
+    assert len(result) == 50
+
+
+def test_select_strategy_window_insufficient_returns_none():
+    data = [{"date": f"2025-01-{i+1:02d}"} for i in range(30)]
+    result = select_strategy_window(data, 50)
+    assert result is None
+
+
+def test_select_strategy_window_zero_raises():
+    import pytest
+    with pytest.raises(ValueError, match="positive integer"):
+        select_strategy_window([], 0)
+
+
+def test_select_strategy_window_negative_raises():
+    import pytest
+    with pytest.raises(ValueError, match="positive integer"):
+        select_strategy_window([], -5)
+
+
+# ── is_breakout exclusion ─────────────────────────────────────────────
+
+def test_evaluate_at_rejects_breakout_pattern(monkeypatch):
+    """ROUND5-001: is_breakout=True → evaluation.passed=False."""
+    import scanner.strategy_engine as strategy_engine
+
+    data = make_ohlc_from_closes(build_cup_handle_closes())
+    engine = CupHandleStrategyEngine(full_config())
+
+    def fake_analyze_dry_stable(result, data, market_data=None, config=None):
+        return {
+            "decision": {"verdict": "可低吸", "verdict_key": "BUY_LOW"},
+            "pattern_score": {"key_pattern_type": "cup_handle"},
+        }
+
+    monkeypatch.setattr(strategy_engine, "analyze_dry_stable", fake_analyze_dry_stable)
+
+    # Monkeypatch detect_cup_handle to return a breakout result
+    original_detect = strategy_engine.detect_cup_handle
+
+    def fake_detect_cup_handle(data, pattern_cfg):
+        result = original_detect(data, pattern_cfg)
+        result.is_breakout = True
+        return result
+
+    monkeypatch.setattr(strategy_engine, "detect_cup_handle", fake_detect_cup_handle)
+
+    evaluation = engine.evaluate_at(data, code="600000")
+
+    assert evaluation.result.found is True
+    assert evaluation.result.is_breakout is True
+    assert evaluation.passed is False
+    failed_names = {rule.ruleName for rule in evaluation.failed_rules}
+    assert "突破状态排除" in failed_names
+
+
+def test_evaluate_at_passes_non_breakout_pattern(monkeypatch):
+    """ROUND5-001: is_breakout=False with valid dry_stable → evaluation.passed=True."""
+    import scanner.strategy_engine as strategy_engine
+
+    data = make_ohlc_from_closes(build_cup_handle_closes())
+    engine = CupHandleStrategyEngine(full_config())
+
+    def fake_analyze_dry_stable(result, data, market_data=None, config=None):
+        return {
+            "decision": {"verdict": "观察", "verdict_key": "WATCH_BREAKOUT"},
+            "pattern_score": {"key_pattern_type": "cup_handle"},
+        }
+
+    monkeypatch.setattr(strategy_engine, "analyze_dry_stable", fake_analyze_dry_stable)
+
+    evaluation = engine.evaluate_at(data, code="600000")
+
+    assert evaluation.result.found is True
+    assert evaluation.result.is_breakout is False
+    assert evaluation.passed is True
+    passed_names = {rule.ruleName for rule in evaluation.passed_rules}
+    assert "突破状态排除" in passed_names
+
+
+# ── 扫描与回测一致性 ─────────────────────────────────────────────────
+
+def test_same_data_same_window_produces_consistent_result():
+    """ROUND5-CONSISTENCY: 相同OHLC数据、相同配置 → 策略结论一致。
+
+    不区分"扫描路径"与"回测路径"——两者都通过 evaluate_at() 调用同一引擎。
+    """
+    data = make_ohlc_from_closes(build_cup_handle_closes())
+    config = full_config()
+
+    engine1 = CupHandleStrategyEngine(config)
+    engine2 = CupHandleStrategyEngine(config)
+
+    e1 = engine1.evaluate_at(data, code="600000", name="测试")
+    e2 = engine2.evaluate_at(data, code="600000", name="测试")
+
+    assert e1.passed == e2.passed
+    assert e1.result.score == e2.result.score
+    assert e1.result.pattern_kind == e2.result.pattern_kind
+    assert e1.strategy_version == e2.strategy_version
+    assert e1.config_hash == e2.config_hash
+
+    if e1.dry_stable and e2.dry_stable:
+        assert e1.dry_stable["decision"].get("verdict_key") == e2.dry_stable["decision"].get("verdict_key")
+        assert e1.dry_stable["pattern_score"].get("key_pattern_type") == e2.dry_stable["pattern_score"].get("key_pattern_type")
+        assert e1.dry_stable["key_prices"]["stop_loss"] == e2.dry_stable["key_prices"]["stop_loss"]
+        assert e1.dry_stable["key_prices"]["entry_zone_low"] == e2.dry_stable["key_prices"]["entry_zone_low"]
+        assert e1.dry_stable["key_prices"]["entry_zone_high"] == e2.dry_stable["key_prices"]["entry_zone_high"]
+
+
+def test_select_strategy_window_consistency_with_backtest_window():
+    """ROUND5-CONSISTENCY: select_strategy_window 与回测窗口语义一致。
+
+    scan_window_days == backtest_window_days 时，同一数据截取结果相同。
+    """
+    data = make_ohlc_from_closes(build_cup_handle_closes())
+    scan_result = select_strategy_window(data, 100)
+    backtest_result = select_strategy_window(data, 100)
+
+    assert scan_result is not None
+    assert backtest_result is not None
+    assert len(scan_result) == len(backtest_result)
+    assert scan_result[0]["date"] == backtest_result[0]["date"]
+    assert scan_result[-1]["date"] == backtest_result[-1]["date"]

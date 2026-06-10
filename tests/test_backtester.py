@@ -157,7 +157,7 @@ def test_run_backtest_accepts_market_data_injection(monkeypatch, tmp_path):
     monkeypatch.setattr(backtester, "fetch_market_index_daily", fake_fetch_market)
 
     config = {
-        "data": {"database_path": str(db_path), "daily_kline_days": 250},
+        "data": {"database_path": str(db_path), "daily_kline_days": 250, "backtest_window_days": 250},
         "cup": {"max_duration": 60},
         "handle": {"max_duration": 20},
         "breakout": {},
@@ -174,7 +174,6 @@ def test_run_backtest_accepts_market_data_injection(monkeypatch, tmp_path):
         [{"code": "600000", "name": "Test"}],
         fake_fetch,
         config,
-        window_min=250,
         max_stocks=1,
         market_data=injected_market,
     )
@@ -184,11 +183,12 @@ def test_run_backtest_accepts_market_data_injection(monkeypatch, tmp_path):
     assert report.total_stocks_tested == 1
 
     # Run WITHOUT injection → should call live fetch
+    # Set backtest_window_days higher than available data to avoid actual pattern detection
+    config2 = {**config, "data": {**config["data"], "backtest_window_days": 350}}
     report2 = run_backtest(
         [{"code": "600000", "name": "Test"}],
         fake_fetch,
-        config,
-        window_min=350,  # require more data than available to avoid actual pattern detection
+        config2,
         max_stocks=1,
     )
     assert len(fetch_called) > 0

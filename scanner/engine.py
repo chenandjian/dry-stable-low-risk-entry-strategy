@@ -17,7 +17,7 @@ from scanner.index_source import fetch_market_index_daily
 from scanner.liquidity_filter import passes_liquidity_filter
 from scanner.pattern_detector import CupHandleResult
 from analyzer.dry_stable import analyze_dry_stable
-from scanner.strategy_engine import CupHandleStrategyEngine, CANDIDATE_KEYS, REJECT_KEYS
+from scanner.strategy_engine import CupHandleStrategyEngine, select_strategy_window
 
 logger = logging.getLogger(__name__)
 
@@ -96,9 +96,19 @@ def scan_all(
     busy_retry_lock = threading.Lock()
 
     liquidity_cfg = config.get("liquidity", {})
-    scoring_cfg = config.get("scoring", {})
     daily_sources = config.get("data", {}).get("daily_sources") or DEFAULT_DAILY_SOURCES
     kline_days = config.get("data", {}).get("daily_kline_days") or liquidity_cfg.get("min_listing_days", 250) or 250
+    scan_window_days = config.get("data", {}).get("scan_window_days") or 250
+    min_listing_days_val = liquidity_cfg.get("min_listing_days", 250) or 250
+    if scan_window_days > min_listing_days_val:
+        raise ValueError(
+            f"scan_window_days ({scan_window_days}) must not exceed "
+            f"min_listing_days ({min_listing_days_val})"
+        )
+    logger.info(
+        "窗口配置: min_listing_days=%s, scan_window_days=%s",
+        min_listing_days_val, scan_window_days,
+    )
     strategy_engine = CupHandleStrategyEngine(config)
     max_busy_retries = config.get("data", {}).get("source_busy_max_retries", 3)
     market_cfg = config.get("market_environment", {})
@@ -234,8 +244,29 @@ def scan_all(
                         progress_callback("scanning", start_offset + failed_count[0] + skip_count[0] + scanned_count[0], start_offset + len(stocks), f"{code} {stock.get('name', '')}")
                     continue
 
+                # 截取固定策略窗口
+                strategy_data = select_strategy_window(data, scan_window_days)
+                if strategy_data is None:
+                    db.update_task_stock(
+                        task_id,
+                        code,
+                        status="skipped",
+                        status_reason=f"策略计算数据不足：需要 {scan_window_days} 日，实际 {len(data)} 日",
+                        kline_latest_date=latest_trade_date,
+                        source_errors=_encode_source_errors(fetch_result.source_errors),
+                        finished_at=_now(),
+                    )
+                    db.refresh_scan_task_counts(task_id)
+                    with stats_lock:
+                        skip_count[0] += 1
+                    with busy_retry_lock:
+                        busy_retries_by_code.pop(code, None)
+                    if progress_callback:
+                        progress_callback("scanning", start_offset + failed_count[0] + skip_count[0] + scanned_count[0], start_offset + len(stocks), f"{code} {stock.get('name', '')}")
+                    continue
+
                 evaluation = strategy_engine.evaluate_at(
-                    data,
+                    strategy_data,
                     code=code,
                     name=stock.get("name", ""),
                     market_data=market_data,
@@ -243,67 +274,62 @@ def scan_all(
                 result = evaluation.result
                 dry_stable = evaluation.dry_stable
 
-                is_candidate = False
-                if dry_stable:
+                if evaluation.passed and dry_stable:
                     if result.score == 0:
                         result.score = min(100, dry_stable["pattern_score"]["score"] * 5)
                     stock["dry_stable"] = dry_stable
                     strategy_verdict = dry_stable["decision"]["verdict"]
-                    verdict_key = dry_stable["decision"].get("verdict_key", "")
-                    if result.score >= scoring_cfg.get("medium_threshold", 70) - 10 and strategy_verdict not in REJECT_KEYS and verdict_key in CANDIDATE_KEYS and not result.is_breakout:
-                        with candidate_lock:
-                            candidate_by_code[code] = (stock, result)
-                            unique_candidates = len(candidate_by_code)
-                        is_candidate = True
-                        db.update_task_stock(
-                            task_id,
-                            code,
-                            status="candidate",
-                            kline_latest_date=latest_trade_date,
-                            quote_status="not_requested",
-                            source_errors=_encode_source_errors(fetch_result.source_errors),
-                            finished_at=_now(),
+                    with candidate_lock:
+                        candidate_by_code[code] = (stock, result)
+                        unique_candidates = len(candidate_by_code)
+                    db.update_task_stock(
+                        task_id,
+                        code,
+                        status="candidate",
+                        kline_latest_date=latest_trade_date,
+                        quote_status="not_requested",
+                        source_errors=_encode_source_errors(fetch_result.source_errors),
+                        finished_at=_now(),
+                    )
+                    if progress_callback:
+                        progress_callback(
+                            "discovery",
+                            start_offset + unique_candidates,
+                            start_offset + len(stocks),
+                            f"{code} {stock.get('name', '')}",
+                            {
+                                "code": code,
+                                "name": stock.get("name", ""),
+                                "score": result.score,
+                                "is_breakout": result.is_breakout,
+                                "is_volume_breakout": result.is_volume_breakout,
+                                "breakout_price": result.breakout_price,
+                                "cup_depth_pct": result.cup_depth_pct,
+                                "cup_duration": result.cup_duration,
+                                "handle_depth_pct": result.handle_depth_pct,
+                                "vol_multiplier": result.vol_multiplier,
+                                "latest_close": stock.get("latest_close", 0),
+                                "dry_stable_verdict": strategy_verdict,
+                                "dry_stable_summary": dry_stable["decision"]["summary"],
+                                "volume_dry_score": dry_stable["volume_dry"]["score"],
+                                "price_stable_score": dry_stable["price_stable"]["score"],
+                                "pattern_score_20": dry_stable["pattern_score"]["score"],
+                                "pattern_type": dry_stable["pattern_score"]["type"],
+                                "key_pattern_type": dry_stable["pattern_score"]["key_pattern_type"],
+                                "risk_percent": dry_stable["risk_reward"]["risk_percent"],
+                                "rr1": dry_stable["risk_reward"]["rr1"],
+                                "position_advice": dry_stable["risk_reward"]["position_advice"],
+                                "entry_zone_low": dry_stable["key_prices"]["entry_zone_low"],
+                                "entry_zone_high": dry_stable["key_prices"]["entry_zone_high"],
+                                "pivot": dry_stable["key_prices"]["pivot"],
+                                "stop_loss": dry_stable["key_prices"]["stop_loss"],
+                                "target_1": dry_stable["key_prices"]["target_1"],
+                                "target_2": dry_stable["key_prices"]["target_2"],
+                                "market_status": dry_stable["market_environment"]["status"],
+                                "market_position_advice": dry_stable["market_environment"]["position_advice"],
+                            },
                         )
-                        if progress_callback:
-                            progress_callback(
-                                "discovery",
-                                start_offset + unique_candidates,
-                                start_offset + len(stocks),
-                                f"{code} {stock.get('name', '')}",
-                                {
-                                    "code": code,
-                                    "name": stock.get("name", ""),
-                                    "score": result.score,
-                                    "is_breakout": result.is_breakout,
-                                    "is_volume_breakout": result.is_volume_breakout,
-                                    "breakout_price": result.breakout_price,
-                                    "cup_depth_pct": result.cup_depth_pct,
-                                    "cup_duration": result.cup_duration,
-                                    "handle_depth_pct": result.handle_depth_pct,
-                                    "vol_multiplier": result.vol_multiplier,
-                                    "latest_close": stock.get("latest_close", 0),
-                                    "dry_stable_verdict": strategy_verdict,
-                                    "dry_stable_summary": dry_stable["decision"]["summary"],
-                                    "volume_dry_score": dry_stable["volume_dry"]["score"],
-                                    "price_stable_score": dry_stable["price_stable"]["score"],
-                                    "pattern_score_20": dry_stable["pattern_score"]["score"],
-                                    "pattern_type": dry_stable["pattern_score"]["type"],
-                                    "key_pattern_type": dry_stable["pattern_score"]["key_pattern_type"],
-                                    "risk_percent": dry_stable["risk_reward"]["risk_percent"],
-                                    "rr1": dry_stable["risk_reward"]["rr1"],
-                                    "position_advice": dry_stable["risk_reward"]["position_advice"],
-                                    "entry_zone_low": dry_stable["key_prices"]["entry_zone_low"],
-                                    "entry_zone_high": dry_stable["key_prices"]["entry_zone_high"],
-                                    "pivot": dry_stable["key_prices"]["pivot"],
-                                    "stop_loss": dry_stable["key_prices"]["stop_loss"],
-                                    "target_1": dry_stable["key_prices"]["target_1"],
-                                    "target_2": dry_stable["key_prices"]["target_2"],
-                                    "market_status": dry_stable["market_environment"]["status"],
-                                    "market_position_advice": dry_stable["market_environment"]["position_advice"],
-                                },
-                            )
-
-                if not is_candidate:
+                else:
                     db.update_task_stock(
                         task_id,
                         code,
@@ -448,13 +474,12 @@ def re_evaluate_task(
         return {"task_id": task_id, "status": "no_stocks", "candidates_found": 0}
 
     liquidity_cfg = config.get("liquidity", {})
-    scoring_cfg = config.get("scoring", {})
     kline_days = config.get("data", {}).get("daily_kline_days") or liquidity_cfg.get("min_listing_days", 250) or 250
+    scan_window_days = config.get("data", {}).get("scan_window_days") or 250
     strategy_engine = CupHandleStrategyEngine(config)
     market_cfg = config.get("market_environment", {})
     market_data = fetch_market_index_daily(market_cfg.get("index_symbol"))
     old_candidates = {c["code"] for c in db.get_candidates(task_id=task_id)}
-    min_score = scoring_cfg.get("medium_threshold", 70) - 10
     total = len(stocks)
     new_codes = set()
 
@@ -469,25 +494,27 @@ def re_evaluate_task(
             if not passes_liquidity_filter(data, liquidity_cfg):
                 continue
 
+            # 截取固定策略窗口
+            strategy_data = select_strategy_window(data, scan_window_days)
+            if strategy_data is None:
+                continue
+
             evaluation = strategy_engine.evaluate_at(
-                data, code=code, name=name, market_data=market_data,
+                strategy_data, code=code, name=name, market_data=market_data,
             )
             result = evaluation.result
             dry_stable = evaluation.dry_stable
 
-            if dry_stable:
+            if evaluation.passed and dry_stable:
                 if result.score == 0:
                     result.score = min(100, dry_stable["pattern_score"]["score"] * 5)
-                verdict = dry_stable["decision"]["verdict"]
-                verdict_key = dry_stable["decision"].get("verdict_key", "")
-                if result.score >= min_score and verdict not in REJECT_KEYS and verdict_key in CANDIDATE_KEYS and not result.is_breakout:
-                    latest_close = data[-1]["close"]
-                    discovery = _build_discovery(code, name, result, dry_stable, latest_close)
-                    db.upsert_candidate(task_id, discovery)
-                    new_codes.add(code)
-                    if progress_callback:
-                        progress_callback("discovery", len(new_codes), total,
-                                          f"{code} {name}", discovery)
+                latest_close = data[-1]["close"]
+                discovery = _build_discovery(code, name, result, dry_stable, latest_close)
+                db.upsert_candidate(task_id, discovery)
+                new_codes.add(code)
+                if progress_callback:
+                    progress_callback("discovery", len(new_codes), total,
+                                      f"{code} {name}", discovery)
         except Exception:
             pass
 

@@ -242,6 +242,8 @@ def test_run_backtest_uses_only_data_up_to_detection_day(monkeypatch, tmp_path):
             return None
 
     monkeypatch.setattr(single_stock_backtest, "CupHandleStrategyEngine", FakeEngine, raising=False)
+    # Passthrough select_strategy_window to test data isolation, not window truncation
+    monkeypatch.setattr(single_stock_backtest, "select_strategy_window", lambda data, days: data)
 
     result = single_stock_backtest.run_single_stock_cuphandle_backtest(
         "600000",
@@ -372,6 +374,8 @@ def test_run_backtest_includes_specified_handle_diagnosis(monkeypatch, tmp_path)
             return FakeDiagnosis()
 
     monkeypatch.setattr(single_stock_backtest, "CupHandleStrategyEngine", FakeEngine, raising=False)
+    # Passthrough select_strategy_window to test handle diagnosis data, not window truncation
+    monkeypatch.setattr(single_stock_backtest, "select_strategy_window", lambda data, days: data)
 
     result = single_stock_backtest.run_single_stock_cuphandle_backtest(
         "600000",

@@ -16,6 +16,7 @@ data:
   start_date: '2025-01-01'
   end_date: null
   use_fq: true
+  scan_window_days: 250
   backtest_window_days: 250
   worker_count: 3
 liquidity:
@@ -25,7 +26,7 @@ liquidity:
   min_avg_volume: 5000000
   min_latest_turnover: 80000000
   min_stock_price: 10
-  min_listing_days: 350
+  min_listing_days: 351
 cup:
   min_duration: 35
   max_duration: 180
