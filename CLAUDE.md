@@ -40,6 +40,7 @@ npm --prefix web run preview
 ```
 入口层:    main.py (CLI)  /  server.py (FastAPI)  /  scheduler/scheduler.py
 引擎层:    scanner/engine.py (3 线程扫描调度)
+           scanner/strategy_engine.py (统一策略入口 — evaluate_at / 窗口截断 / 配置校验)
 数据层:    scanner/db.py (SQLite 持久化)
            scanner/data_source.py (互斥锁管理 — baidu/sina/tencent)
            scanner/sina_source.py / tencent_source.py / baidu_source.py (HTTP抓取)
@@ -56,7 +57,8 @@ npm --prefix web run preview
              ├─ analyzer/invalid_rules.py (形态失效条件)
              ├─ analyzer/market_env.py (大盘环境评估)
              └─ analyzer/decision.py (7 状态决策：REJECT/WAIT_VOLUME/WAIT_STABLE/WAIT_ENTRY/WAIT_RR/WATCH_BREAKOUT/BUY_LOW)
-回测层:    scanner/backtester.py (历史回测)
+回测层:    scanner/backtester.py (批量历史回测)
+           scanner/single_stock_backtest.py (单股杯柄回测)
 指标层:    scanner/index_source.py (大盘指数数据)
 输出层:    output/csv_writer.py / json_writer.py
 前端:      web/ (Vue 3 + lightweight-charts · 深色金融终端风格；ECharts 依赖存在但当前 web/src 未使用)
@@ -81,6 +83,11 @@ npm --prefix web run preview
 - **SQLite 持久化：** 数据存储于 `data/cuphandle.db`（stock_pool, daily_ohlc, scan_tasks, candidates）。线程级连接 + WAL 模式。
 - **新浪 API：** `quotes.sina.cn/cn/api/jsonp_v2.php/data/CN_MarketDataService.getKLineData` — 返回 JSONP 需手动解析。腾讯源失败返回 None，回退逻辑统一在引擎层处理。
 - **VCP 补位：** `pattern_detector.py` 不检测 VCP；VCP 逻辑在 `analyzer/pattern_score.py`。`engine.py` 可在杯柄未命中但 VCP 评分足够时生成候选。
+- **统一策略入口：** `CupHandleStrategyEngine.evaluate_at()` 是所有业务入口的唯一策略判断点。扫描（`scan_all` / `re_evaluate_task`）、CLI（`cmd_analyze`）、候选详情（`/api/candidate/{code}`）、批量回测（`run_backtest`）、单股回测均通过该入口。`evaluation.passed` 是唯一候选资格结论，调用方不得重复实现评分门槛、形态类型、决策状态或突破排除规则。
+- **窗口职责分离：** `liquidity.min_listing_days` 仅控制数据拉取天数与上市天数检查；`data.scan_window_days`（默认 250）仅控制扫描策略计算窗口；`data.backtest_window_days`（默认 250）仅控制回测策略计算窗口。三个字段由 `resolve_strategy_windows(config)` 统一解析与校验：缺失时固定默认 250，必须为 `int >= 30`，`scan_window_days <= min_listing_days`，拒绝 0/浮点/字符串/布尔。
+- **市场数据截断：** `select_market_window(market_data, decision_date)` 按股票判断日期过滤市场指数，防止未来数据泄漏。全部 6 个策略入口统一使用，`decision_date = strategy_data[-1]["date"]`。
+- **配置 API 校验：** `PUT /api/config` 保存前和 `/api/scan/start` 启动前均执行 `resolve_strategy_windows()`，非法配置返回 HTTP 400，不写文件也不创建任务。
+- **`daily_kline_days` 已废弃：** 不再作为业务拉取配置读取。扫描拉取天数仅由 `liquidity.min_listing_days` 控制。
 
 ## Key Files
 
@@ -93,8 +100,10 @@ npm --prefix web run preview
 | `scanner/tencent_source.py` | `fetch_tencent_daily(code, days)` → `list[dict] \| None`（纯腾讯源，回退由引擎层处理） |
 | `scanner/pattern_detector.py` | `detect_cup_handle(data, config)` → `CupHandleResult`；只负责杯柄检测 |
 | `scanner/scorer.py` | `score_cup_handle(result)` / `score_cup_handle_advanced(result, data)` → `int` (0-100) |
-| `scanner/engine.py` | `scan_all(config)` — 双线程全市场扫描主循环 |
-| `scanner/backtester.py` | `run_backtest(stocks, fetch_fn, config)` — 历史回测 |
+| `scanner/engine.py` | `scan_all(config)` — 多线程全市场扫描主循环 |
+| `scanner/strategy_engine.py` | `CupHandleStrategyEngine.evaluate_at()` — 唯一策略判断入口；`select_strategy_window()` / `select_market_window()` — 共享窗口截断；`resolve_strategy_windows()` — 统一配置校验 |
+| `scanner/backtester.py` | `run_backtest(stocks, fetch_fn, config)` — 批量历史回测 |
+| `scanner/single_stock_backtest.py` | `run_single_stock_cuphandle_backtest(...)` — 单股杯柄回测 |
 | `analyzer/volume_dry.py` | `score_volume_dry(data)` → `VolumeDryResult` (0-10) |
 | `analyzer/price_stable.py` | `score_price_stable(data)` → `PriceStableResult` (0-10) |
 | `analyzer/pattern_score.py` | `score_pattern(result, data)` → `PatternScoreResult` (0-20, 杯柄/VCP 择优；VCP 识别在这里) |
@@ -130,8 +139,8 @@ npm --prefix web run preview
 - **config.yaml 中的假参数**: `data.cache_dir`、`data.start_date`、`cup.filter_v_shape`、`output.csv/json/charts`、`scheduler.webhook_url` 等键存在于 yaml 但代码中未使用。新增配置项前先确认代码已接入。
 - **config.yaml 缺失的有效参数**: `data.source_busy_max_retries`（默认 3）代码中已使用但 config.yaml 中未声明，可通过 yaml 覆盖。
 - **scheduler cron 解析不完整**: `scheduler/scheduler.py` 只解析 cron 表达式的 minute、hour、day_of_week 三个字段；day_of_month 和 month 被忽略（默认 `*`）。含日/月限制的表达式（如 `"30 15 1 * 1-5"`）无法正确限制为每月第一天。
-- **CLI analyze 与扫描不等价**: `main.py analyze` 在杯柄未命中时直接返回，不会像 `engine.py` 那样继续把 VCP-only 机会提升为候选。
-- **Backtester 非线上扫描镜像**: `scanner/backtester.py` 使用滑窗 + 基础杯柄检测/评分做历史评估，不完整复刻 server/engine 的任务追踪、fresh-first、VCP-only 候选提升等逻辑。
+- **CLI analyze 统一入口**: `main.py analyze` 已改为通过 `CupHandleStrategyEngine.evaluate_at()` 执行分析，窗口截取使用 `select_strategy_window()`，市场数据截断使用 `select_market_window()`。不再直接调用 `detect_cup_handle()` / `score_cup_handle_advanced()` / `analyze_dry_stable()`。
+- **Backtester 统一引擎**: `scanner/backtester.py` 和 `scanner/single_stock_backtest.py` 均使用 `CupHandleStrategyEngine.evaluate_at()`，与扫描路径共享同一套策略规则。
 - **配置 API 会改写文件**: `PUT /api/config` 会 deep-merge 请求并直接重写根目录 `config.yaml`；调试配置变化时不要只看 git diff。
 - **前端实时状态是轮询**: 当前 Vue UI 主要轮询 `/api/scan/status`；`/ws/scan` 存在但前端未使用，且服务端在收到客户端消息后才发送状态快照。
 - **FastAPI 不托管构建产物**: `server.py` 只提供 API/WS，没有 mount `web/dist` 或 SPA history fallback；`npm --prefix web run preview` 也没有 dev server 的 `/api`/`/ws` proxy 配置。
@@ -185,7 +194,7 @@ npm --prefix web run preview
 
 ### 扫描 vs 回测一致性
 
-两者共用同一套策略引擎、决策规则、候选过滤常量。唯一差异：扫描用 `min_listing_days` 控制窗口，回测用 `backtest_window_days`（默认均为 250）。
+所有入口共用 `CupHandleStrategyEngine.evaluate_at()` 和 `select_market_window()`。扫描路径使用 `scan_window_days` 截取策略数据，回测路径使用 `backtest_window_days`。当 `scan_window_days == backtest_window_days` 且输入数据、市场数据相同时，核心策略结果（passed / score / pattern_kind / verdict_key / key_pattern_type / stop_loss / entry_zone）完全一致。四类场景（杯柄/VCP/突破排除/策略拒绝）均有自动化测试覆盖。
 
 ### Gotchas（新增）
 
@@ -202,13 +211,33 @@ npm --prefix web run preview
 - **`summarize_by_verdict` 返回 `avg_ret_10d=None`**: 没有可观察收益时返回 `None` 而非 `0.0`。前端/输出层需要处理 `None`（建议显示 `--`）。新增 `observed_10d_count` 字段。
 - **数据源兼容字段一致性**: `fallback_source`/`fallback_attempts`/`fallback_error` 必须指向同一个源。主源失败备用源成功时，主源错误也已回填。使用 `_apply_source_compatibility_fields()` 统一 helper，不要在成功/失败路径分别拼接。
 - **VCP ID 依赖真实收缩日期**: 不再使用滑动窗口边界，改用 `_find_vcp_contractions()` 返回的 `high_idx`/`low_idx` 生成 `vcpStartDate`/`vcpEndDate`。两个相邻窗口的同一 VCP 必须生成相同 ID。
-- **候选排除已突破**: `scan_all` 和 `re_evaluate_task` 均检查 `not result.is_breakout`，已突破杯口的股票不会进入候选。修改候选过滤条件时需同步两个位置。
+- **候选排除已突破**: `is_breakout` 排除规则已收敛到 `CupHandleStrategyEngine._candidate_rules()`（severity=high）。所有入口通过 `evaluation.passed` 统一判断，不再需要在调用方重复检查。
 - **第一止盈 = 最近阻力位**: `target_1` 取 pivot（杯口上方，未突破时）和最近 120 天 swing high 中的最小值，不再是人工构造的 2R。找不到上方阻力时 `target_1=0` 导致 `rr1=0` → WAIT_RR。
+
+### Gotchas（2026-06-10 统一策略窗口与入口）
+
+- **唯一策略入口**: 所有业务路径必须通过 `CupHandleStrategyEngine.evaluate_at()` 判断候选。禁止在任何调用方重复实现 `score >= threshold`、`verdict_key in CANDIDATE_KEYS`、`not result.is_breakout` 等规则。`evaluation.passed` 是唯一结论。
+- **窗口配置统一解析**: 后端业务代码禁止直接读取 `config.get("data", {}).get("scan_window_days")` 或 `or 250`。必须使用 `resolve_strategy_windows(config)` 获取 `StrategyWindows` 实例。该函数拒绝 0、负数、浮点、字符串、布尔值，缺失时固定默认 250。
+- **市场数据必须截断**: 所有策略入口传入市场数据前必须调用 `select_market_window(market_data, strategy_data[-1]["date"])`。直接传入完整市场数据会导致未来数据泄漏，破坏扫描与回测一致性。测试 mock 必须返回完整数据，由业务代码负责截断。
+- **`daily_kline_days` 不再控制拉取**: 扫描和重新分析的拉取天数仅由 `liquidity.min_listing_days` 控制。代码中不应再出现 `data_cfg.get("daily_kline_days")`。
+- **`--min-score` 已废弃**: `main.py backtest --min-score` 仅作为报告展示过滤，不参与策略候选判断。下一版本删除。
+- **批量回测 `window_min` 已废弃**: `run_backtest()` 不再接受 `window_min` 参数。策略窗口由 `backtest_window_days` 控制，未来收益观察期固定为 `min_forward_days = 60`。
+- **`_call_backtest_fetch`**: 批量回测通过该 helper 向数据源传入 `backtest_window_days + 60`，使用 `inspect.signature` 兼容有/无 `days` 参数的数据源函数。
+- **回测循环边界**: `range(backtest_window_days, n - min_forward_days + 1)`，`+1` 确保数据长度恰好 `窗口+60` 时仍执行一次判断。
+- **单股回测市场数据**: `run_single_stock_cuphandle_backtest()` 支持 `market_data` 参数注入，未注入时自动拉取并按判断日期截断。
 
 ## Design Specs（新增）
 
 - 第三~六轮代码复查报告: `docs/reviews/2026-06-09-bug-fix-recheck-round*.md`
 - 最终复查: `docs/reviews/2026-06-09-bug-fix-final-recheck.md`
+- 统一策略窗口与入口设计: `docs/superpowers/specs/2026-06-10-scan-window-unified-strategy-design.md`
+- 统一策略入口确认决策: `docs/superpowers/specs/2026-06-10-scan-window-unified-strategy-decisions.md`
+- BUG 复查: `docs/reviews/2026-06-10-scan-window-unified-strategy-code-review.md`
+- RECHECK 复查: `docs/reviews/2026-06-10-scan-window-unified-strategy-recheck.md`
+- FINAL 复查: `docs/reviews/2026-06-10-scan-window-unified-strategy-final-recheck.md`
+- COMPLETION 复查: `docs/reviews/2026-06-10-scan-window-unified-strategy-completion-recheck.md`
+- ACCEPTANCE 复查: `docs/reviews/2026-06-10-scan-window-unified-strategy-acceptance-recheck.md`
+- FINAL-COMPLETION 验收: `docs/reviews/2026-06-10-scan-window-unified-strategy-final-completion.md`
 
 ## .gitignore Policy
 
