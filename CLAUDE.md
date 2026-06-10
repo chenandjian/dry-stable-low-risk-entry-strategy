@@ -39,29 +39,43 @@ npm --prefix web run preview
 
 ```
 入口层:    main.py (CLI)  /  server.py (FastAPI)  /  scheduler/scheduler.py
-引擎层:    scanner/engine.py (3 线程扫描调度)
-           scanner/strategy_engine.py (统一策略入口 — evaluate_at / 窗口截断 / 配置校验)
+引擎层:    scanner/engine.py (策略1多线程扫描调度)
+           scanner/strategy_engine.py (策略1统一入口 — CupHandleStrategyEngine)
+           strategy2/scanner.py (策略2多线程扫描编排)
+           strategy2/engine.py (策略2唯一入口 — ExtremeDryStableStrategyEngine)
 数据层:    scanner/db.py (SQLite 持久化)
            scanner/data_source.py (互斥锁管理 — baidu/sina/tencent/yfinance)
+           scanner/daily_data_service.py (共享四源拉取 — fetch_with_retry / FetchResult)
            scanner/sina_source.py / tencent_source.py / baidu_source.py / yfinance_source.py (HTTP抓取)
            scanner/stock_pool.py (股票池)
-算法层:    scanner/pattern_detector.py (杯柄识别)
-           scanner/liquidity_filter.py (流动性过滤)
-           scanner/scorer.py (评分 0-100)
-分析层:    analyzer/dry_stable.py → analyze_dry_stable() 串联全部分析
-             ├─ analyzer/volume_dry.py (量干评分 0-10)
+算法层:    scanner/pattern_detector.py (杯柄识别 · 仅策略1)
+           scanner/liquidity_filter.py (流动性过滤 · 策略1+2共享)
+           scanner/scorer.py (杯柄评分 0-100 · 仅策略1)
+           strategy2/indicators.py (策略2指标 — V3/V5/V10/V20/分位/range/return)
+           strategy2/scorer.py (策略2评分 — 量干50 + 价稳50 + 等级)
+           strategy2/rejection.py (策略2一票否决 — 5条规则)
+           strategy2/risk.py (策略2风险 — key_support/买入区间/止损/风险比)
+分析层:    analyzer/dry_stable.py → analyze_dry_stable() 串联全部分析 · 仅策略1
+             ├─ analyzer/volume_dry.py (量干评分 0-12)
              ├─ analyzer/price_stable.py (价稳评分 0-10)
              ├─ analyzer/pattern_score.py (形态评分 0-20, 杯柄/VCP择优)
              ├─ analyzer/key_prices.py (关键价格/入场区间)
              ├─ analyzer/risk_reward.py (风险收益比 + 仓位建议)
              ├─ analyzer/invalid_rules.py (形态失效条件)
              ├─ analyzer/market_env.py (大盘环境评估)
-             └─ analyzer/decision.py (7 状态决策：REJECT/WAIT_VOLUME/WAIT_STABLE/WAIT_ENTRY/WAIT_RR/WATCH_BREAKOUT/BUY_LOW)
+             └─ analyzer/decision.py (7 状态决策)
 回测层:    scanner/backtester.py (批量历史回测)
            scanner/single_stock_backtest.py (单股杯柄回测)
 指标层:    scanner/index_source.py (大盘指数数据)
 输出层:    output/csv_writer.py / json_writer.py
-前端:      web/ (Vue 3 + lightweight-charts · 深色金融终端风格；ECharts 依赖存在但当前 web/src 未使用)
+策略2层:   strategy2/models.py (数据模型 — 5 个 dataclass)
+           strategy2/indicators.py (指标计算)
+           strategy2/scorer.py (量干价稳评分)
+           strategy2/rejection.py (一票否决)
+           strategy2/risk.py (风险计算)
+           strategy2/engine.py (引擎入口)
+           strategy2/scanner.py (扫描编排)
+前端:      web/ (Vue 3 + lightweight-charts · 深色金融终端风格)
 ```
 
 **核心设计决策:**
@@ -88,6 +102,13 @@ npm --prefix web run preview
 - **市场数据截断：** `select_market_window(market_data, decision_date)` 按股票判断日期过滤市场指数，防止未来数据泄漏。全部 6 个策略入口统一使用，`decision_date = strategy_data[-1]["date"]`。
 - **配置 API 校验：** `PUT /api/config` 保存前和 `/api/scan/start` 启动前均执行 `resolve_strategy_windows()`，非法配置返回 HTTP 400，不写文件也不创建任务。
 - **`daily_kline_days` 已废弃：** 不再作为业务拉取配置读取。扫描拉取天数仅由 `liquidity.min_listing_days` 控制。
+- **策略2独立边界：** `strategy2/` 包完全不导入策略1的形态检测、评分、分析或决策模块。共享层（stock_pool、data_source、liquidity_filter、db 基础能力、daily_data_service）允许复用。策略2结果写入独立表 `strategy2_candidates`，不写入 `candidates`。
+- **策略2 双策略全局互斥：** 同一时间只允许一个全市场扫描（策略1或策略2）。任一扫描 `running` 时，另一策略启动返回 HTTP 409 含 `strategyType` 和 `runningTaskId`。`_running` 状态新增 `strategy_type`，`scan_tasks.strategy_type` 区分 `STRATEGY_1_CUP_HANDLE` / `STRATEGY_2_EXTREME_DRY_STABLE`。
+- **策略2 评分体系（满分100）：** 量干 50 分（V5/V20≤0.60:+10, ≤0.50:+10, V3<V5<V10<V20:+10, 量处60日最低20%:+10, return_5≥-3%:+10）+ 价稳 50 分（range_5≤5%:+10, ≤3%:+10, close_range_5≤3%:+10, 无单日跌幅<-3%:+10, 收盘≥支撑:+10）。等级：70-79普通观察/80-89重点观察/90-94极致量干价稳/95-100终极状态。
+- **策略2 一票否决（5条）：** return_5<-5%、放量(>V20)单日跌幅≤-4%、range_5>8%、收盘<key_support、return_3≥8%。任一触发即排除。
+- **策略2 key_support：** 不含评估日 T 的前10个交易日最低收盘价。禁止包含评估日自身（否则"当前价永远不低于支撑"规则失效）。
+- **策略2 入选条件：** 总分≥70（可配）、无否决、风险比≤5%（可配）。风险比=(收盘-止损)/收盘，≤3%低风险/≤5%可接受/>5%排除。
+- **策略2 本期不做：** 回测、重新评估、CSV导出。策略2不使用杯柄/VCP形态判断。
 
 ## Key Files
 
@@ -115,8 +136,18 @@ npm --prefix web run preview
 | `analyzer/market_env.py` | `assess_market_environment(market_data)` → `MarketEnvResult` |
 | `analyzer/invalid_rules.py` | `find_invalid_conditions(...)` → `list[str]` |
 | `scanner/index_source.py` | `fetch_market_index_daily(code)` → `list[dict]` (复用新浪源) |
-| `server.py` | FastAPI API + 扫描任务编排 — CORS/lifespan、恢复中断任务、失败重拉、配置读写 |
-| `web/src/pages/ScannerConsole.vue` | 前端首页 — 机会雷达控制台 |
+| `server.py` | FastAPI API + 扫描任务编排 — CORS/lifespan、恢复中断任务、失败重拉、配置读写、策略2 API |
+| `scanner/daily_data_service.py` | 共享四数据源拉取服务 — `fetch_with_retry()` / `FetchResult` / 锁/重试/缓存合并 |
+| `strategy2/models.py` | 策略2数据模型 — `Strategy2Indicators` / `Score` / `Risk` / `Evaluation` |
+| `strategy2/indicators.py` | 策略2指标计算 — V3/V5/V10/V20、分位、range、return |
+| `strategy2/scorer.py` | 策略2量干价稳评分 + 等级 |
+| `strategy2/rejection.py` | 策略2一票否决 — 5 条规则返回稳定错误码 |
+| `strategy2/risk.py` | 策略2风险 — `compute_key_support()` / `compute_risk()` |
+| `strategy2/engine.py` | 策略2唯一入口 — `ExtremeDryStableStrategyEngine.evaluate_at()` |
+| `strategy2/scanner.py` | 策略2全市场扫描编排 — `scan_strategy2_all()` |
+| `web/src/pages/ScannerConsole.vue` | 前端首页 — 双策略启动按钮 |
+| `web/src/pages/Strategy2Results.vue` | 策略2结果页 — 任务选择器 + 候选表（总分/等级/量干/价稳/风险比/支撑/止损） |
+| `web/src/pages/StrategyConfig.vue` | 策略配置页 — 含策略2独立金色分区（7参数+启停开关） |
 
 ## Design Specs
 
@@ -237,6 +268,29 @@ npm --prefix web run preview
 - **任务恢复不再限定错误类型**: `get_interrupted_task()` 匹配所有 `finished_at IS NULL` 的 failed/cancelled 任务。`mark_dead_tasks_as_failed()` 额外重置崩溃任务的 fetching 股票。代码 bug 导致的失败也可自动恢复。
 - **外部网络测试分离**: `tests/test_yfinance_hist.py` 手工运行，不纳入常规 CI。常规回归依赖 `tests/test_yfinance_source.py` 的 mock 测试。
 
+## Recent Changes (2026-06-10 策略2)
+
+### 策略2「极致量干价稳」
+
+- **独立包 `strategy2/`**: 7 个模块 — models / indicators / scorer / rejection / risk / engine / scanner。完全不依赖策略1的形态检测/评分/分析/决策。
+- **共享日线服务**: `scanner/daily_data_service.py` 从 engine.py 提取四源拉取/重试/缓存逻辑，策略1和策略2共用。
+- **数据库扩展**: `scan_tasks.strategy_type` 字段（向后兼容），`strategy2_candidates` 独立表（27 字段），3 条新索引。
+- **策略2 API**: 5 个端点 — `POST /api/strategy2/scans`（启动）、`GET status/tasks/candidates/candidate`（查询）。全局互斥增强（409 含 `strategyType`/`runningTaskId`）。
+- **前端**: 策略2结果页（`Strategy2Results.vue`）、配置分区（`StrategyConfig.vue` 金色独立区）、双策略按钮（`ScanEngine.vue`）、导航入口（`TopNav.vue`）、API composable 扩展。
+- **测试**: 104 项策略2新增测试（模型11 + 指标28 + 评分23 + 否决12 + 风险13 + 引擎12 + 独立性5）。策略1全部回归通过（163 项）。前端构建通过。
+- **配置**: `config.yaml` 新增 `strategy2` 段（8 参数），前端可独立配置和校验。
+
+### Gotchas（2026-06-10 策略2）
+
+- **策略2 禁止导入策略1 模块**: `strategy2/` 不得导入 `scanner.pattern_detector`、`scanner.strategy_engine`、`analyzer.*` 等策略1判断模块。测试 `test_strategy2_independence.py` 通过 AST 扫描所有 `strategy2/*.py` 验证此规则。新增 strategy2 代码时不要添加对策略1形态/分析模块的 import。
+- **策略2 候选独立存储**: 策略2候选写入 `strategy2_candidates` 表，不写入 `candidates` 表。前端策略2结果页通过 `/api/strategy2/candidates` 读取。API `/api/candidates` 仍只返回策略1候选。
+- **`scan_tasks.strategy_type`**: 新任务自动写入 `STRATEGY_1_CUP_HANDLE` 或 `STRATEGY_2_EXTREME_DRY_STABLE`。旧任务该字段为 NULL，API 层按策略1解释。`get_scan_tasks()` 返回结果自动补默认值。
+- **策略2 配置校验**: `ExtremeDryStableStrategyEngine.__init__()` 构造时即校验所有配置参数（窗口≥最低天数、最低≥60、支撑回看≥2、分数0-100、风险比0-1、溢价/缓冲0-0.2）。非法配置直接 `raise ValueError`。
+- **策略2 key_support 排除评估日**: `compute_key_support(data, lookback_days)` 内部执行 `data[:-1]`，确保 T 日自身不参与最低收盘价计算。单日数据（无历史）返回 None → `INSUFFICIENT_STRATEGY_DATA`。
+- **策略2 前端独立**: 策略2结果页不显示杯柄/VCP/突破/形态分等字段。扫描控制台双按钮分别调用不同 API（`/api/scan/start` vs `POST /api/strategy2/scans`）。任一策略运行时两个按钮同时禁用。
+- **策略2 前端配置 API**: `StrategyConfig.vue` 保存 payload 包含 `strategy2` 段，后端 `PUT /api/config` 通过 `_deep_merge` 写入 `config.yaml`。前端校验窗口天数关系和范围同步后端 `ValueError` 检查。
+- **策略2 Volume Percentile 窗口弹性**: 日线数据不足 60 天但 ≥ `minimum_required_days` 时，`volume_percentile_days` 取实际可用窗口天数，不强制 60。评分阈值 `≤20%` 不变。
+
 ## Design Specs（新增）
 
 - 第三~六轮代码复查报告: `docs/reviews/2026-06-09-bug-fix-recheck-round*.md`
@@ -250,6 +304,8 @@ npm --prefix web run preview
 - ACCEPTANCE 复查: `docs/reviews/2026-06-10-scan-window-unified-strategy-acceptance-recheck.md`
 - FINAL-COMPLETION 验收: `docs/reviews/2026-06-10-scan-window-unified-strategy-final-completion.md`
 - yfinance 四源并发设计: `docs/superpowers/specs/2026-06-10-yfinance-four-source-daily-kline-design.md`
+- 策略2极致量干价稳设计: `docs/superpowers/specs/2026-06-10-strategy2-extreme-dry-stable-design.md`
+- 策略2极致量干价稳实施计划: `docs/superpowers/plans/2026-06-10-strategy2-extreme-dry-stable.md`
 
 ## .gitignore Policy
 
