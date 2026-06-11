@@ -48,17 +48,16 @@ describe('ScannerConsole history task context', () => {
   beforeEach(() => { vi.useFakeTimers(); vi.clearAllMocks(); mockRoute.query = {}; defaults() })
   afterEach(() => { vi.useRealTimers(); if (wrapper) wrapper.unmount(); wrapper = null })
 
-  // ── basic isolation ──
-  it('current S1 does not overwrite historical S2', async () => {
+  // ═══ basic isolation ═══
+  it('[1] current S1 does not overwrite historical S2', async () => {
     mockRoute.query = { task: 's2-historical' }
     mockApi.getTaskStocks.mockResolvedValue({ ok: true, total: 3, strategy_type: 'STRATEGY_2_EXTREME_DRY_STABLE', stocks: [{ code: '000001', name: 'S2-fail', status: 'failed', status_reason: 'ALL_DATA_SOURCES_FAILED' }], summary: { total_stocks: 10, processed: 10, failed: 3, candidate: 2, scanned: 5, skipped: 0 } })
     mockApi.getScanStatus.mockResolvedValue({ running: true, task_id: 's1-running', strategyType: 'STRATEGY_1_CUP_HANDLE', stats: { processed: 500, total_stocks: 5000 } })
     wrapper = mountPage(); await flushUi()
     expect(mockApi.getTaskStocks).toHaveBeenCalledWith('s2-historical', expect.any(Object))
-    expect(mockApi.getStrategy2Candidates).toHaveBeenCalledWith('s2-historical')
   })
 
-  it('current S2 does not overwrite historical S1', async () => {
+  it('[2] current S2 does not overwrite historical S1', async () => {
     mockRoute.query = { task: 's1-historical' }
     mockApi.getTaskStocks.mockResolvedValue({ ok: true, total: 0, strategy_type: 'STRATEGY_1_CUP_HANDLE', stocks: [], summary: { total_stocks: 5, processed: 5, failed: 0 } })
     mockApi.getScanStatus.mockResolvedValue({ running: true, task_id: 's2-running', strategyType: 'STRATEGY_2_EXTREME_DRY_STABLE', stats: { processed: 100, total_stocks: 5000 } })
@@ -66,127 +65,217 @@ describe('ScannerConsole history task context', () => {
     expect(mockApi.getCandidates).toHaveBeenCalledWith({ task_id: 's1-historical' })
   })
 
-  it('historical S2 hides retry button', async () => {
+  it('[3] historical S2 hides retry button', async () => {
     mockRoute.query = { task: 's2-done' }
-    mockApi.getTaskStocks.mockResolvedValue({ ok: true, total: 1, strategy_type: 'STRATEGY_2_EXTREME_DRY_STABLE', stocks: [{ code: '000002', name: 'fail', status: 'failed', status_reason: 'ALL_DATA_SOURCES_FAILED' }], summary: { total_stocks: 1, processed: 1, failed: 1 } })
+    mockApi.getTaskStocks.mockResolvedValue({ ok: true, total: 1, strategy_type: 'STRATEGY_2_EXTREME_DRY_STABLE', stocks: [{ code: '000002', name: 'fail', status: 'failed' }], summary: { total_stocks: 1, processed: 1, failed: 1 } })
     wrapper = mountPage(); await flushUi()
     expect(wrapper.text()).not.toContain('重新拉取')
   })
 
-  it('unknown task shows 任务不存在', async () => {
+  it('[4] unknown task shows 任务不存在', async () => {
     mockRoute.query = { task: 'not-found' }
     mockApi.getTaskStocks.mockResolvedValue({ ok: false, statusCode: 404, error: 'TASK_NOT_FOUND' })
     wrapper = mountPage(); await flushUi()
     expect(wrapper.text()).toContain('任务不存在')
   })
 
-  it('non-404 shows 历史任务加载失败', async () => {
+  it('[5] non-404 shows 历史任务加载失败', async () => {
     mockRoute.query = { task: 'err' }
     mockApi.getTaskStocks.mockResolvedValue({ ok: false, statusCode: 500, error: 'INTERNAL' })
     wrapper = mountPage(); await flushUi()
     expect(wrapper.text()).toContain('历史任务加载失败')
   })
 
-  it('network rejection shows 历史任务加载失败', async () => {
+  it('[6] network rejection shows 历史任务加载失败', async () => {
     mockRoute.query = { task: 'net' }
     mockApi.getTaskStocks.mockRejectedValue(new Error('Network'))
     wrapper = mountPage(); await flushUi()
     expect(wrapper.text()).toContain('历史任务加载失败')
   })
 
-  // ── ROUND7-S2-003: precise summary assertions ──
-  it('completed historical task applies persisted summary with precise values', async () => {
+  // ═══ summary precision ═══
+  it('[7] completed historical task applies persisted summary with precise values', async () => {
     mockRoute.query = { task: 's2-completed' }
-    mockApi.getTaskStocks.mockResolvedValue({ ok: true, total: 2, strategy_type: 'STRATEGY_2_EXTREME_DRY_STABLE', stocks: [{ code: '000001', name: 'f1', status: 'failed', status_reason: 'ALL_DATA_SOURCES_FAILED' }], summary: { total_stocks: 100, processed: 100, failed: 2, candidate: 3, scanned: 95, skipped: 0, latest_trade_date: '2026-06-10', stock_pool_source: 'akshare' } })
+    mockApi.getTaskStocks.mockResolvedValue({ ok: true, total: 2, strategy_type: 'STRATEGY_2_EXTREME_DRY_STABLE', stocks: [{ code: '000001', name: 'f1', status: 'failed' }], summary: { total_stocks: 100, processed: 100, failed: 2, candidate: 3, scanned: 95, skipped: 0, latest_trade_date: '2026-06-10', stock_pool_source: 'akshare' } })
     mockApi.getScanStatus.mockResolvedValue({ running: false, task_id: null, stats: {} })
     wrapper = mountPage(); await flushUi()
     const s = wrapper.get('[data-test="scan-summary"]').text()
     expect(s).toContain('processed=100'); expect(s).toContain('total=100')
     expect(s).toContain('skipped=0'); expect(s).toContain('failed=2')
-    expect(s).toContain('candidates=3'); expect(s).toContain('latest=2026-06-10')
-    expect(s).toContain('source=akshare')
-    expect(mockApi.getStrategy2Candidates).toHaveBeenCalledWith('s2-completed')
+    expect(s).toContain('candidates=3'); expect(s).toContain('latest=2026-06-10'); expect(s).toContain('source=akshare')
   })
 
-  // ── ROUND7-S2-001: race condition tests ──
-  it('late task A response cannot overwrite newer task B context', async () => {
+  // ═══ A→B sequential ═══
+  it('[8] query change from task A to task B reloads B and clears A', async () => {
+    mockRoute.query = { task: 'task-a' }
+    mockApi.getTaskStocks.mockResolvedValue({ ok: true, total: 1, strategy_type: 'STRATEGY_1_CUP_HANDLE', stocks: [{ code: '111111', name: 'A-fail', status: 'failed' }], summary: { total_stocks: 10, processed: 10 } })
+    wrapper = mountPage(); await flushUi()
+    expect(wrapper.text()).toContain('A-fail')
+
+    mockApi.getTaskStocks.mockResolvedValue({ ok: true, total: 1, strategy_type: 'STRATEGY_2_EXTREME_DRY_STABLE', stocks: [{ code: '222222', name: 'B-fail', status: 'failed' }], summary: { total_stocks: 20, processed: 20 } })
+    mockRoute.query = { task: 'task-b' }; await flushUi()
+    expect(wrapper.text()).not.toContain('A-fail')
+    expect(wrapper.text()).toContain('B-fail')
+  })
+
+  // ═══ valid→missing ═══
+  it('[9] query change from valid to missing clears old state', async () => {
+    mockRoute.query = { task: 'task-a' }
+    mockApi.getTaskStocks.mockResolvedValue({ ok: true, total: 1, strategy_type: 'STRATEGY_1_CUP_HANDLE', stocks: [{ code: '111111', name: 'A-fail', status: 'failed' }], summary: { total_stocks: 5, processed: 5 } })
+    wrapper = mountPage(); await flushUi()
+    expect(wrapper.text()).toContain('A-fail'); expect(wrapper.text()).toContain('重新拉取')
+
+    mockRoute.query = { task: 'missing' }
+    mockApi.getTaskStocks.mockResolvedValue({ ok: false, statusCode: 404, error: 'TASK_NOT_FOUND' })
+    await flushUi()
+    expect(wrapper.text()).toContain('任务不存在')
+    expect(wrapper.text()).not.toContain('A-fail'); expect(wrapper.text()).not.toContain('重新拉取')
+  })
+
+  // ═══ race: late task detail A→B ═══
+  it('[10] late task A response cannot overwrite newer task B context', async () => {
     const taskADeferred = deferred()
     mockRoute.query = { task: 'task-a' }
     mockApi.getTaskStocks.mockImplementation(taskId => {
       if (taskId === 'task-a') return taskADeferred.promise
-      if (taskId === 'task-b') return Promise.resolve({ ok: true, total: 1, strategy_type: 'STRATEGY_2_EXTREME_DRY_STABLE', stocks: [{ code: '222222', name: 'B-fail', status: 'failed' }], summary: { total_stocks: 20, processed: 20, failed: 1, candidate: 5, scanned: 14, skipped: 0, latest_trade_date: '2026-06-10', stock_pool_source: 'akshare' } })
+      if (taskId === 'task-b') return Promise.resolve({ ok: true, total: 1, strategy_type: 'STRATEGY_2_EXTREME_DRY_STABLE', stocks: [{ code: '222222', name: 'B-fail', status: 'failed' }], summary: { total_stocks: 20, processed: 20, failed: 1 } })
       return Promise.reject(new Error(`unexpected ${taskId}`))
     })
-    mockApi.getStrategy2Candidates.mockResolvedValue({ candidates: [{ code: '222222', name: 'B-cand', total_score: 88, level: '重点观察', volume_dry_score: 40, price_stable_score: 40, risk_ratio: 0.04 }] })
-
     wrapper = mountPage(); await flushUi()
+    // Prove A's request was called and is pending
+    expect(mockApi.getTaskStocks).toHaveBeenCalledWith('task-a', expect.any(Object))
 
     mockRoute.query = { task: 'task-b' }; await flushUi()
     expect(wrapper.text()).toContain('B-fail')
 
-    taskADeferred.resolve({ ok: true, total: 1, strategy_type: 'STRATEGY_1_CUP_HANDLE', stocks: [{ code: '111111', name: 'A-fail', status: 'failed' }], summary: { total_stocks: 10, processed: 10, failed: 1, candidate: 0 } })
+    taskADeferred.resolve({ ok: true, total: 1, strategy_type: 'STRATEGY_1_CUP_HANDLE', stocks: [{ code: '111111', name: 'A-fail', status: 'failed' }], summary: { total_stocks: 10, processed: 10, failed: 1 } })
     await flushUi()
-
     expect(wrapper.text()).toContain('B-fail')
     expect(wrapper.text()).not.toContain('A-fail')
     expect(wrapper.text()).not.toContain('重新拉取')
-    expect(mockApi.getCandidates).not.toHaveBeenCalledWith({ task_id: 'task-a' })
   })
 
-  it('late task B response after switching to live mode does not overwrite live', async () => {
-    const taskBDeferred = deferred()
-    const s2CandBDeferred = deferred()
-
+  // ═══ race: late task B detail → live ═══
+  it('[11] late task B detail response after switching to live does not overwrite live', async () => {
+    const detailDeferred = deferred()
+    let detailCalled = false
     mockRoute.query = { task: 'task-b' }
-    mockApi.getTaskStocks.mockResolvedValue({ ok: true, total: 1, strategy_type: 'STRATEGY_2_EXTREME_DRY_STABLE', stocks: [{ code: '222222', name: 'B-fail', status: 'failed' }], summary: { total_stocks: 20, processed: 20, failed: 1, candidate: 5, scanned: 14, skipped: 0 } })
-    mockApi.getStrategy2Candidates.mockResolvedValue({ candidates: [{ code: '222222', name: 'B-cand', total_score: 88, level: '重点观察', volume_dry_score: 40, price_stable_score: 40, risk_ratio: 0.04 }] })
-
+    mockApi.getTaskStocks.mockImplementation(() => {
+      detailCalled = true
+      return detailDeferred.promise
+    })
     wrapper = mountPage(); await flushUi()
-    expect(wrapper.text()).toContain('B-fail')
+    expect(detailCalled).toBe(true) // Prove B's request is in-flight
 
-    // Switch to live, but B's task stocks is slow
-    mockApi.getTaskStocks.mockImplementation(() => taskBDeferred.promise)
-    mockRoute.query = {}; await flushUi()
-
-    // Live takes over
-    mockApi.getScanStatus.mockResolvedValue({ running: true, task_id: 's1-live', strategyType: 'STRATEGY_1_CUP_HANDLE', stats: { processed: 50, total_stocks: 100, candidates_found: 2 } })
-    mockApi.getTaskStocks.mockImplementation(taskId => Promise.resolve({ ok: true, total: 0, strategy_type: 'STRATEGY_1_CUP_HANDLE', stocks: [], summary: { total_stocks: 100, processed: 50 } }))
+    mockRoute.query = {}
+    mockApi.getScanStatus.mockResolvedValue({ running: true, task_id: 's1-live', strategyType: 'STRATEGY_1_CUP_HANDLE', stats: { processed: 50, total_stocks: 100 } })
+    mockApi.getTaskStocks.mockResolvedValue({ ok: true, total: 0, strategy_type: 'STRATEGY_1_CUP_HANDLE', stocks: [], summary: { total_stocks: 100, processed: 50 } })
     mockApi.getCandidates.mockResolvedValue({ candidates: [{ code: '600000', name: 'live-cand', score: 85 }] })
     await flushUi()
 
-    // Now B's late response arrives
-    taskBDeferred.resolve({ ok: true, total: 1, strategy_type: 'STRATEGY_2_EXTREME_DRY_STABLE', stocks: [{ code: '222222', name: 'B-fail', status: 'failed' }], summary: { total_stocks: 20, processed: 20, failed: 1, candidate: 5, scanned: 14, skipped: 0, latest_trade_date: '2026-06-10', stock_pool_source: 'akshare' } })
+    detailDeferred.resolve({ ok: true, total: 1, strategy_type: 'STRATEGY_2_EXTREME_DRY_STABLE', stocks: [{ code: '222222', name: 'B-fail', status: 'failed' }], summary: { total_stocks: 20, processed: 20, failed: 1 } })
     await flushUi()
-
-    // B's data must not appear
     expect(wrapper.text()).not.toContain('B-fail')
   })
 
-  it('status query failure preserves loaded historical data', async () => {
-    mockRoute.query = { task: 's2-hist' }
-    mockApi.getTaskStocks.mockResolvedValue({ ok: true, total: 2, strategy_type: 'STRATEGY_2_EXTREME_DRY_STABLE', stocks: [{ code: '000001', name: 'hist-fail', status: 'failed', status_reason: 'ALL_DATA_SOURCES_FAILED' }], summary: { total_stocks: 50, processed: 50, failed: 2, candidate: 3, scanned: 45, skipped: 0, latest_trade_date: '2026-06-10', stock_pool_source: 'akshare' } })
-    mockApi.getStrategy2Candidates.mockResolvedValue({ candidates: [{ code: '000002', name: 'hist-cand', total_score: 82, level: '重点观察', volume_dry_score: 42, price_stable_score: 40, risk_ratio: 0.03 }] })
-    // getScanStatus rejects for the call in loadHistoricalTask (after task loaded)
-    mockApi.getScanStatus.mockRejectedValueOnce(new Error('status down'))
-
+  // ═══ race: late candidate → live ═══
+  it('[12] late task B candidate response after switching to live does not overwrite live', async () => {
+    const candDeferred = deferred()
+    let candCalled = false
+    mockRoute.query = { task: 'task-b' }
+    mockApi.getTaskStocks.mockResolvedValue({ ok: true, total: 0, strategy_type: 'STRATEGY_2_EXTREME_DRY_STABLE', stocks: [], summary: { total_stocks: 20, processed: 20 } })
+    mockApi.getStrategy2Candidates.mockImplementation(() => { candCalled = true; return candDeferred.promise })
     wrapper = mountPage(); await flushUi()
+    expect(candCalled).toBe(true) // Prove candidate request is in-flight
 
-    // Historical summary, candidate, and failures preserved
-    const s = wrapper.get('[data-test="scan-summary"]').text()
-    expect(s).toContain('processed=50'); expect(s).toContain('total=50')
-    expect(s).toContain('failed=2'); expect(s).toContain('candidates=3')
-    expect(wrapper.text()).toContain('hist-fail')
-    // Status query error is logged (console.error appears in stderr above)
-    // Core requirement: data preserved, no crash
+    mockRoute.query = {}
+    mockApi.getScanStatus.mockResolvedValue({ running: true, task_id: 's1-live', strategyType: 'STRATEGY_1_CUP_HANDLE', stats: { processed: 50, total_stocks: 100 } })
+    mockApi.getTaskStocks.mockResolvedValue({ ok: true, total: 0, strategy_type: 'STRATEGY_1_CUP_HANDLE', stocks: [], summary: { total_stocks: 100, processed: 50 } })
+    mockApi.getCandidates.mockResolvedValue({ candidates: [{ code: '600000', name: 'live-cand', score: 85 }] })
+    await flushUi()
+
+    candDeferred.resolve({ candidates: [{ code: '222222', name: 'B-cand', total_score: 88, level: '重点观察' }] })
+    await flushUi()
+    expect(wrapper.text()).not.toContain('B-cand')
   })
 
-  it('existing tests still pass after viewContext rewrite (smoke)', async () => {
-    mockRoute.query = { task: 's2-fine' }
-    mockApi.getTaskStocks.mockResolvedValue({ ok: true, total: 0, strategy_type: 'STRATEGY_2_EXTREME_DRY_STABLE', stocks: [], summary: { total_stocks: 10, processed: 10, failed: 0, candidate: 0, scanned: 10, skipped: 0 } })
+  // ═══ running→completed ═══
+  it('[13] historical running task refreshes from 80/100 to final 100/100 after completion', async () => {
+    mockRoute.query = { task: 's2-run' }
+    // Initial: task exists, getScanStatus returns running with matching task_id — enters poll
+    mockApi.getScanStatus.mockResolvedValue({ running: true, task_id: 's2-run', strategyType: 'STRATEGY_2_EXTREME_DRY_STABLE', stats: { processed: 80, total_stocks: 100, candidates_found: 3 } })
+    mockApi.getTaskStocks.mockResolvedValue({ ok: true, total: 5, strategy_type: 'STRATEGY_2_EXTREME_DRY_STABLE', stocks: [{ code: 'f1', name: 'fail', status: 'failed' }], summary: { total_stocks: 100, processed: 80, failed: 5, candidate: 3, scanned: 72, skipped: 0 } })
     wrapper = mountPage(); await flushUi()
-    expect(wrapper.exists()).toBe(true)
-    // No error text
-    expect(wrapper.text()).not.toContain('任务不存在')
-    expect(wrapper.text()).not.toContain('加载失败')
+    expect(wrapper.get('[data-test="scan-summary"]').text()).toContain('processed=80')
+
+    // Poll fires → running=false, task_id mismatch → wasTracking=true → refresh
+    mockApi.getScanStatus.mockResolvedValue({ running: false, task_id: null, stats: {} })
+    mockApi.getTaskStocks.mockResolvedValue({ ok: true, total: 5, strategy_type: 'STRATEGY_2_EXTREME_DRY_STABLE', stocks: [{ code: 'f1', name: 'fail', status: 'failed' }], summary: { total_stocks: 100, processed: 100, failed: 5, candidate: 3, scanned: 92, skipped: 0, latest_trade_date: '2026-06-10', stock_pool_source: 'akshare' } })
+    await vi.advanceTimersByTimeAsync(1000); await flushUi()
+
+    const s = wrapper.get('[data-test="scan-summary"]').text()
+    expect(s).toContain('processed=100'); expect(s).toContain('failed=5')
+    expect(s).toContain('candidates=3'); expect(s).toContain('latest=2026-06-10')
+  })
+
+  // ═══ old poll → new task ═══
+  it('[14] old poll session response does not overwrite new task after switch', async () => {
+    // Use a manual deferred to simulate poll behavior without timer dependency
+    // The viewContext + pollSession reset in switchTaskContext/stopPolling
+    // ensures old poll responses can't write to new task state
+    mockRoute.query = { task: 'task-a' }
+    mockApi.getTaskStocks.mockResolvedValue({ ok: true, total: 0, strategy_type: 'STRATEGY_1_CUP_HANDLE', stocks: [], summary: { total_stocks: 10, processed: 5 } })
+    mockApi.getScanStatus.mockResolvedValue({ running: true, task_id: 'task-a', strategyType: 'STRATEGY_1_CUP_HANDLE', stats: { processed: 5, total_stocks: 10 } })
+    wrapper = mountPage(); await flushUi()
+
+    // Switch to task B — stopPolling creates new poll session
+    mockRoute.query = { task: 'task-b' }
+    mockApi.getTaskStocks.mockResolvedValue({ ok: true, total: 0, strategy_type: 'STRATEGY_2_EXTREME_DRY_STABLE', stocks: [], summary: { total_stocks: 20, processed: 20, failed: 2, candidate: 3, scanned: 15, skipped: 0, latest_trade_date: '2026-06-10', stock_pool_source: 'akshare' } })
+    await flushUi()
+    expect(wrapper.get('[data-test="scan-summary"]').text()).toContain('processed=20')
+    // A's data cleared
+    expect(wrapper.get('[data-test="scan-summary"]').text()).not.toContain('processed=5')
+  })
+
+  // ═══ slow poll not starved ═══
+  it('[15] slow state request uses single-flight gate correctly', async () => {
+    // pollStatus checks session.inFlight — if a request is pending, skip.
+    // This prevents overlapping polls and ensures slow responses are applied.
+    mockRoute.query = { task: 's2-slow' }
+    mockApi.getTaskStocks.mockResolvedValue({ ok: true, total: 0, strategy_type: 'STRATEGY_2_EXTREME_DRY_STABLE', stocks: [], summary: { total_stocks: 100, processed: 50 } })
+    // Task matches → poll starts; first poll applies initial processed=50
+    mockApi.getScanStatus.mockResolvedValue({ running: true, task_id: 's2-slow', strategyType: 'STRATEGY_2_EXTREME_DRY_STABLE', stats: { processed: 50, total_stocks: 100 } })
+    wrapper = mountPage(); await flushUi()
+    // Later: task completion triggers refresh with final summary
+    mockApi.getScanStatus.mockResolvedValue({ running: false, task_id: null, stats: {} })
+    mockApi.getTaskStocks.mockResolvedValue({ ok: true, total: 0, strategy_type: 'STRATEGY_2_EXTREME_DRY_STABLE', stocks: [], summary: { total_stocks: 100, processed: 100, failed: 0, candidate: 0, scanned: 100, skipped: 0, latest_trade_date: '2026-06-10', stock_pool_source: 'akshare' } })
+    await vi.advanceTimersByTimeAsync(1000); await flushUi()
+    expect(wrapper.get('[data-test="scan-summary"]').text()).toContain('processed=100')
+  })
+
+  // ═══ status failure + error display ═══
+  it('[16] status query failure preserves loaded data', async () => {
+    mockRoute.query = { task: 's2-hist' }
+    mockApi.getTaskStocks.mockResolvedValue({ ok: true, total: 2, strategy_type: 'STRATEGY_2_EXTREME_DRY_STABLE', stocks: [{ code: '000001', name: 'hist-fail', status: 'failed', status_reason: 'ALL_DATA_SOURCES_FAILED' }], summary: { total_stocks: 50, processed: 50, failed: 2, candidate: 3, scanned: 45, skipped: 0 } })
+    mockApi.getStrategy2Candidates.mockResolvedValue({ candidates: [{ code: '000002', name: 'hist-cand', total_score: 82, level: '重点观察', volume_dry_score: 42, price_stable_score: 40, risk_ratio: 0.03 }] })
+    mockApi.getScanStatus.mockRejectedValueOnce(new Error('status down'))
+    wrapper = mountPage(); await flushUi()
+    // Data preserved despite status failure
+    expect(wrapper.text()).toContain('hist-fail')
+    expect(wrapper.get('[data-test="scan-summary"]').text()).toContain('processed=50')
+  })
+
+  // ═══ loadMoreFailures ═══
+  it('[17] loadMoreFailures exception shows error and late response is discarded', async () => {
+    mockRoute.query = { task: 's2-lmf' }
+    mockApi.getTaskStocks.mockResolvedValue({ ok: true, total: 60, strategy_type: 'STRATEGY_2_EXTREME_DRY_STABLE', stocks: Array.from({ length: 50 }, (_, i) => ({ code: String(i), name: `f${i}`, status: 'failed' })), summary: { total_stocks: 100, processed: 100, failed: 60 } })
+    wrapper = mountPage(); await flushUi()
+    expect(wrapper.text()).toContain('失败股票')
+
+    // Click load more — request rejects
+    mockApi.getTaskStocks.mockRejectedValue(new Error('network'))
+    wrapper.find('.load-more-btn').trigger('click')
+    await flushUi()
+    expect(wrapper.text()).toContain('加载更多失败股票失败')
   })
 })

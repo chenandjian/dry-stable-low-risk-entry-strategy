@@ -203,18 +203,27 @@ let pollTimer = null
 let clockTimer = null
 let lastLogScanned = 0
 
-// ROUND7-S2-001: viewContext system for stale response prevention
+// ROUND8: viewContext + single-flight poll session
 let viewContextEpoch = 0
-let pollRequestEpoch = 0
 let activeViewContext = { epoch: 0, taskId: '' }
+let activePollSession = { epoch: 0, inFlight: false }
 
 function normalizeTaskId(taskId) {
   return String(taskId || '')
 }
 
+function resetPollSession() {
+  activePollSession = { epoch: activePollSession.epoch + 1, inFlight: false }
+  return activePollSession
+}
+
+function isCurrentPollSession(session) {
+  return session === activePollSession
+}
+
 function beginViewContext(taskId) {
   viewContextEpoch += 1
-  pollRequestEpoch += 1
+  resetPollSession()
   activeViewContext = { epoch: viewContextEpoch, taskId: normalizeTaskId(taskId) }
   return { ...activeViewContext }
 }
@@ -389,7 +398,7 @@ async function refreshTaskContext(context) {
 
 function stopPolling() {
   if (pollTimer) { clearInterval(pollTimer); pollTimer = null }
-  pollRequestEpoch += 1
+  resetPollSession()
   scanning.value = false
 }
 
@@ -425,18 +434,21 @@ async function switchTaskContext(newTaskId) {
 
 async function pollStatus() {
   const context = captureCurrentViewContext()
-  const requestEpoch = ++pollRequestEpoch
+  const session = activePollSession
+  if (session.inFlight) return
+  session.inFlight = true
+
   try {
     const status = await getScanStatus()
     if (!isCurrentViewContext(context)) return
-    if (requestEpoch !== pollRequestEpoch) return
+    if (!isCurrentPollSession(session)) return
 
     if (context.taskId && status.task_id !== context.taskId) {
       const wasTracking = scanning.value
       stopPolling()
       if (wasTracking) {
         const ok = await refreshTaskContext(context)
-        if (!ok || !isCurrentViewContext(context)) return
+        if (!ok || !isCurrentViewContext(context) || !isCurrentPollSession(session)) return
         addLog('found', `扫描完成 · 发现 ${scanProgress.candidates} 个候选 · 跳过 ${scanProgress.skipped} · 失败 ${scanProgress.failed}`)
       }
       return
@@ -455,12 +467,12 @@ async function pollStatus() {
       stopPolling()
       if (context.taskId) {
         const ok = await refreshTaskContext(context)
-        if (!ok || !isCurrentViewContext(context)) return
+        if (!ok || !isCurrentViewContext(context) || !isCurrentPollSession(session)) return
       } else {
-        await loadResults({ taskId: scanProgress.taskId, strategyType: activeStrategyType.value, context })
-        if (!isCurrentViewContext(context)) return
-        await loadFailures({ taskId: scanProgress.taskId, context })
-        if (!isCurrentViewContext(context)) return
+        await loadResults({ taskId: scanProgress.taskId, strategyType: activeStrategyType.value, context, pollSession: session })
+        if (!isCurrentViewContext(context) || !isCurrentPollSession(session)) return
+        await loadFailures({ taskId: scanProgress.taskId, context, pollSession: session })
+        if (!isCurrentViewContext(context) || !isCurrentPollSession(session)) return
       }
       addLog('found', `扫描完成 · 发现 ${scanProgress.candidates} 个候选 · 跳过 ${scanProgress.skipped} · 失败 ${scanProgress.failed}`)
       return
@@ -478,18 +490,21 @@ async function pollStatus() {
       discoveries.value = dedupeDiscoveries(discoveries.value)
       updateMetrics()
     }
-    if (scanProgress.failed) await loadFailures({ taskId: scanProgress.taskId, context })
+    if (scanProgress.failed) await loadFailures({ taskId: scanProgress.taskId, context, pollSession: session })
   } catch (e) {
-    if (isCurrentViewContext(context) && requestEpoch === pollRequestEpoch) { scanError.value = '状态查询失败'; console.error(e) }
+    if (isCurrentViewContext(context) && isCurrentPollSession(session)) { scanError.value = '状态查询失败'; console.error(e) }
+  } finally {
+    if (isCurrentPollSession(session)) { session.inFlight = false }
   }
 }
 
-async function loadFailures({ taskId, context } = {}) {
+async function loadFailures({ taskId, context, pollSession } = {}) {
   const targetTaskId = normalizeTaskId(taskId)
   if (!targetTaskId) return false
   try {
     const data = await getTaskStocks(targetTaskId, { status: 'failed', page_size: 50, page: 1 })
     if (context && !isCurrentViewContext(context)) return false
+    if (pollSession && !isCurrentPollSession(pollSession)) return false
     if (!data.ok) return false
     failures.value = data.stocks || []
     failuresTotal.value = data.total || 0
@@ -502,11 +517,18 @@ async function loadMoreFailures() {
   const context = captureCurrentViewContext()
   const taskId = scanProgress.taskId
   if (!taskId) return
-  const nextPage = Math.floor(failures.value.length / 50) + 1
-  const data = await getTaskStocks(taskId, { status: 'failed', page_size: 50, page: nextPage })
-  if (!isCurrentViewContext(context) || scanProgress.taskId !== taskId) return
-  if (data.stocks?.length) { failures.value = [...failures.value, ...data.stocks] }
-  failuresTotal.value = data.total || failuresTotal.value
+  try {
+    const nextPage = Math.floor(failures.value.length / 50) + 1
+    const data = await getTaskStocks(taskId, { status: 'failed', page_size: 50, page: nextPage })
+    if (!isCurrentViewContext(context) || scanProgress.taskId !== taskId) return
+    if (!data.ok) { scanError.value = '加载更多失败股票失败'; return }
+    if (data.stocks?.length) { failures.value = [...failures.value, ...data.stocks] }
+    failuresTotal.value = data.total || failuresTotal.value
+  } catch (e) {
+    if (isCurrentViewContext(context) && scanProgress.taskId === taskId) {
+      scanError.value = '加载更多失败股票失败'; console.error('Load more failures failed:', e)
+    }
+  }
 }
 
 async function handleRetryFailed() {
