@@ -9,11 +9,9 @@ from typing import Callable
 
 import scanner.db as db
 from scanner.data_source import DataSourceManager
-from scanner.mootdx_source import fetch_mootdx_daily
 from scanner.baidu_source import fetch_baidu_daily
 from scanner.sina_source import fetch_sina_daily
 from scanner.tencent_source import fetch_tencent_daily
-from scanner.yfinance_source import fetch_yfinance_daily
 from scanner.index_source import fetch_market_index_daily
 from scanner.liquidity_filter import passes_liquidity_filter
 from scanner.pattern_detector import CupHandleResult
@@ -561,11 +559,9 @@ DEFAULT_DAILY_SOURCES = ["baidu", "sina", "tencent"]
 
 def _daily_fetch_fn(ds_name: str):
     fetchers = {
-        "mootdx": fetch_mootdx_daily,
         "baidu": fetch_baidu_daily,
         "sina": fetch_sina_daily,
         "tencent": fetch_tencent_daily,
-        "yfinance": fetch_yfinance_daily,
     }
     if ds_name not in fetchers:
         raise ValueError(f"Unknown daily data source: {ds_name}")

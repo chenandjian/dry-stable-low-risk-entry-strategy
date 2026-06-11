@@ -17,7 +17,6 @@ from scanner.strategy_engine import (
     serialize_pattern_for_backtest,
 )
 from scanner.tencent_source import fetch_tencent_daily
-from scanner.yfinance_source import fetch_yfinance_daily
 
 
 class DataCoverageError(Exception):
@@ -108,7 +107,7 @@ def default_fresh_fetch(
     if required_start_date and required_end_date:
         days = _estimate_fetch_days(required_start_date, required_end_date)
 
-    for fetch_fn in (fetch_baidu_daily, fetch_sina_daily, fetch_tencent_daily, fetch_yfinance_daily):
+    for fetch_fn in (fetch_baidu_daily, fetch_sina_daily, fetch_tencent_daily):
         data = fetch_fn(code, days=days)
         if data:
             return data

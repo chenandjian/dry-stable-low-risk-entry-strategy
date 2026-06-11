@@ -15,10 +15,14 @@
     </div>
 
     <!-- Summary -->
-    <div class="summary-bar" v-if="candidates.length">
-      <span>候选数: <strong>{{ candidates.length }}</strong></span>
+    <div class="summary-bar" v-if="candidates.length || failureCount > 0">
+      <span v-if="candidates.length">候选数: <strong>{{ candidates.length }}</strong></span>
       <span v-for="lv in levels" :key="lv" class="level-chip" :class="levelClass(lv)">
         {{ lv }}: {{ countByLevel(lv) }}
+      </span>
+      <span v-if="failureCount > 0" class="failed-count">
+        失败股票: <strong>{{ failureCount }}</strong>
+        <router-link :to="`/?task=${selectedTaskId}&status=failed`" class="view-failures-link">查看失败股票</router-link>
       </span>
     </div>
 
@@ -112,6 +116,7 @@ export default {
       selectedTaskId: '',
       loading: false,
       expandedCode: null,
+      failureCount: 0,
       levels: ['终极状态', '极致量干价稳', '重点观察', '普通观察'],
     }
   },
@@ -137,7 +142,7 @@ export default {
   },
   methods: {
     async loadCandidates() {
-      if (!this.selectedTaskId) { this.candidates = []; return }
+      if (!this.selectedTaskId) { this.candidates = []; this.failureCount = 0; return }
       this.loading = true
       try {
         const api = useApi()
@@ -148,6 +153,12 @@ export default {
       } finally {
         this.loading = false
       }
+      // ROUND2-S2-002: also load failure count
+      try {
+        const api = useApi()
+        const data = await api.getTaskStocks(this.selectedTaskId, { status: 'failed', page_size: 1 })
+        this.failureCount = data.total || 0
+      } catch (e) { /* ignore */ }
     },
     countByLevel(level) {
       return this.candidates.filter(c => c.level === level).length
@@ -212,4 +223,6 @@ tr.expanded .expand-cell { color: var(--accent); }
 .reason-line { font-size: 0.8rem; color: #aa8; padding: 1px 0; }
 .reason-line.reject { color: #e44; }
 .muted { color: #666; }
+.failed-count { color: #e88; font-size: 0.85rem; }
+.view-failures-link { color: var(--accent); margin-left: 8px; cursor: pointer; font-size: 0.8rem; }
 </style>

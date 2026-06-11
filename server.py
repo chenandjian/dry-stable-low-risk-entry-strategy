@@ -504,13 +504,15 @@ async def list_tasks():
 
 @app.get("/api/scan/tasks/{task_id}/stocks")
 async def get_task_stocks(task_id: str, status: str = None, page: int = 1, page_size: int = 100):
+    """ROUND2-S2-002: Returns strategy_type so frontend can restore task context."""
     page = max(page, 1)
     page_size = min(max(page_size, 1), 500)
     offset = (page - 1) * page_size
     stocks = db.get_task_stocks(task_id, status=status, limit=page_size, offset=offset)
     total = db.summarize_task_stocks(task_id)
     count = total.get(status, 0) if status else total["total_stocks"]
-    return {"task_id": task_id, "stocks": stocks, "total": count, "page": page, "page_size": page_size}
+    s_type = db.get_task_strategy_type(task_id) or "STRATEGY_1_CUP_HANDLE"
+    return {"task_id": task_id, "strategy_type": s_type, "stocks": stocks, "total": count, "page": page, "page_size": page_size}
 
 
 @app.post("/api/scan/tasks/{task_id}/retry-failed")

@@ -81,19 +81,21 @@
           <button v-if="activeStrategyType === 'STRATEGY_1_CUP_HANDLE'" class="retry-btn" :disabled="scanning" @click="handleRetryFailed">重新拉取</button>
         </div>
       </div>
-      <div v-for="f in failures" :key="f.code" class="failure-row" @click="toggleFailureDetail(f)">
-        <span class="code">{{ f.code }}</span>
-        <span>{{ f.name }}</span>
-        <span class="reason">{{ reasonLabel(f.status_reason) || f.error_detail || '--' }}</span>
-        <span class="muted">主源 {{ f.primary_attempts || 0 }} · 备源 {{ f.fallback_attempts || 0 }}</span>
-        <span class="expand-icon">{{ expandedFailures[f.code] ? '▾' : '▸' }}</span>
-      </div>
-      <div v-if="expandedFailures[f.code]" class="failure-detail">
-        <div><strong>错误码:</strong> {{ f.status_reason || '--' }}</div>
-        <div><strong>详情:</strong> {{ f.error_detail || '--' }}</div>
-        <div v-if="f.source_errors"><strong>数据源:</strong> {{ formatSourceErrors(f.source_errors) }}</div>
-        <div>主源: {{ f.primary_source || '--' }} · 备源: {{ f.fallback_source || '--' }}</div>
-      </div>
+      <template v-for="f in failures" :key="f.code">
+        <div class="failure-row" @click="toggleFailureDetail(f)">
+          <span class="code">{{ f.code }}</span>
+          <span>{{ f.name }}</span>
+          <span class="reason">{{ reasonLabel(f.status_reason) || f.error_detail || '--' }}</span>
+          <span class="muted">主源 {{ f.primary_attempts || 0 }} · 备源 {{ f.fallback_attempts || 0 }}</span>
+          <span class="expand-icon">{{ expandedFailures[f.code] ? '▾' : '▸' }}</span>
+        </div>
+        <div v-if="expandedFailures[f.code]" class="failure-detail">
+          <div><strong>错误码:</strong> {{ f.status_reason || '--' }}</div>
+          <div><strong>详情:</strong> {{ f.error_detail || '--' }}</div>
+          <div v-if="f.source_errors"><strong>数据源:</strong> {{ formatSourceErrors(f.source_errors) }}</div>
+          <div>主源: {{ f.primary_source || '--' }} · 备源: {{ f.fallback_source || '--' }}</div>
+        </div>
+      </template>
     </div>
   </div>
 </template>
@@ -369,6 +371,10 @@ async function loadFailures() {
     const data = await getTaskStocks(scanProgress.taskId, { status: 'failed', page_size: 50, page: 1 })
     failures.value = data.stocks || []
     failuresTotal.value = data.total || 0
+    // ROUND2-S2-002: Restore strategy_type from task context
+    if (data.strategy_type && !activeStrategyType.value) {
+      activeStrategyType.value = data.strategy_type
+    }
   } catch (e) {
     console.error('Load failures failed:', e)
   }
@@ -444,7 +450,7 @@ function updateMetrics() {
 }
 
 onMounted(async () => {
-  // FINAL-S2-003: Get status first to know which strategy is running
+  // ROUND2-S2-002: Get status first to know which strategy is running
   const queryTaskId = route.query.task
   if (queryTaskId) {
     scanProgress.taskId = queryTaskId
@@ -453,9 +459,21 @@ onMounted(async () => {
   try {
     const status = await getScanStatus()
     applyStats(status)
-    // Restore strategy type before loading results
+    // Restore strategy type — from running task or from query task
     if (status.strategyType) {
       activeStrategyType.value = status.strategyType
+    }
+    // ROUND2-S2-002: For history tasks, fetch strategy_type from task API
+    if (queryTaskId && !activeStrategyType.value) {
+      try {
+        const { getScanTasks } = useApi()
+        const tasksData = await getScanTasks()
+        const allTasks = tasksData.tasks || []
+        const matchTask = allTasks.find(t => t.id === queryTaskId)
+        if (matchTask?.strategy_type) {
+          activeStrategyType.value = matchTask.strategy_type
+        }
+      } catch (e) { /* ignore */ }
     }
     if (status.running) {
       scanning.value = true

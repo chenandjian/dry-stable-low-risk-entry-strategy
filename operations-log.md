@@ -106,6 +106,15 @@
 - User decision after review: remove cache fallback entirely. When all online data sources fail, both strategies must mark the stock failed and must not use local OHLC cache; trading-day/holiday freshness logic is no longer required.
 - User requirement added: failed stocks must be visible in the frontend with a clear Chinese reason, per-source errors, accurate total count, and a historical Strategy2 failure-list entry point. Strategy2 must not expose the Strategy1-only retry action.
 
+## 2026-06-10 (Strategy2 Final Acceptance Recheck Round 2)
+
+- Reviewed commit `c14b974` against the ACCEPT-S2-001~006 requirements and added the Round 2 acceptance report plus repair-AI prompt.
+- Confirmed the backend now rejects cache fallback on all-source failure, records Strategy2 failed terminal states and processed callbacks, isolates live Strategy discoveries, and returns correct failed-stock pagination/source errors.
+- Found a high-severity frontend runtime error: ScannerConsole failure detail references `f` outside its `v-for`; the compiled bundle reads undefined `e.f.code` when the failure panel renders.
+- Confirmed Strategy2Results still has no historical failure entry and historical ScannerConsole routes cannot restore the target task's strategy type.
+- Confirmed source convergence remains incomplete in `scanner/engine.py`, single-stock backtest, requirements, tests, and design documentation.
+- Verification: targeted suites passed 115; offline suite passed 445; full suite had 448 passed and two external failures plus an unhandled background-thread warning; compileall, frontend build, and diff check passed.
+
 ### Commit history
 ```
 eff4597 feat(strategy2): full implementation — engine, scanner, DB, API, frontend
