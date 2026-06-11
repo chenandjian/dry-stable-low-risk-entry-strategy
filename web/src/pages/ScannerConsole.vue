@@ -304,15 +304,26 @@ function applyTaskSummary(summary = {}) {
 }
 
 async function refreshTaskContext(taskId) {
-  const data = await getTaskStocks(taskId, { status: 'failed', page_size: 50, page: 1 })
-  if (!data.ok) return false
-  scanProgress.taskId = taskId
-  activeStrategyType.value = data.strategy_type
-  failures.value = data.stocks || []
-  failuresTotal.value = data.total || 0
-  applyTaskSummary(data.summary)
-  await loadResults()
-  return true
+  try {
+    const data = await getTaskStocks(taskId, { status: 'failed', page_size: 50, page: 1 })
+    if (!data.ok) {
+      scanError.value = data.error === 'TASK_NOT_FOUND'
+        ? `任务不存在：${taskId}`
+        : '历史任务加载失败'
+      return false
+    }
+    scanProgress.taskId = taskId
+    activeStrategyType.value = data.strategy_type
+    failures.value = data.stocks || []
+    failuresTotal.value = data.total || 0
+    applyTaskSummary(data.summary)
+    await loadResults()
+    return true
+  } catch (e) {
+    scanError.value = '历史任务加载失败'
+    console.error('Load historical task failed:', e)
+    return false
+  }
 }
 
 function stopPolling() {
@@ -346,10 +357,7 @@ async function switchTaskContext(newTaskId) {
     return
   }
   const ok = await refreshTaskContext(newTaskId)
-  if (!ok) {
-    scanError.value = `任务不存在：${newTaskId}`
-    return
-  }
+  if (!ok) return
   try {
     const status = await getScanStatus()
     if (status.running && status.task_id === newTaskId) {
@@ -544,26 +552,9 @@ function updateMetrics() {
 
 // Stage 3: Historical task loading
 async function loadHistoricalTask(taskId) {
-  scanProgress.taskId = taskId
-  scanning.value = false
-  activeStrategyType.value = null
-  scanError.value = ''
-
-  const data = await getTaskStocks(taskId, { status: 'failed', page_size: 50, page: 1 })
-  if (!data.ok) {
-    failures.value = []
-    failuresTotal.value = 0
-    discoveries.value = []
-    scanError.value = data.error === 'TASK_NOT_FOUND'
-      ? `任务不存在：${taskId}`
-      : '历史任务加载失败'
-    return false
-  }
-
-  activeStrategyType.value = data.strategy_type
-  failures.value = data.stocks || []
-  failuresTotal.value = data.total || 0
-  await loadResults()
+  // ROUND6-S2-001: Delegate to refreshTaskContext for summary/failures/type/candidates
+  const ok = await refreshTaskContext(taskId)
+  if (!ok) return false
 
   const status = await getScanStatus()
   if (status.running && status.task_id === taskId) {
