@@ -304,23 +304,96 @@ class TestDataSourceConvergence:
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# Stage 1: Task stocks API 404 semantics
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestTaskStocksAPI:
+    def test_unknown_task_returns_404(self, monkeypatch, tmp_path):
+        """Stage 1: Unknown task → 404 TASK_NOT_FOUND."""
+        from fastapi.testclient import TestClient
+        import server as server_mod
+        db_path = str(tmp_path / "ts1.db")
+        import scanner.db as db
+        db.init_db(db_path)
+        server_mod._running["running"] = False
+        monkeypatch.setattr(server_mod, "load_config",
+                            lambda path="config.yaml": {"data": {"database_path": db_path}})
+        client = TestClient(server_mod.app)
+        res = client.get("/api/scan/tasks/not-found/stocks")
+        assert res.status_code == 404
+        assert res.json()["error"] == "TASK_NOT_FOUND"
+
+    def test_legacy_null_type_returns_s1(self, monkeypatch, tmp_path):
+        """Stage 1: NULL strategy_type → STRATEGY_1_CUP_HANDLE."""
+        from fastapi.testclient import TestClient
+        import server as server_mod
+        db_path = str(tmp_path / "ts2.db")
+        import scanner.db as db
+        db.init_db(db_path)
+        db.create_scan_task("null-task", "2026-06-10 09:00:00")
+        conn = db.get_conn()
+        conn.execute("UPDATE scan_tasks SET strategy_type=NULL WHERE id='null-task'")
+        conn.commit()
+        monkeypatch.setattr(server_mod, "load_config",
+                            lambda path="config.yaml": {"data": {"database_path": db_path}})
+        client = TestClient(server_mod.app)
+        res = client.get("/api/scan/tasks/null-task/stocks")
+        assert res.status_code == 200
+        assert res.json()["strategy_type"] == "STRATEGY_1_CUP_HANDLE"
+
+    def test_s2_task_returns_s2(self, monkeypatch, tmp_path):
+        """Stage 1: S2 task → STRATEGY_2_EXTREME_DRY_STABLE."""
+        from fastapi.testclient import TestClient
+        import server as server_mod
+        db_path = str(tmp_path / "ts3.db")
+        import scanner.db as db
+        db.init_db(db_path)
+        db.create_scan_task("s2-ts", "2026-06-10 09:00:00",
+                            strategy_type="STRATEGY_2_EXTREME_DRY_STABLE")
+        monkeypatch.setattr(server_mod, "load_config",
+                            lambda path="config.yaml": {"data": {"database_path": db_path}})
+        client = TestClient(server_mod.app)
+        res = client.get("/api/scan/tasks/s2-ts/stocks")
+        assert res.status_code == 200
+        assert res.json()["strategy_type"] == "STRATEGY_2_EXTREME_DRY_STABLE"
+
+    def test_empty_failure_list_not_404(self, monkeypatch, tmp_path):
+        """Stage 1: Valid task, no failures → 200 + empty + total=0."""
+        from fastapi.testclient import TestClient
+        import server as server_mod
+        db_path = str(tmp_path / "ts4.db")
+        import scanner.db as db
+        db.init_db(db_path)
+        db.create_scan_task("empty-ts", "2026-06-10 09:00:00")
+        monkeypatch.setattr(server_mod, "load_config",
+                            lambda path="config.yaml": {"data": {"database_path": db_path}})
+        client = TestClient(server_mod.app)
+        res = client.get("/api/scan/tasks/empty-ts/stocks?status=failed")
+        assert res.status_code == 200
+        assert res.json()["stocks"] == []
+        assert res.json()["total"] == 0
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # ROUND2-S2-004: 六种终态分别真实制造并验证
 # ═══════════════════════════════════════════════════════════════════════════════
 
 class TestSixTerminalStatesParametrized:
-    """ROUND2-S2-004: 6 terminal states, each with distinct conditions and isolated verification."""
+    """Stage 4: 6 terminal states with exact expected status and reason."""
 
-    @pytest.mark.parametrize("state,setup", [
-        ("candidate", "candidate"),
-        ("scanned", "scanned"),
-        ("skipped", "skipped"),
-        ("all-sources-failed", "fail"),
-        ("persist-failed", "persist_fail"),
-        ("evaluation-error", "crash"),
-    ])
-    def test_each_terminal_state_individually(self, monkeypatch, tmp_path, state, setup):
-        """ROUND2-S2-004: Single stock through exactly one terminal path → correct DB + processed."""
-        import time
+    @pytest.mark.parametrize(
+        "setup,expected_status,expected_reason",
+        [
+            ("candidate", "candidate", None),
+            ("scanned", "scanned", "SCORE_BELOW_THRESHOLD"),
+            ("skipped", "skipped", "LIQUIDITY_FILTER_REJECTED"),
+            ("fail", "failed", "ALL_DATA_SOURCES_FAILED"),
+            ("persist_fail", "failed", "STRATEGY2_CANDIDATE_PERSIST_FAILED"),
+            ("crash", "failed", "STRATEGY2_EVALUATION_ERROR"),
+        ],
+    )
+    def test_each_terminal_state_individually(self, monkeypatch, tmp_path, setup, expected_status, expected_reason):
+        """Stage 4: Single stock, distinct terminal path → exact status + reason + callback."""
         from strategy2 import scanner as s2_scanner
         from scanner.daily_data_service import FetchResult
 
@@ -339,14 +412,18 @@ class TestSixTerminalStatesParametrized:
                 d.append({"date": date, "open": 10, "high": 10, "low": 10, "close": 10, "volume": vol, "turnover": 10 * vol})
             return d
 
+        events = []
+        def on_progress(stage, current, total, detail, discovery=None):
+            events.append({"stage": stage, "current": current, "total": total, "detail": detail, "discovery": discovery})
+
         if setup == "fail":
-            # All sources fail → failed
             def mock_fetch(*a, **kw):
-                return FetchResult(data=None, primary_source="baidu", fallback_source="sina",
-                                   primary_error="connection refused", fallback_error="timeout")
+                return FetchResult(data=None, primary_source="baidu", fallback_source="tencent",
+                                   primary_attempts=2, fallback_attempts=2,
+                                   primary_error="baidu failed", fallback_error="tencent failed",
+                                   source_errors={"baidu": "a=2 e=baidu failed", "sina": "a=2 e=sina failed", "tencent": "a=2 e=tencent failed"})
             monkeypatch.setattr(s2_scanner, "fetch_with_retry", mock_fetch)
         elif setup == "crash":
-            # Engine crash → failed
             def mock_fetch(*a, **kw):
                 return FetchResult(data=build_good_data(), primary_source="test", fallback_source="test", from_cache=True)
             monkeypatch.setattr(s2_scanner, "fetch_with_retry", mock_fetch)
@@ -355,22 +432,13 @@ class TestSixTerminalStatesParametrized:
                 raise RuntimeError("boom")
             monkeypatch.setattr(ExtremeDryStableStrategyEngine, "evaluate_at", crash_eval)
         elif setup == "persist_fail":
-            # Candidate but persist fails → failed
             def mock_fetch(*a, **kw):
                 return FetchResult(data=build_good_data(), primary_source="test", fallback_source="test", from_cache=True)
             monkeypatch.setattr(s2_scanner, "fetch_with_retry", mock_fetch)
             def mock_upsert(*a, **kw):
                 raise RuntimeError("db write error")
             monkeypatch.setattr(db, "upsert_strategy2_candidate", mock_upsert)
-        elif setup == "skipped":
-            # Liquidity filter blocks → skipped
-            def mock_fetch(*a, **kw):
-                return FetchResult(data=build_good_data(), primary_source="test", fallback_source="test", from_cache=True)
-            monkeypatch.setattr(s2_scanner, "fetch_with_retry", mock_fetch)
-            # Override config to enable strict liquidity
-            pass  # handled by config below
         else:
-            # candidate / scanned: normal data
             def mock_fetch(*a, **kw):
                 return FetchResult(data=build_good_data(), primary_source="test", fallback_source="test", from_cache=True)
             monkeypatch.setattr(s2_scanner, "fetch_with_retry", mock_fetch)
@@ -392,16 +460,30 @@ class TestSixTerminalStatesParametrized:
                             strategy_type="STRATEGY_2_EXTREME_DRY_STABLE")
         db.save_task_stocks(f"term-{setup}", stocks)
 
-        s2_scanner.scan_strategy2_all(cfg, task_id=f"term-{setup}", stocks=stocks, worker_count=1)
+        s2_scanner.scan_strategy2_all(cfg, task_id=f"term-{setup}", stocks=stocks,
+                                       progress_callback=on_progress, worker_count=1)
 
         ts = db.get_task_stocks(f"term-{setup}")
         assert len(ts) == 1
-        # Verify terminal state — no fetching
-        assert ts[0]["status"] != "fetching", f"Stock stuck in fetching for setup={setup}"
-        assert ts[0]["finished_at"] is not None, f"finished_at missing for setup={setup}"
+        row = ts[0]
+        assert row["status"] == expected_status, f"Expected {expected_status}, got {row['status']}"
+        if expected_reason is not None:
+            assert row["status_reason"] == expected_reason, \
+                f"Expected reason {expected_reason}, got {row['status_reason']}"
+        assert row["finished_at"] is not None
 
         summary = db.summarize_task_stocks(f"term-{setup}")
-        terminal = summary["scanned"] + summary["skipped"] + summary["failed"] + summary["candidate"]
-        assert terminal == 1, f"Expected 1 terminal for {setup}, got {terminal}: {summary}"
-        # Allow threads to finish
-        time.sleep(0.1)
+        assert summary[expected_status] == 1
+        for other in {"candidate", "scanned", "skipped", "failed"} - {expected_status}:
+            assert summary[other] == 0, f"{other} should be 0 for {setup}"
+
+        scanning_events = [e for e in events if e["stage"] == "scanning"]
+        assert len(scanning_events) == 1, f"Expected 1 scanning event, got {len(scanning_events)}"
+        assert scanning_events[0]["current"] == 1
+        assert scanning_events[0]["total"] == 1
+
+        discovery_events = [e for e in events if e["stage"] == "discovery"]
+        if expected_status == "candidate":
+            assert len(discovery_events) == 1
+        else:
+            assert len(discovery_events) == 0, f"No discovery expected for {setup}"

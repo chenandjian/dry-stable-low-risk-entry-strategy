@@ -34,7 +34,8 @@ export function useApi() {
     const qs = new URLSearchParams(params).toString()
     const url = `${API_BASE}/scan/tasks/${taskId}/stocks${qs ? '?' + qs : ''}`
     const res = await fetch(url)
-    return res.json()
+    const body = await res.json()
+    return { ...body, ok: res.ok, statusCode: res.status }
   }
 
   async function retryFailedStocks(taskId) {

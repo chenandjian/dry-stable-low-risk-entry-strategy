@@ -73,7 +73,8 @@ class TestCrossStrategyExecutionBlocked:
         ), f"Unexpected error code: {body.get('error')}"
 
     def test_strategy1_retry_still_works(self, monkeypatch, tmp_path):
-        """FINAL-S2-001: Strategy1 normal retry path still works."""
+        """Stage 5: Strategy1 retry — mock scan_all to avoid background thread leak."""
+        import threading
         db_path = _setup_server_state(tmp_path)
         db.create_scan_task("s1-task", "2026-06-10 09:00:00",
                             strategy_type="STRATEGY_1_CUP_HANDLE")
@@ -87,11 +88,21 @@ class TestCrossStrategyExecutionBlocked:
                             lambda path="config.yaml": {"data": {"database_path": str(db_path)}})
         server_mod._clear_running()
 
+        done = threading.Event()
+        received = {}
+        def fake_scan_all(config, progress_callback=None, task_id=None, stocks=None, **kwargs):
+            received["task_id"] = task_id
+            received["stocks"] = stocks
+            done.set()
+            return {"candidates": [], "stats": {"total_stocks": len(stocks or []), "processed": len(stocks or []), "failed": 0, "skipped": 0, "candidates_found": 0}}
+        monkeypatch.setattr(server_mod, "scan_all", fake_scan_all)
+
         client = TestClient(server_mod.app)
         res = client.post("/api/scan/tasks/s1-task/retry-failed")
-        # Should not be rejected — S1 task on S1 endpoint
-        assert res.status_code not in (400, 404), \
-            f"Strategy1 retry should not be blocked: {res.status_code} {res.json()}"
+        assert res.status_code == 200, f"Strategy1 retry blocked: {res.status_code} {res.json()}"
+        assert done.wait(timeout=2), "retry worker did not finish"
+        assert received["task_id"] == "s1-task"
+        server_mod._clear_running()
 
     def test_strategy2_endpoints_reject_strategy1_task(self, monkeypatch, tmp_path):
         """FINAL-S2-001: Strategy2 endpoints reject Strategy1 task_id."""

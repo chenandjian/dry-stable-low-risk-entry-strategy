@@ -110,7 +110,11 @@ import ScanEngine from '../components/ScanEngine.vue'
 
 const router = useRouter()
 const route = useRoute()
-const { startScan, startStrategy2Scan, getScanStatus, getCandidates, getTaskStocks, retryFailedStocks } = useApi()
+const { startScan, startStrategy2Scan, getScanStatus, getCandidates, getTaskStocks, retryFailedStocks, getStrategy2Candidates } = useApi()
+
+// Stage 3: 两种互斥模式
+const routeTaskId = computed(() => String(route.query.task || ''))
+const isHistoricalMode = computed(() => Boolean(routeTaskId.value))
 
 // Market status & clock
 const currentTime = ref('')
@@ -211,6 +215,8 @@ function goToStock(code) {
 }
 
 async function handleStartScan() {
+  // Stage 3: Clear historical mode before starting new scan
+  if (routeTaskId.value) { await router.replace({ path: '/', query: {} }) }
   scanError.value = ''
   try {
     const res = await startScan()
@@ -240,6 +246,8 @@ async function handleStartScan() {
 }
 
 async function handleStartStrategy2Scan() {
+  // Stage 3: Clear historical mode before starting new scan
+  if (routeTaskId.value) { await router.replace({ path: '/', query: {} }) }
   scanError.value = ''
   try {
     const res = await startStrategy2Scan()
@@ -268,9 +276,11 @@ async function handleStartStrategy2Scan() {
   }
 }
 
-function applyStats(status) {
+function applyStats(status, { applyTaskId = true } = {}) {
   const stats = status.stats || {}
-  scanProgress.taskId = status.task_id || scanProgress.taskId
+  if (applyTaskId && status.task_id) {
+    scanProgress.taskId = status.task_id
+  }
   scanProgress.scanned = stats.processed || stats.scanned || 0
   scanProgress.total = stats.total_stocks || scanProgress.total || 0
   scanProgress.skipped = stats.skipped || 0
@@ -285,9 +295,16 @@ function applyStats(status) {
 async function pollStatus() {
   try {
     const status = await getScanStatus()
-    applyStats(status)
-    // RECHECK-S2-001: Restore activeStrategyType from backend on refresh
-    if (status.strategyType) {
+
+    // Stage 3: Historical mode — only allow same task
+    if (isHistoricalMode.value && status.task_id !== routeTaskId.value) {
+      scanning.value = false
+      if (pollTimer) { clearInterval(pollTimer); pollTimer = null }
+      return
+    }
+
+    applyStats(status, { applyTaskId: !isHistoricalMode.value })
+    if (status.strategyType && !isHistoricalMode.value) {
       activeStrategyType.value = status.strategyType
     }
     // Progress log every ~50 stocks
@@ -336,9 +353,7 @@ async function loadResults() {
     const isS2 = activeStrategyType.value === 'STRATEGY_2_EXTREME_DRY_STABLE'
     let candidates = []
     if (isS2) {
-      // RECHECK-S2-001: Load strategy2 results from correct API
       try {
-        const { getStrategy2Candidates } = useApi()
         const res = await getStrategy2Candidates(scanProgress.taskId)
         candidates = (res.candidates || []).map(c => ({
           code: c.code, name: c.name,
@@ -349,7 +364,8 @@ async function loadResults() {
         }))
       } catch (e) { console.error('Failed to load strategy2 results:', e) }
     } else {
-      const data = await getCandidates()
+      const params = scanProgress.taskId ? { task_id: scanProgress.taskId } : {}
+      const data = await getCandidates(params)
       candidates = (data.candidates || []).map(c => ({
         code: c.code, name: c.name,
         score: c.score || 0,
@@ -371,8 +387,8 @@ async function loadFailures() {
     const data = await getTaskStocks(scanProgress.taskId, { status: 'failed', page_size: 50, page: 1 })
     failures.value = data.stocks || []
     failuresTotal.value = data.total || 0
-    // ROUND2-S2-002: Restore strategy_type from task context
-    if (data.strategy_type && !activeStrategyType.value) {
+    // Stage 3: Always restore strategy_type from API
+    if (data.strategy_type) {
       activeStrategyType.value = data.strategy_type
     }
   } catch (e) {
@@ -449,41 +465,58 @@ function updateMetrics() {
   metrics.topScore = list.reduce((max, d) => Math.max(max, d.score), 0)
 }
 
-onMounted(async () => {
-  // ROUND2-S2-002: Get status first to know which strategy is running
-  const queryTaskId = route.query.task
-  if (queryTaskId) {
-    scanProgress.taskId = queryTaskId
+// Stage 3: Historical task loading
+async function loadHistoricalTask(taskId) {
+  scanProgress.taskId = taskId
+  scanning.value = false
+  activeStrategyType.value = null
+  scanError.value = ''
+
+  const data = await getTaskStocks(taskId, { status: 'failed', page_size: 50, page: 1 })
+  if (!data.ok) {
+    failures.value = []
+    failuresTotal.value = 0
+    discoveries.value = []
+    scanError.value = data.error === 'TASK_NOT_FOUND'
+      ? `任务不存在：${taskId}`
+      : '历史任务加载失败'
+    return false
   }
 
+  activeStrategyType.value = data.strategy_type
+  failures.value = data.stocks || []
+  failuresTotal.value = data.total || 0
+  await loadResults()
+
+  const status = await getScanStatus()
+  if (status.running && status.task_id === taskId) {
+    applyStats(status, { applyTaskId: false })
+    scanning.value = true
+    pollTimer = setInterval(pollStatus, 1000)
+  }
+  return true
+}
+
+async function loadLiveTask() {
   try {
     const status = await getScanStatus()
     applyStats(status)
-    // Restore strategy type — from running task or from query task
-    if (status.strategyType) {
-      activeStrategyType.value = status.strategyType
-    }
-    // ROUND2-S2-002: For history tasks, fetch strategy_type from task API
-    if (queryTaskId && !activeStrategyType.value) {
-      try {
-        const { getScanTasks } = useApi()
-        const tasksData = await getScanTasks()
-        const allTasks = tasksData.tasks || []
-        const matchTask = allTasks.find(t => t.id === queryTaskId)
-        if (matchTask?.strategy_type) {
-          activeStrategyType.value = matchTask.strategy_type
-        }
-      } catch (e) { /* ignore */ }
-    }
+    if (status.strategyType) activeStrategyType.value = status.strategyType
     if (status.running) {
       scanning.value = true
       pollTimer = setInterval(pollStatus, 1000)
     }
     await loadFailures()
   } catch (e) { console.error('Check status on mount failed:', e) }
-
-  // Load results AFTER strategy type is known
   await loadResults()
+}
+
+onMounted(async () => {
+  if (routeTaskId.value) {
+    await loadHistoricalTask(routeTaskId.value)
+  } else {
+    await loadLiveTask()
+  }
   updateTime()
   clockTimer = setInterval(updateTime, 1000)
 })

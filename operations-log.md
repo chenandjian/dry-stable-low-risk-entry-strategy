@@ -115,6 +115,17 @@
 - Confirmed source convergence remains incomplete in `scanner/engine.py`, single-stock backtest, requirements, tests, and design documentation.
 - Verification: targeted suites passed 115; offline suite passed 445; full suite had 448 passed and two external failures plus an unhandled background-thread warning; compileall, frontend build, and diff check passed.
 
+## 2026-06-11 (Strategy2 Final Acceptance Recheck Round 3)
+
+- Reviewed fix commit `948b284` and added `docs/reviews/2026-06-11-strategy2-final-acceptance-recheck-round3.md` plus a direct repair-AI prompt.
+- Confirmed the previous failure-panel scope error, Strategy2 historical failure entry, task-stock strategy type response, and production source mapping were fixed.
+- Found that a historical task route is overwritten by an unrelated currently running task, causing wrong failures/candidates/strategy actions; Strategy1 historical candidate loading is also not scoped by task ID.
+- Direct reproduction confirmed Strategy2 all-source failure records preserve `source_errors` but lose primary/fallback attempts and errors, so the frontend displays misleading zero attempts.
+- Direct API reproduction confirmed a nonexistent task-stock request returns 200 and is silently labeled Strategy1.
+- Confirmed the six-terminal-state test does not assert each exact terminal state, and targeted tests still emit an unhandled background-thread SQLite exception.
+- Verification: targeted suites passed 53 with one unhandled thread warning; offline suite passed 449; full suite had 450 passed and four external/environment diagnostic failures; compileall and frontend build passed; commit-range diff check reported two EOF whitespace issues.
+- Expanded the Round 3 repair-AI prompt into an ordered one-pass implementation guide with exact per-file edits, code skeletons, regression-test matrices, frontend runtime-test requirements, and phase/final acceptance gates.
+
 ### Commit history
 ```
 eff4597 feat(strategy2): full implementation — engine, scanner, DB, API, frontend

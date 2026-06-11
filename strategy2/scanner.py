@@ -85,15 +85,26 @@ def scan_strategy2_all(
         return time.strftime("%Y-%m-%d %H:%M:%S")
 
     def _finish_stock(code, name, status, status_reason=None, error_detail=None,
-                      kline_latest_date=None, source_errors=None):
-        """FINAL-S2-002: 统一终态处理 — DB更新 + 刷新统计 + 发送 processed 进度。"""
+                      kline_latest_date=None, fetch_result=None):
+        """统一终态处理 — DB更新（含数据源诊断）+ 刷新统计 + 发送 processed 进度。"""
+        source_fields = {}
+        if fetch_result is not None:
+            source_fields = {
+                "primary_source": fetch_result.primary_source,
+                "fallback_source": fetch_result.fallback_source,
+                "primary_attempts": fetch_result.primary_attempts,
+                "fallback_attempts": fetch_result.fallback_attempts,
+                "primary_error": fetch_result.primary_error,
+                "fallback_error": fetch_result.fallback_error,
+                "source_errors": encode_source_errors(fetch_result.source_errors),
+            }
         db.update_task_stock(
             task_id, code, status=status,
             status_reason=status_reason,
             error_detail=error_detail,
             kline_latest_date=kline_latest_date,
-            source_errors=source_errors,
             finished_at=_now(),
+            **source_fields,
         )
         summary = db.refresh_scan_task_counts(task_id)
         if progress_callback:
@@ -113,6 +124,7 @@ def scan_strategy2_all(
 
             code = stock["code"]
             stock_name = stock.get("name", "")
+            fetch_result = None
             try:
                 db.update_task_stock(
                     task_id, code, status="fetching",
@@ -136,7 +148,8 @@ def scan_strategy2_all(
                             time.sleep(0.1)
                             continue
                         _finish_stock(code, stock_name, "failed",
-                                       status_reason="数据源忙，超过重试次数")
+                                       status_reason="数据源忙，超过重试次数",
+                                       fetch_result=fetch_result)
                         with stats_lock:
                             failed_count[0] += 1
                             skip_count[0] += 1
@@ -145,7 +158,7 @@ def scan_strategy2_all(
                         continue
                     _finish_stock(code, stock_name, "failed",
                                   status_reason="ALL_DATA_SOURCES_FAILED",
-                                  source_errors=encode_source_errors(fetch_result.source_errors))
+                                  fetch_result=fetch_result)
                     with stats_lock:
                         failed_count[0] += 1
                         skip_count[0] += 1
@@ -159,7 +172,8 @@ def scan_strategy2_all(
                 if not passes_liquidity_filter(data, liquidity_cfg):
                     _finish_stock(code, stock_name, "skipped",
                                   status_reason="LIQUIDITY_FILTER_REJECTED",
-                                  kline_latest_date=latest_trade_date)
+                                  kline_latest_date=latest_trade_date,
+                                  fetch_result=fetch_result)
                     with stats_lock:
                         skip_count[0] += 1
                     with busy_retry_lock:
@@ -181,7 +195,8 @@ def scan_strategy2_all(
                         _finish_stock(code, stock_name, "failed",
                                       status_reason="STRATEGY2_CANDIDATE_PERSIST_FAILED",
                                       error_detail=str(exc),
-                                      kline_latest_date=latest_trade_date)
+                                      kline_latest_date=latest_trade_date,
+                                      fetch_result=fetch_result)
                         with stats_lock:
                             failed_count[0] += 1
                             skip_count[0] += 1
@@ -193,7 +208,8 @@ def scan_strategy2_all(
                         candidate_by_code[code] = evaluation
 
                     _finish_stock(code, stock_name, "candidate",
-                                  kline_latest_date=latest_trade_date)
+                                  kline_latest_date=latest_trade_date,
+                                  fetch_result=fetch_result)
 
                     if progress_callback:
                         progress_callback(
@@ -204,7 +220,8 @@ def scan_strategy2_all(
                 else:
                     _finish_stock(code, stock_name, "scanned",
                                   status_reason=evaluation.status_reason,
-                                  kline_latest_date=latest_trade_date)
+                                  kline_latest_date=latest_trade_date,
+                                  fetch_result=fetch_result)
 
                 with stats_lock:
                     scanned_count[0] += 1
@@ -215,7 +232,8 @@ def scan_strategy2_all(
                 logger.error("Strategy2 error scanning %s: %s", code, e)
                 _finish_stock(code, stock_name, "failed",
                               status_reason="STRATEGY2_EVALUATION_ERROR",
-                              error_detail=str(e))
+                              error_detail=str(e),
+                              fetch_result=fetch_result)
                 with stats_lock:
                     failed_count[0] += 1
                     skip_count[0] += 1
