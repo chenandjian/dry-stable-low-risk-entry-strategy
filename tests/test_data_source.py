@@ -25,20 +25,24 @@ def test_two_sources_independent():
 
 
 def test_try_acquire_any():
-    """自动获取空闲数据源 — 三个数据源 (ACCEPT-S2-004)。"""
+    """自动获取空闲数据源 — 四个数据源。"""
     mgr = DataSourceManager()
     ds = mgr.try_acquire_any()
-    assert ds in ("baidu", "sina", "tencent")
+    assert ds in ("baidu", "sina", "tencent", "yfinance")
     ds2 = mgr.try_acquire_any()
-    assert ds2 in ("baidu", "sina", "tencent")
+    assert ds2 in ("baidu", "sina", "tencent", "yfinance")
     assert ds2 != ds
     ds3 = mgr.try_acquire_any()
-    assert ds3 in ("baidu", "sina", "tencent")
+    assert ds3 in ("baidu", "sina", "tencent", "yfinance")
     assert ds3 not in (ds, ds2)
-    assert mgr.try_acquire_any() is None  # 三源全忙
+    ds4 = mgr.try_acquire_any()
+    assert ds4 in ("baidu", "sina", "tencent", "yfinance")
+    assert ds4 not in (ds, ds2, ds3)
+    assert mgr.try_acquire_any() is None  # 四源全忙
     mgr.release(ds)
     mgr.release(ds2)
     mgr.release(ds3)
+    mgr.release(ds4)
 
 
 def test_tencent_lock_independent():

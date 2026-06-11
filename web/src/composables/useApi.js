@@ -95,6 +95,18 @@ export function useApi() {
     return res.json()
   }
 
+  async function retryStrategy2FailedStocks(taskId) {
+    const res = await fetch(`${API_BASE}/strategy2/tasks/${encodeURIComponent(taskId)}/retry-failed`, { method: 'POST' })
+    const body = await res.json().catch(() => ({}))
+    return { ...body, ok: res.ok, statusCode: res.status }
+  }
+
+  async function reEvaluateStrategy2Task(taskId) {
+    const res = await fetch(`${API_BASE}/strategy2/tasks/${encodeURIComponent(taskId)}/re-evaluate`, { method: 'POST' })
+    const body = await res.json().catch(() => ({}))
+    return { ...body, ok: res.ok, statusCode: res.status }
+  }
+
   async function getStrategy2Candidates(taskId) {
     const qs = taskId ? `?task_id=${taskId}` : ''
     const res = await fetch(`${API_BASE}/strategy2/candidates${qs}`)
@@ -113,6 +125,7 @@ export function useApi() {
     getTaskStocks, retryFailedStocks, reEvaluateTask, getConfig, updateConfig,
     runCupHandleBacktest,
     startStrategy2Scan, getStrategy2ScanStatus, getStrategy2Tasks,
+    retryStrategy2FailedStocks, reEvaluateStrategy2Task,
     getStrategy2Candidates, getStrategy2Candidate,
   }
 }

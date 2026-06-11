@@ -1,5 +1,97 @@
 # Operations Log
 
+## 2026-06-11 — 策略2下降趋势证据评分升级
+
+### 变更概述
+将旧"四项全部满足"规则替换为多时间尺度证据评分制。
+`DOWNTREND = MA20 < MA60 AND evidence_score >= 5`（满分7分）。
+
+### 修改文件
+
+| 文件 | 操作 | 说明 |
+|---|---|---|
+| `strategy2/trend.py` | **重写** | 新证据评分逻辑，7项证据每项1分，MA20<MA60为必要条件 |
+| `strategy2/models.py` | 修改 | Strategy2Trend 新增 evidence_score/ma120/ma60_slope/return_60/price_position_60 |
+| `strategy2/engine.py` | 无需修改 | 趋势过滤逻辑不变（仍检查 trend_type） |
+| `strategy2/scanner.py` | 修改 | discovery + error_detail 新增字段，补 `import json` |
+| `scanner/db.py` | 修改 | strategy2_candidates 兼容式新增6列为5列（v2新增 evidence_score/ma120/ma60_slope/return_60/price_position_60/downtrend_conditions） |
+| `web/src/pages/Strategy2Results.vue` | 修改 | 详情面板展示证据分、MA120、MA60斜率、60日涨跌、区间位置 |
+| `tests/test_strategy2_trend.py` | **重写** | 30个测试含601607离线回归 |
+| `tests/test_strategy2_bug_fixes.py` | 修复 | test_big_drop_on_last_day 增加 MA20>=MA60 保护 |
+| `operations-log.md` | 追加 | 本记录 |
+
+### 核心规则
+- **必要条件**: MA20 < MA60
+- **7项证据** (每项1分): CLOSE_BELOW_MA20, MA20_BELOW_MA60, MA60_BELOW_MA120, MA20_SLOPE_NEGATIVE, MA60_SLOPE_NEGATIVE, RETURN60_BELOW_MINUS_5_PERCENT, PRICE_POSITION60_BOTTOM_30_PERCENT
+- **阈值**: evidence_score >= 5 → DOWNTREND
+- **601607回归**: 7项证据全部命中，判定 DOWNTREND ✓
+
+### 测试结果
+- 策略2趋势测试: 30 passed (含601607回归)
+- 后端全量: **482 passed** (新增15个趋势测试)
+- 前端构建: **通过**
+
+### 遗留问题
+无
+
+---
+
+## 2026-06-11 — 策略2走势趋势过滤增量开发
+
+### 开发目标
+在不修改策略2现有评分/否决/风险规则的前提下，新增独立走势趋势前置过滤模块。
+
+### 修改文件
+
+| 文件 | 操作 | 说明 |
+|---|---|---|
+| `strategy2/trend.py` | 新增 | 走势趋势判断模块，计算MA20/MA60/MA20斜率/20日涨跌幅 |
+| `strategy2/models.py` | 修改 | 新增 `Strategy2Trend` dataclass，`Strategy2Evaluation` 增加 `trend` 字段 |
+| `strategy2/engine.py` | 修改 | V20检查后、风险前插入趋势过滤步骤 |
+| `strategy2/scanner.py` | 修改 | `_build_strategy2_discovery` 增加趋势字段；下降趋势写入 `error_detail` JSON |
+| `scanner/db.py` | 修改 | `strategy2_candidates` 表兼容式新增5个趋势字段；`upsert` 函数读写趋势字段 |
+| `server.py` | 无需修改 | `SELECT *` 自动包含新字段 |
+| `web/src/pages/Strategy2Results.vue` | 修改 | 新增走势趋势列 + 详情面板展示MA20/MA60/MA20斜率/20日涨跌幅 |
+| `tests/test_strategy2_trend.py` | 新增 | 15个单元测试：全命中/单缺失/边界值/下标口径/数据不足/无效行情 |
+| `tests/test_strategy2_independence.py` | 修改 | 将 `trend.py` 加入8个策略2模块列表 |
+
+### 核心逻辑
+
+**趋势判断执行顺序（engine.py evaluate_at）：**
+```
+指标计算 → V20=0检查 → 走势趋势过滤 → 风险计算 → 否决 → 评分 → 入选判断
+```
+
+**下降趋势四个条件（严格不等）：**
+1. current_close < MA20
+2. MA20 < MA60
+3. MA20_SLOPE_5 < 0
+4. RETURN_20 < -0.05
+
+四项同时命中 → `DOWNTREND_FILTERED`（不写入候选表）
+未同时命中 → `UPTREND_OR_SIDEWAYS`（继续原有流程）
+
+**Python下标口径：**
+- MA20 = mean(closes[-20:])
+- MA60 = mean(closes[-60:])
+- MA20(-5) = mean(closes[-25:-5])
+- RETURN_20 = closes[-1] / closes[-21] - 1
+
+### 数据库变更
+`strategy2_candidates` 表兼容式新增：`trend_type TEXT`, `ma20 REAL`, `ma60 REAL`, `ma20_slope REAL`, `return_20 REAL`
+
+### 测试结果
+- 策略2趋势单元测试: 15 passed
+- 策略2独立性测试: 5 passed
+- 后端全量: **467 passed**
+- 前端构建: **通过**
+- 前端测试: 23/25 passed (预存 [18]/[23] 与本次无关)
+
+### 遗留问题
+无
+
+---
+
 ## 2026-06-04
 
 - Continued dry-stable strategy implementation: added market environment analysis, API/DB/CSV fields, and frontend display for dry-stable verdicts.

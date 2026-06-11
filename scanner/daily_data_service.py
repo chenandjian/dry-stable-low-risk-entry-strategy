@@ -1,5 +1,5 @@
 # scanner/daily_data_service.py
-"""共享日线数据拉取服务 — 从三数据源链逐级拉取、合并缓存、入库。
+"""共享日线数据拉取服务 — 从多数据源链逐级拉取、合并缓存、入库。
 
 本模块只包含数据源选择、锁管理、重试和统一 FetchResult，
 不包含任何策略判断。
@@ -16,10 +16,11 @@ from scanner.data_source import DataSourceManager
 from scanner.baidu_source import fetch_baidu_daily
 from scanner.sina_source import fetch_sina_daily
 from scanner.tencent_source import fetch_tencent_daily
+from scanner.yfinance_source import fetch_yfinance_daily
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_DAILY_SOURCES = ["baidu", "sina", "tencent"]
+DEFAULT_DAILY_SOURCES = ["baidu", "sina", "tencent", "yfinance"]
 
 
 @dataclass
@@ -46,6 +47,7 @@ def _daily_fetch_fn(ds_name: str):
         "baidu": fetch_baidu_daily,
         "sina": fetch_sina_daily,
         "tencent": fetch_tencent_daily,
+        "yfinance": fetch_yfinance_daily,
     }
     if ds_name not in fetchers:
         raise ValueError(f"Unknown daily data source: {ds_name}")

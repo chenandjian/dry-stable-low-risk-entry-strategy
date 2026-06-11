@@ -337,9 +337,16 @@ class TestEngineRecent5DayFix:
         assert "REJECT_HEAVY_VOLUME_DROP" in ev.reject_reasons
 
     def test_big_drop_on_last_day_detected(self):
-        """Drop on data[-1] (most recent day) should be detected."""
+        """Drop on data[-1] (most recent day) should be detected.
+
+        Ensure MA20 >= MA60 so trend filter doesn't block before rejection.
+        """
         engine = ExtremeDryStableStrategyEngine(_s2_cfg())
         data = self._make_drop_data(119, 9.55)  # -4.5% on last day
+        # 压低 [-60:-20] 区间使 MA60 < MA20，打破下降趋势必要条件
+        for i in range(60, 100):
+            data[i]["close"] = 9.5
+            data[i]["low"] = 9.5
         ev = engine.evaluate_at(data, code="000001", name="test")
         assert "REJECT_HEAVY_VOLUME_DROP" in ev.reject_reasons
 

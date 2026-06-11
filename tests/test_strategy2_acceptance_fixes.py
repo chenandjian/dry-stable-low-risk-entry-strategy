@@ -269,38 +269,38 @@ class TestAllSourcesFailedNoCache:
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# ACCEPT-S2-004: 三数据源收敛
+# ACCEPT-S2-004: 四数据源收敛 (baidu/sina/tencent/yfinance)
 # ═══════════════════════════════════════════════════════════════════════════════
 
 class TestDataSourceConvergence:
-    def test_default_daily_sources_equal_three(self):
-        """ACCEPT-S2-004: DEFAULT_DAILY_SOURCES == ['baidu', 'sina', 'tencent']."""
+    def test_default_daily_sources_equal_four(self):
+        """DEFAULT_DAILY_SOURCES == ['baidu', 'sina', 'tencent', 'yfinance']."""
         from scanner.daily_data_service import DEFAULT_DAILY_SOURCES as DDS
-        assert DDS == ["baidu", "sina", "tencent"], f"Got: {DDS}"
+        assert DDS == ["baidu", "sina", "tencent", "yfinance"], f"Got: {DDS}"
 
     def test_mootdx_not_in_source_chain(self):
         """ACCEPT-S2-004: mootdx not in available fetch functions."""
         with pytest.raises(ValueError, match="Unknown daily data source"):
             _daily_fetch_fn("mootdx")
 
-    def test_yfinance_not_in_source_chain(self):
-        """ACCEPT-S2-004: yfinance not in available fetch functions."""
-        with pytest.raises(ValueError, match="Unknown daily data source"):
-            _daily_fetch_fn("yfinance")
+    def test_yfinance_in_source_chain(self):
+        """yfinance is now back in available fetch functions."""
+        fn = _daily_fetch_fn("yfinance")
+        assert fn is not None
 
-    def test_datasource_manager_only_three_locks(self):
-        """ACCEPT-S2-004: DataSourceManager only has baidu/sina/tencent locks."""
+    def test_datasource_manager_has_four_locks(self):
+        """DataSourceManager has baidu/sina/tencent/yfinance locks."""
         mgr = DataSourceManager()
-        assert set(mgr._locks.keys()) == {"baidu", "sina", "tencent"}, \
+        assert set(mgr._locks.keys()) == {"baidu", "sina", "tencent", "yfinance"}, \
             f"Got: {set(mgr._locks.keys())}"
 
-    def test_config_default_daily_sources_are_three(self):
-        """ACCEPT-S2-004: config.yaml default daily_sources are baidu/sina/tencent."""
+    def test_config_default_daily_sources_are_four(self):
+        """config.yaml default daily_sources are baidu/sina/tencent/yfinance."""
         import yaml
         with open("config.yaml", "r", encoding="utf-8") as f:
             config = yaml.safe_load(f)
         sources = config.get("data", {}).get("daily_sources", [])
-        assert sources == ["baidu", "sina", "tencent"], f"Got: {sources}"
+        assert sources == ["baidu", "sina", "tencent", "yfinance"], f"Got: {sources}"
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

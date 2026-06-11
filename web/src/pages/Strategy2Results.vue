@@ -41,6 +41,7 @@
           <th>等级</th>
           <th>量干</th>
           <th>价稳</th>
+          <th>走势趋势</th>
           <th>风险比</th>
           <th>风险等级</th>
           <th>支撑</th>
@@ -60,6 +61,7 @@
             <td><span class="level-badge" :class="levelClass(c.level)">{{ c.level || '--' }}</span></td>
             <td>{{ c.volume_dry_score }}</td>
             <td>{{ c.price_stable_score }}</td>
+            <td><span class="trend-type">{{ trendLabel(c.trend_type) }}</span></td>
             <td>{{ formatPct(c.risk_ratio) }}</td>
             <td>{{ c.risk_level }}</td>
             <td>{{ c.key_support?.toFixed(2) }}</td>
@@ -67,7 +69,7 @@
             <td class="expand-cell">{{ expandedCode === c.code ? '▾' : '▸' }}</td>
           </tr>
           <tr v-if="expandedCode === c.code" class="detail-row">
-            <td colspan="10">
+            <td colspan="11">
               <div class="detail-panel">
                 <div class="detail-grid">
                   <div class="detail-section">
@@ -76,6 +78,19 @@
                     <div>V5/V20: {{ c.volume_ratio_5_20?.toFixed(3) }} &nbsp; 分位: {{ c.volume_percentile?.toFixed(1) }}% ({{ c.volume_percentile_days }}日)</div>
                     <div>range_5: {{ formatPct(c.range_5) }} &nbsp; close_range_5: {{ formatPct(c.close_range_5) }}</div>
                     <div>return_3: {{ formatPct(c.return_3) }} &nbsp; return_5: {{ formatPct(c.return_5) }}</div>
+                  </div>
+                  <div class="detail-section">
+                    <h4>走势趋势 V2</h4>
+                    <div>趋势: {{ trendLabel(c.trend_type) }}
+                      &nbsp; 短中: {{ c.short_mid_score ?? '--' }}/8
+                      &nbsp; 长期: {{ c.long_score ?? '--' }}/3
+                      &nbsp; 总分: {{ c.total_evidence_score ?? '--' }}/11</div>
+                    <div>MA20: {{ fmtPrice(c.ma20) }} &nbsp; MA60: {{ fmtPrice(c.ma60) }} &nbsp; MA120: {{ fmtPrice(c.ma120) }}</div>
+                    <div>MA20斜率: {{ formatPct(c.ma20_slope) }} &nbsp; MA60斜率: {{ formatPct(c.ma60_slope) }}</div>
+                    <div>60日高点回撤: {{ formatPct(c.drawdown_from_high_60) }} &nbsp; 120日高点回撤: {{ formatPct(c.drawdown_from_high_120) }}</div>
+                    <div>20日中枢变化: {{ formatPct(c.center_shift_20) }} &nbsp; 40日中枢变化: {{ formatPct(c.center_shift_40) }}</div>
+                    <div>60日区间位置: {{ fmtPosition(c.price_position_60) }} &nbsp; 60日线性趋势: {{ formatPct(c.linear_trend_60) }}</div>
+                    <div v-if="c.downtrend_conditions?.length" class="muted">证据: {{ c.downtrend_conditions }}</div>
                   </div>
                   <div class="detail-section">
                     <h4>风险</h4>
@@ -170,6 +185,20 @@ export default {
       if (level.includes('重点')) return 'level-key'
       if (level.includes('普通')) return 'level-normal'
       return ''
+    },
+    fmtPrice(v) {
+      if (v == null) return '--'
+      return Number(v).toFixed(2)
+    },
+    fmtPosition(v) {
+      if (v == null) return '--'
+      return (Number(v) * 100).toFixed(0) + '%'
+    },
+    trendLabel(v) {
+      if (!v) return '--'
+      if (v === 'UPTREND_OR_SIDEWAYS') return '上涨或横盘'
+      if (v === 'DOWNTREND') return '下降趋势'
+      return v
     },
     formatPct(v) {
       if (v == null) return '--'

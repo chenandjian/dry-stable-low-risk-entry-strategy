@@ -55,6 +55,7 @@ npm --prefix web run preview
            strategy2/scorer.py (策略2评分 — 量干50 + 价稳50 + 等级)
            strategy2/rejection.py (策略2一票否决 — 5条规则)
            strategy2/risk.py (策略2风险 — key_support/买入区间/止损/风险比)
+           strategy2/trend.py (策略2趋势 — V2 价格路径+120日长期确认，11项证据评分)
 分析层:    analyzer/dry_stable.py → analyze_dry_stable() 串联全部分析 · 仅策略1
              ├─ analyzer/volume_dry.py (量干评分 0-12)
              ├─ analyzer/price_stable.py (价稳评分 0-10)
@@ -143,6 +144,7 @@ npm --prefix web run preview
 | `strategy2/scorer.py` | 策略2量干价稳评分 + 等级 |
 | `strategy2/rejection.py` | 策略2一票否决 — 5 条规则返回稳定错误码 |
 | `strategy2/risk.py` | 策略2风险 — `compute_key_support()` / `compute_risk()` |
+| `strategy2/trend.py` | 策略2趋势过滤 V2 — `evaluate_trend()` 价格路径+120日长期确认，8短中+3长期=11项证据 |
 | `strategy2/engine.py` | 策略2唯一入口 — `ExtremeDryStableStrategyEngine.evaluate_at()` |
 | `strategy2/scanner.py` | 策略2全市场扫描编排 — `scan_strategy2_all()` |
 | `web/src/pages/ScannerConsole.vue` | 前端首页 — 双策略启动按钮 |
@@ -272,13 +274,13 @@ npm --prefix web run preview
 
 ### 策略2「极致量干价稳」
 
-- **独立包 `strategy2/`**: 7 个模块 — models / indicators / scorer / rejection / risk / engine / scanner。完全不依赖策略1的形态检测/评分/分析/决策。
-- **共享日线服务**: `scanner/daily_data_service.py` 从 engine.py 提取三源（baidu/sina/tencent）拉取/重试/缓存逻辑，策略1和策略2共用。mootdx/yfinance 已从生产链移除，全源失败直接标记 failed，不使用缓存。
+- **独立包 `strategy2/`**: 8 个模块 — models / indicators / scorer / rejection / risk / trend / engine / scanner。完全不依赖策略1的形态检测/评分/分析/决策。
+- **共享日线服务**: `scanner/daily_data_service.py` 从 engine.py 提取多源拉取/重试/缓存逻辑（默认 baidu/sina/tencent/yfinance），策略1和策略2共用。mootdx 已从生产链移除，yfinance 已加回。全源失败直接标记 failed，不使用缓存。数据源列表可通过 `config.yaml` 的 `data.daily_sources` 或前端 StrategyConfig 页面配置。
 - **数据库扩展**: `scan_tasks.strategy_type` 字段（向后兼容），`strategy2_candidates` 独立表（27 字段），3 条新索引。
 - **策略2 API**: 5 个端点 — `POST /api/strategy2/scans`（启动）、`GET status/tasks/candidates/candidate`（查询）。全局互斥增强（409 含 `strategyType`/`runningTaskId`）。
 - **前端**: 策略2结果页（`Strategy2Results.vue`）、配置分区（`StrategyConfig.vue` 金色独立区）、双策略按钮（`ScanEngine.vue`）、导航入口（`TopNav.vue`）、API composable 扩展。
-- **测试**: 104 项策略2核心测试 + 61 项修复验收测试 + 25 项前端 vitest 组件测试。策略1全部回归通过。后端全量 426 项。
-- **修复轮次**: 历经 11 轮代码审查修复（BUG → RECHECK → FINAL → ROUND1~11），覆盖：跨策略隔离、全源失败/缓存禁回退、六种终态、三数据源收敛、viewContext 竞态防护、单飞 poll session、终态 session 生命周期、终态部分刷新失败独立处理、历史 summary 终态更新。
+- **测试**: 策略2核心测试 + 修复验收 + 趋势 V2 35 项（含 002468/601607 离线回归 + 4 项反误杀）。策略1全部回归通过。后端全量 487 项。前端 vitest 25 项。
+- **修复轮次**: 历经 11 轮代码审查修复 + 趋势 V1 开发 + V2 升级。趋势 V2 使用 8 短中+3 长期=11 项证据评分，禁止端点收益。
 - **配置**: `config.yaml` 新增 `strategy2` 段（8 参数），前端可独立配置和校验。
 
 ### Gotchas（2026-06-10 策略2）
@@ -290,12 +292,14 @@ npm --prefix web run preview
 - **策略2 key_support 排除评估日**: `compute_key_support(data, lookback_days)` 内部执行 `data[:-1]`，确保 T 日自身不参与最低收盘价计算。单日数据（无历史）返回 None → `INSUFFICIENT_STRATEGY_DATA`。
 - **策略2 前端独立**: 策略2结果页不显示杯柄/VCP/突破/形态分等字段。扫描控制台双按钮分别调用不同 API（`/api/scan/start` vs `POST /api/strategy2/scans`）。任一策略运行时两个按钮同时禁用。
 - **策略2 前端配置 API**: `StrategyConfig.vue` 保存 payload 包含 `strategy2` 段，后端 `PUT /api/config` 通过 `_deep_merge` 写入 `config.yaml`。前端校验窗口天数关系和范围同步后端 `ValueError` 检查。
+- **策略2 趋势过滤 V2**: `evaluate_trend()` 使用价格路径+120日长期确认。必要条件：`close < MA20 AND MA20 < MA60`。8 项短中期证据 + 3 项长期证据，总分 ≥6 且 short≥4 且 long≥1 → DOWNTREND。禁止使用 RETURN_60/RETURN_120 端点收益。少于 120 日数据返回 `INSUFFICIENT_TREND_DATA` 并排除。趋势过滤在评分/风险/否决之前执行。重新评估后移除不再符合条件的旧候选，同步更新 `task_stocks` 状态。
+- **趋势 V2 数据库字段**: `strategy2_candidates` 表兼容式新增 15 个趋势字段（V1→V2 增量 5 个新字段 + 5 个替换字段）。旧候选空字段兼容显示 `--`。`downtrend_conditions` JSON 数组字段需 `_json_dumps` 序列化。
 - **策略2 Volume Percentile 窗口弹性**: 日线数据不足 60 天但 ≥ `minimum_required_days` 时，`volume_percentile_days` 取实际可用窗口天数，不强制 60。评分阈值 `≤20%` 不变。
 
 ### Gotchas（2026-06-11 策略2 验收修复）
 
 - **全源失败不使用缓存**: 三数据源全部在线失败时，`fetch_with_retry()` 直接返回 `data=None`，股票标记 `failed / ALL_DATA_SOURCES_FAILED`。不使用本地缓存继续扫描。在线拉取成功时仍可与数据库历史合并并持久化。
-- **三源收敛**: 生产数据源仅为 `baidu / sina / tencent`。`mootdx_source.py`、`yfinance_source.py` 已删除。`requirements.txt` 不包含 mootdx/yfinance。诊断脚本移至 `tools/data_source_diagnostics/`。
+- **四源收敛**: 生产数据源为 `baidu / sina / tencent / yfinance`（可通过 `config.yaml` 的 `data.daily_sources` 配置）。`mootdx_source.py` 已删除。诊断脚本移至 `tools/data_source_diagnostics/`。
 - **跨策略执行隔离**: `_require_task_strategy(task_id, expected)` 统一校验。策略2 task_id 进入策略1 retry/re-evaluate/candidates 返回 `TASK_STRATEGY_MISMATCH` (400)。策略1 task_id 进入策略2 同理。
 - **历史任务上下文**: URL `?task=` 参数是历史页面唯一任务上下文。`routeTaskId` / `isHistoricalMode` 两种互斥模式。`watch(route.query.task)` 支持 A→B→A→none 切换。历史任务策略类型从任务 API 返回，不依赖当前运行状态。
 - **viewContext 竞态防护**: `beginViewContext()` 每次导航创建新 context。所有 async 函数在 `await` 后用 `isCurrentViewContext(context)` 校验防止 stale response 覆盖新任务。
@@ -318,6 +322,7 @@ npm --prefix web run preview
 - ACCEPTANCE 复查: `docs/reviews/2026-06-10-scan-window-unified-strategy-acceptance-recheck.md`
 - FINAL-COMPLETION 验收: `docs/reviews/2026-06-10-scan-window-unified-strategy-final-completion.md`
 - yfinance 四源并发设计: `docs/superpowers/specs/2026-06-10-yfinance-four-source-daily-kline-design.md`
+- 策略2趋势过滤V2: `docs/superpowers/specs/2026-06-11-strategy2-path-and-120d-trend-filter-v2.md`
 - 策略2极致量干价稳设计: `docs/superpowers/specs/2026-06-10-strategy2-extreme-dry-stable-design.md`
 - 策略2极致量干价稳实施计划: `docs/superpowers/plans/2026-06-10-strategy2-extreme-dry-stable.md`
 - 策略2修复审核文档: `docs/reviews/2026-06-10-strategy2-*.md` / `2026-06-11-strategy2-*.md`

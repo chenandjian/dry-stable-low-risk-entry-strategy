@@ -3,6 +3,7 @@
 
 不导入 strategy2 之外的任何策略判断模块。
 """
+import json
 import logging
 import threading
 import time
@@ -28,6 +29,7 @@ def scan_strategy2_all(
     task_id: str = None,
     stocks: list[dict] = None,
     worker_count: int = 4,
+    retry_policy: str = "normal",
 ) -> dict:
     """执行策略2全市场扫描。
 
@@ -37,6 +39,7 @@ def scan_strategy2_all(
         task_id: 扫描任务 ID。
         stocks: 股票列表，None 时从股票池获取。
         worker_count: 工作线程数。
+        retry_policy: "normal" (默认) 或 "failed_only" (提升重试次数 2→3)。
 
     Returns:
         dict with candidates, stats, task_id.
@@ -132,9 +135,11 @@ def scan_strategy2_all(
                     fallback_source=daily_sources[-1],
                     started_at=_now(),
                 )
+                retry_attempts = 3 if retry_policy == "failed_only" else 2
+                fallback_attempts = 3 if retry_policy == "failed_only" else 2
                 fetch_result = fetch_with_retry(
                     code, daily_sources[0],
-                    retry_attempts=2, fallback_attempts=2,
+                    retry_attempts=retry_attempts, fallback_attempts=fallback_attempts,
                     mgr=mgr, source_chain=daily_sources, kline_days=kline_days,
                 )
                 data = fetch_result.data
@@ -218,8 +223,39 @@ def scan_strategy2_all(
                             discovery,
                         )
                 else:
+                    # 下降趋势过滤时，将趋势指标写入 error_detail
+                    error_detail = None
+                    if evaluation.status_reason == "DOWNTREND_FILTERED" and evaluation.trend is not None:
+                        error_detail = json.dumps({
+                            "trendType": evaluation.trend.trend_type,
+                            "shortMidScore": evaluation.trend.short_mid_score,
+                            "longScore": evaluation.trend.long_score,
+                            "totalEvidenceScore": evaluation.trend.total_evidence_score,
+                            "necessaryConditionsMet": evaluation.trend.necessary_conditions_met,
+                            "ma20": evaluation.trend.ma20,
+                            "ma60": evaluation.trend.ma60,
+                            "ma120": evaluation.trend.ma120,
+                            "ma20Slope": evaluation.trend.ma20_slope,
+                            "ma60Slope": evaluation.trend.ma60_slope,
+                            "drawdownFromHigh60": evaluation.trend.drawdown_from_high_60,
+                            "centerShift20": evaluation.trend.center_shift_20,
+                            "pricePosition60": evaluation.trend.price_position_60,
+                            "linearTrend60": evaluation.trend.linear_trend_60,
+                            "drawdownFromHigh120": evaluation.trend.drawdown_from_high_120,
+                            "centerShift40": evaluation.trend.center_shift_40,
+                            "return20": evaluation.trend.return_20,
+                            "return60": evaluation.trend.return_60,
+                            "conditions": evaluation.trend.downtrend_conditions,
+                        })
+                        logger.info(
+                            "DOWNTREND_FILTERED task=%s code=%s date=%s ma20=%.2f ma60=%.2f slope=%.4f return=%.4f",
+                            task_id, code, evaluation.evaluation_date,
+                            evaluation.trend.ma20, evaluation.trend.ma60,
+                            evaluation.trend.ma20_slope, evaluation.trend.return_20,
+                        )
                     _finish_stock(code, stock_name, "scanned",
                                   status_reason=evaluation.status_reason,
+                                  error_detail=error_detail,
                                   kline_latest_date=latest_trade_date,
                                   fetch_result=fetch_result)
 
@@ -273,10 +309,7 @@ def _build_strategy2_discovery(evaluation, fetch_result=None) -> dict:
     """Build discovery dict from Strategy2Evaluation for frontend/persistence."""
     ind = evaluation.indicators
     risk = evaluation.risk
-    # Extract current_close from the evaluation — engine doesn't store it directly,
-    # but we can infer it from key_support if close >= support, or use 0 as fallback.
-    # The scanner has the raw data but the evaluation doesn't carry current_close.
-    # Use key_support as a conservative estimate — caller should pass data if needed.
+    trend = evaluation.trend
     current_close = evaluation.current_close
     return {
         "code": evaluation.code,
@@ -304,4 +337,106 @@ def _build_strategy2_discovery(evaluation, fetch_result=None) -> dict:
         "score_reasons": evaluation.score_reasons,
         "reject_reasons": evaluation.reject_reasons,
         "data_source": fetch_result.primary_source if fetch_result else "",
+        "trend_type": trend.trend_type if trend else "",
+        "short_mid_score": trend.short_mid_score if trend else 0,
+        "long_score": trend.long_score if trend else 0,
+        "total_evidence_score": trend.total_evidence_score if trend else 0,
+        "necessary_conditions_met": 1 if (trend and trend.necessary_conditions_met) else 0,
+        "ma20": trend.ma20 if trend else 0.0,
+        "ma60": trend.ma60 if trend else 0.0,
+        "ma120": trend.ma120 if trend else None,
+        "ma20_slope": trend.ma20_slope if trend else 0.0,
+        "ma60_slope": trend.ma60_slope if trend else None,
+        "drawdown_from_high_60": trend.drawdown_from_high_60 if trend else 0.0,
+        "center_shift_20": trend.center_shift_20 if trend else 0.0,
+        "price_position_60": trend.price_position_60 if trend else 0.5,
+        "linear_trend_60": trend.linear_trend_60 if trend else 0.0,
+        "drawdown_from_high_120": trend.drawdown_from_high_120 if trend else 0.0,
+        "center_shift_40": trend.center_shift_40 if trend else 0.0,
+        "return_20": trend.return_20 if trend else 0.0,
+        "return_60": trend.return_60 if trend else 0.0,
+        "downtrend_conditions": json.dumps(trend.downtrend_conditions) if trend else "[]",
+    }
+
+
+def re_evaluate_strategy2_task(
+    config: dict,
+    task_id: str,
+    progress_callback=None,
+) -> dict:
+    """用已缓存的日线数据重跑策略2评估。
+
+    不重新拉取数据，只重新应用流动性过滤和策略2引擎评估。
+    旧候选会被新候选替换。
+    """
+    db_path = config.get("data", {}).get("database_path", "data/cuphandle.db")
+    db.init_db(db_path)
+
+    stocks = db.get_task_stocks(task_id, limit=100000, offset=0)
+    if not stocks:
+        return {"task_id": task_id, "status": "no_stocks", "candidates_found": 0}
+
+    liquidity_cfg = config.get("liquidity", {})
+    kline_days = liquidity_cfg.get("min_listing_days", 350)
+    engine = ExtremeDryStableStrategyEngine(config)
+    old_candidates = {c["code"] for c in db.get_strategy2_candidates(task_id=task_id)}
+    total = len(stocks)
+    new_codes = set()
+
+    for i, stock in enumerate(stocks):
+        code = stock["code"]
+        name = stock.get("name", "")
+        data = db.get_ohlc(code, max_rows=kline_days)
+        if not data:
+            continue
+
+        try:
+            if not passes_liquidity_filter(data, liquidity_cfg):
+                continue
+
+            evaluation = engine.evaluate_at(data, code=code, name=name)
+
+            if evaluation.passed:
+                discovery = _build_strategy2_discovery(evaluation)
+                db.upsert_strategy2_candidate(task_id, discovery)
+                new_codes.add(code)
+                if progress_callback:
+                    progress_callback("discovery", len(new_codes), total,
+                                      f"{code} {name}", discovery)
+        except Exception:
+            pass
+
+        if progress_callback and (i + 1) % 100 == 0:
+            progress_callback("scanning", i + 1, total, f"{code} {name}")
+
+    # 移除不再符合条件的旧候选，同步更新 task_stocks 状态
+    removed = old_candidates - new_codes
+    if removed:
+        conn = db.get_conn()
+        for code in removed:
+            conn.execute(
+                "DELETE FROM strategy2_candidates WHERE task_id=? AND code=?",
+                (task_id, code),
+            )
+            conn.execute(
+                "UPDATE task_stocks SET status='scanned',"
+                "  status_reason='POST_REVALUATE_REMOVED',"
+                "  updated_at=datetime('now')"
+                " WHERE task_id=? AND code=? AND status='candidate'",
+                (task_id, code),
+            )
+        conn.commit()
+        logger.info(
+            "Strategy2 re-evaluate %s: removed %d candidates from DB",
+            task_id, len(removed),
+        )
+
+    db.refresh_scan_task_counts(task_id)
+    return {
+        "task_id": task_id,
+        "status": "completed",
+        "candidates_found": len(new_codes),
+        "total_stocks": total,
+        "added": len(new_codes - old_candidates),
+        "removed": len(removed),
     }

@@ -944,6 +944,33 @@ def _ensure_strategy2_candidates_table(conn: sqlite3.Connection):
         "CREATE INDEX IF NOT EXISTS idx_strategy2_candidates_task_risk "
         "ON strategy2_candidates(task_id, risk_ratio ASC)"
     )
+    # 趋势字段兼容式迁移（V2 价格路径+120日长期确认）
+    _ensure_column(conn, "strategy2_candidates", "trend_type", "TEXT")
+    _ensure_column(conn, "strategy2_candidates", "short_mid_score", "INTEGER DEFAULT 0")
+    _ensure_column(conn, "strategy2_candidates", "long_score", "INTEGER DEFAULT 0")
+    _ensure_column(conn, "strategy2_candidates", "total_evidence_score", "INTEGER DEFAULT 0")
+    _ensure_column(conn, "strategy2_candidates", "necessary_conditions_met", "INTEGER DEFAULT 0")
+    _ensure_column(conn, "strategy2_candidates", "ma20", "REAL")
+    _ensure_column(conn, "strategy2_candidates", "ma60", "REAL")
+    _ensure_column(conn, "strategy2_candidates", "ma120", "REAL")
+    _ensure_column(conn, "strategy2_candidates", "ma20_slope", "REAL")
+    _ensure_column(conn, "strategy2_candidates", "ma60_slope", "REAL")
+    _ensure_column(conn, "strategy2_candidates", "drawdown_from_high_60", "REAL")
+    _ensure_column(conn, "strategy2_candidates", "center_shift_20", "REAL")
+    _ensure_column(conn, "strategy2_candidates", "price_position_60", "REAL")
+    _ensure_column(conn, "strategy2_candidates", "linear_trend_60", "REAL")
+    _ensure_column(conn, "strategy2_candidates", "drawdown_from_high_120", "REAL")
+    _ensure_column(conn, "strategy2_candidates", "center_shift_40", "REAL")
+    _ensure_column(conn, "strategy2_candidates", "return_20", "REAL")
+    _ensure_column(conn, "strategy2_candidates", "return_60", "REAL")
+    _ensure_column(conn, "strategy2_candidates", "downtrend_conditions", "TEXT")
+
+
+def _ensure_column(conn: sqlite3.Connection, table: str, column: str, col_type: str):
+    """Compatible add-column-if-not-exists helper."""
+    existing = [d[1] for d in conn.execute(f"PRAGMA table_info({table})").fetchall()]
+    if column not in existing:
+        conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {col_type}")
 
 
 def _json_dumps(value):
@@ -965,6 +992,12 @@ def upsert_strategy2_candidate(task_id: str, d: dict):
         "range_5", "close_range_5", "return_3", "return_5",
         "key_support", "buy_zone_low", "buy_zone_high", "stop_loss",
         "risk_ratio", "risk_level", "score_reasons", "reject_reasons", "data_source",
+        "trend_type", "short_mid_score", "long_score", "total_evidence_score",
+        "necessary_conditions_met", "ma20", "ma60", "ma120",
+        "ma20_slope", "ma60_slope",
+        "drawdown_from_high_60", "center_shift_20", "price_position_60",
+        "linear_trend_60", "drawdown_from_high_120", "center_shift_40",
+        "return_20", "return_60", "downtrend_conditions",
     ]
     values = (
         task_id, d["code"], d["name"], d["evaluation_date"],
@@ -978,6 +1011,16 @@ def upsert_strategy2_candidate(task_id: str, d: dict):
         _json_dumps(d.get("score_reasons")),
         _json_dumps(d.get("reject_reasons")),
         d.get("data_source", ""),
+        d.get("trend_type", ""),
+        d.get("short_mid_score", 0), d.get("long_score", 0), d.get("total_evidence_score", 0),
+        d.get("necessary_conditions_met", 0),
+        d.get("ma20", 0.0), d.get("ma60", 0.0), d.get("ma120"),
+        d.get("ma20_slope", 0.0), d.get("ma60_slope"),
+        d.get("drawdown_from_high_60", 0.0), d.get("center_shift_20", 0.0),
+        d.get("price_position_60", 0.5), d.get("linear_trend_60", 0.0),
+        d.get("drawdown_from_high_120", 0.0), d.get("center_shift_40", 0.0),
+        d.get("return_20", 0.0), d.get("return_60", 0.0),
+        d.get("downtrend_conditions", "[]"),
     )
     value_marks = ", ".join("?" for _ in columns)
     update_assignments = ", ".join(f"{c}=excluded.{c}" for c in columns if c not in ("task_id", "code"))

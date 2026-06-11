@@ -43,6 +43,30 @@ class Strategy2Score:
 
 
 @dataclass
+class Strategy2Trend:
+    """策略2走势趋势判断结果（V2 价格路径 + 120日长期确认）。"""
+    trend_type: str = ""
+    short_mid_score: int = 0
+    long_score: int = 0
+    total_evidence_score: int = 0
+    necessary_conditions_met: bool = False
+    ma20: float = 0.0
+    ma60: float = 0.0
+    ma120: float | None = None
+    ma20_slope: float = 0.0
+    ma60_slope: float | None = None
+    drawdown_from_high_60: float = 0.0
+    center_shift_20: float = 0.0
+    price_position_60: float = 0.5
+    linear_trend_60: float = 0.0
+    drawdown_from_high_120: float = 0.0
+    center_shift_40: float = 0.0
+    return_20: float = 0.0  # 保留向后兼容
+    return_60: float = 0.0  # 保留向后兼容
+    downtrend_conditions: list[str] = field(default_factory=list)
+
+
+@dataclass
 class Strategy2Risk:
     """策略2风险计算结果。"""
     key_support: float = 0.0
@@ -71,6 +95,7 @@ class Strategy2Evaluation:
     score_reasons: list[str] = field(default_factory=list)
     reject_reasons: list[str] = field(default_factory=list)
     risk: Strategy2Risk = None
+    trend: Strategy2Trend = None
     current_close: float = 0.0
     status_reason: str | None = None
 
@@ -79,3 +104,5 @@ class Strategy2Evaluation:
             self.indicators = Strategy2Indicators()
         if self.risk is None:
             self.risk = Strategy2Risk()
+        if self.trend is None:
+            self.trend = Strategy2Trend()

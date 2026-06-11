@@ -15,6 +15,7 @@ from strategy2.indicators import compute_indicators
 from strategy2.scorer import compute_total_score
 from strategy2.rejection import check_rejection_rules
 from strategy2.risk import compute_key_support, compute_risk
+from strategy2.trend import evaluate_trend
 from strategy2.validation import (
     resolve_strategy2_config,
     validate_ohlc_structure,
@@ -128,13 +129,41 @@ class ExtremeDryStableStrategyEngine:
                 status_reason="INVALID_MARKET_DATA",
             )
 
-        # 7. 风险计算
+        # 7. 走势趋势过滤 — 在量干价稳评分、风险计算和一票否决之前执行
+        trend = evaluate_trend(strategy_data)
+        if trend is None:
+            return Strategy2Evaluation(
+                passed=False, code=code, name=name,
+                evaluation_date=evaluation_date,
+                indicators=ind,
+                status_reason="INSUFFICIENT_STRATEGY_DATA",
+            )
+        if trend.trend_type in ("INVALID_MARKET_DATA", "INSUFFICIENT_TREND_DATA"):
+            return Strategy2Evaluation(
+                passed=False, code=code, name=name,
+                evaluation_date=evaluation_date,
+                indicators=ind,
+                trend=trend,
+                status_reason=trend.trend_type,
+            )
+        if trend.trend_type == "DOWNTREND":
+            return Strategy2Evaluation(
+                passed=False, code=code, name=name,
+                evaluation_date=evaluation_date,
+                indicators=ind,
+                trend=trend,
+                current_close=current_close,
+                status_reason="DOWNTREND_FILTERED",
+            )
+
+        # 8. 风险计算
         key_support = compute_key_support(strategy_data, self.support_lookback_days)
         if key_support is None:
             return Strategy2Evaluation(
                 passed=False, code=code, name=name,
                 evaluation_date=evaluation_date,
                 indicators=ind,
+                trend=trend,
                 status_reason="INSUFFICIENT_STRATEGY_DATA",
             )
 
@@ -145,11 +174,11 @@ class ExtremeDryStableStrategyEngine:
             stop_loss_buffer=self.stop_loss_buffer,
         )
 
-        # 8. 最近5日涨跌
+        # 9. 最近5日涨跌
         changes_5 = recent_daily_changes(strategy_data, days=5)
         has_big_drop = any(ch["change"] < -0.03 for ch in changes_5)
 
-        # 9. 一票否决
+        # 10. 一票否决
         reject_reasons = check_rejection_rules(
             ind, strategy_data,
             key_support=key_support,
@@ -158,7 +187,7 @@ class ExtremeDryStableStrategyEngine:
             daily_changes=changes_5,
         )
 
-        # 10. 评分
+        # 11. 评分
         close_above_support = current_close >= key_support
         score = compute_total_score(
             ind,
@@ -166,7 +195,7 @@ class ExtremeDryStableStrategyEngine:
             close_above_support=close_above_support,
         )
 
-        # 11. 入选条件判断
+        # 12. 入选条件判断
         score_ok = score.total_score >= self.candidate_min_score
         rejection_ok = len(reject_reasons) == 0
         risk_ok = risk.risk_ratio <= self.max_risk_ratio
@@ -194,6 +223,7 @@ class ExtremeDryStableStrategyEngine:
             score_reasons=score.score_reasons,
             reject_reasons=reject_reasons,
             risk=risk,
+            trend=trend,
             current_close=current_close,
             status_reason=status_reason,
         )

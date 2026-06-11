@@ -1114,6 +1114,108 @@ async def strategy2_tasks():
     return {"tasks": tasks}
 
 
+@app.post("/api/strategy2/tasks/{task_id}/retry-failed")
+async def strategy2_retry_failed_stocks(task_id: str):
+    """重试策略2任务中失败的股票。"""
+    config = load_config()
+    db_path = config.get("data", {}).get("database_path", "data/cuphandle.db")
+    db.init_db(db_path)
+
+    _, type_err = _require_task_strategy(task_id, "STRATEGY_2_EXTREME_DRY_STABLE")
+    if type_err is not None:
+        return type_err
+
+    conflict = _scan_conflict_response()
+    if conflict:
+        return conflict
+
+    failed = db.get_failed_task_stocks(task_id)
+    if not failed:
+        return {"task_id": task_id, "status": "no_failed_stocks", "retry_count": 0}
+
+    db.reset_failed_task_stocks(task_id)
+    conn = db.get_conn()
+    conn.execute("UPDATE scan_tasks SET status='running', retry_mode='failed_only' WHERE id=?", (task_id,))
+    conn.commit()
+    _set_running(task_id, "failed_only", strategy_type="STRATEGY_2_EXTREME_DRY_STABLE")
+
+    stocks = [{"code": s["code"], "name": s["name"], "market": s.get("market", "")} for s in failed]
+
+    def run_retry():
+        import datetime
+        try:
+            from strategy2.scanner import scan_strategy2_all
+            result = scan_strategy2_all(config, task_id=task_id, stocks=stocks, retry_policy="failed_only")
+            s = result["stats"]
+            db.finish_scan_task(
+                task_id,
+                finished_at=datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                candidates_count=s.get("candidates_found", 0),
+                elapsed_seconds=s.get("elapsed_seconds", 0),
+                scanned=s.get("scanned", 0),
+                skipped=s.get("skipped", 0),
+            )
+            db.refresh_scan_task_counts(task_id)
+        except Exception as e:
+            import traceback
+            logger.error(f"Strategy2 retry failed stocks failed: {e}\n{traceback.format_exc()}")
+            conn = db.get_conn()
+            conn.execute("UPDATE scan_tasks SET status='failed', error=? WHERE id=?", (str(e), task_id))
+            conn.commit()
+        finally:
+            _clear_running()
+
+    threading.Thread(target=run_retry, daemon=True).start()
+    return {"task_id": task_id, "status": "retry_started", "retry_count": len(stocks)}
+
+
+@app.post("/api/strategy2/tasks/{task_id}/re-evaluate")
+async def strategy2_re_evaluate(task_id: str):
+    """用已缓存日线数据重跑策略2评估，不重新拉取数据。"""
+    config = load_config()
+    db_path = config.get("data", {}).get("database_path", "data/cuphandle.db")
+    db.init_db(db_path)
+
+    _, type_err = _require_task_strategy(task_id, "STRATEGY_2_EXTREME_DRY_STABLE")
+    if type_err is not None:
+        return type_err
+
+    conn = db.get_conn()
+    task = conn.execute("SELECT id FROM scan_tasks WHERE id=?", (task_id,)).fetchone()
+    if not task:
+        return JSONResponse({"error": "Task not found"}, status_code=404)
+
+    conn.execute("UPDATE scan_tasks SET status='re_evaluating' WHERE id=?", (task_id,))
+    conn.commit()
+
+    def run_re_eval():
+        import datetime
+        try:
+            from strategy2.scanner import re_evaluate_strategy2_task
+            result = re_evaluate_strategy2_task(config, task_id)
+            now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            conn2 = db.get_conn()
+            conn2.execute(
+                "UPDATE scan_tasks SET status='completed', candidates_count=?, finished_at=? WHERE id=?",
+                (result["candidates_found"], now, task_id),
+            )
+            conn2.commit()
+            logger.info(
+                "Strategy2 re-evaluate %s: %d candidates (added %d, removed %d)",
+                task_id, result["candidates_found"],
+                result.get("added", 0), result.get("removed", 0),
+            )
+        except Exception as e:
+            import traceback
+            logger.error(f"Strategy2 re-evaluate {task_id} failed: {e}\n{traceback.format_exc()}")
+            conn2 = db.get_conn()
+            conn2.execute("UPDATE scan_tasks SET status='completed', error=? WHERE id=?", (str(e), task_id))
+            conn2.commit()
+
+    threading.Thread(target=run_re_eval, daemon=True).start()
+    return {"task_id": task_id, "status": "re_evaluating"}
+
+
 @app.get("/api/strategy2/candidates")
 async def strategy2_candidates(task_id: str = None):
     """查询策略2候选列表（RECHECK-S2-003: 验证任务类型）。"""

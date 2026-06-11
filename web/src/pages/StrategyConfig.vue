@@ -50,6 +50,16 @@
           <span class="default">默认 250天</span>
         </div>
       </div>
+      <div class="param-group" style="margin-top:12px">
+        <label class="param-label" title="按优先级排列，首位为主数据源，拉取失败时按顺序尝试后续数据源">日线数据源 <span class="unit">按优先级排列</span></label>
+        <div class="toggle-grid">
+          <label v-for="src in availableSources" :key="src.key" class="toggle-item">
+            <span class="toggle-label" :title="src.tip">{{ src.label }}</span>
+            <button class="toggle" :class="{ active: (config.data.daily_sources || []).includes(src.key) }"
+              @click="toggleSource(src.key)">{{ (config.data.daily_sources || []).includes(src.key) ? '开' : '关' }}</button>
+          </label>
+        </div>
+      </div>
     </section>
 
     <!-- 高级参数 -->
@@ -310,7 +320,7 @@ const { getConfig, updateConfig } = useApi()
 const config = reactive({
   market: {},
   liquidity: {},
-  data: { scan_window_days: 250, backtest_window_days: 250 },
+  data: { scan_window_days: 250, backtest_window_days: 250, daily_sources: ['baidu', 'sina', 'tencent', 'yfinance'] },
   cup: {},
   handle: {},
   breakout: {},
@@ -388,6 +398,13 @@ function toggleStrategy2(key) {
   markDirty()
 }
 
+const availableSources = [
+  { key: 'baidu', label: '百度', tip: '百度股票API，国内数据源，稳定可靠' },
+  { key: 'sina', label: '新浪', tip: '新浪财经API，数据覆盖全' },
+  { key: 'tencent', label: '腾讯', tip: '腾讯财经API，实时性好' },
+  { key: 'yfinance', label: 'Yahoo Finance', tip: 'Yahoo Finance 国际数据源，需稳定外网连接' },
+]
+
 const markets = [
   { key: 'include_sh', label: '沪市主板', tip: '上证主板股票，代码 60xxxx' },
   { key: 'include_sz', label: '深市主板', tip: '深证主板股票，代码 00xxxx/002xxx/003xxx' },
@@ -399,6 +416,20 @@ const markets = [
 
 function toggle(section, key) {
   config[section][key] = !config[section][key]
+  markDirty()
+}
+
+function toggleSource(key) {
+  if (!config.data.daily_sources) {
+    config.data.daily_sources = availableSources.map(s => s.key)
+  }
+  const idx = config.data.daily_sources.indexOf(key)
+  if (idx >= 0) {
+    if (config.data.daily_sources.length <= 1) return  // 至少保留一个
+    config.data.daily_sources.splice(idx, 1)
+  } else {
+    config.data.daily_sources.push(key)
+  }
   markDirty()
 }
 
@@ -431,6 +462,7 @@ function validate() {
   if (dataCfg.scan_window_days < 30) errors.push('扫描分析天数最低 30天')
   if (dataCfg.backtest_window_days < 30) errors.push('回测分析天数最低 30天')
   if (dataCfg.scan_window_days > liq.min_listing_days) errors.push('扫描分析天数不能超过日线拉取天数')
+  if (!dataCfg.daily_sources || dataCfg.daily_sources.length === 0) errors.push('至少选择一个日线数据源')
 
   // Strategy2 validation
   const s2 = config.strategy2 || {}

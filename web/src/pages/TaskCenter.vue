@@ -23,20 +23,33 @@
         <span class="task-dot" :class="dotClass(t)"></span>
         <span class="task-id">{{ t.id }}</span>
         <span class="task-date">{{ t.date }}</span>
-        <span :class="statusClass(t)">{{ statusLabel(t) }}</span>
+        <span :class="statusClass(t)">{{ statusLabel(t) }}<span class="strategy-badge" :class="isStrategy2(t) ? 's2' : 's1'">{{ isStrategy2(t) ? 'S2' : 'S1' }}</span></span>
         <span class="muted">{{ t.duration || '--' }}</span>
         <span class="blue">{{ t.candidates || 0 }}<span v-if="candidateDelta(t)" class="delta">{{ candidateDelta(t) }}</span></span>
         <span class="red">{{ t.failed || 0 }}</span>
         <span class="muted">{{ t.stock_pool_source || '--' }}</span>
         <span class="muted">{{ t.latest_trade_date || '--' }}</span>
         <span class="actions">
-          <button class="action-btn" @click="viewResults(t.id)" v-if="!isReEvaluating(t) && !t.running">查看结果</button>
-          <button class="action-btn primary" @click="handleReEvaluate(t.id)" :disabled="isReEvaluating(t)" v-if="!t.running">
-            {{ isReEvaluating(t) ? '重新评估中...' : '重新扫描策略' }}
-          </button>
-          <button class="action-btn" @click="viewFailures(t.id)" v-if="!isReEvaluating(t) && !t.running && t.failed">失败列表</button>
-          <button class="action-btn" @click="exportResults(t.id)" v-if="!isReEvaluating(t) && !t.running">导出</button>
-          <span v-if="t.running" class="st-running">实时查看 →</span>
+          <!-- Strategy 1 -->
+          <template v-if="!isStrategy2(t)">
+            <button class="action-btn" @click="viewResults(t.id, t)" v-if="!isReEvaluating(t) && !t.running">查看结果</button>
+            <button class="action-btn primary" @click="handleReEvaluate(t.id)" :disabled="isReEvaluating(t)" v-if="!t.running">
+              {{ isReEvaluating(t) ? '重新评估中...' : '重新扫描策略' }}
+            </button>
+            <button class="action-btn" @click="viewFailures(t.id)" v-if="!isReEvaluating(t) && !t.running && t.failed">失败列表</button>
+            <button class="action-btn" @click="exportResults(t.id, t)" v-if="!isReEvaluating(t) && !t.running">导出</button>
+            <span v-if="t.running" class="st-running">实时查看 →</span>
+          </template>
+          <!-- Strategy 2 -->
+          <template v-else>
+            <button class="action-btn" @click="viewResults(t.id, t)" v-if="!isReEvaluating(t) && !t.running">查看结果</button>
+            <button class="action-btn primary" @click="handleReEvaluateS2(t.id)" :disabled="isReEvaluating(t)" v-if="!t.running">
+              {{ isReEvaluating(t) ? '重新评估中...' : '重新扫描策略' }}
+            </button>
+            <button class="action-btn" @click="viewFailures(t.id)" v-if="!isReEvaluating(t) && !t.running && t.failed">失败列表</button>
+            <button class="action-btn" @click="exportResults(t.id, t)" v-if="!isReEvaluating(t) && !t.running">导出</button>
+            <span v-if="t.running" class="st-running">实时查看 →</span>
+          </template>
         </span>
       </div>
     </div>
@@ -49,7 +62,7 @@ import { useRouter } from 'vue-router'
 import { useApi } from '../composables/useApi.js'
 
 const router = useRouter()
-const { getScanTasks, reEvaluateTask } = useApi()
+const { getScanTasks, reEvaluateTask, getStrategy2Tasks, reEvaluateStrategy2Task } = useApi()
 const tasks = ref([])
 const reEvaluating = ref(new Set())
 const preCounts = ref({})   // taskId → previous candidate count
@@ -80,9 +93,26 @@ function candidateDelta(t) {
   }
   return ''
 }
-function viewResults(id) { router.push(`/results?task_id=${id}`) }
+function isStrategy2(t) { return t.strategyType === 'STRATEGY_2_EXTREME_DRY_STABLE' || t.strategy_type === 'STRATEGY_2_EXTREME_DRY_STABLE' }
+function viewResults(id, t) { router.push(isStrategy2(t) ? `/strategy2/results?task_id=${id}` : `/results?task_id=${id}`) }
 function viewFailures(id) { router.push(`/?task=${id}&status=failed`) }
-function exportResults(id) { window.open('/api/candidates', '_blank') }
+function exportResults(id, t) { window.open(isStrategy2(t) ? `/api/strategy2/candidates?task_id=${id}` : '/api/candidates', '_blank') }
+async function handleReEvaluateS2(taskId) {
+  reEvaluating.value.add(taskId)
+  const res = await reEvaluateStrategy2Task(taskId)
+  if (res.ok) {
+    let tries = 0
+    while (tries < 60) {
+      await new Promise(r => setTimeout(r, 1000))
+      await loadTasks()
+      const task = tasks.value.find(t => t.id === taskId)
+      if (task && task.status !== 're_evaluating') break
+      tries++
+    }
+  }
+  reEvaluating.value.delete(taskId)
+  await loadTasks()
+}
 async function handleReEvaluate(taskId) {
   preCounts.value[taskId] = tasks.value.find(t => t.id === taskId)?.candidates || 0
   reEvaluating.value.add(taskId)
@@ -108,8 +138,18 @@ async function handleReEvaluate(taskId) {
 
 async function loadTasks() {
   try {
-    const data = await getScanTasks()
-    tasks.value = (data.tasks || [])
+    const [s1Data, s2Data] = await Promise.all([
+      getScanTasks().catch(() => ({ tasks: [] })),
+      getStrategy2Tasks().catch(() => ({ tasks: [] })),
+    ])
+    const s1Tasks = (s1Data.tasks || []).map(t => ({ ...t, strategyType: 'STRATEGY_1_CUP_HANDLE' }))
+    const s2Tasks = (s2Data.tasks || []).map(t => ({ ...t, strategyType: t.strategy_type || 'STRATEGY_2_EXTREME_DRY_STABLE' }))
+    // Merge and sort by date descending, running first
+    tasks.value = [...s1Tasks, ...s2Tasks].sort((a, b) => {
+      if (a.running && !b.running) return -1
+      if (!a.running && b.running) return 1
+      return (b.date || '').localeCompare(a.date || '')
+    })
     // Sync re-evaluating state from server status
     for (const t of tasks.value) {
       if (t.status === 're_evaluating') reEvaluating.value.add(t.id)
@@ -162,4 +202,10 @@ onUnmounted(() => { if (pollTimer) clearInterval(pollTimer) })
 .delta { font-size: 10px; margin-left: 2px; color: var(--down-green); }
 .task-row.re-evaluating { background: rgba(249,115,22,0.04); }
 .empty-state { padding: 40px; text-align: center; color: var(--text-muted); }
+.strategy-badge {
+  font-size: 9px; padding: 1px 4px; border-radius: 2px; margin-left: 4px;
+  vertical-align: middle; font-weight: 700;
+}
+.strategy-badge.s1 { background: rgba(79,125,255,0.15); color: var(--accent); }
+.strategy-badge.s2 { background: rgba(255,215,0,0.15); color: var(--gold); }
 </style>
