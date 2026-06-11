@@ -273,11 +273,12 @@ npm --prefix web run preview
 ### 策略2「极致量干价稳」
 
 - **独立包 `strategy2/`**: 7 个模块 — models / indicators / scorer / rejection / risk / engine / scanner。完全不依赖策略1的形态检测/评分/分析/决策。
-- **共享日线服务**: `scanner/daily_data_service.py` 从 engine.py 提取四源拉取/重试/缓存逻辑，策略1和策略2共用。
+- **共享日线服务**: `scanner/daily_data_service.py` 从 engine.py 提取三源（baidu/sina/tencent）拉取/重试/缓存逻辑，策略1和策略2共用。mootdx/yfinance 已从生产链移除，全源失败直接标记 failed，不使用缓存。
 - **数据库扩展**: `scan_tasks.strategy_type` 字段（向后兼容），`strategy2_candidates` 独立表（27 字段），3 条新索引。
 - **策略2 API**: 5 个端点 — `POST /api/strategy2/scans`（启动）、`GET status/tasks/candidates/candidate`（查询）。全局互斥增强（409 含 `strategyType`/`runningTaskId`）。
 - **前端**: 策略2结果页（`Strategy2Results.vue`）、配置分区（`StrategyConfig.vue` 金色独立区）、双策略按钮（`ScanEngine.vue`）、导航入口（`TopNav.vue`）、API composable 扩展。
-- **测试**: 104 项策略2新增测试（模型11 + 指标28 + 评分23 + 否决12 + 风险13 + 引擎12 + 独立性5）。策略1全部回归通过（163 项）。前端构建通过。
+- **测试**: 104 项策略2核心测试 + 61 项修复验收测试 + 25 项前端 vitest 组件测试。策略1全部回归通过。后端全量 426 项。
+- **修复轮次**: 历经 11 轮代码审查修复（BUG → RECHECK → FINAL → ROUND1~11），覆盖：跨策略隔离、全源失败/缓存禁回退、六种终态、三数据源收敛、viewContext 竞态防护、单飞 poll session、终态 session 生命周期、终态部分刷新失败独立处理、历史 summary 终态更新。
 - **配置**: `config.yaml` 新增 `strategy2` 段（8 参数），前端可独立配置和校验。
 
 ### Gotchas（2026-06-10 策略2）
@@ -290,6 +291,19 @@ npm --prefix web run preview
 - **策略2 前端独立**: 策略2结果页不显示杯柄/VCP/突破/形态分等字段。扫描控制台双按钮分别调用不同 API（`/api/scan/start` vs `POST /api/strategy2/scans`）。任一策略运行时两个按钮同时禁用。
 - **策略2 前端配置 API**: `StrategyConfig.vue` 保存 payload 包含 `strategy2` 段，后端 `PUT /api/config` 通过 `_deep_merge` 写入 `config.yaml`。前端校验窗口天数关系和范围同步后端 `ValueError` 检查。
 - **策略2 Volume Percentile 窗口弹性**: 日线数据不足 60 天但 ≥ `minimum_required_days` 时，`volume_percentile_days` 取实际可用窗口天数，不强制 60。评分阈值 `≤20%` 不变。
+
+### Gotchas（2026-06-11 策略2 验收修复）
+
+- **全源失败不使用缓存**: 三数据源全部在线失败时，`fetch_with_retry()` 直接返回 `data=None`，股票标记 `failed / ALL_DATA_SOURCES_FAILED`。不使用本地缓存继续扫描。在线拉取成功时仍可与数据库历史合并并持久化。
+- **三源收敛**: 生产数据源仅为 `baidu / sina / tencent`。`mootdx_source.py`、`yfinance_source.py` 已删除。`requirements.txt` 不包含 mootdx/yfinance。诊断脚本移至 `tools/data_source_diagnostics/`。
+- **跨策略执行隔离**: `_require_task_strategy(task_id, expected)` 统一校验。策略2 task_id 进入策略1 retry/re-evaluate/candidates 返回 `TASK_STRATEGY_MISMATCH` (400)。策略1 task_id 进入策略2 同理。
+- **历史任务上下文**: URL `?task=` 参数是历史页面唯一任务上下文。`routeTaskId` / `isHistoricalMode` 两种互斥模式。`watch(route.query.task)` 支持 A→B→A→none 切换。历史任务策略类型从任务 API 返回，不依赖当前运行状态。
+- **viewContext 竞态防护**: `beginViewContext()` 每次导航创建新 context。所有 async 函数在 `await` 后用 `isCurrentViewContext(context)` 校验防止 stale response 覆盖新任务。
+- **单飞 poll session**: `activePollSession.inFlight` 防止重叠轮询。`clearPollTimer()` 仅停止 timer，正常完成时保留 session 以完成终态刷新。`invalidatePolling()` 用于任务切换和组件卸载，立即失效旧 session。
+- **终态 session 生命周期**: `finalizeCompletedPoll` 在 finally 中调用 `resetPollSession()`。stale 时立即退出不写页面。接口失败时记录到 `refreshFailures[]`，继续执行其他独立刷新，始终写完成日志。
+- **历史终态 summary**: `loadFailures` 接受 `applySummary` 参数（默认 false）。历史终态传 `applySummary: true` 以应用持久化的 processed/failed/candidate/latestTradeDate/stockPoolSource。
+- **前端 vitest 约束**: `vi.useFakeTimers()` 与 Vue `setInterval` 不兼容。轮询相关测试应使用 deferred promise 构造异步时序，不依赖 fake timer 推进。组件测试使用 `ScanEngineStub` 精确断言 summary props。
+- **策略2 scan_tasks.strategy_type**: 旧任务为 NULL → API 层默认按策略1。`get_task_strategy_type()` 返回 NULL 仅表示任务不存在。
 
 ## Design Specs（新增）
 
@@ -306,6 +320,8 @@ npm --prefix web run preview
 - yfinance 四源并发设计: `docs/superpowers/specs/2026-06-10-yfinance-four-source-daily-kline-design.md`
 - 策略2极致量干价稳设计: `docs/superpowers/specs/2026-06-10-strategy2-extreme-dry-stable-design.md`
 - 策略2极致量干价稳实施计划: `docs/superpowers/plans/2026-06-10-strategy2-extreme-dry-stable.md`
+- 策略2修复审核文档: `docs/reviews/2026-06-10-strategy2-*.md` / `2026-06-11-strategy2-*.md`
+- 最终第三方审核指南: `docs/reviews/2026-06-11-strategy2-final-third-party-review-guide.md`
 
 ## .gitignore Policy
 
