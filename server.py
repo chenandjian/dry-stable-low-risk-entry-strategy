@@ -516,9 +516,12 @@ async def get_task_stocks(task_id: str, status: str = None, page: int = 1, page_
     page_size = min(max(page_size, 1), 500)
     offset = (page - 1) * page_size
     stocks = db.get_task_stocks(task_id, status=status, limit=page_size, offset=offset)
-    summary = db.summarize_task_stocks(task_id)
-    count = summary.get(status, 0) if status else summary["total_stocks"]
-    return {"task_id": task_id, "strategy_type": s_type, "stocks": stocks, "total": count, "page": page, "page_size": page_size}
+    full_summary = db.refresh_scan_task_counts(task_id)
+    count = full_summary.get(status, 0) if status else full_summary.get("total_stocks", 0)
+    return {
+        "task_id": task_id, "strategy_type": s_type, "stocks": stocks, "total": count,
+        "summary": full_summary, "page": page, "page_size": page_size,
+    }
 
 
 @app.post("/api/scan/tasks/{task_id}/retry-failed")

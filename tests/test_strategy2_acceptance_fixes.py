@@ -304,6 +304,128 @@ class TestDataSourceConvergence:
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# Step 5: 源诊断精确测试
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestSourceDiagnostics:
+    def test_all_sources_failed_persists_full_diagnostics(self, monkeypatch, tmp_path):
+        """Step 5: All sources fail → all diagnostic fields persisted."""
+        from strategy2 import scanner as s2_scanner
+        from scanner.daily_data_service import FetchResult
+        db_path = str(tmp_path / "diag1.db")
+        import scanner.db as db
+        db.init_db(db_path)
+
+        expected_errs = {"baidu": "attempts=2 error=timeout", "sina": "attempts=2 error=456", "tencent": "attempts=2 error=empty"}
+        def mock_fetch(*a, **kw):
+            return FetchResult(data=None, primary_source="baidu", fallback_source="tencent",
+                               primary_attempts=2, fallback_attempts=2,
+                               primary_error="timeout", fallback_error="empty",
+                               source_errors=expected_errs)
+        monkeypatch.setattr(s2_scanner, "fetch_with_retry", mock_fetch)
+
+        stocks = [{"code": "000001", "name": "test", "market": ""}]
+        cfg = {"strategy2": {"strategy_window_days": 120, "minimum_required_days": 60, "candidate_min_score": 70, "max_risk_ratio": 0.05, "support_lookback_days": 10, "buy_zone_max_premium": 0.03, "stop_loss_buffer": 0.03}, "liquidity": {"enabled": False}, "data": {"database_path": db_path, "daily_sources": ["baidu", "sina", "tencent"]}}
+        db.create_scan_task("diag-test", "2026-06-10 09:00:00", total_stocks=1, strategy_type="STRATEGY_2_EXTREME_DRY_STABLE")
+        db.save_task_stocks("diag-test", stocks)
+
+        s2_scanner.scan_strategy2_all(cfg, task_id="diag-test", stocks=stocks, worker_count=1)
+        ts = db.get_task_stocks("diag-test")
+        row = ts[0]
+        assert row["status"] == "failed"
+        assert row["status_reason"] == "ALL_DATA_SOURCES_FAILED"
+        assert row["primary_source"] == "baidu"
+        assert row["fallback_source"] == "tencent"
+        assert row["primary_attempts"] == 2
+        assert row["fallback_attempts"] == 2
+        assert row["primary_error"] == "timeout"
+        assert row["fallback_error"] == "empty"
+        assert row["source_errors"] is not None
+        import json
+        parsed = json.loads(row["source_errors"])
+        assert parsed == expected_errs
+
+    def test_busy_exceeded_persists_diagnostics(self, monkeypatch, tmp_path):
+        """Step 5: Busy exceeded → failed with diagnostic info."""
+        from strategy2 import scanner as s2_scanner
+        from scanner.daily_data_service import FetchResult
+        db_path = str(tmp_path / "diag2.db")
+        import scanner.db as db
+        db.init_db(db_path)
+
+        def mock_fetch(*a, **kw):
+            return FetchResult(data=None, primary_source="baidu", fallback_source="sina",
+                               primary_error="data source busy", fallback_error="data source busy",
+                               source_errors={"baidu": "busy", "sina": "busy", "tencent": "busy"})
+        monkeypatch.setattr(s2_scanner, "fetch_with_retry", mock_fetch)
+
+        stocks = [{"code": "000001", "name": "test", "market": ""}]
+        cfg = {"strategy2": {"strategy_window_days": 120, "minimum_required_days": 60, "candidate_min_score": 70, "max_risk_ratio": 0.05, "support_lookback_days": 10, "buy_zone_max_premium": 0.03, "stop_loss_buffer": 0.03}, "liquidity": {"enabled": False}, "data": {"database_path": db_path, "daily_sources": ["baidu", "sina", "tencent"], "source_busy_max_retries": 0}}
+        db.create_scan_task("busy-test", "2026-06-10 09:00:00", total_stocks=1, strategy_type="STRATEGY_2_EXTREME_DRY_STABLE")
+        db.save_task_stocks("busy-test", stocks)
+
+        s2_scanner.scan_strategy2_all(cfg, task_id="busy-test", stocks=stocks, worker_count=1)
+        ts = db.get_task_stocks("busy-test")
+        row = ts[0]
+        assert row["status"] == "failed"
+        assert row["finished_at"] is not None
+
+    def test_fetch_exception_produces_eval_error(self, monkeypatch, tmp_path):
+        """Step 5: fetch_with_retry throws → STRATEGY2_EVALUATION_ERROR, no UnboundLocalError."""
+        from strategy2 import scanner as s2_scanner
+        db_path = str(tmp_path / "diag3.db")
+        import scanner.db as db
+        db.init_db(db_path)
+
+        def mock_fetch_crash(*a, **kw):
+            raise RuntimeError("network unreachable")
+        monkeypatch.setattr(s2_scanner, "fetch_with_retry", mock_fetch_crash)
+
+        stocks = [{"code": "000001", "name": "test", "market": ""}]
+        cfg = {"strategy2": {"strategy_window_days": 120, "minimum_required_days": 60, "candidate_min_score": 70, "max_risk_ratio": 0.05, "support_lookback_days": 10, "buy_zone_max_premium": 0.03, "stop_loss_buffer": 0.03}, "liquidity": {"enabled": False}, "data": {"database_path": db_path, "daily_sources": ["baidu", "sina", "tencent"]}}
+        db.create_scan_task("crash-fetch", "2026-06-10 09:00:00", total_stocks=1, strategy_type="STRATEGY_2_EXTREME_DRY_STABLE")
+        db.save_task_stocks("crash-fetch", stocks)
+
+        s2_scanner.scan_strategy2_all(cfg, task_id="crash-fetch", stocks=stocks, worker_count=1)
+        ts = db.get_task_stocks("crash-fetch")
+        row = ts[0]
+        assert row["status"] == "failed"
+        assert row["status_reason"] == "STRATEGY2_EVALUATION_ERROR"
+        assert row["finished_at"] is not None
+
+    def test_candidate_status_reason_is_none(self, monkeypatch, tmp_path):
+        """Step 5: Candidate explicitly has status_reason is None."""
+        from strategy2 import scanner as s2_scanner
+        from scanner.daily_data_service import FetchResult
+        db_path = str(tmp_path / "diag4.db")
+        import scanner.db as db
+        db.init_db(db_path)
+
+        from datetime import datetime, timedelta
+        base = datetime(2026, 6, 10)
+        good = []
+        for i in range(130):
+            date = (base - timedelta(days=129 - i)).strftime("%Y-%m-%d")
+            vol = 500_000 if i >= 110 else 2_000_000
+            good.append({"date": date, "open": 10, "high": 10, "low": 10, "close": 10, "volume": vol, "turnover": 10*vol})
+
+        def mock_fetch(*a, **kw):
+            return FetchResult(data=list(good), primary_source="test", fallback_source="test", from_cache=True)
+        monkeypatch.setattr(s2_scanner, "fetch_with_retry", mock_fetch)
+
+        stocks = [{"code": "000001", "name": "test", "market": ""}]
+        cfg = {"strategy2": {"strategy_window_days": 120, "minimum_required_days": 60, "candidate_min_score": 60, "max_risk_ratio": 0.05, "support_lookback_days": 10, "buy_zone_max_premium": 0.03, "stop_loss_buffer": 0.03}, "liquidity": {"enabled": False}, "data": {"database_path": db_path, "daily_sources": ["baidu", "sina", "tencent"]}}
+        db.create_scan_task("cand-null", "2026-06-10 09:00:00", total_stocks=1, strategy_type="STRATEGY_2_EXTREME_DRY_STABLE")
+        db.save_task_stocks("cand-null", stocks)
+
+        s2_scanner.scan_strategy2_all(cfg, task_id="cand-null", stocks=stocks, worker_count=1)
+        ts = db.get_task_stocks("cand-null")
+        row = ts[0]
+        assert row["status"] == "candidate"
+        assert row["status_reason"] is None
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # Stage 1: Task stocks API 404 semantics
 # ═══════════════════════════════════════════════════════════════════════════════
 

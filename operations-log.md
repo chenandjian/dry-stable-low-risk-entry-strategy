@@ -126,6 +126,15 @@
 - Verification: targeted suites passed 53 with one unhandled thread warning; offline suite passed 449; full suite had 450 passed and four external/environment diagnostic failures; compileall and frontend build passed; commit-range diff check reported two EOF whitespace issues.
 - Expanded the Round 3 repair-AI prompt into an ordered one-pass implementation guide with exact per-file edits, code skeletons, regression-test matrices, frontend runtime-test requirements, and phase/final acceptance gates.
 
+## 2026-06-11 (Strategy2 Final Acceptance Recheck Round 4)
+
+- Reviewed fix commit `b43cdcc` and added the Round 4 acceptance report plus one-pass repair-AI prompt.
+- Confirmed API 404 semantics, complete Strategy2 source diagnostic persistence, exact six-terminal-state tests, thread-warning cleanup, default offline test boundary, and production source-file cleanup.
+- Direct reproduction confirmed `/api/scan/status` returns full task statistics while running but returns `task_id=null` and empty stats after completion.
+- Found that ScannerConsole applies the empty completion status before completion handling, resetting final processed/failed/candidate counts to zero; historical tracked tasks also stop before final result/failure refresh.
+- Confirmed ScannerConsole does not watch query task changes, frontend runtime tests were not added (`npm run test` reports a missing script), and the Strategy2 main design/shared-service comment still describe four sources and failed-source cache fallback.
+- Verification: targeted backend tests passed 57; six-terminal tests passed 6; thread-warning suite passed 17; default full suite passed 422; compileall and frontend build passed; frontend test command failed because no test script exists; diff check passed.
+
 ### Commit history
 ```
 eff4597 feat(strategy2): full implementation — engine, scanner, DB, API, frontend

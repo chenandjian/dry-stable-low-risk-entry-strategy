@@ -101,7 +101,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, onMounted, onUnmounted } from 'vue'
+import { ref, reactive, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useApi } from '../composables/useApi.js'
 import MetricCard from '../components/MetricCard.vue'
@@ -281,15 +281,71 @@ function applyStats(status, { applyTaskId = true } = {}) {
   if (applyTaskId && status.task_id) {
     scanProgress.taskId = status.task_id
   }
-  scanProgress.scanned = stats.processed || stats.scanned || 0
-  scanProgress.total = stats.total_stocks || scanProgress.total || 0
-  scanProgress.skipped = stats.skipped || 0
-  scanProgress.failed = stats.failed || stats.failed_count || 0
-  scanProgress.candidates = stats.candidates_found || stats.candidates_count || 0
+  scanProgress.scanned = stats.processed ?? stats.scanned ?? scanProgress.scanned
+  scanProgress.total = stats.total_stocks ?? scanProgress.total
+  scanProgress.skipped = stats.skipped ?? scanProgress.skipped
+  scanProgress.failed = stats.failed ?? stats.failed_count ?? scanProgress.failed
+  scanProgress.candidates = stats.candidates_found ?? stats.candidates_count ?? scanProgress.candidates
   scanProgress.currentCode = stats.current_code || '--'
   scanProgress.currentName = stats.current_name || '--'
-  scanProgress.latestTradeDate = stats.latest_trade_date || ''
-  scanProgress.stockPoolSource = stats.stock_pool_source || scanProgress.stockPoolSource || ''
+  scanProgress.latestTradeDate = stats.latest_trade_date ?? scanProgress.latestTradeDate
+  scanProgress.stockPoolSource = stats.stock_pool_source ?? scanProgress.stockPoolSource
+}
+
+function applyTaskSummary(summary = {}) {
+  if (!summary || !Object.keys(summary).length) return
+  scanProgress.scanned = summary.processed ?? summary.scanned ?? scanProgress.scanned
+  scanProgress.total = summary.total_stocks ?? scanProgress.total
+  scanProgress.skipped = summary.skipped ?? scanProgress.skipped
+  scanProgress.failed = summary.failed ?? summary.failed_count ?? scanProgress.failed
+  scanProgress.candidates = summary.candidate ?? summary.candidates_count ?? scanProgress.candidates
+  scanProgress.latestTradeDate = summary.latest_trade_date ?? scanProgress.latestTradeDate
+  scanProgress.stockPoolSource = summary.stock_pool_source ?? scanProgress.stockPoolSource
+}
+
+async function refreshTaskContext(taskId) {
+  const data = await getTaskStocks(taskId, { status: 'failed', page_size: 50, page: 1 })
+  if (!data.ok) return false
+  scanProgress.taskId = taskId
+  activeStrategyType.value = data.strategy_type
+  failures.value = data.stocks || []
+  failuresTotal.value = data.total || 0
+  applyTaskSummary(data.summary)
+  await loadResults()
+  return true
+}
+
+function stopPolling() {
+  if (pollTimer) { clearInterval(pollTimer); pollTimer = null }
+  scanning.value = false
+}
+
+let lastKnownTaskId = null
+async function switchTaskContext(newTaskId) {
+  stopPolling()
+  scanError.value = ''
+  discoveries.value = []
+  if (!newTaskId) {
+    // Switch to live mode
+    scanProgress.taskId = ''
+    activeStrategyType.value = null
+    failures.value = []
+    failuresTotal.value = 0
+    await loadLiveTask()
+    return
+  }
+  const ok = await refreshTaskContext(newTaskId)
+  if (!ok) return
+  lastKnownTaskId = newTaskId
+  // Check if task is running
+  try {
+    const status = await getScanStatus()
+    if (status.running && status.task_id === newTaskId) {
+      applyStats(status, { applyTaskId: false })
+      scanning.value = true
+      pollTimer = setInterval(pollStatus, 1000)
+    }
+  } catch (e) { /* ignore */ }
 }
 
 async function pollStatus() {
@@ -314,11 +370,16 @@ async function pollStatus() {
       addLog('info', `进度 ${pct}% · 已处理 ${scanProgress.scanned} / ${scanProgress.total} · 候选 ${scanProgress.candidates}`)
     }
     if (!status.running && scanning.value) {
-      scanning.value = false
-      if (pollTimer) clearInterval(pollTimer)
+      stopPolling()
+      // Refresh final summary from target task DB before logging
+      const targetId = scanProgress.taskId
+      if (targetId) {
+        await refreshTaskContext(targetId)
+      } else {
+        await loadResults()
+        await loadFailures()
+      }
       addLog('found', `扫描完成 · 发现 ${scanProgress.candidates} 个候选 · 跳过 ${scanProgress.skipped} · 失败 ${scanProgress.failed}`)
-      await loadResults()
-      await loadFailures()
     }
     // 实时更新候选发现 (BUG-S2-010: 按策略类型映射)
     if (status.stats?.discoveries) {
@@ -524,6 +585,17 @@ onUnmounted(() => {
   if (pollTimer) clearInterval(pollTimer)
   if (clockTimer) clearInterval(clockTimer)
 })
+
+// Step 3: Watch URL task changes
+watch(
+  () => route.query.task,
+  async (newTask, oldTask) => {
+    const id = String(newTask || '')
+    if (id !== String(oldTask || '')) {
+      await switchTaskContext(id || null)
+    }
+  },
+)
 </script>
 
 <style scoped>
