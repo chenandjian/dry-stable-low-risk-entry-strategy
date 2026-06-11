@@ -203,6 +203,33 @@ let pollTimer = null
 let clockTimer = null
 let lastLogScanned = 0
 
+// ROUND7-S2-001: viewContext system for stale response prevention
+let viewContextEpoch = 0
+let pollRequestEpoch = 0
+let activeViewContext = { epoch: 0, taskId: '' }
+
+function normalizeTaskId(taskId) {
+  return String(taskId || '')
+}
+
+function beginViewContext(taskId) {
+  viewContextEpoch += 1
+  pollRequestEpoch += 1
+  activeViewContext = { epoch: viewContextEpoch, taskId: normalizeTaskId(taskId) }
+  return { ...activeViewContext }
+}
+
+function captureCurrentViewContext() {
+  return { ...activeViewContext }
+}
+
+function isCurrentViewContext(context) {
+  return Boolean(context)
+    && context.epoch === activeViewContext.epoch
+    && context.taskId === activeViewContext.taskId
+    && context.taskId === normalizeTaskId(route.query.task)
+}
+
 function addLog(type, text) {
   const now = new Date()
   const ts = `${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}:${String(now.getSeconds()).padStart(2,'0')}`
@@ -303,13 +330,48 @@ function applyTaskSummary(summary = {}) {
   scanProgress.stockPoolSource = summary.stock_pool_source ?? scanProgress.stockPoolSource
 }
 
-async function refreshTaskContext(taskId) {
+// ROUND7: fetch candidates without writing shared state
+async function fetchMappedResults(taskId, strategyType) {
+  const isS2 = strategyType === 'STRATEGY_2_EXTREME_DRY_STABLE'
+  if (isS2) {
+    const res = await getStrategy2Candidates(taskId)
+    return (res.candidates || []).map(c => ({
+      code: c.code, name: c.name, score: c.total_score || 0,
+      rating: c.level || '', status: c.level || '',
+      detail: `量干${c.volume_dry_score || 0} 价稳${c.price_stable_score || 0} 风险${((c.risk_ratio || 0) * 100).toFixed(1)}%`,
+    }))
+  }
+  const params = taskId ? { task_id: taskId } : {}
+  const data = await getCandidates(params)
+  return (data.candidates || []).map(c => ({
+    code: c.code, name: c.name, score: c.score || 0,
+    rating: c.score >= 80 ? 'strong' : c.score >= 70 ? 'medium' : 'weak',
+    status: statusFor(c), detail: formatDetail(c),
+  }))
+}
+
+async function loadResults({ taskId, strategyType, context } = {}) {
+  const targetTaskId = normalizeTaskId(taskId)
+  const targetStrategyType = strategyType || activeStrategyType.value
+  try {
+    const candidates = await fetchMappedResults(targetTaskId, targetStrategyType)
+    if (context && !isCurrentViewContext(context)) return false
+    discoveries.value = dedupeDiscoveries(candidates)
+    updateMetrics()
+    return true
+  } catch (e) {
+    if (!context || isCurrentViewContext(context)) { console.error('Load results failed:', e) }
+    return false
+  }
+}
+
+async function refreshTaskContext(context) {
+  const taskId = context.taskId
   try {
     const data = await getTaskStocks(taskId, { status: 'failed', page_size: 50, page: 1 })
+    if (!isCurrentViewContext(context)) return false
     if (!data.ok) {
-      scanError.value = data.error === 'TASK_NOT_FOUND'
-        ? `任务不存在：${taskId}`
-        : '历史任务加载失败'
+      scanError.value = data.error === 'TASK_NOT_FOUND' ? `任务不存在：${taskId}` : '历史任务加载失败'
       return false
     }
     scanProgress.taskId = taskId
@@ -317,17 +379,17 @@ async function refreshTaskContext(taskId) {
     failures.value = data.stocks || []
     failuresTotal.value = data.total || 0
     applyTaskSummary(data.summary)
-    await loadResults()
-    return true
+    await loadResults({ taskId, strategyType: data.strategy_type, context })
+    return isCurrentViewContext(context)
   } catch (e) {
-    scanError.value = '历史任务加载失败'
-    console.error('Load historical task failed:', e)
+    if (isCurrentViewContext(context)) { scanError.value = '历史任务加载失败'; console.error('Load historical task failed:', e) }
     return false
   }
 }
 
 function stopPolling() {
   if (pollTimer) { clearInterval(pollTimer); pollTimer = null }
+  pollRequestEpoch += 1
   scanning.value = false
 }
 
@@ -348,161 +410,113 @@ function resetTaskView() {
   failuresTotal.value = 0
 }
 
+// ROUND7: Unified context entry — beginViewContext called once per navigation
 async function switchTaskContext(newTaskId) {
   stopPolling()
   resetTaskView()
   scanError.value = ''
-  if (!newTaskId) {
-    await loadLiveTask()
-    return
+  const context = beginViewContext(newTaskId)
+  if (context.taskId) {
+    await loadHistoricalTask(context)
+  } else {
+    await loadLiveTask(context)
   }
-  const ok = await refreshTaskContext(newTaskId)
-  if (!ok) return
-  try {
-    const status = await getScanStatus()
-    if (status.running && status.task_id === newTaskId) {
-      applyStats(status, { applyTaskId: false })
-      scanning.value = true
-      pollTimer = setInterval(pollStatus, 1000)
-    }
-  } catch (e) { /* ignore */ }
 }
 
 async function pollStatus() {
+  const context = captureCurrentViewContext()
+  const requestEpoch = ++pollRequestEpoch
   try {
     const status = await getScanStatus()
+    if (!isCurrentViewContext(context)) return
+    if (requestEpoch !== pollRequestEpoch) return
 
-    // Stage 3: Historical mode — only allow same task
-    if (isHistoricalMode.value && status.task_id !== routeTaskId.value) {
+    if (context.taskId && status.task_id !== context.taskId) {
       const wasTracking = scanning.value
       stopPolling()
       if (wasTracking) {
-        await refreshTaskContext(routeTaskId.value)
+        const ok = await refreshTaskContext(context)
+        if (!ok || !isCurrentViewContext(context)) return
         addLog('found', `扫描完成 · 发现 ${scanProgress.candidates} 个候选 · 跳过 ${scanProgress.skipped} · 失败 ${scanProgress.failed}`)
       }
       return
     }
 
-    applyStats(status, { applyTaskId: !isHistoricalMode.value })
-    if (status.strategyType && !isHistoricalMode.value) {
-      activeStrategyType.value = status.strategyType
-    }
-    // Progress log every ~50 stocks
+    applyStats(status, { applyTaskId: !context.taskId })
+    if (status.strategyType && !context.taskId) { activeStrategyType.value = status.strategyType }
+
     if (scanProgress.scanned - lastLogScanned >= 50) {
       lastLogScanned = scanProgress.scanned
       const pct = scanProgress.total > 0 ? Math.round(scanProgress.scanned / scanProgress.total * 100) : 0
       addLog('info', `进度 ${pct}% · 已处理 ${scanProgress.scanned} / ${scanProgress.total} · 候选 ${scanProgress.candidates}`)
     }
+
     if (!status.running && scanning.value) {
       stopPolling()
-      // Refresh final summary from target task DB before logging
-      const targetId = scanProgress.taskId
-      if (targetId) {
-        await refreshTaskContext(targetId)
+      if (context.taskId) {
+        const ok = await refreshTaskContext(context)
+        if (!ok || !isCurrentViewContext(context)) return
       } else {
-        await loadResults()
-        await loadFailures()
+        await loadResults({ taskId: scanProgress.taskId, strategyType: activeStrategyType.value, context })
+        if (!isCurrentViewContext(context)) return
+        await loadFailures({ taskId: scanProgress.taskId, context })
+        if (!isCurrentViewContext(context)) return
       }
       addLog('found', `扫描完成 · 发现 ${scanProgress.candidates} 个候选 · 跳过 ${scanProgress.skipped} · 失败 ${scanProgress.failed}`)
+      return
     }
-    // 实时更新候选发现 (BUG-S2-010: 按策略类型映射)
+
     if (status.stats?.discoveries) {
       const isS2 = activeStrategyType.value === 'STRATEGY_2_EXTREME_DRY_STABLE'
       status.stats.discoveries.forEach(d => {
         if (!discoveries.value.find(e => e.code === d.code)) {
-          const item = {
-            code: d.code,
-            name: d.name,
-            score: isS2 ? (d.total_score || 0) : (d.score || 0),
-            rating: '',
-            status: isS2 ? (d.level || '') : statusFor(d),
-            detail: isS2 ? `量干${d.volume_dry_score || 0} 价稳${d.price_stable_score || 0} 风险${((d.risk_ratio || 0) * 100).toFixed(1)}%` : formatDetail(d),
-          }
-          const sc = item.score
-          item.rating = sc >= 80 ? 'strong' : sc >= 70 ? 'medium' : 'weak'
+          const item = { code: d.code, name: d.name, score: isS2 ? (d.total_score || 0) : (d.score || 0), rating: '', status: isS2 ? (d.level || '') : statusFor(d), detail: isS2 ? `量干${d.volume_dry_score || 0} 价稳${d.price_stable_score || 0} 风险${((d.risk_ratio || 0) * 100).toFixed(1)}%` : formatDetail(d) }
+          item.rating = item.score >= 80 ? 'strong' : item.score >= 70 ? 'medium' : 'weak'
           discoveries.value.unshift(item)
         }
       })
       discoveries.value = dedupeDiscoveries(discoveries.value)
       updateMetrics()
     }
-    if (scanProgress.failed) await loadFailures()
+    if (scanProgress.failed) await loadFailures({ taskId: scanProgress.taskId, context })
   } catch (e) {
-    scanError.value = '状态查询失败'
-    console.error(e)
+    if (isCurrentViewContext(context) && requestEpoch === pollRequestEpoch) { scanError.value = '状态查询失败'; console.error(e) }
   }
 }
 
-async function loadResults() {
+async function loadFailures({ taskId, context } = {}) {
+  const targetTaskId = normalizeTaskId(taskId)
+  if (!targetTaskId) return false
   try {
-    const isS2 = activeStrategyType.value === 'STRATEGY_2_EXTREME_DRY_STABLE'
-    let candidates = []
-    if (isS2) {
-      try {
-        const res = await getStrategy2Candidates(scanProgress.taskId)
-        candidates = (res.candidates || []).map(c => ({
-          code: c.code, name: c.name,
-          score: c.total_score || 0,
-          rating: c.level || '',
-          status: c.level || '',
-          detail: `量干${c.volume_dry_score || 0} 价稳${c.price_stable_score || 0} 风险${((c.risk_ratio || 0) * 100).toFixed(1)}%`,
-        }))
-      } catch (e) { console.error('Failed to load strategy2 results:', e) }
-    } else {
-      const params = scanProgress.taskId ? { task_id: scanProgress.taskId } : {}
-      const data = await getCandidates(params)
-      candidates = (data.candidates || []).map(c => ({
-        code: c.code, name: c.name,
-        score: c.score || 0,
-        rating: c.score >= 80 ? 'strong' : c.score >= 70 ? 'medium' : 'weak',
-        status: statusFor(c),
-        detail: formatDetail(c),
-      }))
-    }
-    discoveries.value = dedupeDiscoveries(candidates)
-    updateMetrics()
-  } catch (e) {
-    console.error('Load results failed:', e)
-  }
-}
-
-async function loadFailures() {
-  if (!scanProgress.taskId) return
-  try {
-    const data = await getTaskStocks(scanProgress.taskId, { status: 'failed', page_size: 50, page: 1 })
+    const data = await getTaskStocks(targetTaskId, { status: 'failed', page_size: 50, page: 1 })
+    if (context && !isCurrentViewContext(context)) return false
+    if (!data.ok) return false
     failures.value = data.stocks || []
     failuresTotal.value = data.total || 0
-    // Stage 3: Always restore strategy_type from API
-    if (data.strategy_type) {
-      activeStrategyType.value = data.strategy_type
-    }
-  } catch (e) {
-    console.error('Load failures failed:', e)
-  }
+    if (data.strategy_type) { activeStrategyType.value = data.strategy_type }
+    return true
+  } catch (e) { if (!context || isCurrentViewContext(context)) console.error('Load failures failed:', e); return false }
 }
+
 async function loadMoreFailures() {
-  if (!scanProgress.taskId) return
-  try {
-    const nextPage = Math.floor(failures.value.length / 50) + 1
-    const data = await getTaskStocks(scanProgress.taskId, { status: 'failed', page_size: 50, page: nextPage })
-    if (data.stocks?.length) failures.value = [...failures.value, ...data.stocks]
-    failuresTotal.value = data.total || failuresTotal.value
-  } catch (e) {
-    console.error('Load more failures failed:', e)
-  }
+  const context = captureCurrentViewContext()
+  const taskId = scanProgress.taskId
+  if (!taskId) return
+  const nextPage = Math.floor(failures.value.length / 50) + 1
+  const data = await getTaskStocks(taskId, { status: 'failed', page_size: 50, page: nextPage })
+  if (!isCurrentViewContext(context) || scanProgress.taskId !== taskId) return
+  if (data.stocks?.length) { failures.value = [...failures.value, ...data.stocks] }
+  failuresTotal.value = data.total || failuresTotal.value
 }
 
 async function handleRetryFailed() {
-  if (!scanProgress.taskId) return
-  const res = await retryFailedStocks(scanProgress.taskId)
-  if (!res.ok || res.error) {
-    scanError.value = res.statusCode === 409 ? `扫描已在运行中：${res.running_task_id || '--'}` : (res.error || '重拉失败股票失败')
-    return
-  }
-  if (res.retry_count === 0) {
-    scanError.value = '没有需要重拉的失败股票'
-    return
-  }
+  const context = captureCurrentViewContext()
+  const taskId = scanProgress.taskId
+  if (!taskId) return
+  const res = await retryFailedStocks(taskId)
+  if (!isCurrentViewContext(context) || scanProgress.taskId !== taskId) return
+  if (!res.ok || res.error) { scanError.value = res.statusCode === 409 ? `扫描已在运行中：${res.running_task_id || '--'}` : (res.error || '重拉失败股票失败'); return }
+  if (res.retry_count === 0) { scanError.value = '没有需要重拉的失败股票'; return }
   scanning.value = true
   if (pollTimer) clearInterval(pollTimer)
   pollTimer = setInterval(pollStatus, 1000)
@@ -550,57 +564,64 @@ function updateMetrics() {
   metrics.topScore = list.reduce((max, d) => Math.max(max, d.score), 0)
 }
 
-// Stage 3: Historical task loading
-async function loadHistoricalTask(taskId) {
-  // ROUND6-S2-001: Delegate to refreshTaskContext for summary/failures/type/candidates
-  const ok = await refreshTaskContext(taskId)
-  if (!ok) return false
-
-  const status = await getScanStatus()
-  if (status.running && status.task_id === taskId) {
-    applyStats(status, { applyTaskId: false })
-    scanning.value = true
-    pollTimer = setInterval(pollStatus, 1000)
-  }
-  return true
-}
-
-async function loadLiveTask() {
+// ROUND7: receive context, check after every await
+async function loadHistoricalTask(context) {
+  const ok = await refreshTaskContext(context)
+  if (!ok || !isCurrentViewContext(context)) return false
   try {
     const status = await getScanStatus()
-    applyStats(status)
-    if (status.strategyType) activeStrategyType.value = status.strategyType
-    if (status.running) {
+    if (!isCurrentViewContext(context)) return false
+    if (status.running && status.task_id === context.taskId) {
+      applyStats(status, { applyTaskId: false })
       scanning.value = true
       pollTimer = setInterval(pollStatus, 1000)
     }
-    await loadFailures()
-  } catch (e) { console.error('Check status on mount failed:', e) }
-  await loadResults()
+  } catch (e) {
+    if (isCurrentViewContext(context)) { scanError.value = '任务状态查询失败，已显示最近保存结果'; console.error('Load historical task status failed:', e) }
+  }
+  return isCurrentViewContext(context)
+}
+
+async function loadLiveTask(context) {
+  try {
+    const status = await getScanStatus()
+    if (!isCurrentViewContext(context)) return false
+    applyStats(status)
+    if (status.strategyType) { activeStrategyType.value = status.strategyType }
+    const taskId = normalizeTaskId(status.task_id)
+    const strategyType = status.strategyType || activeStrategyType.value
+    if (taskId) {
+      await loadFailures({ taskId, context })
+      if (!isCurrentViewContext(context)) return false
+    }
+    await loadResults({ taskId, strategyType, context })
+    if (!isCurrentViewContext(context)) return false
+    if (status.running) { scanning.value = true; pollTimer = setInterval(pollStatus, 1000) }
+    return true
+  } catch (e) {
+    if (isCurrentViewContext(context)) { scanError.value = '实时任务加载失败'; console.error('Check live status failed:', e) }
+    return false
+  }
 }
 
 onMounted(async () => {
-  if (routeTaskId.value) {
-    await loadHistoricalTask(routeTaskId.value)
-  } else {
-    await loadLiveTask()
+  try {
+    await switchTaskContext(routeTaskId.value || null)
+  } finally {
+    updateTime()
+    clockTimer = setInterval(updateTime, 1000)
   }
-  updateTime()
-  clockTimer = setInterval(updateTime, 1000)
 })
 onUnmounted(() => {
   if (pollTimer) clearInterval(pollTimer)
   if (clockTimer) clearInterval(clockTimer)
 })
 
-// Step 3: Watch URL task changes
 watch(
   () => route.query.task,
   async (newTask, oldTask) => {
-    const id = String(newTask || '')
-    if (id !== String(oldTask || '')) {
-      await switchTaskContext(id || null)
-    }
+    const id = normalizeTaskId(newTask)
+    if (id !== normalizeTaskId(oldTask)) { await switchTaskContext(id || null) }
   },
 )
 </script>
