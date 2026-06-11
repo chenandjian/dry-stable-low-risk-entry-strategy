@@ -38,6 +38,7 @@
 - 新增策略2独立全市场扫描入口和扫描编排。
 - 策略2扫描全部股票，不依赖杯柄/VCP识别结果。
 - 复用现有股票池、三数据源、日线数据库和全局流动性过滤。
+- 新增策略2独立走势趋势过滤，只收录上涨或横盘股票，下降趋势股票强制排除。
 - 新增策略2独立指标、评分、一票否决、风险计算和结果模型。
 - `key_support` 使用不含评估日的前10个交易日最低收盘价。
 - 策略2候选结果写入独立数据表。
@@ -209,6 +210,7 @@ strategy2/
 - `scorer.py`：只负责量干50分、价稳50分及等级计算。
 - `rejection.py`：只负责执行一票否决规则并返回稳定错误码。
 - `risk.py`：只负责关键支撑、买入区间、止损和风险比计算。
+- `trend.py`：只负责策略2走势趋势指标、趋势分类和下降趋势过滤。
 - `engine.py`：策略2唯一评估入口，组合上述模块并输出最终结果。
 - `scanner.py`：策略2全市场扫描编排，不包含指标和评分实现。
 
@@ -231,10 +233,11 @@ scanner/daily_data_service.py
 7. 使用完整拉取数据执行现有全局流动性过滤。
 8. 从数据尾部截取最近 `strategy2.strategy_window_days` 日。
 9. 若有效数据少于 `strategy2.minimum_required_days`，明确跳过。
-10. 策略2引擎计算指标、评分、否决规则和风险信息。
-11. 满足入选条件的结果写入 `strategy2_candidates`。
-12. 任务进度写入现有任务跟踪结构。
-13. 前端轮询状态并展示独立结果。
+10. 策略2执行独立走势趋势判断，确认下降趋势时强制跳过。
+11. 策略2引擎计算量干价稳指标、评分、否决规则和风险信息。
+12. 满足入选条件的结果写入 `strategy2_candidates`。
+13. 任务进度写入现有任务跟踪结构。
+14. 前端轮询状态并展示独立结果。
 
 ### 5.4 状态设计
 
@@ -265,6 +268,7 @@ scanner/daily_data_service.py
 
 - `INSUFFICIENT_LISTING_DATA`
 - `LIQUIDITY_FILTER_REJECTED`
+- `DOWNTREND_FILTERED`
 - `INSUFFICIENT_STRATEGY_DATA`
 - `INVALID_MARKET_DATA`
 - `REJECT_VOLUME_DRY_PRICE_DROP`
@@ -303,6 +307,11 @@ close_range_5 = (最近5日最高收盘价 - 最近5日最低收盘价) / 最近
 return_5 = 当前收盘价 / 5日前收盘价 - 1
 return_3 = 当前收盘价 / 3日前收盘价 - 1
 daily_return = 当日收盘价 / 前一日收盘价 - 1
+
+MA20 = 最近20日收盘价简单移动平均
+MA60 = 最近60日收盘价简单移动平均
+MA20_SLOPE = 当前MA20 / 5个交易日前MA20 - 1
+RETURN_20 = 当前收盘价 / 20个交易日前收盘价 - 1
 ```
 
 60日成交量分位要求：
@@ -310,6 +319,31 @@ daily_return = 当日收盘价 / 前一日收盘价 - 1
 - 对最近60个交易日的成交量计算分位。
 - 指标输出至少包含最近5日最低成交量在60日窗口中的百分位。
 - 数据不足60日但达到最低有效数据时，以实际可用窗口计算，并在结果中记录实际分位窗口天数。
+
+#### 走势趋势前置过滤
+
+走势趋势判断属于策略2前置强制过滤，不参与量干价稳100分评分。
+
+仅当以下四项同时满足时，股票被判定为下降趋势：
+
+```text
+current_close < MA20
+MA20 < MA60
+MA20_SLOPE < 0
+RETURN_20 < -5%
+```
+
+趋势类型：
+
+- `DOWNTREND`：四项条件全部满足，强制排除并记录 `DOWNTREND_FILTERED`。
+- `UPTREND_OR_SIDEWAYS`：未同时满足四项条件，允许继续执行策略2评分。
+
+约束：
+
+- 趋势判断只使用评估日及之前的数据。
+- 趋势过滤在流动性过滤之后、量干价稳评分之前执行。
+- 不因短期一两日下跌直接判定为下降趋势。
+- 候选详情展示趋势类型、MA20、MA60、MA20斜率和20日涨跌幅。
 
 #### 量干评分，满分50
 
@@ -364,6 +398,7 @@ risk_ratio = (current_close - stop_loss) / current_close
 必须同时满足：
 
 - 总分 `>= strategy2.candidate_min_score`，默认70。
+- 趋势类型为 `UPTREND_OR_SIDEWAYS`。
 - 未触发任何一票否决。
 - 风险比 `<= strategy2.max_risk_ratio`，默认0.05。
 
@@ -413,6 +448,11 @@ CREATE TABLE IF NOT EXISTS strategy2_candidates (
     close_range_5              REAL,
     return_3                   REAL,
     return_5                   REAL,
+    trend_type                TEXT NOT NULL,
+    ma20                       REAL,
+    ma60                       REAL,
+    ma20_slope                 REAL,
+    return_20                  REAL,
     key_support                REAL NOT NULL,
     buy_zone_low               REAL NOT NULL,
     buy_zone_high              REAL NOT NULL,
@@ -558,6 +598,7 @@ strategy_type = STRATEGY_1_CUP_HANDLE
 - `strategy2/scorer.py`
 - `strategy2/rejection.py`
 - `strategy2/risk.py`
+- `strategy2/trend.py`
 - `strategy2/engine.py`
 - `strategy2/scanner.py`
 - `scanner/daily_data_service.py`
@@ -603,11 +644,12 @@ ExtremeDryStableStrategyEngine.evaluate_at(data, code, name)
 2. 校验数据长度、排序、字段和值。
 3. 截取 strategy_window_days。
 4. 计算策略2指标。
-5. 计算 key_support 和风险指标。
-6. 计算量干分、价稳分和总分。
-7. 执行一票否决规则。
-8. 判断总分和风险比是否达标。
-9. 返回 Strategy2Evaluation。
+5. 执行走势趋势判断；下降趋势直接返回 `DOWNTREND_FILTERED`。
+6. 计算 key_support 和风险指标。
+7. 计算量干分、价稳分和总分。
+8. 执行一票否决规则。
+9. 判断总分和风险比是否达标。
+10. 返回 Strategy2Evaluation。
 ```
 
 `Strategy2Evaluation` 至少包含：
@@ -623,6 +665,7 @@ level
 score_reasons
 reject_reasons
 risk
+trend
 ```
 
 #### 独立性约束
@@ -640,11 +683,12 @@ scan_strategy2_all()
 2. 保存 task_stocks。
 3. 使用共享日线服务拉取 min_listing_days。
 4. 使用完整拉取窗口执行全局流动性过滤。
-5. 调用 ExtremeDryStableStrategyEngine.evaluate_at()。
-6. candidate 时 upsert 到 strategy2_candidates。
-7. 未入选时写入稳定 status_reason。
-8. 单股异常时标记 failed 并继续。
-9. 汇总任务统计并完成任务。
+5. 调用 ExtremeDryStableStrategyEngine.evaluate_at() 执行趋势过滤和策略判断。
+6. 下降趋势时写入 `DOWNTREND_FILTERED` 并继续下一只股票。
+7. candidate 时 upsert 到 strategy2_candidates。
+8. 未入选时写入稳定 status_reason。
+9. 单股异常时标记 failed 并继续。
+10. 汇总任务统计并完成任务。
 ```
 
 #### 并发控制
@@ -717,6 +761,7 @@ scan_strategy2_all()
 - 任务 ID、策略类型、配置摘要和策略窗口。
 - 数据源尝试、回退、缓存使用和全部失败日志。
 - 单股数据不足、流动性过滤、评分不足、一票否决和风险超限原因。
+- 单股趋势分类、趋势指标和下降趋势过滤原因。
 - 策略2候选写入失败日志。
 - 全局扫描冲突日志。
 - 非法配置拒绝日志。
@@ -753,6 +798,14 @@ scan_strategy2_all()
 - 累加评分项正确。
 - 70、80、90、95分等级边界正确。
 - 命中评分项可解释且稳定。
+
+#### 趋势过滤测试
+
+- 当前价低于MA20、MA20低于MA60、MA20斜率为负且20日跌幅低于-5%时，判定为 `DOWNTREND`。
+- 四个下降条件缺少任意一项时，判定为 `UPTREND_OR_SIDEWAYS`。
+- 下降趋势返回 `DOWNTREND_FILTERED`，且不进入量干价稳评分。
+- 上涨和横盘股票允许继续评分。
+- MA20、MA60、MA20斜率和20日涨跌幅只使用评估日及之前的数据。
 
 #### 否决规则测试
 
@@ -798,9 +851,10 @@ scan_strategy2_all()
 4. 日线按统一格式入库。
 5. 执行全局流动性过滤。
 6. 截取策略2计算窗口。
-7. 策略2独立评估并写入候选。
-8. API 查询任务和候选。
-9. 前端展示策略2结果。
+7. 执行策略2独立走势趋势过滤。
+8. 对上涨或横盘股票执行策略2独立评估并写入候选。
+9. API 查询任务和候选。
+10. 前端展示策略2结果。
 
 额外验证：
 
@@ -818,6 +872,7 @@ scan_strategy2_all()
 - 策略2运行时策略1按钮禁用。
 - 页面刷新后恢复当前策略名称和进度。
 - 策略2结果页展示正确字段。
+- 策略2结果页展示趋势类型和趋势指标。
 - 空结果、接口失败、任务失败提示。
 - 策略2页面不显示杯柄/VCP字段。
 
@@ -851,7 +906,7 @@ cd web && npm run build
 4. 策略2配置、任务类型、候选表、API 和结果页面独立。
 5. 策略2使用独立 `strategy_window_days`，日线拉取继续使用 `min_listing_days`。
 6. `key_support` 使用不含评估日的前10个交易日最低收盘价。
-7. 只有总分不低于70、无一票否决且风险比不高于5%的股票入选。
+7. 只有非下降趋势、总分不低于70、无一票否决且风险比不高于5%的股票入选。
 8. 任一全市场扫描运行时，另一策略不能启动。
 9. 单股失败不中断整体任务，失败原因可追踪。
 10. 策略1现有判断、结果、接口和回测不受影响。
@@ -924,3 +979,4 @@ cd web && npm run build
 10. 入选要求为总分至少70、无一票否决、风险比不超过5%。
 11. 前端配置页必须明确区分策略2配置。
 12. 开发必须新建独立 worktree 分支。
+13. 策略2新增独立走势趋势过滤；下降趋势强制排除，只允许上涨或横盘股票进入候选。

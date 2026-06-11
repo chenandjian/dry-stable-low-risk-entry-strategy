@@ -55,6 +55,7 @@
 - Confirmed product and architecture decisions with the user.
 - Added the Strategy 2 independent full-market scan development design document.
 - No strategy implementation code was changed in this phase.
+- Confirmed and documented a Strategy 2 pre-score trend filter: stocks classified as downtrends are excluded, while uptrend or sideways stocks may continue to scoring.
 
 ## 2026-06-10 (Strategy2 Development)
 
