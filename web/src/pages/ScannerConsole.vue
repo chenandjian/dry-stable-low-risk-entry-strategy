@@ -415,7 +415,7 @@ async function finalizeCompletedPoll({ context, session, historical }) {
 
   try {
     if (historical) {
-      const failOk = await loadFailures({ taskId: context.taskId, context, pollSession: session })
+      const failOk = await loadFailures({ taskId: context.taskId, context, pollSession: session, applySummary: true })
       if (!isCurrentViewContext(context) || !isCurrentPollSession(session)) return false
       if (!failOk) refreshFailures.push('历史任务详情')
 
@@ -532,7 +532,7 @@ async function pollStatus() {
   }
 }
 
-async function loadFailures({ taskId, context, pollSession } = {}) {
+async function loadFailures({ taskId, context, pollSession, applySummary = false } = {}) {
   const targetTaskId = normalizeTaskId(taskId)
   if (!targetTaskId) return false
   try {
@@ -543,6 +543,7 @@ async function loadFailures({ taskId, context, pollSession } = {}) {
     failures.value = data.stocks || []
     failuresTotal.value = data.total || 0
     if (data.strategy_type) { activeStrategyType.value = data.strategy_type }
+    if (applySummary) { applyTaskSummary(data.summary) }
     return true
   } catch (e) { if (!context || isCurrentViewContext(context)) console.error('Load failures failed:', e); return false }
 }
