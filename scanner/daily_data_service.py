@@ -1,7 +1,7 @@
 # scanner/daily_data_service.py
 """共享日线数据拉取服务 — 从三数据源链逐级拉取、合并缓存、入库。
 
-本模块只包含数据源选择、锁管理、重试、缓存新鲜度和统一 FetchResult，
+本模块只包含数据源选择、锁管理、重试和统一 FetchResult，
 不包含任何策略判断。
 策略1和策略2扫描器均通过本模块调用数据拉取能力。
 """
@@ -9,7 +9,6 @@ import json
 import logging
 import time
 from dataclasses import dataclass
-from datetime import date, timedelta
 from typing import Callable
 
 import scanner.db as db

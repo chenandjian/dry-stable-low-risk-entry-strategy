@@ -346,17 +346,18 @@ class TestSourceDiagnostics:
         assert parsed == expected_errs
 
     def test_busy_exceeded_persists_diagnostics(self, monkeypatch, tmp_path):
-        """Step 5: Busy exceeded → failed with diagnostic info."""
+        """ROUND5-S2-004: Busy exceeded → exact status_reason + all diagnostic fields."""
         from strategy2 import scanner as s2_scanner
         from scanner.daily_data_service import FetchResult
         db_path = str(tmp_path / "diag2.db")
         import scanner.db as db
         db.init_db(db_path)
 
+        expected_src_errs = {"baidu": "busy", "sina": "busy", "tencent": "busy"}
         def mock_fetch(*a, **kw):
             return FetchResult(data=None, primary_source="baidu", fallback_source="sina",
                                primary_error="data source busy", fallback_error="data source busy",
-                               source_errors={"baidu": "busy", "sina": "busy", "tencent": "busy"})
+                               source_errors=expected_src_errs)
         monkeypatch.setattr(s2_scanner, "fetch_with_retry", mock_fetch)
 
         stocks = [{"code": "000001", "name": "test", "market": ""}]
@@ -368,6 +369,13 @@ class TestSourceDiagnostics:
         ts = db.get_task_stocks("busy-test")
         row = ts[0]
         assert row["status"] == "failed"
+        assert row["status_reason"] == "数据源忙，超过重试次数"
+        assert row["primary_source"] == "baidu"
+        assert row["fallback_source"] == "sina"
+        assert row["primary_error"] == "data source busy"
+        assert row["fallback_error"] == "data source busy"
+        import json
+        assert json.loads(row["source_errors"]) == expected_src_errs
         assert row["finished_at"] is not None
 
     def test_fetch_exception_produces_eval_error(self, monkeypatch, tmp_path):

@@ -135,6 +135,16 @@
 - Confirmed ScannerConsole does not watch query task changes, frontend runtime tests were not added (`npm run test` reports a missing script), and the Strategy2 main design/shared-service comment still describe four sources and failed-source cache fallback.
 - Verification: targeted backend tests passed 57; six-terminal tests passed 6; thread-warning suite passed 17; default full suite passed 422; compileall and frontend build passed; frontend test command failed because no test script exists; diff check passed.
 
+## 2026-06-11 (Strategy2 Final Acceptance Recheck Round 5)
+
+- Reviewed fix commit `6f04564` and added the Round 5 acceptance report plus final focused repair-AI prompt.
+- Confirmed task-stock summary response, live completion summary recovery, reactive query watcher implementation, Vitest setup, full source-diagnostic persistence tests, and core three-source/no-cache-fallback design synchronization.
+- Found that historical tracked tasks still return before final refresh because the historical task-id mismatch branch precedes completion handling in `pollStatus`.
+- Found that switching from a valid historical task to an unknown task leaves old failures, strategy context, and statistics visible and does not show the unknown-task error.
+- Confirmed the six passing frontend tests do not actually exercise interval-driven historical completion or reactive query A-to-B/missing-task transitions; the route mock is not reactive.
+- Confirmed remaining stale cache-freshness wording and a weak busy-diagnostic test.
+- Verification: targeted backend tests passed 61; default full suite passed 426; frontend Vitest passed 6 tests; frontend build, compileall, and diff check passed; task summary API direct reproduction passed.
+
 ### Commit history
 ```
 eff4597 feat(strategy2): full implementation — engine, scanner, DB, API, frontend

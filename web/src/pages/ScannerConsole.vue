@@ -320,24 +320,36 @@ function stopPolling() {
   scanning.value = false
 }
 
-let lastKnownTaskId = null
+function resetTaskView() {
+  scanProgress.taskId = ''
+  scanProgress.scanned = 0
+  scanProgress.total = 0
+  scanProgress.skipped = 0
+  scanProgress.failed = 0
+  scanProgress.candidates = 0
+  scanProgress.currentCode = '--'
+  scanProgress.currentName = '--'
+  scanProgress.latestTradeDate = ''
+  scanProgress.stockPoolSource = ''
+  activeStrategyType.value = null
+  discoveries.value = []
+  failures.value = []
+  failuresTotal.value = 0
+}
+
 async function switchTaskContext(newTaskId) {
   stopPolling()
+  resetTaskView()
   scanError.value = ''
-  discoveries.value = []
   if (!newTaskId) {
-    // Switch to live mode
-    scanProgress.taskId = ''
-    activeStrategyType.value = null
-    failures.value = []
-    failuresTotal.value = 0
     await loadLiveTask()
     return
   }
   const ok = await refreshTaskContext(newTaskId)
-  if (!ok) return
-  lastKnownTaskId = newTaskId
-  // Check if task is running
+  if (!ok) {
+    scanError.value = `任务不存在：${newTaskId}`
+    return
+  }
   try {
     const status = await getScanStatus()
     if (status.running && status.task_id === newTaskId) {
@@ -354,8 +366,12 @@ async function pollStatus() {
 
     // Stage 3: Historical mode — only allow same task
     if (isHistoricalMode.value && status.task_id !== routeTaskId.value) {
-      scanning.value = false
-      if (pollTimer) { clearInterval(pollTimer); pollTimer = null }
+      const wasTracking = scanning.value
+      stopPolling()
+      if (wasTracking) {
+        await refreshTaskContext(routeTaskId.value)
+        addLog('found', `扫描完成 · 发现 ${scanProgress.candidates} 个候选 · 跳过 ${scanProgress.skipped} · 失败 ${scanProgress.failed}`)
+      }
       return
     }
 
