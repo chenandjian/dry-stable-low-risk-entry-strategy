@@ -359,17 +359,20 @@ async function fetchMappedResults(taskId, strategyType) {
   }))
 }
 
-async function loadResults({ taskId, strategyType, context } = {}) {
+async function loadResults({ taskId, strategyType, context, pollSession } = {}) {
   const targetTaskId = normalizeTaskId(taskId)
   const targetStrategyType = strategyType || activeStrategyType.value
   try {
     const candidates = await fetchMappedResults(targetTaskId, targetStrategyType)
     if (context && !isCurrentViewContext(context)) return false
+    if (pollSession && !isCurrentPollSession(pollSession)) return false
     discoveries.value = dedupeDiscoveries(candidates)
     updateMetrics()
     return true
   } catch (e) {
-    if (!context || isCurrentViewContext(context)) { console.error('Load results failed:', e) }
+    if ((!context || isCurrentViewContext(context)) && (!pollSession || isCurrentPollSession(pollSession))) {
+      console.error('Load results failed:', e)
+    }
     return false
   }
 }
@@ -396,10 +399,33 @@ async function refreshTaskContext(context) {
   }
 }
 
-function stopPolling() {
+function clearPollTimer() {
   if (pollTimer) { clearInterval(pollTimer); pollTimer = null }
-  resetPollSession()
   scanning.value = false
+}
+
+function invalidatePolling() {
+  clearPollTimer()
+  resetPollSession()
+}
+
+// ROUND9: Shared completion handler — session stays valid through final refresh
+async function finalizeCompletedPoll({ context, session, historical }) {
+  try {
+    if (historical) {
+      const ok = await refreshTaskContext(context)
+      if (!ok || !isCurrentViewContext(context) || !isCurrentPollSession(session)) return false
+    } else {
+      const resultsOk = await loadResults({ taskId: scanProgress.taskId, strategyType: activeStrategyType.value, context, pollSession: session })
+      if (!resultsOk || !isCurrentViewContext(context) || !isCurrentPollSession(session)) return false
+      const failuresOk = await loadFailures({ taskId: scanProgress.taskId, context, pollSession: session })
+      if (!failuresOk || !isCurrentViewContext(context) || !isCurrentPollSession(session)) return false
+    }
+    addLog('found', `扫描完成 · 发现 ${scanProgress.candidates} 个候选 · 跳过 ${scanProgress.skipped} · 失败 ${scanProgress.failed}`)
+    return true
+  } finally {
+    if (isCurrentPollSession(session)) { resetPollSession() }
+  }
 }
 
 function resetTaskView() {
@@ -421,7 +447,7 @@ function resetTaskView() {
 
 // ROUND7: Unified context entry — beginViewContext called once per navigation
 async function switchTaskContext(newTaskId) {
-  stopPolling()
+  invalidatePolling()
   resetTaskView()
   scanError.value = ''
   const context = beginViewContext(newTaskId)
@@ -445,11 +471,9 @@ async function pollStatus() {
 
     if (context.taskId && status.task_id !== context.taskId) {
       const wasTracking = scanning.value
-      stopPolling()
+      clearPollTimer()
       if (wasTracking) {
-        const ok = await refreshTaskContext(context)
-        if (!ok || !isCurrentViewContext(context) || !isCurrentPollSession(session)) return
-        addLog('found', `扫描完成 · 发现 ${scanProgress.candidates} 个候选 · 跳过 ${scanProgress.skipped} · 失败 ${scanProgress.failed}`)
+        await finalizeCompletedPoll({ context, session, historical: true })
       }
       return
     }
@@ -464,17 +488,8 @@ async function pollStatus() {
     }
 
     if (!status.running && scanning.value) {
-      stopPolling()
-      if (context.taskId) {
-        const ok = await refreshTaskContext(context)
-        if (!ok || !isCurrentViewContext(context) || !isCurrentPollSession(session)) return
-      } else {
-        await loadResults({ taskId: scanProgress.taskId, strategyType: activeStrategyType.value, context, pollSession: session })
-        if (!isCurrentViewContext(context) || !isCurrentPollSession(session)) return
-        await loadFailures({ taskId: scanProgress.taskId, context, pollSession: session })
-        if (!isCurrentViewContext(context) || !isCurrentPollSession(session)) return
-      }
-      addLog('found', `扫描完成 · 发现 ${scanProgress.candidates} 个候选 · 跳过 ${scanProgress.skipped} · 失败 ${scanProgress.failed}`)
+      clearPollTimer()
+      await finalizeCompletedPoll({ context, session, historical: Boolean(context.taskId) })
       return
     }
 
@@ -635,7 +650,7 @@ onMounted(async () => {
   }
 })
 onUnmounted(() => {
-  if (pollTimer) clearInterval(pollTimer)
+  invalidatePolling()
   if (clockTimer) clearInterval(clockTimer)
 })
 
