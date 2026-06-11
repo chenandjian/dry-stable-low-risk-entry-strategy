@@ -409,19 +409,38 @@ function invalidatePolling() {
   resetPollSession()
 }
 
-// ROUND9: Shared completion handler — session stays valid through final refresh
+// ROUND10: Completion handler — stale → immediate return; interface failure → record + continue
 async function finalizeCompletedPoll({ context, session, historical }) {
+  const refreshFailures = []
+
   try {
     if (historical) {
-      const ok = await refreshTaskContext(context)
-      if (!ok || !isCurrentViewContext(context) || !isCurrentPollSession(session)) return false
+      const failOk = await loadFailures({ taskId: context.taskId, context, pollSession: session })
+      if (!isCurrentViewContext(context) || !isCurrentPollSession(session)) return false
+      if (!failOk) refreshFailures.push('历史任务详情')
+
+      const resultsOk = await loadResults({ taskId: context.taskId, strategyType: activeStrategyType.value, context, pollSession: session })
+      if (!isCurrentViewContext(context) || !isCurrentPollSession(session)) return false
+      if (!resultsOk) refreshFailures.push('最终候选')
     } else {
       const resultsOk = await loadResults({ taskId: scanProgress.taskId, strategyType: activeStrategyType.value, context, pollSession: session })
-      if (!resultsOk || !isCurrentViewContext(context) || !isCurrentPollSession(session)) return false
+      if (!isCurrentViewContext(context) || !isCurrentPollSession(session)) return false
+      if (!resultsOk) refreshFailures.push('最终候选')
+
       const failuresOk = await loadFailures({ taskId: scanProgress.taskId, context, pollSession: session })
-      if (!failuresOk || !isCurrentViewContext(context) || !isCurrentPollSession(session)) return false
+      if (!isCurrentViewContext(context) || !isCurrentPollSession(session)) return false
+      if (!failuresOk) refreshFailures.push('最终失败股票')
     }
+
     addLog('found', `扫描完成 · 发现 ${scanProgress.candidates} 个候选 · 跳过 ${scanProgress.skipped} · 失败 ${scanProgress.failed}`)
+
+    if (refreshFailures.length) {
+      const message = `扫描已完成，但${refreshFailures.join('、')}刷新失败，请刷新页面重试`
+      scanError.value = message
+      addLog('error', message)
+      return false
+    }
+
     return true
   } finally {
     if (isCurrentPollSession(session)) { resetPollSession() }
