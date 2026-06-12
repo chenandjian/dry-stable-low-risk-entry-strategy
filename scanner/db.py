@@ -1284,6 +1284,8 @@ def _ensure_strategy2_backtest_tables(conn: sqlite3.Connection):
         "backtest_engine_version='legacy-v1' "
         "WHERE credibility_status IS NULL"
     )
+    # task_stocks missing columns
+    _ensure_column(conn, "strategy2_backtest_task_stocks", "required_days", "INTEGER DEFAULT 0")
 
 
 def create_strategy2_backtest_task(task_id: str, payload: dict, config_snapshot: str):
