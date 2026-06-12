@@ -503,15 +503,19 @@ def run_strategy2_stock_backtest(
             buy_zone_high = opp.evaluation_snapshot.get("buy_zone_high", float("inf"))
         calculate_execution_outcome(opp, ohlc_data, date_to_index, buy_zone_high)
 
-        # 计算各周期 horizon（基于实际入场价）
-        signal_idx = date_to_index.get(opp.first_detected_date)
-        if signal_idx is not None:
-            future = ohlc_data[signal_idx + 1:]
+        # 计算各周期 horizon（仅当成功入场时）
+        if opp.entry_price > 0:
+            signal_idx = date_to_index.get(opp.first_detected_date)
+            if signal_idx is not None:
+                future = ohlc_data[signal_idx + 1:]
+                for h in HORIZONS:
+                    opp.horizons[str(h)] = calculate_horizon_performance(
+                        future, opp.entry_price, opp.stop_loss, h,
+                    )
+        else:
+            # 无入场 → 全部标记 UNOBSERVED
             for h in HORIZONS:
-                entry_price = opp.entry_price if opp.entry_price > 0 else opp.entry_close
-                opp.horizons[str(h)] = calculate_horizon_performance(
-                    future, entry_price, opp.stop_loss, h,
-                )
+                opp.horizons[str(h)] = HorizonPerformance(horizon_days=h, result="UNOBSERVED")
 
     return {
         "signals": signals,

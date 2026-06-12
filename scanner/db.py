@@ -1104,7 +1104,7 @@ def _deserialize_strategy2_candidate(row: dict) -> dict:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def _ensure_strategy2_backtest_tables(conn: sqlite3.Connection):
-    """Create strategy2 backtest tables if not exists."""
+    """Create strategy2 backtest tables if not exists (Phase 1 compatible migration)."""
     conn.execute('''
         CREATE TABLE IF NOT EXISTS strategy2_backtest_tasks (
             id                       TEXT PRIMARY KEY,
@@ -1113,6 +1113,9 @@ def _ensure_strategy2_backtest_tables(conn: sqlite3.Connection):
             requested_end_date       TEXT,
             actual_start_date        TEXT,
             actual_end_date          TEXT,
+            actual_evaluation_start_date TEXT,
+            actual_evaluation_end_date TEXT,
+            observation_data_end_date   TEXT,
             scope_type               TEXT NOT NULL DEFAULT 'market',
             requested_codes          TEXT,
             max_stocks               INTEGER,
@@ -1128,7 +1131,19 @@ def _ensure_strategy2_backtest_tables(conn: sqlite3.Connection):
             elapsed_seconds          REAL,
             current_code             TEXT,
             current_name             TEXT,
-            error                    TEXT
+            error                    TEXT,
+            backtest_engine_version  TEXT,
+            strategy_engine_version  TEXT,
+            credibility_status       TEXT,
+            execution_model          TEXT,
+            sampling_method          TEXT,
+            sampling_seed            INTEGER,
+            data_snapshot_date       TEXT,
+            estimated_evaluations    INTEGER DEFAULT 0,
+            completed_evaluations    INTEGER DEFAULT 0,
+            raw_signals_count        INTEGER DEFAULT 0,
+            evaluation_error_days    INTEGER DEFAULT 0,
+            summary_json             TEXT
         )
     ''')
     conn.execute('''
@@ -1158,6 +1173,27 @@ def _ensure_strategy2_backtest_tables(conn: sqlite3.Connection):
         )
     ''')
     conn.execute('''
+        CREATE TABLE IF NOT EXISTS strategy2_backtest_signals (
+            id                    INTEGER PRIMARY KEY AUTOINCREMENT,
+            task_id               TEXT NOT NULL,
+            code                  TEXT NOT NULL,
+            name                  TEXT,
+            evaluation_date       TEXT NOT NULL,
+            evaluation_index      INTEGER NOT NULL,
+            score                 INTEGER NOT NULL,
+            level                 TEXT,
+            current_close         REAL NOT NULL,
+            stop_loss             REAL,
+            risk_ratio            REAL,
+            volume_dry_score      INTEGER,
+            price_stable_score    INTEGER,
+            trend_type            TEXT,
+            trend_evidence_score  INTEGER,
+            evaluation_snapshot   TEXT NOT NULL,
+            UNIQUE (task_id, code, evaluation_date)
+        )
+    ''')
+    conn.execute('''
         CREATE TABLE IF NOT EXISTS strategy2_backtest_insufficient_stocks (
             id               INTEGER PRIMARY KEY AUTOINCREMENT,
             task_id          TEXT NOT NULL,
@@ -1174,21 +1210,78 @@ def _ensure_strategy2_backtest_tables(conn: sqlite3.Connection):
             FOREIGN KEY (task_id) REFERENCES strategy2_backtest_tasks(id)
         )
     ''')
+    conn.execute('''
+        CREATE TABLE IF NOT EXISTS strategy2_backtest_task_stocks (
+            task_id                  TEXT NOT NULL,
+            code                     TEXT NOT NULL,
+            name                     TEXT,
+            status                   TEXT NOT NULL DEFAULT 'PENDING',
+            available_days           INTEGER DEFAULT 0,
+            actual_eval_start_date   TEXT,
+            actual_eval_end_date     TEXT,
+            evaluation_days          INTEGER DEFAULT 0,
+            liquidity_filtered_days  INTEGER DEFAULT 0,
+            trend_filtered_days      INTEGER DEFAULT 0,
+            rejection_failed_days    INTEGER DEFAULT 0,
+            score_failed_days        INTEGER DEFAULT 0,
+            risk_failed_days         INTEGER DEFAULT 0,
+            invalid_data_days        INTEGER DEFAULT 0,
+            evaluation_error_days    INTEGER DEFAULT 0,
+            raw_signals_count        INTEGER DEFAULT 0,
+            opportunities_count      INTEGER DEFAULT 0,
+            error_code               TEXT,
+            error_detail             TEXT,
+            started_at               TEXT,
+            finished_at              TEXT,
+            PRIMARY KEY (task_id, code)
+        )
+    ''')
+    # Indexes
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_s2_bt_task_status ON strategy2_backtest_tasks(status, started_at DESC)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_s2_bt_opp_task ON strategy2_backtest_opportunities(task_id, first_detected_date)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_s2_bt_opp_stock ON strategy2_backtest_opportunities(task_id, code, first_detected_date)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_s2_bt_insuf_task ON strategy2_backtest_insufficient_stocks(task_id, reason_code)")
+    # Phase 1 unique indexes
+    conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS uq_s2_bt_signal ON strategy2_backtest_signals(task_id, code, evaluation_date)")
+    conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS uq_s2_bt_opp ON strategy2_backtest_opportunities(task_id, code, first_detected_date)")
+
+    # Compatible migration: add execution columns to opportunities
+    _ensure_column(conn, "strategy2_backtest_opportunities", "first_signal_id", "INTEGER")
+    _ensure_column(conn, "strategy2_backtest_opportunities", "last_signal_id", "INTEGER")
+    _ensure_column(conn, "strategy2_backtest_opportunities", "signal_count", "INTEGER DEFAULT 0")
+    _ensure_column(conn, "strategy2_backtest_opportunities", "execution_model", "TEXT")
+    _ensure_column(conn, "strategy2_backtest_opportunities", "entry_date", "TEXT")
+    _ensure_column(conn, "strategy2_backtest_opportunities", "entry_price", "REAL")
+    _ensure_column(conn, "strategy2_backtest_opportunities", "exit_date", "TEXT")
+    _ensure_column(conn, "strategy2_backtest_opportunities", "exit_price", "REAL")
+    _ensure_column(conn, "strategy2_backtest_opportunities", "exit_reason", "TEXT")
+    _ensure_column(conn, "strategy2_backtest_opportunities", "realized_return", "REAL")
+    _ensure_column(conn, "strategy2_backtest_opportunities", "mark_to_market_end_return", "REAL")
+    _ensure_column(conn, "strategy2_backtest_opportunities", "holding_days", "INTEGER DEFAULT 0")
+    _ensure_column(conn, "strategy2_backtest_opportunities", "available_forward_days", "INTEGER DEFAULT 0")
+
+    # Task table migration: add Phase 1 fields
+    _ensure_column(conn, "strategy2_backtest_tasks", "backtest_engine_version", "TEXT")
+    _ensure_column(conn, "strategy2_backtest_tasks", "strategy_engine_version", "TEXT")
+    _ensure_column(conn, "strategy2_backtest_tasks", "credibility_status", "TEXT")
+    _ensure_column(conn, "strategy2_backtest_tasks", "execution_model", "TEXT")
+    _ensure_column(conn, "strategy2_backtest_tasks", "sampling_method", "TEXT")
+    _ensure_column(conn, "strategy2_backtest_tasks", "sampling_seed", "INTEGER")
+    _ensure_column(conn, "strategy2_backtest_tasks", "data_snapshot_date", "TEXT")
+    _ensure_column(conn, "strategy2_backtest_tasks", "actual_evaluation_start_date", "TEXT")
+    _ensure_column(conn, "strategy2_backtest_tasks", "actual_evaluation_end_date", "TEXT")
+    _ensure_column(conn, "strategy2_backtest_tasks", "observation_data_end_date", "TEXT")
+    _ensure_column(conn, "strategy2_backtest_tasks", "estimated_evaluations", "INTEGER DEFAULT 0")
+    _ensure_column(conn, "strategy2_backtest_tasks", "completed_evaluations", "INTEGER DEFAULT 0")
+    _ensure_column(conn, "strategy2_backtest_tasks", "raw_signals_count", "INTEGER DEFAULT 0")
+    _ensure_column(conn, "strategy2_backtest_tasks", "evaluation_error_days", "INTEGER DEFAULT 0")
+    _ensure_column(conn, "strategy2_backtest_tasks", "summary_json", "TEXT")
+
+    # Mark old tasks as untrusted
     conn.execute(
-        "CREATE INDEX IF NOT EXISTS idx_s2_bt_task_status "
-        "ON strategy2_backtest_tasks(status, started_at DESC)"
-    )
-    conn.execute(
-        "CREATE INDEX IF NOT EXISTS idx_s2_bt_opp_task "
-        "ON strategy2_backtest_opportunities(task_id, first_detected_date)"
-    )
-    conn.execute(
-        "CREATE INDEX IF NOT EXISTS idx_s2_bt_opp_stock "
-        "ON strategy2_backtest_opportunities(task_id, code, first_detected_date)"
-    )
-    conn.execute(
-        "CREATE INDEX IF NOT EXISTS idx_s2_bt_insuf_task "
-        "ON strategy2_backtest_insufficient_stocks(task_id, reason_code)"
+        "UPDATE strategy2_backtest_tasks SET credibility_status='LEGACY_UNTRUSTED', "
+        "backtest_engine_version='legacy-v1' "
+        "WHERE credibility_status IS NULL"
     )
 
 
@@ -1291,8 +1384,11 @@ def save_strategy2_backtest_opportunity(task_id: str, opp: dict):
            (task_id, code, name, first_detected_date, last_detected_date,
             consecutive_hit_days, first_score, max_score, level,
             entry_close, stop_loss, risk_ratio, trend_type, trend_evidence_score,
-            evaluation_snapshot, horizon_3, horizon_5, horizon_10, horizon_20)
-           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            evaluation_snapshot, horizon_3, horizon_5, horizon_10, horizon_20,
+            signal_count, execution_model, entry_date, entry_price,
+            exit_date, exit_price, exit_reason, realized_return,
+            mark_to_market_end_return, holding_days, available_forward_days)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
         (task_id, opp["code"], opp.get("name", ""), opp["first_detected_date"],
          opp["last_detected_date"], opp["consecutive_hit_days"],
          opp["first_score"], opp["max_score"], opp.get("level", ""),
@@ -1300,9 +1396,46 @@ def save_strategy2_backtest_opportunity(task_id: str, opp: dict):
          opp.get("trend_type", ""), opp.get("trend_evidence_score", 0),
          opp.get("evaluation_snapshot", "{}"),
          opp.get("horizon_3", "{}"), opp.get("horizon_5", "{}"),
-         opp.get("horizon_10", "{}"), opp.get("horizon_20", "{}")),
+         opp.get("horizon_10", "{}"), opp.get("horizon_20", "{}"),
+         opp.get("signal_count", 0),
+         opp.get("execution_model", ""), opp.get("entry_date", ""),
+         opp.get("entry_price", 0), opp.get("exit_date", ""),
+         opp.get("exit_price", 0), opp.get("exit_reason", ""),
+         opp.get("realized_return", 0), opp.get("mark_to_market_end_return", 0),
+         opp.get("holding_days", 0), opp.get("available_forward_days", 0)),
     )
     conn.commit()
+
+
+def save_strategy2_backtest_task_stock(task_id: str, code: str, **kwargs):
+    conn = get_conn()
+    existing = conn.execute(
+        "SELECT 1 FROM strategy2_backtest_task_stocks WHERE task_id=? AND code=?", (task_id, code)
+    ).fetchone()
+    if existing:
+        sets = ", ".join(f"{k}=?" for k in kwargs)
+        vals = list(kwargs.values()) + [task_id, code]
+        conn.execute(f"UPDATE strategy2_backtest_task_stocks SET {sets} WHERE task_id=? AND code=?", vals)
+    else:
+        cols = ["task_id", "code"] + list(kwargs.keys())
+        placeholders = ", ".join("?" for _ in cols)
+        vals = [task_id, code] + list(kwargs.values())
+        conn.execute(f"INSERT INTO strategy2_backtest_task_stocks ({', '.join(cols)}) VALUES ({placeholders})", vals)
+    conn.commit()
+
+
+def get_strategy2_backtest_task_stocks(task_id: str, status: str = None) -> list[dict]:
+    conn = get_conn()
+    if status:
+        rows = conn.execute(
+            "SELECT * FROM strategy2_backtest_task_stocks WHERE task_id=? AND status=? ORDER BY code",
+            (task_id, status)).fetchall()
+    else:
+        rows = conn.execute(
+            "SELECT * FROM strategy2_backtest_task_stocks WHERE task_id=? ORDER BY code",
+            (task_id,)).fetchall()
+    cols = [d[1] for d in conn.execute("PRAGMA table_info(strategy2_backtest_task_stocks)")]
+    return [dict(zip(cols, r)) for r in rows]
 
 
 def get_strategy2_backtest_opportunities(

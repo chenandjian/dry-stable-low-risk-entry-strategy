@@ -1315,24 +1315,63 @@ async def start_strategy2_backtest(payload: dict):
     if conflict:
         return conflict
 
-    # 检查数据库是否有日线数据
+    # ── 参数验证（请求线程内同步完成）──
+    import random as _random, string as _string
+    codes = payload.get("codes") or []
+    has_max = "maxStocks" in payload
+    max_stocks_raw = payload.get("maxStocks")
+
+    if has_max and max_stocks_raw is None:
+        max_stocks_val = None  # 显式 null → 全市场
+    elif not has_max:
+        max_stocks_val = 200   # 未传 → 默认 200
+    elif isinstance(max_stocks_raw, (int, float)) and max_stocks_raw > 0:
+        max_stocks_val = int(max_stocks_raw)
+    else:
+        return JSONResponse({"error": "INVALID_PARAM", "message": "maxStocks must be positive integer or null"}, status_code=422)
+
+    # 验证日期
+    start_date = payload.get("startDate", "")
+    end_date = payload.get("endDate", "")
+    if start_date and end_date and start_date > end_date:
+        return JSONResponse({"error": "INVALID_PARAM", "message": "startDate must be <= endDate"}, status_code=422)
+
+    # 检查数据库
     conn = db.get_conn()
     has_data = conn.execute("SELECT COUNT(*) FROM daily_ohlc").fetchone()[0]
     if has_data == 0:
-        return JSONResponse({
-            "error": "NO_LOCAL_DATA",
-            "message": "本地数据库无日线数据，无法执行回测",
-        }, status_code=400)
+        return JSONResponse({"error": "NO_LOCAL_DATA", "message": "本地数据库无日线数据"}, status_code=400)
 
-    task_id = datetime.datetime.now().strftime("s2bt-%Y%m%d-%H%M%S")
+    # ── 解析股票范围（请求线程内完成，不跨线程用 conn）──
+    if codes:
+        resolved_stocks = [{"code": c, "name": ""} for c in codes]
+        if max_stocks_val:
+            resolved_stocks = resolved_stocks[:max_stocks_val]
+    else:
+        pool = db.get_stock_pool()
+        if not pool:
+            codes_list = [r[0] for r in conn.execute("SELECT DISTINCT code FROM daily_ohlc").fetchall()]
+            resolved_stocks = [{"code": c, "name": ""} for c in codes_list]
+        else:
+            resolved_stocks = [{"code": s["code"], "name": s.get("name", "")} for s in pool]
+        if max_stocks_val:
+            resolved_stocks = resolved_stocks[:max_stocks_val]
+
+    # ── 创建任务 ──
+    suffix = ''.join(_random.choices(_string.ascii_lowercase + _string.digits, k=6))
+    task_id = datetime.datetime.now().strftime(f"s2bt-%Y%m%d-%H%M%S-{suffix}")
     config_json = json.dumps(config, ensure_ascii=False)
     db.create_strategy2_backtest_task(task_id, payload, config_json)
+    db.update_strategy2_backtest_task(task_id, status="running",
+        backtest_engine_version="phase1-v1", credibility_status="TRUSTED_BASELINE",
+        execution_model=payload.get("executionModel", "NEXT_OPEN"),
+        data_snapshot_date=datetime.datetime.now().strftime("%Y-%m-%d"))
 
     _backtest_running["running"] = True
     _backtest_running["task_id"] = task_id
     _backtest_running["started_at"] = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     _backtest_running["stats"] = {
-        "total_stocks": 0, "processed_stocks": 0,
+        "total_stocks": len(resolved_stocks), "processed_stocks": 0,
         "current_code": "--", "current_name": "--",
         "opportunities_count": 0, "insufficient_stocks_count": 0,
     }
@@ -1340,30 +1379,13 @@ async def start_strategy2_backtest(payload: dict):
     def run_backtest():
         import time as _time
         from strategy2.backtester import run_strategy2_stock_backtest
+        t_start = _time.monotonic()
 
         try:
-            codes = payload.get("codes") or []
-            max_stocks = payload.get("maxStocks")
-            # 缺省 200；null=全市场；0/负数=参数错误（前端已验证）
-            if max_stocks is None:
-                max_stocks = 200  # 缺省
-            elif max_stocks <= 0:
-                db.update_strategy2_backtest_task(task_id, status="failed", error="maxStocks must be positive or null")
-                return
-
-            if codes:
-                stocks = [{"code": c, "name": ""} for c in codes]
-                stocks = stocks[:max_stocks]
-            else:
-                # 只使用本地 stock_pool，禁止外部数据源
-                pool = db.get_stock_pool()
-                if not pool:
-                    codes_from_ohlc = [r[0] for r in conn.execute(
-                        "SELECT DISTINCT code FROM daily_ohlc LIMIT ?", (max_stocks,)
-                    ).fetchall()]
-                    stocks = [{"code": c, "name": ""} for c in codes_from_ohlc]
-                else:
-                    stocks = [{"code": s["code"], "name": s.get("name", "")} for s in pool[:max_stocks]]
+            stocks = resolved_stocks
+            total = len(stocks)
+            db.update_strategy2_backtest_task(task_id, total_stocks=total)
+            _backtest_running["stats"]["total_stocks"] = total
 
             total = len(stocks)
             db.update_strategy2_backtest_task(task_id, total_stocks=total)
@@ -1427,16 +1449,18 @@ async def start_strategy2_backtest(payload: dict):
                 db.save_strategy2_backtest_insufficient_stocks(task_id, insufficient)
 
             # 汇总更新
+            elapsed = round(_time.monotonic() - t_start, 1)
+            status = "completed" if failed_count == 0 else "completed_with_errors"
             now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             db.update_strategy2_backtest_task(
                 task_id,
-                status="completed",
+                status=status,
                 processed_stocks=total,
                 stocks_with_opportunities=stocks_with_opps,
                 opportunities_count=len(all_opps),
                 insufficient_stocks_count=len(insufficient),
                 failed_stocks_count=failed_count,
-                finished_at=now,
+                finished_at=now, elapsed_seconds=elapsed,
                 actual_start_date=payload.get("startDate", ""),
                 actual_end_date=payload.get("endDate", ""),
             )
@@ -1486,11 +1510,38 @@ async def strategy2_backtest_detail(task_id: str):
 
 @app.get("/api/strategy2/backtests/{task_id}/opportunities")
 async def strategy2_backtest_opportunities(
-    task_id: str, code: str = None, limit: int = 500, offset: int = 0,
+    task_id: str, code: str = None, limit: int = 100, offset: int = 0,
 ):
-    """查询回测机会明细。"""
+    """查询回测机会明细（分页，返回真实总数）。"""
+    total = db.get_conn().execute(
+        "SELECT COUNT(*) FROM strategy2_backtest_opportunities WHERE task_id=?",
+        (task_id,),
+    ).fetchone()[0]
     opps = db.get_strategy2_backtest_opportunities(task_id, code=code, limit=limit, offset=offset)
-    return {"opportunities": opps, "total": len(opps)}
+    return {"items": opps, "total": total, "limit": limit, "offset": offset, "hasMore": (offset + limit) < total}
+
+
+@app.get("/api/strategy2/backtests/{task_id}/signals")
+async def strategy2_backtest_signals(
+    task_id: str, code: str = None, limit: int = 100, offset: int = 0,
+):
+    """查询原始命中信号。"""
+    conn = db.get_conn()
+    if code:
+        total = conn.execute(
+            "SELECT COUNT(*) FROM strategy2_backtest_signals WHERE task_id=? AND code=?",
+            (task_id, code)).fetchone()[0]
+        rows = conn.execute(
+            "SELECT * FROM strategy2_backtest_signals WHERE task_id=? AND code=? ORDER BY evaluation_index LIMIT ? OFFSET ?",
+            (task_id, code, limit, offset)).fetchall()
+    else:
+        total = conn.execute(
+            "SELECT COUNT(*) FROM strategy2_backtest_signals WHERE task_id=?", (task_id,)).fetchone()[0]
+        rows = conn.execute(
+            "SELECT * FROM strategy2_backtest_signals WHERE task_id=? ORDER BY evaluation_index LIMIT ? OFFSET ?",
+            (task_id, limit, offset)).fetchall()
+    cols = [d[1] for d in conn.execute("PRAGMA table_info(strategy2_backtest_signals)")]
+    return {"items": [dict(zip(cols, r)) for r in rows], "total": total, "limit": limit, "offset": offset, "hasMore": (offset + limit) < total}
 
 
 @app.get("/api/strategy2/backtests/{task_id}/insufficient-stocks")
