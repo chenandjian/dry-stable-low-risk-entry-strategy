@@ -5,6 +5,7 @@ Single database file at data/cuphandle.db with tables:
   stock_pool, daily_ohlc, scan_tasks, candidates.
 """
 
+import json
 import sqlite3
 import os
 import threading
@@ -1388,7 +1389,7 @@ def save_strategy2_backtest_opportunity(task_id: str, opp: dict):
             signal_count, execution_model, entry_date, entry_price,
             exit_date, exit_price, exit_reason, realized_return,
             mark_to_market_end_return, holding_days, available_forward_days)
-           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
         (task_id, opp["code"], opp.get("name", ""), opp["first_detected_date"],
          opp["last_detected_date"], opp["consecutive_hit_days"],
          opp["first_score"], opp["max_score"], opp.get("level", ""),

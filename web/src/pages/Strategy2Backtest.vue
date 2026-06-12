@@ -65,8 +65,8 @@
     </div>
 
     <!-- Opportunities -->
-    <div class="panel" v-if="opportunities.length">
-      <h3>机会明细 ({{ opportunities.length }})</h3>
+    <div class="panel" v-if="oppsTotal > 0">
+      <h3>机会明细 ({{ oppsTotal }}) <span v-if="oppsHasMore" class="muted">当前显示 {{ opportunities.length }} 条</span></h3>
       <table class="opp-table">
         <thead>
           <tr><th>股票</th><th>首次命中</th><th>最后命中</th><th>连续</th><th>分数</th><th>最高分</th><th>风险比</th><th>3日</th><th>5日</th><th>10日</th><th>20日</th></tr>
@@ -87,6 +87,11 @@
           </tr>
         </tbody>
       </table>
+      <div class="pagination" v-if="oppsHasMore || oppPage > 1">
+        <button :disabled="oppPage <= 1" @click="loadOpps(oppPage - 1)">上一页</button>
+        <span>第 {{ oppPage }} 页 / 共 {{ Math.ceil(oppsTotal / oppLimit) }} 页</span>
+        <button :disabled="!oppsHasMore" @click="loadOpps(oppPage + 1)">下一页</button>
+      </div>
     </div>
 
     <!-- Insufficient Stocks -->
@@ -133,6 +138,7 @@ export default {
       running: false, starting: false, error: '',
       task: null, tasks: [], opportunities: [], insufficient: [],
       stats: {}, pollTimer: null, horizons: ['3', '5', '10', '20'],
+      oppsTotal: 0, oppsHasMore: false, oppPage: 1, oppLimit: 100,
     }
   },
   computed: {
@@ -148,7 +154,11 @@ export default {
       if (this.task?.status === 'failed') return 'red'
       return ''
     },
-    horizonStats() { return null },  // populated by loadTask
+    horizonStats() {
+      if (this.task?.summary?.horizon_stats) return this.task.summary.horizon_stats
+      if (this.task?.horizon_stats) return this.task.horizon_stats
+      return null
+    },
   },
   async mounted() {
     await this.loadTasks()
@@ -191,19 +201,29 @@ export default {
     async loadTask(taskId) {
       const api = useApi()
       this.task = await api.getStrategy2BacktestTask(taskId)
-      const oRes = await api.getStrategy2BacktestOpportunities(taskId)
-      this.opportunities = (oRes.opportunities || []).map(o => {
+      this.oppPage = 1
+      await this.loadOpps(1)
+      const iRes = await api.getStrategy2BacktestInsufficientStocks(taskId)
+      this.insufficient = iRes.stocks || []
+    },
+    async loadOpps(page) {
+      const api = useApi()
+      this.oppPage = page
+      const offset = (page - 1) * this.oppLimit
+      const oRes = await api.getStrategy2BacktestOpportunities(this.task.id, { limit: this.oppLimit, offset })
+      this.opportunities = (oRes.items || oRes.opportunities || []).map(o => {
         try { o._h3 = JSON.parse(o.horizon_3 || '{}') } catch {}
         try { o._h5 = JSON.parse(o.horizon_5 || '{}') } catch {}
         try { o._h10 = JSON.parse(o.horizon_10 || '{}') } catch {}
         try { o._h20 = JSON.parse(o.horizon_20 || '{}') } catch {}
         return o
       })
-      const iRes = await api.getStrategy2BacktestInsufficientStocks(taskId)
-      this.insufficient = iRes.stocks || []
+      this.oppsTotal = oRes.total || this.opportunities.length
+      this.oppsHasMore = oRes.hasMore || false
     },
     hs(h, key) {
-      const stats = (this.task && this.task.horizon_stats) ? this.task.horizon_stats : {}
+      const stats = this.horizonStats
+      if (!stats) return '--'
       const hData = stats[h]
       if (!hData) return '--'
       return hData[key] != null ? hData[key] : '--'
@@ -264,4 +284,7 @@ td { padding: 6px 8px; border-bottom: 1px solid #222; }
 .task-row { display: flex; gap: 20px; padding: 8px 12px; border-bottom: 1px solid #222; cursor: pointer; font-size: 0.8rem; }
 .task-row:hover { background: rgba(79,125,255,0.05); }
 .empty { text-align: center; padding: 30px; color: #666; }
+.pagination { display: flex; gap: 12px; align-items: center; justify-content: center; padding: 12px 0; font-size: 0.8rem; color: #aaa; }
+.pagination button { padding: 4px 12px; background: #2a2a2a; border: 1px solid #444; color: #ccc; border-radius: 3px; cursor: pointer; }
+.pagination button:disabled { opacity: 0.4; cursor: not-allowed; }
 </style>

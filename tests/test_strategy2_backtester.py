@@ -154,3 +154,35 @@ def test_summary_counts():
 
 def test_empty_no_crash():
     assert aggregate_backtest_summary([]).total_opportunities == 0
+
+
+# ═══ DB round-trip tests (Batch A) ═══
+
+def test_signal_save_roundtrip(tmp_path):
+    """新数据库保存原始信号 → 查询一致。"""
+    import scanner.db as db, os
+    p = str(tmp_path / "test.db")
+    db.init_db(p)
+    signal = type('s',(),{'code':'000001','name':'t','evaluation_date':'2025-01-01','evaluation_index':0,'score':70,'level':'','current_close':10.0,'stop_loss':9.5,'risk_ratio':0.03,'volume_dry_score':20,'price_stable_score':50,'trend_type':'','trend_evidence_score':3,'evaluation_snapshot':{'k':'v'}})()
+    db.save_strategy2_backtest_signal('t1', signal)
+    rows = db.get_conn().execute("SELECT * FROM strategy2_backtest_signals WHERE task_id='t1'").fetchall()
+    assert len(rows) == 1
+    # 幂等：重复保存不增加
+    db.save_strategy2_backtest_signal('t1', signal)
+    assert db.get_conn().execute("SELECT COUNT(*) FROM strategy2_backtest_signals WHERE task_id='t1'").fetchone()[0] == 1
+
+def test_opportunity_save_with_execution_fields(tmp_path):
+    """保存带执行字段的机会 → round-trip 一致。"""
+    import scanner.db as db, os
+    p = str(tmp_path / "test.db")
+    db.init_db(p)
+    opp = {'code':'t','name':'','first_detected_date':'2025-01-01','last_detected_date':'2025-01-02','consecutive_hit_days':2,'first_score':70,'max_score':75,'level':'重点观察','entry_close':10.0,'stop_loss':9.5,'risk_ratio':0.03,'trend_type':'UPTREND_OR_SIDEWAYS','trend_evidence_score':4,'evaluation_snapshot':'{}','horizon_3':'{}','horizon_5':'{}','horizon_10':'{}','horizon_20':'{}','signal_count':2,'execution_model':'NEXT_OPEN','entry_date':'2025-01-03','entry_price':10.1,'exit_date':'2025-01-05','exit_price':10.5,'exit_reason':'TARGET','realized_return':0.0396,'mark_to_market_end_return':0.04,'holding_days':2,'available_forward_days':20}
+    db.save_strategy2_backtest_opportunity('t2', opp)
+    rows = db.get_strategy2_backtest_opportunities('t2')
+    assert len(rows) == 1
+    r = rows[0]
+    assert r['execution_model'] == 'NEXT_OPEN'
+    assert r['entry_price'] == 10.1
+    assert r['exit_reason'] == 'TARGET'
+    assert r['exit_date'] == '2025-01-05'
+    assert r['signal_count'] == 2
