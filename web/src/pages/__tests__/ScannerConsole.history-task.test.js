@@ -220,12 +220,17 @@ describe('ScannerConsole history task context', () => {
 
   // ═══ ROUND11: live completion [18] — final data visible ═══
   it('[18] live completion shows final failures and candidates', async () => {
-    mockApi.getScanStatus.mockResolvedValue({ running: true, task_id: 's1-live', strategyType: 'STRATEGY_1_CUP_HANDLE', stats: { processed: 80, total_stocks: 100, candidates_found: 2 } })
+    let callCount = 0
+    mockApi.getScanStatus.mockImplementation(() => {
+      callCount++
+      if (callCount === 1) return Promise.resolve({ running: true, task_id: 's1-live', strategyType: 'STRATEGY_1_CUP_HANDLE', stats: { processed: 80, total_stocks: 100, candidates_found: 2 } })
+      return Promise.resolve({ running: false, task_id: 's1-live', strategyType: 'STRATEGY_1_CUP_HANDLE', stats: { processed: 100, total_stocks: 100, candidates_found: 2, failed: 1 } })
+    })
     mockApi.getCandidates.mockResolvedValue({ candidates: [{ code: '600001', name: 'live-cand', score: 85 }] })
     mockApi.getTaskStocks.mockResolvedValue({ ok: true, total: 1, strategy_type: 'STRATEGY_1_CUP_HANDLE', stocks: [{ code: '000999', name: 'final-fail', status: 'failed', status_reason: 'ALL_DATA_SOURCES_FAILED' }], summary: { total_stocks: 100, processed: 100, failed: 1, candidate: 2, scanned: 97, skipped: 0, latest_trade_date: '2026-06-10', stock_pool_source: 'akshare' } })
     wrapper = mountPage(); await flushUi()
-    // Live running, poll started. Task stocks API returns final summary with failures.
-    expect(wrapper.get('[data-test="scan-summary"]').text()).toContain('processed=100')
+    // Advance timer to trigger second poll which gets running=false
+    await vi.advanceTimersToNextTimerAsync(); await flushUi()
     expect(wrapper.text()).toContain('000999')
   })
 
@@ -299,11 +304,16 @@ describe('ScannerConsole history task context', () => {
     // Structural: Round10 no-short-circuit preserved; Round11 applySummary only in historical path
   })
   it('[23] live failure stock terminal refresh fails — candidates still loaded', async () => {
-    mockApi.getScanStatus.mockResolvedValue({ running: true, task_id: 's1-live', strategyType: 'STRATEGY_1_CUP_HANDLE', stats: { processed: 80, total_stocks: 100, candidates_found: 2 } })
+    let callCount = 0
+    mockApi.getScanStatus.mockImplementation(() => {
+      callCount++
+      if (callCount === 1) return Promise.resolve({ running: true, task_id: 's1-live', strategyType: 'STRATEGY_1_CUP_HANDLE', stats: { processed: 80, total_stocks: 100, candidates_found: 2 } })
+      return Promise.resolve({ running: false, task_id: 's1-live', strategyType: 'STRATEGY_1_CUP_HANDLE', stats: { processed: 100, total_stocks: 100, candidates_found: 2 } })
+    })
     mockApi.getCandidates.mockResolvedValue({ candidates: [{ code: '600001', name: 'live-cand', score: 85 }] })
     mockApi.getTaskStocks.mockResolvedValue({ ok: true, total: 0, strategy_type: 'STRATEGY_1_CUP_HANDLE', stocks: [], summary: { total_stocks: 100, processed: 80 } })
     wrapper = mountPage(); await flushUi()
-    // finalizeCompletedPoll: loadFailures failure does not block loadResults
+    await vi.advanceTimersToNextTimerAsync(); await flushUi()
     expect(wrapper.text()).toContain('600001')
   })
   it('[24] historical candidate terminal refresh fails — details + summary still applied', async () => {
