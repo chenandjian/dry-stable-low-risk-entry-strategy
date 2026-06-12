@@ -1286,6 +1286,8 @@ def _ensure_strategy2_backtest_tables(conn: sqlite3.Connection):
     )
     # task_stocks missing columns
     _ensure_column(conn, "strategy2_backtest_task_stocks", "required_days", "INTEGER DEFAULT 0")
+    _ensure_column(conn, "strategy2_backtest_task_stocks", "observation_data_end_date", "TEXT")
+    _ensure_column(conn, "strategy2_backtest_task_stocks", "available_days", "INTEGER DEFAULT 0")
 
 
 def create_strategy2_backtest_task(task_id: str, payload: dict, config_snapshot: str):
@@ -1439,6 +1441,258 @@ def get_strategy2_backtest_task_stocks(task_id: str, status: str = None) -> list
             (task_id,)).fetchall()
     cols = [d[1] for d in conn.execute("PRAGMA table_info(strategy2_backtest_task_stocks)")]
     return [dict(zip(cols, r)) for r in rows]
+
+
+def build_strategy2_backtest_summary(task_id: str) -> dict:
+    """从数据库完整明细生成汇总（不接受分页结果）。"""
+    import statistics as _st
+    conn = get_conn()
+    opps = conn.execute(
+        "SELECT * FROM strategy2_backtest_opportunities WHERE task_id=?", (task_id,)
+    ).fetchall()
+    cols = [d[1] for d in conn.execute("PRAGMA table_info(strategy2_backtest_opportunities)")]
+    opps = [dict(zip(cols, r)) for r in opps]
+
+    if not opps:
+        return {"horizon_stats": {}, "execution_stats": {}, "funnel": {}, "integrity": {"errors": ["no_opportunities"]}}
+
+    # Horizon stats
+    horizon_stats = {}
+    for h in ["3", "5", "10", "20"]:
+        results = {"observed": 0, "success": 0, "failed": 0, "unresolved": 0, "unobserved": 0,
+                   "realized_returns": [], "holding_days_list": []}
+        for o in opps:
+            try:
+                raw = o.get(f"horizon_{h}", "{}")
+                d = __import__("json").loads(raw) if raw else {}
+            except Exception:
+                d = {}
+            r = d.get("result", "UNOBSERVED")
+            if r == "UNOBSERVED":
+                results["unobserved"] += 1
+            else:
+                results["observed"] += 1
+                results[r.lower() + "d"] = results.get(r.lower() + "d", 0) + 1  # no, let me use explicit keys
+        # Re-do correctly
+        results = {"observed": 0, "success": 0, "failed": 0, "unresolved": 0, "unobserved": 0,
+                   "realized_returns": [], "holding_days_list": []}
+        for o in opps:
+            try:
+                raw = o.get(f"horizon_{h}", "{}")
+                d = __import__("json").loads(raw) if raw else {}
+            except Exception:
+                d = {}
+            r = d.get("result", "UNOBSERVED")
+            if r == "UNOBSERVED":
+                results["unobserved"] += 1
+            else:
+                results["observed"] += 1
+                if r == "SUCCESS":
+                    results["success"] += 1
+                    results["realized_returns"].append(o.get("realized_return") or 0)
+                    if o.get("holding_days"):
+                        results["holding_days_list"].append(o["holding_days"])
+                elif r == "FAILED":
+                    results["failed"] += 1
+                    results["realized_returns"].append(o.get("realized_return") or 0)
+                    if o.get("holding_days"):
+                        results["holding_days_list"].append(o["holding_days"])
+                elif r == "UNRESOLVED":
+                    results["unresolved"] += 1
+
+        obs = results["observed"]
+        horizon_stats[h] = {
+            "observed": obs, "unobserved": results["unobserved"],
+            "success": results["success"], "failed": results["failed"],
+            "unresolved": results["unresolved"],
+            "success_rate": round(results["success"] / obs * 100, 2) if obs else 0,
+            "failed_rate": round(results["failed"] / obs * 100, 2) if obs else 0,
+            "avg_realized_return": round(_st.mean(results["realized_returns"]), 6) if results["realized_returns"] else 0,
+            "median_realized_return": round(_st.median(results["realized_returns"]), 6) if results["realized_returns"] else 0,
+            "avg_holding_days": round(_st.mean(results["holding_days_list"]), 1) if results["holding_days_list"] else 0,
+        }
+
+    # Execution stats
+    entered = sum(1 for o in opps if o.get("entry_price") and o["entry_price"] > 0)
+    target = sum(1 for o in opps if o.get("exit_reason") == "TARGET")
+    stop = sum(1 for o in opps if o.get("exit_reason") == "STOP")
+    unresolved = sum(1 for o in opps if o.get("exit_reason") == "UNRESOLVED")
+    not_entered = len(opps) - entered
+    realized_returns = [o["realized_return"] for o in opps if o.get("realized_return") != 0]
+
+    return {
+        "horizon_stats": horizon_stats,
+        "execution_stats": {
+            "opportunities": len(opps), "entered": entered,
+            "target": target, "stop": stop, "unresolved": unresolved,
+            "not_entered": not_entered,
+            "target_hit_rate": round(target / entered * 100, 2) if entered else 0,
+            "avg_realized_return": round(_st.mean(realized_returns), 6) if realized_returns else 0,
+        },
+        "funnel": {},
+        "integrity": {},
+    }
+
+
+def validate_strategy2_backtest_integrity(task_id: str) -> tuple:
+    """校验任务完整性。返回 (passed: bool, errors: list[str])。"""
+    conn = get_conn()
+    errors = []
+    task = conn.execute("SELECT * FROM strategy2_backtest_tasks WHERE id=?", (task_id,)).fetchone()
+    if not task:
+        return False, ["task_not_found"]
+    tcols = [d[1] for d in conn.execute("PRAGMA table_info(strategy2_backtest_tasks)")]
+    t = dict(zip(tcols, task))
+
+    total = t.get("total_stocks", 0)
+    processed = t.get("processed_stocks", 0)
+    stocks_cnt = conn.execute("SELECT COUNT(*) FROM strategy2_backtest_task_stocks WHERE task_id=?", (task_id,)).fetchone()[0]
+    if stocks_cnt != total:
+        errors.append(f"task_stocks count mismatch: {stocks_cnt} != {total}")
+    pending = conn.execute("SELECT COUNT(*) FROM strategy2_backtest_task_stocks WHERE task_id=? AND status IN ('PENDING','RUNNING')", (task_id,)).fetchone()[0]
+    if pending > 0:
+        errors.append(f"{pending} stocks still PENDING/RUNNING")
+    if processed != total:
+        errors.append(f"processed {processed} != total {total}")
+
+    sig_cnt = conn.execute("SELECT COUNT(*) FROM strategy2_backtest_signals WHERE task_id=?", (task_id,)).fetchone()[0]
+    stock_sig = conn.execute("SELECT COALESCE(SUM(raw_signals_count),0) FROM strategy2_backtest_task_stocks WHERE task_id=?", (task_id,)).fetchone()[0]
+    if sig_cnt != stock_sig:
+        errors.append(f"signal delta: {sig_cnt} vs {stock_sig}")
+
+    opp_cnt = conn.execute("SELECT COUNT(*) FROM strategy2_backtest_opportunities WHERE task_id=?", (task_id,)).fetchone()[0]
+    stock_opp = conn.execute("SELECT COALESCE(SUM(opportunities_count),0) FROM strategy2_backtest_task_stocks WHERE task_id=?", (task_id,)).fetchone()[0]
+    if opp_cnt != stock_opp:
+        errors.append(f"opportunity delta: {opp_cnt} vs {stock_opp}")
+
+    if not t.get("observation_data_end_date"):
+        errors.append("missing observation_data_end_date")
+    if not t.get("summary_json"):
+        errors.append("missing summary_json")
+    else:
+        try:
+            s = __import__("json").loads(t["summary_json"])
+            hs = s.get("horizon_stats", {})
+            for h in ["3", "5", "10", "20"]:
+                if h not in hs:
+                    errors.append(f"missing horizon_stats {h}")
+        except Exception:
+            errors.append("invalid summary_json")
+
+    if t.get("evaluation_error_days", 0) > 0:
+        errors.append(f"evaluation_error_days={t['evaluation_error_days']} > 0")
+    failed = t.get("failed_stocks_count", 0)
+    if failed > 0:
+        errors.append(f"failed_stocks_count={failed} > 0")
+
+    return (len(errors) == 0), errors
+
+
+def replace_strategy2_stock_backtest_result(
+    task_id: str, code: str, name: str, result: dict,
+) -> None:
+    """原子替换单只股票的回测结果（事务化）。"""
+    conn = get_conn()
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        # 删除旧结果
+        conn.execute("DELETE FROM strategy2_backtest_opportunities WHERE task_id=? AND code=?", (task_id, code))
+        conn.execute("DELETE FROM strategy2_backtest_signals WHERE task_id=? AND code=?", (task_id, code))
+
+        # 插入信号，记录日期→ID映射
+        signal_id_by_date = {}
+        for sig in (result.get("signals") or []):
+            if hasattr(sig, 'evaluation_date'):
+                edate = sig.evaluation_date
+                snapshot = (json.dumps(sig.evaluation_snapshot, ensure_ascii=False)
+                            if sig.evaluation_snapshot else "{}")
+                c = conn.execute(
+                    """INSERT INTO strategy2_backtest_signals
+                       (task_id, code, name, evaluation_date, evaluation_index,
+                        score, level, current_close, stop_loss, risk_ratio,
+                        volume_dry_score, price_stable_score, trend_type, trend_evidence_score,
+                        evaluation_snapshot)
+                       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                    (task_id, code, name, edate, sig.evaluation_index, sig.score,
+                     sig.level, sig.current_close, sig.stop_loss, sig.risk_ratio,
+                     sig.volume_dry_score, sig.price_stable_score, sig.trend_type,
+                     sig.trend_evidence_score, snapshot),
+                )
+                signal_id_by_date[edate] = c.lastrowid
+            else:
+                edate = sig.get("evaluation_date", "")
+                c = conn.execute(
+                    """INSERT INTO strategy2_backtest_signals
+                       (task_id, code, name, evaluation_date, evaluation_index, score, level,
+                        current_close, stop_loss, risk_ratio, volume_dry_score,
+                        price_stable_score, trend_type, trend_evidence_score, evaluation_snapshot)
+                       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                    (task_id, code, name, edate, sig.get("evaluation_index", 0),
+                     sig.get("score", 0), sig.get("level", ""), sig.get("current_close", 0),
+                     sig.get("stop_loss", 0), sig.get("risk_ratio", 0), sig.get("volume_dry_score", 0),
+                     sig.get("price_stable_score", 0), sig.get("trend_type", ""),
+                     sig.get("trend_evidence_score", 0),
+                     json.dumps(sig.get("evaluation_snapshot", {}), ensure_ascii=False)),
+                )
+                signal_id_by_date[edate] = c.lastrowid
+
+        # 插入机会，关联信号ID
+        for opp in (result.get("opportunities") or []):
+            first_sid = signal_id_by_date.get(opp["first_detected_date"])
+            last_sid = signal_id_by_date.get(opp["last_detected_date"])
+            conn.execute(
+                """INSERT INTO strategy2_backtest_opportunities
+                   (task_id, code, name, first_detected_date, last_detected_date,
+                    consecutive_hit_days, first_score, max_score, level,
+                    entry_close, stop_loss, risk_ratio, trend_type, trend_evidence_score,
+                    evaluation_snapshot, horizon_3, horizon_5, horizon_10, horizon_20,
+                    signal_count, execution_model, entry_date, entry_price,
+                    exit_date, exit_price, exit_reason, realized_return,
+                    mark_to_market_end_return, holding_days, available_forward_days,
+                    first_signal_id, last_signal_id)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                (task_id, code, name, opp["first_detected_date"], opp["last_detected_date"],
+                 opp["consecutive_hit_days"], opp["first_score"], opp["max_score"],
+                 opp.get("level", ""), opp["entry_close"], opp["stop_loss"],
+                 opp.get("risk_ratio"), opp.get("trend_type", ""),
+                 opp.get("trend_evidence_score", 0), opp.get("evaluation_snapshot", "{}"),
+                 opp.get("horizon_3", "{}"), opp.get("horizon_5", "{}"),
+                 opp.get("horizon_10", "{}"), opp.get("horizon_20", "{}"),
+                 opp.get("signal_count", 0), opp.get("execution_model", ""),
+                 opp.get("entry_date", ""), opp.get("entry_price", 0),
+                 opp.get("exit_date", ""), opp.get("exit_price", 0),
+                 opp.get("exit_reason", ""), opp.get("realized_return", 0),
+                 opp.get("mark_to_market_end_return", 0), opp.get("holding_days", 0),
+                 opp.get("available_forward_days", 0), first_sid, last_sid),
+            )
+
+        # 更新股票终态
+        update_kwargs = {k: v for k, v in {
+            "status": "COMPLETED", "name": name,
+            "evaluation_days": result.get("eval_days", 0),
+            "liquidity_filtered_days": result.get("liquidity_filtered_days", 0),
+            "trend_filtered_days": result.get("trend_filtered_days", 0),
+            "rejection_failed_days": result.get("rejection_failed_days", 0),
+            "score_failed_days": result.get("score_failed_days", 0),
+            "risk_failed_days": result.get("risk_failed_days", 0),
+            "evaluation_error_days": result.get("evaluation_error_days", 0),
+            "raw_signals_count": result.get("raw_signals_count", 0),
+            "opportunities_count": result.get("opportunities_count", 0),
+            "actual_eval_start_date": result.get("actual_eval_start_date"),
+            "actual_eval_end_date": result.get("actual_eval_end_date"),
+            "observation_data_end_date": result.get("observation_data_end_date"),
+            "available_days": result.get("available_days", len(result.get("signals", [])) if result.get("signals") else 0),
+            "required_days": result.get("required_days", 250),
+        }.items() if v is not None}
+        if update_kwargs:
+            sets = ", ".join(f"{k}=?" for k in update_kwargs)
+            vals = list(update_kwargs.values()) + [task_id, code]
+            conn.execute(f"UPDATE strategy2_backtest_task_stocks SET {sets} WHERE task_id=? AND code=?", vals)
+
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
 
 
 def get_strategy2_backtest_opportunities(

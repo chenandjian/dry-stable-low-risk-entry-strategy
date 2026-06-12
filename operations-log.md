@@ -248,3 +248,13 @@ b262c8b feat(strategy2): add scorer, rejection rules, and risk calculator
 68d6c26 feat(strategy2): add indicator computation module
 905f733 feat(strategy2): add data models for extreme dry-stable strategy
 ```
+
+## 2026-06-12 (Strategy2 Phase 1 Completion Recheck)
+
+- Reviewed commits through `b23d254` and analyzed task `s2bt-20260612-155934-n35sdk`.
+- Added `docs/reviews/2026-06-12-strategy2-phase1-completion-recheck-and-task-155934-analysis.md`.
+- Confirmed task-stock count closure, stable signal/opportunity counts, and complete target/stop exit dates.
+- Found remaining high-severity gaps: empty horizon summary accepted as `TRUSTED_BASELINE`, nonfunctional resume/retry/cancel behavior, and non-transactional per-stock persistence with missing signal links.
+- Found incomplete audit metadata and two remaining ScannerConsole frontend test failures.
+- New task result: 641 actual entries, 265 targets, 374 stops, 2 unresolved, 41.34% target-hit rate, and -0.3191% average realized return.
+- Verification: Strategy2 targeted tests passed 23; offline backend suite passed 506 with 2 warnings; frontend build, compileall, and diff check passed; frontend Vitest had 23 passed and 2 failed.

@@ -171,6 +171,60 @@ def test_signal_save_roundtrip(tmp_path):
     db.save_strategy2_backtest_signal('t1', signal)
     assert db.get_conn().execute("SELECT COUNT(*) FROM strategy2_backtest_signals WHERE task_id='t1'").fetchone()[0] == 1
 
+def test_atomic_replace_idempotent(tmp_path):
+    """同一股票 repeat 执行 → 结果幂等，不重复。"""
+    import scanner.db as db, os
+    p = str(tmp_path / "test.db")
+    db.init_db(p)
+    db.create_strategy2_backtest_task('t3', {'startDate':'2025-01-01','endDate':'2025-06-01','maxStocks':10}, '{}')
+    db.save_strategy2_backtest_task_stock('t3', '000001', name='t', status='PENDING')
+    from strategy2.backtest_models import BacktestSignal
+    sig = BacktestSignal(code='000001', name='t', evaluation_date='2025-01-02', evaluation_index=0,
+        score=70, level='', current_close=10.0, stop_loss=9.5, risk_ratio=0.03,
+        trend_type='', trend_evidence_score=3, evaluation_snapshot={})
+    result = {'signals': [sig], 'opportunities': [{'code':'000001','first_detected_date':'2025-01-02',
+        'last_detected_date':'2025-01-02','consecutive_hit_days':1,'first_score':70,'max_score':70,
+        'entry_close':10.0,'stop_loss':9.5,'signal_count':1,'execution_model':'NEXT_OPEN',
+        'entry_date':'','entry_price':0,'exit_date':'','exit_price':0,'exit_reason':'','realized_return':0,
+        'mark_to_market_end_return':0,'holding_days':0,'available_forward_days':0}],
+        'eval_days': 10, 'raw_signals_count': 1, 'opportunities_count': 1,
+        'actual_eval_start_date': '2025-01-02', 'actual_eval_end_date': '2025-01-02',
+        'observation_data_end_date': '2025-01-20', 'available_days': 120, 'required_days': 250}
+    db.replace_strategy2_stock_backtest_result('t3', '000001', 't', result)
+    sig_cnt = db.get_conn().execute("SELECT COUNT(*) FROM strategy2_backtest_signals WHERE task_id='t3'").fetchone()[0]
+    opp_cnt = db.get_conn().execute("SELECT COUNT(*) FROM strategy2_backtest_opportunities WHERE task_id='t3'").fetchone()[0]
+    assert sig_cnt == 1
+    assert opp_cnt == 1
+    # 重复执行：幂等
+    db.replace_strategy2_stock_backtest_result('t3', '000001', 't', result)
+    assert db.get_conn().execute("SELECT COUNT(*) FROM strategy2_backtest_signals WHERE task_id='t3'").fetchone()[0] == 1
+    assert db.get_conn().execute("SELECT COUNT(*) FROM strategy2_backtest_opportunities WHERE task_id='t3'").fetchone()[0] == 1
+    # 验证信号ID关联
+    first_sid = db.get_conn().execute("SELECT first_signal_id FROM strategy2_backtest_opportunities WHERE task_id='t3'").fetchone()[0]
+    assert first_sid is not None
+
+def test_integrity_rejects_pending_stocks(tmp_path):
+    """存在 PENDING 股票时完整性校验拒绝可信基线。"""
+    import scanner.db as db, os
+    p = str(tmp_path / "test.db")
+    db.init_db(p)
+    db.create_strategy2_backtest_task('t4', {'startDate':'2025-01-01','endDate':'2025-06-01','maxStocks':10}, '{}')
+    db.save_strategy2_backtest_task_stock('t4', '000001', name='t', status='PENDING')
+    ok, errors = db.validate_strategy2_backtest_integrity('t4')
+    assert not ok
+    assert any('PENDING' in e for e in errors)
+
+def test_integrity_rejects_empty_summary(tmp_path):
+    """空 summary 时拒绝可信基线。"""
+    import scanner.db as db, os
+    p = str(tmp_path / "test.db")
+    db.init_db(p)
+    db.create_strategy2_backtest_task('t5', {'startDate':'','endDate':''}, '{}')
+    db.update_strategy2_backtest_task('t5', total_stocks=0, processed_stocks=0)
+    ok, _ = db.validate_strategy2_backtest_integrity('t5')
+    assert not ok  # missing summary_json
+
+
 def test_opportunity_save_with_execution_fields(tmp_path):
     """保存带执行字段的机会 → round-trip 一致。"""
     import scanner.db as db, os

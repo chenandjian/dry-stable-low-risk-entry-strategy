@@ -636,7 +636,7 @@ async def re_evaluate_task_endpoint(task_id: str):
         import datetime
         try:
             result = re_evaluate_task(config, task_id)
-            now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            now = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
             conn2 = db.get_conn()
             conn2.execute(
                 "UPDATE scan_tasks SET status='completed', candidates_count=?, finished_at=? WHERE id=?",
@@ -1224,7 +1224,7 @@ async def strategy2_re_evaluate(task_id: str):
         try:
             from strategy2.scanner import re_evaluate_strategy2_task
             result = re_evaluate_strategy2_task(config, task_id)
-            now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            now = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
             conn2 = db.get_conn()
             conn2.execute(
                 "UPDATE scan_tasks SET status='completed', candidates_count=?, finished_at=? WHERE id=?",
@@ -1375,7 +1375,7 @@ async def start_strategy2_backtest(payload: dict):
     config_json = json.dumps(config, ensure_ascii=False)
     db.create_strategy2_backtest_task(task_id, payload, config_json)
     db.update_strategy2_backtest_task(task_id, status="running",
-        backtest_engine_version="phase1-v1", credibility_status="TRUSTED_BASELINE",
+        backtest_engine_version="phase1-v1", credibility_status="RUNNING_UNVERIFIED",
         execution_model=payload.get("executionModel", "NEXT_OPEN"),
         data_snapshot_date=datetime.datetime.now().strftime("%Y-%m-%d"))
 
@@ -1386,7 +1386,7 @@ async def start_strategy2_backtest(payload: dict):
 
     _backtest_running["running"] = True
     _backtest_running["task_id"] = task_id
-    _backtest_running["started_at"] = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    _backtest_running["started_at"] = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
     _backtest_running["stats"] = {
         "total_stocks": len(resolved_stocks), "processed_stocks": 0,
         "current_code": "--", "current_name": "--",
@@ -1455,31 +1455,12 @@ async def start_strategy2_backtest(payload: dict):
                     _backtest_running["stats"]["insufficient_stocks_count"] = len(insufficient)
                     continue
 
-                # 保存原始信号 + 机会
-                raw_signals = result.get("signals") or []
-                for sig in raw_signals:
-                    db.save_strategy2_backtest_signal(task_id, sig)
-
+                # 原子保存：信号 + 机会 + 股票终态
+                db.replace_strategy2_stock_backtest_result(task_id, code, name, result)
                 opps = result.get("opportunities") or []
                 if opps:
                     stocks_with_opps += 1
-                    for opp in opps:
-                        db.save_strategy2_backtest_opportunity(task_id, opp)
                     all_opps.extend(opps)
-
-                # 股票终态
-                db.save_strategy2_backtest_task_stock(task_id, code, status="COMPLETED",
-                    evaluation_days=result.get("eval_days", 0),
-                    liquidity_filtered_days=result.get("liquidity_filtered_days", 0),
-                    trend_filtered_days=result.get("trend_filtered_days", 0),
-                    rejection_failed_days=result.get("rejection_failed_days", 0),
-                    score_failed_days=result.get("score_failed_days", 0),
-                    risk_failed_days=result.get("risk_failed_days", 0),
-                    evaluation_error_days=result.get("evaluation_error_days", 0),
-                    raw_signals_count=result.get("raw_signals_count", 0),
-                    opportunities_count=result.get("opportunities_count", 0),
-                    actual_eval_start_date=result.get("actual_eval_start_date"),
-                    actual_eval_end_date=result.get("actual_eval_end_date"))
 
                 _backtest_running["stats"]["processed_stocks"] = i + 1
                 _backtest_running["stats"]["opportunities_count"] = len(all_opps)
@@ -1501,21 +1482,18 @@ async def start_strategy2_backtest(payload: dict):
             total_signals = agg[4] or 0
 
             # 生成 summary（从数据库全量机会）
-            from strategy2.backtester import aggregate_backtest_summary
-            all_db_opps = db.get_strategy2_backtest_opportunities(task_id, limit=100000)
-            import json as _json
-            summary = aggregate_backtest_summary([], total, total_eval_days, 0, 0)
-            if all_db_opps:
-                summary.total_opportunities = len(all_db_opps)
-                summary.horizon_stats = {}  # simplified for now
-            summary_json = _json.dumps({"horizon_stats": summary.horizon_stats, "total_opportunities": len(all_db_opps),
-                "total_signals": total_signals, "total_eval_days": total_eval_days, "total_errors": total_errors}, ensure_ascii=False)
+            summary = db.build_strategy2_backtest_summary(task_id)
+            # 完整性校验
+            integrity_ok, integrity_errors = db.validate_strategy2_backtest_integrity(task_id)
+            credibility = "TRUSTED_BASELINE" if integrity_ok else "PHASE1_INCOMPLETE"
+            if integrity_errors:
+                summary["integrity"] = {"errors": integrity_errors}
+            summary_json = json.dumps(summary, ensure_ascii=False)
 
             # 汇总更新
             elapsed = round(_time.monotonic() - t_start, 1)
             status = "completed" if failed_count == 0 else "completed_with_errors"
-            credibility = "TRUSTED_BASELINE" if (failed_count == 0 and actual_eval_start and summary_json) else "PHASE1_INCOMPLETE"
-            now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            now = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
             db.update_strategy2_backtest_task(
                 task_id,
                 status=status, credibility_status=credibility,
@@ -1569,10 +1547,15 @@ async def strategy2_backtests():
 
 @app.get("/api/strategy2/backtests/{task_id}")
 async def strategy2_backtest_detail(task_id: str):
-    """查询回测任务详情和汇总。"""
+    """查询回测任务详情和汇总（解析 summary_json）。"""
     task = db.get_strategy2_backtest_task(task_id)
     if not task:
         return JSONResponse({"error": "TASK_NOT_FOUND"}, status_code=404)
+    if task.get("summary_json"):
+        try:
+            task["summary"] = json.loads(task["summary_json"])
+        except Exception:
+            task["summary"] = None
     return task
 
 
