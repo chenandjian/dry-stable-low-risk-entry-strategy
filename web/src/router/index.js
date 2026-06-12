@@ -8,6 +8,7 @@ const routes = [
   { path: '/backtest/cup-handle/:code?', name: 'SingleStockBacktest', component: () => import('../pages/SingleStockBacktest.vue') },
   { path: '/stock/:code', name: 'StockDetail', component: () => import('../pages/StockDetail.vue') },
   { path: '/strategy2/results', name: 'Strategy2Results', component: () => import('../pages/Strategy2Results.vue') },
+  { path: '/strategy2/backtest', name: 'Strategy2Backtest', component: () => import('../pages/Strategy2Backtest.vue') },
 ]
 
 const router = createRouter({

@@ -117,6 +117,7 @@ def init_db(path: str = "data/cuphandle.db"):
         _dedupe_candidates_before_unique_index(conn)
         conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_candidates_task_code ON candidates(task_id, code)")
         _ensure_strategy2_candidates_table(conn)
+        _ensure_strategy2_backtest_tables(conn)
         conn.commit()
 
 
@@ -1096,3 +1097,263 @@ def _deserialize_strategy2_candidate(row: dict) -> dict:
         elif not value:
             row[field] = []
     return row
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Strategy2 Backtest Tables
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def _ensure_strategy2_backtest_tables(conn: sqlite3.Connection):
+    """Create strategy2 backtest tables if not exists."""
+    conn.execute('''
+        CREATE TABLE IF NOT EXISTS strategy2_backtest_tasks (
+            id                       TEXT PRIMARY KEY,
+            status                   TEXT NOT NULL DEFAULT 'running',
+            requested_start_date     TEXT,
+            requested_end_date       TEXT,
+            actual_start_date        TEXT,
+            actual_end_date          TEXT,
+            scope_type               TEXT NOT NULL DEFAULT 'market',
+            requested_codes          TEXT,
+            max_stocks               INTEGER,
+            config_snapshot          TEXT NOT NULL,
+            total_stocks             INTEGER DEFAULT 0,
+            processed_stocks         INTEGER DEFAULT 0,
+            stocks_with_opportunities INTEGER DEFAULT 0,
+            opportunities_count      INTEGER DEFAULT 0,
+            insufficient_stocks_count INTEGER DEFAULT 0,
+            failed_stocks_count      INTEGER DEFAULT 0,
+            started_at               TEXT,
+            finished_at              TEXT,
+            elapsed_seconds          REAL,
+            current_code             TEXT,
+            current_name             TEXT,
+            error                    TEXT
+        )
+    ''')
+    conn.execute('''
+        CREATE TABLE IF NOT EXISTS strategy2_backtest_opportunities (
+            id                    INTEGER PRIMARY KEY AUTOINCREMENT,
+            task_id               TEXT NOT NULL,
+            code                  TEXT NOT NULL,
+            name                  TEXT,
+            first_detected_date   TEXT NOT NULL,
+            last_detected_date    TEXT NOT NULL,
+            consecutive_hit_days  INTEGER NOT NULL,
+            first_score           INTEGER NOT NULL,
+            max_score             INTEGER NOT NULL,
+            level                 TEXT,
+            entry_close           REAL NOT NULL,
+            stop_loss             REAL NOT NULL,
+            risk_ratio            REAL,
+            trend_type            TEXT,
+            trend_evidence_score  INTEGER,
+            evaluation_snapshot   TEXT,
+            horizon_3             TEXT,
+            horizon_5             TEXT,
+            horizon_10            TEXT,
+            horizon_20            TEXT,
+            created_at            TEXT DEFAULT (datetime('now')),
+            FOREIGN KEY (task_id) REFERENCES strategy2_backtest_tasks(id)
+        )
+    ''')
+    conn.execute('''
+        CREATE TABLE IF NOT EXISTS strategy2_backtest_insufficient_stocks (
+            id               INTEGER PRIMARY KEY AUTOINCREMENT,
+            task_id          TEXT NOT NULL,
+            code             TEXT NOT NULL,
+            name             TEXT,
+            reason_code      TEXT NOT NULL,
+            available_days   INTEGER DEFAULT 0,
+            required_days    INTEGER DEFAULT 0,
+            earliest_date    TEXT,
+            latest_date      TEXT,
+            actual_start_date    TEXT,
+            actual_end_date      TEXT,
+            detail               TEXT,
+            FOREIGN KEY (task_id) REFERENCES strategy2_backtest_tasks(id)
+        )
+    ''')
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_s2_bt_task_status "
+        "ON strategy2_backtest_tasks(status, started_at DESC)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_s2_bt_opp_task "
+        "ON strategy2_backtest_opportunities(task_id, first_detected_date)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_s2_bt_opp_stock "
+        "ON strategy2_backtest_opportunities(task_id, code, first_detected_date)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_s2_bt_insuf_task "
+        "ON strategy2_backtest_insufficient_stocks(task_id, reason_code)"
+    )
+
+
+def create_strategy2_backtest_task(task_id: str, payload: dict, config_snapshot: str):
+    conn = get_conn()
+    conn.execute(
+        """INSERT INTO strategy2_backtest_tasks
+           (id, status, requested_start_date, requested_end_date,
+            scope_type, requested_codes, max_stocks, config_snapshot,
+            total_stocks, started_at)
+           VALUES (?, 'running', ?, ?, ?, ?, ?, ?, 0, datetime('now'))""",
+        (task_id, payload.get("startDate", ""), payload.get("endDate", ""),
+         "market" if not payload.get("codes") else "single",
+         ",".join(payload.get("codes") or []),
+         payload.get("maxStocks", 200),
+         config_snapshot),
+    )
+    conn.commit()
+
+
+def update_strategy2_backtest_task(task_id: str, **kwargs):
+    if not kwargs:
+        return
+    conn = get_conn()
+    sets = ", ".join(f"{k}=?" for k in kwargs)
+    values = list(kwargs.values()) + [task_id]
+    conn.execute(f"UPDATE strategy2_backtest_tasks SET {sets} WHERE id=?", values)
+    conn.commit()
+
+
+def get_strategy2_backtest_task(task_id: str) -> dict | None:
+    conn = get_conn()
+    row = conn.execute(
+        "SELECT * FROM strategy2_backtest_tasks WHERE id=?", (task_id,)
+    ).fetchone()
+    if not row:
+        return None
+    cols = [d[1] for d in conn.execute("PRAGMA table_info(strategy2_backtest_tasks)")]
+    return dict(zip(cols, row))
+
+
+def get_strategy2_backtest_tasks() -> list[dict]:
+    conn = get_conn()
+    rows = conn.execute(
+        "SELECT * FROM strategy2_backtest_tasks ORDER BY started_at DESC"
+    ).fetchall()
+    cols = [d[1] for d in conn.execute("PRAGMA table_info(strategy2_backtest_tasks)")]
+    return [dict(zip(cols, r)) for r in rows]
+
+
+def save_strategy2_backtest_signal(task_id: str, signal):
+    """保存原始命中信号（幂等：ON CONFLICT 更新）。"""
+    conn = get_conn()
+    if hasattr(signal, 'evaluation_date'):
+        # BacktestSignal dataclass
+        snapshot_json = json.dumps(signal.evaluation_snapshot, ensure_ascii=False) if signal.evaluation_snapshot else "{}"
+        conn.execute(
+            """INSERT INTO strategy2_backtest_signals
+               (task_id, code, name, evaluation_date, evaluation_index,
+                score, level, current_close, stop_loss, risk_ratio,
+                volume_dry_score, price_stable_score, trend_type, trend_evidence_score,
+                evaluation_snapshot)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+               ON CONFLICT(task_id, code, evaluation_date) DO UPDATE SET
+                score=excluded.score, level=excluded.level,
+                current_close=excluded.current_close, stop_loss=excluded.stop_loss,
+                risk_ratio=excluded.risk_ratio""",
+            (task_id, signal.code, signal.name, signal.evaluation_date,
+             signal.evaluation_index, signal.score, signal.level,
+             signal.current_close, signal.stop_loss, signal.risk_ratio,
+             signal.volume_dry_score, signal.price_stable_score,
+             signal.trend_type, signal.trend_evidence_score, snapshot_json),
+        )
+    else:
+        # 兼容 dict
+        conn.execute(
+            """INSERT INTO strategy2_backtest_signals
+               (task_id, code, name, evaluation_date, evaluation_index,
+                score, level, current_close, stop_loss, risk_ratio,
+                volume_dry_score, price_stable_score, trend_type, trend_evidence_score,
+                evaluation_snapshot)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+               ON CONFLICT(task_id, code, evaluation_date) DO NOTHING""",
+            (task_id, signal.get("code"), signal.get("name"),
+             signal.get("evaluation_date"), signal.get("evaluation_index", 0),
+             signal.get("score", 0), signal.get("level", ""),
+             signal.get("current_close", 0.0), signal.get("stop_loss", 0.0),
+             signal.get("risk_ratio", 0.0), signal.get("volume_dry_score", 0),
+             signal.get("price_stable_score", 0), signal.get("trend_type", ""),
+             signal.get("trend_evidence_score", 0),
+             json.dumps(signal.get("evaluation_snapshot", {}), ensure_ascii=False)),
+        )
+    conn.commit()
+
+
+def save_strategy2_backtest_opportunity(task_id: str, opp: dict):
+    conn = get_conn()
+    conn.execute(
+        """INSERT INTO strategy2_backtest_opportunities
+           (task_id, code, name, first_detected_date, last_detected_date,
+            consecutive_hit_days, first_score, max_score, level,
+            entry_close, stop_loss, risk_ratio, trend_type, trend_evidence_score,
+            evaluation_snapshot, horizon_3, horizon_5, horizon_10, horizon_20)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+        (task_id, opp["code"], opp.get("name", ""), opp["first_detected_date"],
+         opp["last_detected_date"], opp["consecutive_hit_days"],
+         opp["first_score"], opp["max_score"], opp.get("level", ""),
+         opp["entry_close"], opp["stop_loss"], opp.get("risk_ratio"),
+         opp.get("trend_type", ""), opp.get("trend_evidence_score", 0),
+         opp.get("evaluation_snapshot", "{}"),
+         opp.get("horizon_3", "{}"), opp.get("horizon_5", "{}"),
+         opp.get("horizon_10", "{}"), opp.get("horizon_20", "{}")),
+    )
+    conn.commit()
+
+
+def get_strategy2_backtest_opportunities(
+    task_id: str, code: str = None, limit: int = 500, offset: int = 0,
+) -> list[dict]:
+    conn = get_conn()
+    if code:
+        rows = conn.execute(
+            "SELECT * FROM strategy2_backtest_opportunities "
+            "WHERE task_id=? AND code=? ORDER BY first_detected_date LIMIT ? OFFSET ?",
+            (task_id, code, limit, offset),
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            "SELECT * FROM strategy2_backtest_opportunities "
+            "WHERE task_id=? ORDER BY first_detected_date LIMIT ? OFFSET ?",
+            (task_id, limit, offset),
+        ).fetchall()
+    cols = [d[1] for d in conn.execute(
+        "PRAGMA table_info(strategy2_backtest_opportunities)"
+    )]
+    return [dict(zip(cols, r)) for r in rows]
+
+
+def save_strategy2_backtest_insufficient_stocks(task_id: str, stocks: list[dict]):
+    if not stocks:
+        return
+    conn = get_conn()
+    for s in stocks:
+        conn.execute(
+            """INSERT INTO strategy2_backtest_insufficient_stocks
+               (task_id, code, name, reason_code, available_days, required_days,
+                earliest_date, latest_date, actual_start_date, actual_end_date, detail)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+            (task_id, s["code"], s.get("name", ""), s["reason_code"],
+             s.get("available_days", 0), s.get("required_days", 0),
+             s.get("earliest_date", ""), s.get("latest_date", ""),
+             s.get("actual_start_date", ""), s.get("actual_end_date", ""),
+             s.get("detail", "")),
+        )
+    conn.commit()
+
+
+def get_strategy2_backtest_insufficient_stocks(task_id: str) -> list[dict]:
+    conn = get_conn()
+    rows = conn.execute(
+        "SELECT * FROM strategy2_backtest_insufficient_stocks "
+        "WHERE task_id=? ORDER BY reason_code, code",
+        (task_id,),
+    ).fetchall()
+    cols = [d[1] for d in conn.execute(
+        "PRAGMA table_info(strategy2_backtest_insufficient_stocks)"
+    )]
+    return [dict(zip(cols, r)) for r in rows]

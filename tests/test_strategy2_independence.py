@@ -115,7 +115,7 @@ class TestStrategy2Independence:
                     f"{os.path.basename(filepath)} imports {imp}"
 
     def test_strategy2_modules_exist(self):
-        """All 8 strategy2 modules should exist."""
+        """All 10 strategy2 modules should exist."""
         expected = [
             "__init__.py",
             "models.py",
@@ -125,6 +125,8 @@ class TestStrategy2Independence:
             "risk.py",
             "engine.py",
             "trend.py",
+            "backtest_models.py",
+            "backtester.py",
         ]
         for f in expected:
             path = os.path.join(STRATEGY2_DIR, f)

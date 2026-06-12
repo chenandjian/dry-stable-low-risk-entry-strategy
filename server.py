@@ -1,4 +1,6 @@
 # server.py
+import datetime
+import json
 import logging
 import sys
 import threading
@@ -164,6 +166,14 @@ _running = {
     "stats": {},
 }
 
+# Strategy2 backtest running state — mutually exclusive with scans
+_backtest_running = {
+    "running": False,
+    "task_id": None,
+    "started_at": None,
+    "stats": {},
+}
+
 
 def _get_running_task_id() -> str | None:
     """Return the active scan task id from memory or DB."""
@@ -183,7 +193,7 @@ def _get_running_strategy_type() -> str | None:
 
 
 def _scan_conflict_response():
-    """Return a 409 response if any scan process is already running."""
+    """Return a 409 response if any scan or backtest process is already running."""
     running_id = _get_running_task_id()
     if running_id:
         return JSONResponse(
@@ -192,6 +202,15 @@ def _scan_conflict_response():
                 "message": "当前已有全市场扫描任务正在运行",
                 "runningTaskId": running_id,
                 "runningStrategyType": _running.get("strategy_type", "STRATEGY_1_CUP_HANDLE"),
+            },
+            status_code=409,
+        )
+    if _backtest_running["running"]:
+        return JSONResponse(
+            {
+                "error": "TASK_CONFLICT",
+                "message": "当前已有策略2回测任务正在运行",
+                "runningTaskId": _backtest_running["task_id"],
             },
             status_code=409,
         )
@@ -1262,3 +1281,227 @@ async def strategy2_candidate_detail(code: str, task_id: str = None):
     if not c:
         return JSONResponse({"error": "Not found"}, status_code=404)
     return c
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Strategy2 Backtest API
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def _backtest_conflict_response():
+    """Return 409 if any scan or backtest is running."""
+    if _running["running"]:
+        return JSONResponse({
+            "error": "TASK_CONFLICT",
+            "message": "当前已有扫描任务正在运行",
+            "runningTaskId": _running["task_id"],
+        }, status_code=409)
+    if _backtest_running["running"]:
+        return JSONResponse({
+            "error": "TASK_CONFLICT",
+            "message": "当前已有策略2回测任务正在运行",
+            "runningTaskId": _backtest_running["task_id"],
+        }, status_code=409)
+    return None
+
+
+@app.post("/api/strategy2/backtests")
+async def start_strategy2_backtest(payload: dict):
+    """启动策略2本地数据库短线回测。"""
+    config = load_config()
+    db_path = config.get("data", {}).get("database_path", "data/cuphandle.db")
+    db.init_db(db_path)
+
+    conflict = _backtest_conflict_response()
+    if conflict:
+        return conflict
+
+    # 检查数据库是否有日线数据
+    conn = db.get_conn()
+    has_data = conn.execute("SELECT COUNT(*) FROM daily_ohlc").fetchone()[0]
+    if has_data == 0:
+        return JSONResponse({
+            "error": "NO_LOCAL_DATA",
+            "message": "本地数据库无日线数据，无法执行回测",
+        }, status_code=400)
+
+    task_id = datetime.datetime.now().strftime("s2bt-%Y%m%d-%H%M%S")
+    config_json = json.dumps(config, ensure_ascii=False)
+    db.create_strategy2_backtest_task(task_id, payload, config_json)
+
+    _backtest_running["running"] = True
+    _backtest_running["task_id"] = task_id
+    _backtest_running["started_at"] = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    _backtest_running["stats"] = {
+        "total_stocks": 0, "processed_stocks": 0,
+        "current_code": "--", "current_name": "--",
+        "opportunities_count": 0, "insufficient_stocks_count": 0,
+    }
+
+    def run_backtest():
+        import time as _time
+        from strategy2.backtester import run_strategy2_stock_backtest
+
+        try:
+            codes = payload.get("codes") or []
+            max_stocks = payload.get("maxStocks")
+            # 缺省 200；null=全市场；0/负数=参数错误（前端已验证）
+            if max_stocks is None:
+                max_stocks = 200  # 缺省
+            elif max_stocks <= 0:
+                db.update_strategy2_backtest_task(task_id, status="failed", error="maxStocks must be positive or null")
+                return
+
+            if codes:
+                stocks = [{"code": c, "name": ""} for c in codes]
+                stocks = stocks[:max_stocks]
+            else:
+                # 只使用本地 stock_pool，禁止外部数据源
+                pool = db.get_stock_pool()
+                if not pool:
+                    codes_from_ohlc = [r[0] for r in conn.execute(
+                        "SELECT DISTINCT code FROM daily_ohlc LIMIT ?", (max_stocks,)
+                    ).fetchall()]
+                    stocks = [{"code": c, "name": ""} for c in codes_from_ohlc]
+                else:
+                    stocks = [{"code": s["code"], "name": s.get("name", "")} for s in pool[:max_stocks]]
+
+            total = len(stocks)
+            db.update_strategy2_backtest_task(task_id, total_stocks=total)
+            _backtest_running["stats"]["total_stocks"] = total
+
+            all_opps = []
+            insufficient = []
+            failed_count = 0
+            stocks_with_opps = 0
+
+            for i, s in enumerate(stocks):
+                code = s["code"]
+                name = s.get("name", "")
+                _backtest_running["stats"]["current_code"] = code
+                _backtest_running["stats"]["current_name"] = name
+
+                ohlc = db.get_ohlc(code)
+                if not ohlc:
+                    insufficient.append({
+                        "code": code, "name": name,
+                        "reason_code": "NO_LOCAL_DATA",
+                        "available_days": 0,
+                        "required_days": config.get("strategy2", {}).get("minimum_required_days", 250),
+                        "earliest_date": "", "latest_date": "",
+                    })
+                    _backtest_running["stats"]["insufficient_stocks_count"] = len(insufficient)
+                    continue
+
+                try:
+                    result = run_strategy2_stock_backtest(
+                        code, name, ohlc, config,
+                        payload.get("startDate", ""),
+                        payload.get("endDate", ""),
+                    )
+                except Exception as exc:
+                    failed_count += 1
+                    logger.warning("Strategy2 backtest stock %s failed: %s", code, exc)
+                    continue
+
+                if result.get("insufficient"):
+                    insufficient.append(result["insufficient"])
+                    _backtest_running["stats"]["insufficient_stocks_count"] = len(insufficient)
+
+                # 保存原始信号
+                raw_signals = result.get("signals") or []
+                for sig in raw_signals:
+                    db.save_strategy2_backtest_signal(task_id, sig)
+
+                opps = result.get("opportunities") or []
+                if opps:
+                    stocks_with_opps += 1
+                    for opp in opps:
+                        db.save_strategy2_backtest_opportunity(task_id, opp)
+                    all_opps.extend(opps)
+
+                _backtest_running["stats"]["processed_stocks"] = i + 1
+                _backtest_running["stats"]["opportunities_count"] = len(all_opps)
+
+            # 保存数据不足股票
+            if insufficient:
+                db.save_strategy2_backtest_insufficient_stocks(task_id, insufficient)
+
+            # 汇总更新
+            now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            db.update_strategy2_backtest_task(
+                task_id,
+                status="completed",
+                processed_stocks=total,
+                stocks_with_opportunities=stocks_with_opps,
+                opportunities_count=len(all_opps),
+                insufficient_stocks_count=len(insufficient),
+                failed_stocks_count=failed_count,
+                finished_at=now,
+                actual_start_date=payload.get("startDate", ""),
+                actual_end_date=payload.get("endDate", ""),
+            )
+        except Exception as e:
+            import traceback
+            logger.error("Strategy2 backtest %s failed: %s\n%s", task_id, e, traceback.format_exc())
+            db.update_strategy2_backtest_task(task_id, status="failed", error=str(e))
+        finally:
+            _backtest_running["running"] = False
+            _backtest_running["task_id"] = None
+
+    threading.Thread(target=run_backtest, daemon=True).start()
+    return {
+        "task_id": task_id, "status": "started",
+        "maxStocks": payload.get("maxStocks", 200),
+        "message": "回测任务已启动，只使用本地数据库数据",
+    }
+
+
+@app.get("/api/strategy2/backtests/status")
+async def strategy2_backtest_status():
+    """查询当前回测运行状态。"""
+    if _backtest_running["running"]:
+        return {
+            "running": True,
+            "taskId": _backtest_running["task_id"],
+            "stats": _backtest_running["stats"],
+        }
+    return {"running": False, "taskId": None, "stats": {}}
+
+
+@app.get("/api/strategy2/backtests")
+async def strategy2_backtests():
+    """查询历史回测任务列表。"""
+    tasks = db.get_strategy2_backtest_tasks()
+    return {"tasks": tasks}
+
+
+@app.get("/api/strategy2/backtests/{task_id}")
+async def strategy2_backtest_detail(task_id: str):
+    """查询回测任务详情和汇总。"""
+    task = db.get_strategy2_backtest_task(task_id)
+    if not task:
+        return JSONResponse({"error": "TASK_NOT_FOUND"}, status_code=404)
+    return task
+
+
+@app.get("/api/strategy2/backtests/{task_id}/opportunities")
+async def strategy2_backtest_opportunities(
+    task_id: str, code: str = None, limit: int = 500, offset: int = 0,
+):
+    """查询回测机会明细。"""
+    opps = db.get_strategy2_backtest_opportunities(task_id, code=code, limit=limit, offset=offset)
+    return {"opportunities": opps, "total": len(opps)}
+
+
+@app.get("/api/strategy2/backtests/{task_id}/insufficient-stocks")
+async def strategy2_backtest_insufficient(task_id: str):
+    """查询数据不足股票列表。"""
+    stocks = db.get_strategy2_backtest_insufficient_stocks(task_id)
+    return {"stocks": stocks, "total": len(stocks)}
+
+
+@app.get("/api/strategy2/backtests/{task_id}/stocks/{code}")
+async def strategy2_backtest_stock_history(task_id: str, code: str):
+    """查询单只股票在回测任务中的历史命中。"""
+    opps = db.get_strategy2_backtest_opportunities(task_id, code=code, limit=500)
+    return {"code": code, "opportunities": opps, "total": len(opps)}
