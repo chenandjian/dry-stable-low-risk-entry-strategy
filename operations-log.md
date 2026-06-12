@@ -258,3 +258,15 @@ b262c8b feat(strategy2): add scorer, rejection rules, and risk calculator
 - Found incomplete audit metadata and two remaining ScannerConsole frontend test failures.
 - New task result: 641 actual entries, 265 targets, 374 stops, 2 unresolved, 41.34% target-hit rate, and -0.3191% average realized return.
 - Verification: Strategy2 targeted tests passed 23; offline backend suite passed 506 with 2 warnings; frontend build, compileall, and diff check passed; frontend Vitest had 23 passed and 2 failed.
+
+## 2026-06-12 (Strategy2 Phase 1 Recheck and Task 220015 Analysis)
+
+- Reviewed fixes through `cd78cc2` and analyzed task `s2bt-20260612-220015-qmr54h`.
+- Added `docs/reviews/2026-06-12-strategy2-phase1-recheck-and-task-220015-analysis.md`.
+- Confirmed atomic per-stock persistence, complete signal ID links, non-empty horizon summary, parsed detail summary, UTC task timing, and all 25 frontend tests.
+- Found that integrity validation runs before final task fields are saved, so completed tasks retain stale integrity errors and cannot become trusted.
+- Found horizon summaries use final trade returns instead of each horizon's own performance fields, while frontend expects fields the backend does not provide.
+- Confirmed backtest resume/retry remain placeholders and cancel does not stop the worker.
+- Same config hash and same `data_snapshot_date` produced different results: 69 old-only and 53 new-only signals, with 4850 changed stock evaluation ranges.
+- New task result: 628 entries, 253 targets, 373 stops, 2 unresolved, 40.29% target-hit rate, and -0.4071% average realized return.
+- Verification: Strategy2 targeted tests passed 26; frontend Vitest passed 25; frontend build and compileall passed; backend suite had 508 passed and one external yfinance 429 failure.

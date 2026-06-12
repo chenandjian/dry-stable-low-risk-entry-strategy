@@ -1444,7 +1444,7 @@ def get_strategy2_backtest_task_stocks(task_id: str, status: str = None) -> list
 
 
 def build_strategy2_backtest_summary(task_id: str) -> dict:
-    """从数据库完整明细生成汇总（不接受分页结果）。"""
+    """从数据库完整明细生成汇总。horizon统计使用 horizon_N JSON 字段。"""
     import statistics as _st
     conn = get_conn()
     opps = conn.execute(
@@ -1456,11 +1456,11 @@ def build_strategy2_backtest_summary(task_id: str) -> dict:
     if not opps:
         return {"horizon_stats": {}, "execution_stats": {}, "funnel": {}, "integrity": {"errors": ["no_opportunities"]}}
 
-    # Horizon stats
+    # ── 周期观察统计（使用 horizon_N JSON）──
     horizon_stats = {}
     for h in ["3", "5", "10", "20"]:
-        results = {"observed": 0, "success": 0, "failed": 0, "unresolved": 0, "unobserved": 0,
-                   "realized_returns": [], "holding_days_list": []}
+        end_returns, max_upsides, max_drawdowns = [], [], []
+        observed, success, failed, unresolved, unobserved = 0, 0, 0, 0, 0
         for o in opps:
             try:
                 raw = o.get(f"horizon_{h}", "{}")
@@ -1469,56 +1469,45 @@ def build_strategy2_backtest_summary(task_id: str) -> dict:
                 d = {}
             r = d.get("result", "UNOBSERVED")
             if r == "UNOBSERVED":
-                results["unobserved"] += 1
+                unobserved += 1
             else:
-                results["observed"] += 1
-                results[r.lower() + "d"] = results.get(r.lower() + "d", 0) + 1  # no, let me use explicit keys
-        # Re-do correctly
-        results = {"observed": 0, "success": 0, "failed": 0, "unresolved": 0, "unobserved": 0,
-                   "realized_returns": [], "holding_days_list": []}
-        for o in opps:
-            try:
-                raw = o.get(f"horizon_{h}", "{}")
-                d = __import__("json").loads(raw) if raw else {}
-            except Exception:
-                d = {}
-            r = d.get("result", "UNOBSERVED")
-            if r == "UNOBSERVED":
-                results["unobserved"] += 1
-            else:
-                results["observed"] += 1
+                observed += 1
+                end_returns.append(d.get("end_return", 0))
+                max_upsides.append(d.get("max_upside", 0))
+                max_drawdowns.append(d.get("max_drawdown", 0))
                 if r == "SUCCESS":
-                    results["success"] += 1
-                    results["realized_returns"].append(o.get("realized_return") or 0)
-                    if o.get("holding_days"):
-                        results["holding_days_list"].append(o["holding_days"])
+                    success += 1
                 elif r == "FAILED":
-                    results["failed"] += 1
-                    results["realized_returns"].append(o.get("realized_return") or 0)
-                    if o.get("holding_days"):
-                        results["holding_days_list"].append(o["holding_days"])
+                    failed += 1
                 elif r == "UNRESOLVED":
-                    results["unresolved"] += 1
-
-        obs = results["observed"]
+                    unresolved += 1
+        decisive = success + failed
         horizon_stats[h] = {
-            "observed": obs, "unobserved": results["unobserved"],
-            "success": results["success"], "failed": results["failed"],
-            "unresolved": results["unresolved"],
-            "success_rate": round(results["success"] / obs * 100, 2) if obs else 0,
-            "failed_rate": round(results["failed"] / obs * 100, 2) if obs else 0,
-            "avg_realized_return": round(_st.mean(results["realized_returns"]), 6) if results["realized_returns"] else 0,
-            "median_realized_return": round(_st.median(results["realized_returns"]), 6) if results["realized_returns"] else 0,
-            "avg_holding_days": round(_st.mean(results["holding_days_list"]), 1) if results["holding_days_list"] else 0,
+            "observed": observed, "unobserved": unobserved,
+            "success": success, "failed": failed, "unresolved": unresolved,
+            "target_hit_rate": round(success / observed * 100, 2) if observed else 0,
+            "stop_hit_rate": round(failed / observed * 100, 2) if observed else 0,
+            "unresolved_rate": round(unresolved / observed * 100, 2) if observed else 0,
+            "decisive_win_rate": round(success / decisive * 100, 2) if decisive else 0,
+            "avg_end_return": round(_st.mean(end_returns), 6) if end_returns else 0,
+            "median_end_return": round(_st.median(end_returns), 6) if end_returns else 0,
+            "avg_max_upside": round(_st.mean(max_upsides), 6) if max_upsides else 0,
+            "median_max_upside": round(_st.median(max_upsides), 6) if max_upsides else 0,
+            "avg_max_drawdown": round(_st.mean(max_drawdowns), 6) if max_drawdowns else 0,
+            "median_max_drawdown": round(_st.median(max_drawdowns), 6) if max_drawdowns else 0,
+            "avg_days_to_target": None, "avg_days_to_stop": None,
         }
 
-    # Execution stats
-    entered = sum(1 for o in opps if o.get("entry_price") and o["entry_price"] > 0)
+    # ── 整笔交易执行统计（使用机会执行字段）──
+    entered_opps = [o for o in opps if o.get("entry_price") and o["entry_price"] > 0]
+    entered = len(entered_opps)
     target = sum(1 for o in opps if o.get("exit_reason") == "TARGET")
     stop = sum(1 for o in opps if o.get("exit_reason") == "STOP")
     unresolved = sum(1 for o in opps if o.get("exit_reason") == "UNRESOLVED")
     not_entered = len(opps) - entered
-    realized_returns = [o["realized_return"] for o in opps if o.get("realized_return") != 0]
+    realized_returns = [o["realized_return"] or 0 for o in entered_opps]
+    holding_days = [o.get("holding_days") or 0 for o in entered_opps if o.get("holding_days")]
+    positive = sum(1 for rr in realized_returns if rr > 0)
 
     return {
         "horizon_stats": horizon_stats,
@@ -1528,6 +1517,9 @@ def build_strategy2_backtest_summary(task_id: str) -> dict:
             "not_entered": not_entered,
             "target_hit_rate": round(target / entered * 100, 2) if entered else 0,
             "avg_realized_return": round(_st.mean(realized_returns), 6) if realized_returns else 0,
+            "median_realized_return": round(_st.median(realized_returns), 6) if realized_returns else 0,
+            "positive_rate": round(positive / entered * 100, 2) if entered else 0,
+            "avg_holding_days": round(_st.mean(holding_days), 1) if holding_days else 0,
         },
         "funnel": {},
         "integrity": {},
@@ -1681,7 +1673,7 @@ def replace_strategy2_stock_backtest_result(
             "actual_eval_start_date": result.get("actual_eval_start_date"),
             "actual_eval_end_date": result.get("actual_eval_end_date"),
             "observation_data_end_date": result.get("observation_data_end_date"),
-            "available_days": result.get("available_days", len(result.get("signals", [])) if result.get("signals") else 0),
+            "available_days": result.get("available_days", 0),
             "required_days": result.get("required_days", 250),
         }.items() if v is not None}
         if update_kwargs:

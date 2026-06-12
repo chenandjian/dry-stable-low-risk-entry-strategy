@@ -569,6 +569,10 @@ def run_strategy2_stock_backtest(
         "evaluation_errors": evaluation_errors,
         "raw_signals_count": len(signals),
         "opportunities_count": len(opportunities),
+        "available_days": len(ohlc_data),
+        "required_days": min_required,
+        "earliest_date": ohlc_data[0]["date"] if ohlc_data else "",
+        "latest_date": ohlc_data[-1]["date"] if ohlc_data else "",
         "insufficient": None,
     }
 
