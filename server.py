@@ -140,8 +140,20 @@ async def lifespan(app: FastAPI):
         from scheduler.scheduler import start_scheduler
         start_scheduler(config)
         logger.info("Scheduler auto-started on server launch")
+
+    # 启动时恢复遗留的回测任务
+    try:
+        running = conn.execute(
+            "SELECT id FROM strategy2_backtest_tasks WHERE status='running'").fetchall()
+        for r in running:
+            conn.execute("UPDATE strategy2_backtest_tasks SET status='INTERRUPTED' WHERE id=?", (r[0],))
+            conn.execute("UPDATE strategy2_backtest_task_stocks SET status='PENDING' WHERE task_id=? AND status='RUNNING'", (r[0],))
+            conn.commit()
+            logger.info("Marked interrupted backtest task: %s", r[0])
+    except Exception:
+        pass  # 表可能尚未创建
+
     yield
-    # Shutdown
     from scheduler.scheduler import stop_scheduler
     stop_scheduler()
     logger.info("Server shutting down")
@@ -1612,3 +1624,46 @@ async def strategy2_backtest_stock_history(task_id: str, code: str):
     """查询单只股票在回测任务中的历史命中。"""
     opps = db.get_strategy2_backtest_opportunities(task_id, code=code, limit=500)
     return {"code": code, "opportunities": opps, "total": len(opps)}
+
+
+@app.get("/api/strategy2/backtests/{task_id}/stocks")
+async def strategy2_backtest_stocks(task_id: str, status: str = None):
+    """查询任务中的股票状态列表。"""
+    stocks = db.get_strategy2_backtest_task_stocks(task_id, status=status)
+    return {"stocks": stocks, "total": len(stocks)}
+
+
+@app.post("/api/strategy2/backtests/{task_id}/resume")
+async def strategy2_backtest_resume(task_id: str):
+    """恢复中断的回测任务。"""
+    task = db.get_strategy2_backtest_task(task_id)
+    if not task:
+        return JSONResponse({"error": "TASK_NOT_FOUND"}, status_code=404)
+    if _backtest_running["running"]:
+        return JSONResponse({"error": "TASK_CONFLICT", "message": "已有回测正在运行"}, status_code=409)
+    # 将遗留 RUNNING 股票恢复为 PENDING
+    config = json.loads(task["config_snapshot"]) if task.get("config_snapshot") else load_config()
+    # TODO: 完整恢复逻辑（使用原任务快照重新调度）
+    return {"task_id": task_id, "status": "resume_not_implemented"}
+
+
+@app.post("/api/strategy2/backtests/{task_id}/cancel")
+async def strategy2_backtest_cancel(task_id: str):
+    """取消运行中的回测任务。"""
+    if _backtest_running.get("task_id") == task_id:
+        _backtest_running["running"] = False
+        _backtest_running["task_id"] = None
+        db.update_strategy2_backtest_task(task_id, status="CANCELED")
+        return {"task_id": task_id, "status": "canceled"}
+    return JSONResponse({"error": "TASK_NOT_RUNNING"}, status_code=404)
+
+
+@app.post("/api/strategy2/backtests/{task_id}/retry-failed")
+async def strategy2_backtest_retry_failed(task_id: str):
+    """重试任务中失败的股票。"""
+    task = db.get_strategy2_backtest_task(task_id)
+    if not task:
+        return JSONResponse({"error": "TASK_NOT_FOUND"}, status_code=404)
+    if _backtest_running["running"]:
+        return JSONResponse({"error": "TASK_CONFLICT"}, status_code=409)
+    return {"task_id": task_id, "status": "retry_not_implemented"}  # TODO
