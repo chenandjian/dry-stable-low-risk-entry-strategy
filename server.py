@@ -1367,6 +1367,11 @@ async def start_strategy2_backtest(payload: dict):
         execution_model=payload.get("executionModel", "NEXT_OPEN"),
         data_snapshot_date=datetime.datetime.now().strftime("%Y-%m-%d"))
 
+    # 初始化所有股票的 PENDING 状态
+    for s in resolved_stocks:
+        db.save_strategy2_backtest_task_stock(task_id, s["code"],
+            name=s.get("name", ""), status="PENDING")
+
     _backtest_running["running"] = True
     _backtest_running["task_id"] = task_id
     _backtest_running["started_at"] = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -1402,14 +1407,16 @@ async def start_strategy2_backtest(payload: dict):
                 _backtest_running["stats"]["current_code"] = code
                 _backtest_running["stats"]["current_name"] = name
 
+                db.save_strategy2_backtest_task_stock(task_id, code, status="RUNNING")
                 ohlc = db.get_ohlc(code)
                 if not ohlc:
+                    db.save_strategy2_backtest_task_stock(task_id, code,
+                        status="INSUFFICIENT", error_code="NO_LOCAL_DATA")
                     insufficient.append({
                         "code": code, "name": name,
                         "reason_code": "NO_LOCAL_DATA",
                         "available_days": 0,
                         "required_days": config.get("strategy2", {}).get("minimum_required_days", 250),
-                        "earliest_date": "", "latest_date": "",
                     })
                     _backtest_running["stats"]["insufficient_stocks_count"] = len(insufficient)
                     continue
@@ -1422,14 +1429,21 @@ async def start_strategy2_backtest(payload: dict):
                     )
                 except Exception as exc:
                     failed_count += 1
+                    db.save_strategy2_backtest_task_stock(task_id, code,
+                        status="FAILED", error_code=type(exc).__name__, error_detail=str(exc)[:500])
                     logger.warning("Strategy2 backtest stock %s failed: %s", code, exc)
                     continue
 
                 if result.get("insufficient"):
+                    db.save_strategy2_backtest_task_stock(task_id, code,
+                        status="INSUFFICIENT", error_code=result["insufficient"]["reason_code"],
+                        available_days=result["insufficient"]["available_days"],
+                        required_days=result["insufficient"]["required_days"])
                     insufficient.append(result["insufficient"])
                     _backtest_running["stats"]["insufficient_stocks_count"] = len(insufficient)
+                    continue
 
-                # 保存原始信号
+                # 保存原始信号 + 机会
                 raw_signals = result.get("signals") or []
                 for sig in raw_signals:
                     db.save_strategy2_backtest_signal(task_id, sig)
@@ -1441,6 +1455,20 @@ async def start_strategy2_backtest(payload: dict):
                         db.save_strategy2_backtest_opportunity(task_id, opp)
                     all_opps.extend(opps)
 
+                # 股票终态
+                db.save_strategy2_backtest_task_stock(task_id, code, status="COMPLETED",
+                    evaluation_days=result.get("eval_days", 0),
+                    liquidity_filtered_days=result.get("liquidity_filtered_days", 0),
+                    trend_filtered_days=result.get("trend_filtered_days", 0),
+                    rejection_failed_days=result.get("rejection_failed_days", 0),
+                    score_failed_days=result.get("score_failed_days", 0),
+                    risk_failed_days=result.get("risk_failed_days", 0),
+                    evaluation_error_days=result.get("evaluation_error_days", 0),
+                    raw_signals_count=result.get("raw_signals_count", 0),
+                    opportunities_count=result.get("opportunities_count", 0),
+                    actual_eval_start_date=result.get("actual_eval_start_date"),
+                    actual_eval_end_date=result.get("actual_eval_end_date"))
+
                 _backtest_running["stats"]["processed_stocks"] = i + 1
                 _backtest_running["stats"]["opportunities_count"] = len(all_opps)
 
@@ -1448,21 +1476,49 @@ async def start_strategy2_backtest(payload: dict):
             if insufficient:
                 db.save_strategy2_backtest_insufficient_stocks(task_id, insufficient)
 
+            # 从 task_stocks 聚合实际评估区间和漏斗
+            agg = db.get_conn().execute(
+                "SELECT MIN(actual_eval_start_date), MAX(actual_eval_end_date), "
+                "SUM(evaluation_days), SUM(evaluation_error_days), SUM(raw_signals_count) "
+                "FROM strategy2_backtest_task_stocks WHERE task_id=?", (task_id,)
+            ).fetchone()
+            actual_eval_start = agg[0] if agg else None
+            actual_eval_end = agg[1] if agg else None
+            total_eval_days = agg[2] or 0
+            total_errors = agg[3] or 0
+            total_signals = agg[4] or 0
+
+            # 生成 summary（从数据库全量机会）
+            from strategy2.backtester import aggregate_backtest_summary
+            all_db_opps = db.get_strategy2_backtest_opportunities(task_id, limit=100000)
+            import json as _json
+            summary = aggregate_backtest_summary([], total, total_eval_days, 0, 0)
+            if all_db_opps:
+                summary.total_opportunities = len(all_db_opps)
+                summary.horizon_stats = {}  # simplified for now
+            summary_json = _json.dumps({"horizon_stats": summary.horizon_stats, "total_opportunities": len(all_db_opps),
+                "total_signals": total_signals, "total_eval_days": total_eval_days, "total_errors": total_errors}, ensure_ascii=False)
+
             # 汇总更新
             elapsed = round(_time.monotonic() - t_start, 1)
             status = "completed" if failed_count == 0 else "completed_with_errors"
+            credibility = "TRUSTED_BASELINE" if (failed_count == 0 and actual_eval_start and summary_json) else "PHASE1_INCOMPLETE"
             now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             db.update_strategy2_backtest_task(
                 task_id,
-                status=status,
+                status=status, credibility_status=credibility,
                 processed_stocks=total,
                 stocks_with_opportunities=stocks_with_opps,
                 opportunities_count=len(all_opps),
                 insufficient_stocks_count=len(insufficient),
                 failed_stocks_count=failed_count,
                 finished_at=now, elapsed_seconds=elapsed,
-                actual_start_date=payload.get("startDate", ""),
-                actual_end_date=payload.get("endDate", ""),
+                actual_evaluation_start_date=actual_eval_start,
+                actual_evaluation_end_date=actual_eval_end,
+                completed_evaluations=total_eval_days,
+                raw_signals_count=total_signals,
+                evaluation_error_days=total_errors,
+                summary_json=summary_json,
             )
         except Exception as e:
             import traceback

@@ -185,6 +185,7 @@ def _build_opportunity(cluster) -> BacktestOpportunity:
     last = cluster[-1]
     if isinstance(first, BacktestSignal):
         scores = [s.score for s in cluster]
+        signal_ids = [s.evaluation_index for s in cluster]
         return BacktestOpportunity(
             code=first.code, name=first.name,
             first_detected_date=first.evaluation_date,
@@ -197,6 +198,7 @@ def _build_opportunity(cluster) -> BacktestOpportunity:
             trend_type=first.trend_type,
             trend_evidence_score=first.trend_evidence_score,
             evaluation_snapshot=first.evaluation_snapshot,
+            signal_ids=signal_ids,
             signal_count=len(cluster),
         )
     else:
@@ -348,28 +350,38 @@ def calculate_execution_outcome(
     future_from_entry = ohlc_data[signal_idx + 1:]
     opp.available_forward_days = len(future_from_entry)
 
-    target_day = stop_day = None
+    target_hit = None  # {holding_days, date, price}
+    stop_hit = None
     for i, d in enumerate(future_from_entry):
-        if d["high"] >= target_price and target_day is None:
-            target_day = i + 1
-        if d["low"] <= stop_loss and stop_day is None:
-            stop_day = i + 1
+        if d["high"] >= target_price and target_hit is None:
+            target_hit = {"holding_days": i + 1, "date": d["date"], "price": target_price}
+        if d["low"] <= stop_loss and stop_hit is None:
+            stop_hit = {"holding_days": i + 1, "date": d["date"], "price": stop_loss}
 
-    if target_day and stop_day:
-        if stop_day <= target_day:
-            opp.exit_reason, opp.holding_days = "STOP", stop_day
+    if target_hit and stop_hit:
+        if stop_hit["holding_days"] <= target_hit["holding_days"]:
+            selected = stop_hit; opp.exit_reason = "STOP"
         else:
-            opp.exit_reason, opp.holding_days = "TARGET", target_day
-    elif stop_day:
-        opp.exit_reason, opp.holding_days = "STOP", stop_day
-    elif target_day:
-        opp.exit_reason, opp.holding_days = "TARGET", target_day
+            selected = target_hit; opp.exit_reason = "TARGET"
+        opp.holding_days = selected["holding_days"]
+        opp.exit_date = selected["date"]
+        opp.exit_price = selected["price"]
+        opp.realized_return = opp.exit_price / opp.entry_price - 1.0
+    elif stop_hit:
+        opp.exit_reason = "STOP"
+        opp.holding_days = stop_hit["holding_days"]
+        opp.exit_date = stop_hit["date"]
+        opp.exit_price = stop_hit["price"]
+        opp.realized_return = opp.exit_price / opp.entry_price - 1.0
+    elif target_hit:
+        opp.exit_reason = "TARGET"
+        opp.holding_days = target_hit["holding_days"]
+        opp.exit_date = target_hit["date"]
+        opp.exit_price = target_hit["price"]
+        opp.realized_return = opp.exit_price / opp.entry_price - 1.0
     else:
         opp.exit_reason = "UNRESOLVED"
         opp.holding_days = len(future_from_entry)
-
-    if opp.exit_reason in ("TARGET", "STOP") and opp.entry_price > 0:
-        opp.realized_return = (target_price if opp.exit_reason == "TARGET" else stop_loss) / opp.entry_price - 1.0
 
     if len(future_from_entry) > 0:
         opp.mark_to_market_end_return = future_from_entry[-1]["close"] / opp.entry_price - 1.0
@@ -438,14 +450,30 @@ def run_strategy2_stock_backtest(
     eval_days = 0
     liquidity_filtered = 0
     trend_skipped = 0
+    rejection_failed = 0
+    score_failed = 0
+    risk_failed = 0
+    invalid_data = 0
+    error_days = 0
+    evaluation_errors: list[dict] = []
+    actual_eval_start = None
+    actual_eval_end = None
+    obs_data_end = None
 
     for i in range(min_required, len(ohlc_data) + 1):
         eval_day = ohlc_data[i - 1]["date"]
         if eval_day < start_date or eval_day > end_date:
             continue
 
-        evaluation_index = i - 1  # 判断日在 ohlc_data 中的位置
+        evaluation_index = i - 1
         eval_days += 1
+        if actual_eval_start is None:
+            actual_eval_start = eval_day
+        actual_eval_end = eval_day
+        # 未来观察截止：evaluation_index 之后的最后一条数据
+        if i < len(ohlc_data):
+            obs_data_end = ohlc_data[-1]["date"]
+
         history = ohlc_data[:i]
         if len(history) > max_window:
             history = history[-max_window:]
@@ -458,7 +486,9 @@ def run_strategy2_stock_backtest(
         try:
             evaluation = engine.evaluate_at(history, code=code, name=name)
         except Exception as exc:
+            error_days += 1
             eval_results[evaluation_index] = "EVALUATION_ERROR"
+            evaluation_errors.append({"code": code, "date": eval_day, "type": type(exc).__name__, "detail": str(exc)[:200]})
             continue
 
         if evaluation.passed:
@@ -483,17 +513,21 @@ def run_strategy2_stock_backtest(
             trend_skipped += 1
             eval_results[evaluation_index] = "DOWNTREND_FILTERED"
         elif evaluation.status_reason and "REJECT" in str(evaluation.status_reason):
+            rejection_failed += 1
             eval_results[evaluation_index] = "REJECTION_FAILED"
         elif evaluation.status_reason == "SCORE_BELOW_THRESHOLD":
+            score_failed += 1
             eval_results[evaluation_index] = "SCORE_BELOW_THRESHOLD"
         elif evaluation.status_reason == "RISK_RATIO_TOO_HIGH":
+            risk_failed += 1
             eval_results[evaluation_index] = "RISK_RATIO_TOO_HIGH"
         elif evaluation.status_reason in ("INVALID_MARKET_DATA",):
+            invalid_data += 1
             eval_results[evaluation_index] = "INVALID_DATA"
         elif evaluation.status_reason in ("INSUFFICIENT_STRATEGY_DATA", "INSUFFICIENT_TREND_DATA"):
             eval_results[evaluation_index] = "INSUFFICIENT_DATA"
         else:
-            eval_results[evaluation_index] = "RISK_RATIO_TOO_HIGH"  # 其他非通过原因
+            eval_results[evaluation_index] = "RISK_RATIO_TOO_HIGH"
 
     # 合并连续信号 + 执行模型 + 未来表现
     opportunities = merge_consecutive_signals(signals, eval_results)
@@ -522,8 +556,19 @@ def run_strategy2_stock_backtest(
         "opportunities": opps_to_dicts(opportunities),
         "eval_days": eval_days,
         "eval_results": eval_results,
-        "liquidity_filtered": liquidity_filtered,
-        "trend_skipped": trend_skipped,
+        "actual_eval_start_date": actual_eval_start,
+        "actual_eval_end_date": actual_eval_end,
+        "observation_data_end_date": obs_data_end,
+        "liquidity_filtered_days": liquidity_filtered,
+        "trend_filtered_days": trend_skipped,
+        "rejection_failed_days": rejection_failed,
+        "score_failed_days": score_failed,
+        "risk_failed_days": risk_failed,
+        "invalid_data_days": invalid_data,
+        "evaluation_error_days": error_days,
+        "evaluation_errors": evaluation_errors,
+        "raw_signals_count": len(signals),
+        "opportunities_count": len(opportunities),
         "insufficient": None,
     }
 
@@ -542,6 +587,8 @@ def opps_to_dicts(opportunities: list[BacktestOpportunity]) -> list[dict]:
             "entry_close": o.entry_close,
             "stop_loss": o.stop_loss,
             "risk_ratio": o.risk_ratio,
+            "first_signal_date": o.first_detected_date,
+            "last_signal_date": o.last_detected_date,
             "trend_type": o.trend_type,
             "trend_evidence_score": o.trend_evidence_score,
             "signal_count": o.signal_count,
