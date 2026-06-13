@@ -20,16 +20,33 @@
     <div v-if="error" class="error-msg">{{ error }}</div>
 
     <!-- Progress -->
-    <div class="progress-bar" v-if="running || (task && task.status === 'completed')">
+    <div class="progress-bar" v-if="running || task">
       <span :class="statusClass">{{ statusLabel }}</span>
       <span>{{ stats.processed_stocks || 0 }} / {{ stats.total_stocks || task?.total_stocks || 0 }}</span>
       <span>{{ stats.current_code }} {{ stats.current_name }}</span>
       <span>机会: {{ stats.opportunities_count || task?.opportunities_count || 0 }}</span>
       <span>数据不足: {{ stats.insufficient_stocks_count || task?.insufficient_stocks_count || 0 }}</span>
+      <button v-if="canCancel" class="btn-action" :disabled="actionPending" @click.stop="runTaskAction('cancel')">取消</button>
+      <button v-if="canResume" class="btn-action" :disabled="actionPending" @click.stop="runTaskAction('resume')">恢复</button>
+      <button v-if="canRetryFailed" class="btn-action" :disabled="actionPending" @click.stop="runTaskAction('retry')">重试失败股票</button>
+    </div>
+    <div v-if="actionError" class="error-msg">{{ actionError }}</div>
+
+    <div class="panel version-panel" v-if="task">
+      <h3>可信度与版本</h3>
+      <div class="summary-grid">
+        <div class="metric"><span class="label">可信度</span><span class="value small" :class="credibilityClass">{{ task.credibility_status || '--' }}</span></div>
+        <div class="metric"><span class="label">回测引擎</span><span class="value small">{{ task.backtest_engine_version || '--' }}</span></div>
+        <div class="metric"><span class="label">策略引擎</span><span class="value small">{{ task.strategy_engine_version || '--' }}</span></div>
+        <div class="metric"><span class="label">数据版本算法</span><span class="value small">{{ task.data_revision_version || '--' }}</span></div>
+        <div class="metric"><span class="label">数据指纹</span><span class="value small code">{{ shortRevision }}</span></div>
+        <div class="metric"><span class="label">执行模型</span><span class="value small">{{ task.execution_model || '--' }}</span></div>
+        <div class="metric"><span class="label">数据快照</span><span class="value small">{{ task.data_snapshot_date || '--' }}</span></div>
+      </div>
     </div>
 
     <!-- Summary -->
-    <div class="panel" v-if="task && task.status === 'completed'">
+    <div class="panel" v-if="task && task.summary">
       <h3>汇总报告</h3>
       <div class="summary-grid">
         <div class="metric"><span class="label">测试股票</span><span class="value">{{ task.total_stocks }}</span></div>
@@ -90,6 +107,22 @@
       </div>
     </div>
 
+    <div class="panel" v-if="failedStocks.length">
+      <h3>失败股票 ({{ failedStocks.length }})</h3>
+      <table>
+        <thead><tr><th>股票</th><th>错误类型</th><th>错误详情</th><th>开始</th><th>结束</th></tr></thead>
+        <tbody>
+          <tr v-for="s in failedStocks" :key="s.code">
+            <td>{{ s.code }} {{ s.name }}</td>
+            <td class="red">{{ s.error_code }}</td>
+            <td>{{ s.error_detail }}</td>
+            <td>{{ s.started_at }}</td>
+            <td>{{ s.finished_at }}</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
     <!-- Opportunities -->
     <div class="panel" v-if="oppsTotal > 0">
       <h3>机会明细 ({{ oppsTotal }}) <span v-if="oppsHasMore" class="muted">当前显示 {{ opportunities.length }} 条</span></h3>
@@ -141,12 +174,28 @@
     <!-- Task History -->
     <div class="panel">
       <h3>历史回测任务</h3>
+      <div class="history-controls">
+        <select v-model="taskStatusFilter" @change="loadTasks(1)">
+          <option value="">全部状态</option>
+          <option value="completed">已完成</option>
+          <option value="completed_with_errors">有失败</option>
+          <option value="INTERRUPTED">已中断</option>
+          <option value="CANCELED">已取消</option>
+          <option value="DATA_REVISION_CHANGED">数据版本变化</option>
+          <option value="ENGINE_REVISION_CHANGED">引擎版本变化</option>
+        </select>
+      </div>
       <div v-if="!tasks.length" class="empty">暂无回测记录</div>
       <div v-for="t in tasks" :key="t.id" class="task-row" @click="loadTask(t.id)">
         <span>{{ t.id }}</span>
         <span :class="t.status === 'completed' ? 'green' : t.status === 'failed' ? 'red' : ''">{{ t.status }}</span>
         <span>{{ t.started_at }}</span>
         <span>机会: {{ t.opportunities_count }}</span>
+      </div>
+      <div class="pagination" v-if="taskTotal > taskPageSize">
+        <button :disabled="taskPage <= 1" @click="loadTasks(taskPage - 1)">上一页</button>
+        <span>第 {{ taskPage }} 页 / 共 {{ Math.ceil(taskTotal / taskPageSize) }} 页</span>
+        <button :disabled="taskPage * taskPageSize >= taskTotal" @click="loadTasks(taskPage + 1)">下一页</button>
       </div>
     </div>
   </div>
@@ -162,17 +211,22 @@ export default {
       startDate: '2025-08-01', endDate: '2026-05-01',
       codesInput: '', maxStocks: 200,
       running: false, starting: false, error: '',
-      task: null, tasks: [], opportunities: [], insufficient: [],
+      task: null, tasks: [], opportunities: [], insufficient: [], failedStocks: [],
       stats: {}, pollTimer: null, horizons: ['3', '5', '10', '20'],
       oppsTotal: 0, oppsHasMore: false, oppPage: 1, oppLimit: 100,
+      activeTaskId: null, actionPending: false, actionError: '',
+      taskPage: 1, taskPageSize: 20, taskTotal: 0, taskStatusFilter: '',
     }
   },
   computed: {
     statusLabel() {
       if (this.running) return '运行中'
-      if (this.task?.status === 'completed') return '已完成'
-      if (this.task?.status === 'failed') return '失败'
-      return '--'
+      const labels = {
+        completed: '已完成', completed_with_errors: '完成但有失败',
+        failed: '失败', INTERRUPTED: '已中断', CANCELED: '已取消',
+        DATA_REVISION_CHANGED: '数据版本变化', ENGINE_REVISION_CHANGED: '引擎版本变化',
+      }
+      return labels[this.task?.status] || this.task?.status || '--'
     },
     statusClass() {
       if (this.running) return 'st-running'
@@ -188,9 +242,29 @@ export default {
     funnel() {
       return this.task?.summary?.funnel || null
     },
+    canCancel() { return this.running && this.task?.id === this.activeTaskId },
+    canResume() { return !this.running && ['INTERRUPTED', 'CANCELED'].includes(this.task?.status) },
+    canRetryFailed() {
+      return !this.running && Number(this.task?.failed_stocks_count || 0) > 0
+        && !['DATA_REVISION_CHANGED', 'ENGINE_REVISION_CHANGED'].includes(this.task?.status)
+    },
+    credibilityClass() {
+      if (this.task?.credibility_status === 'TRUSTED_BASELINE') return 'green'
+      return 'red'
+    },
+    shortRevision() { return this.task?.data_revision_id?.slice(0, 12) || '--' },
   },
   async mounted() {
     await this.loadTasks()
+    const api = useApi()
+    const status = await api.getStrategy2BacktestStatus()
+    if (status.running && status.taskId) {
+      this.running = true
+      this.activeTaskId = status.taskId
+      this.stats = status.stats || {}
+      await this.loadTask(status.taskId)
+      this.pollStatus()
+    }
   },
   beforeUnmount() { this.stopPoll() },
   methods: {
@@ -205,7 +279,8 @@ export default {
       if (this.codesInput.trim()) payload.codes = this.codesInput.split(',').map(s => s.trim()).filter(Boolean)
       const res = await api.startStrategy2Backtest(payload)
       if (res.ok) {
-        this.running = true; this.task = null; this.opportunities = []; this.insufficient = []
+        this.running = true; this.activeTaskId = res.task_id; this.task = { id: res.task_id, status: 'running' }
+        this.opportunities = []; this.insufficient = []; this.failedStocks = []
         this.pollStatus()
       } else {
         this.error = res.message || res.error || '启动失败'
@@ -217,15 +292,25 @@ export default {
       this.pollTimer = setInterval(async () => {
         const api = useApi()
         const s = await api.getStrategy2BacktestStatus()
-        if (!s.running) { this.stopPoll(); this.running = false; await this.loadTasks(); return }
+        if (!s.running) {
+          this.stopPoll(); this.running = false
+          if (this.activeTaskId) await this.loadTask(this.activeTaskId)
+          await this.loadTasks(this.taskPage)
+          return
+        }
+        this.activeTaskId = s.taskId || this.activeTaskId
         this.stats = s.stats || {}
       }, 2000)
     },
     stopPoll() { if (this.pollTimer) { clearInterval(this.pollTimer); this.pollTimer = null } },
-    async loadTasks() {
+    async loadTasks(page = 1) {
       const api = useApi()
-      const res = await api.getStrategy2BacktestTasks()
+      this.taskPage = page
+      const params = new URLSearchParams({ page: String(page), page_size: String(this.taskPageSize) })
+      if (this.taskStatusFilter) params.set('status', this.taskStatusFilter)
+      const res = await api.getStrategy2BacktestTasks(params)
       this.tasks = res.tasks || []
+      this.taskTotal = res.total || this.tasks.length
     },
     async loadTask(taskId) {
       const api = useApi()
@@ -234,6 +319,8 @@ export default {
       await this.loadOpps(1)
       const iRes = await api.getStrategy2BacktestInsufficientStocks(taskId)
       this.insufficient = iRes.stocks || []
+      const fRes = await api.getStrategy2BacktestStocks(taskId, 'FAILED')
+      this.failedStocks = fRes.stocks || []
     },
     async loadOpps(page) {
       const api = useApi()
@@ -249,6 +336,23 @@ export default {
       })
       this.oppsTotal = oRes.total || this.opportunities.length
       this.oppsHasMore = oRes.hasMore || false
+    },
+    async runTaskAction(action) {
+      if (!this.task?.id) return
+      this.actionPending = true; this.actionError = ''
+      const api = useApi()
+      const fn = action === 'cancel' ? api.cancelStrategy2Backtest
+        : action === 'resume' ? api.resumeStrategy2Backtest
+          : api.retryFailedStrategy2Backtest
+      const res = await fn(this.task.id)
+      if (!res.ok) {
+        this.actionError = res.message || res.error || '操作失败'
+      } else if (action !== 'cancel') {
+        this.running = true; this.activeTaskId = this.task.id; this.pollStatus()
+      } else {
+        this.task.status = 'canceling'
+      }
+      this.actionPending = false
     },
     hs(h, key) {
       const stats = this.horizonStats
@@ -303,6 +407,11 @@ h1 { font-size: 1.5rem; color: #ffd700; margin-bottom: 4px; }
 .metric { text-align: center; }
 .metric .label { display: block; font-size: 11px; color: #888; }
 .metric .value { display: block; font-size: 18px; font-weight: 700; color: var(--accent); margin-top: 2px; }
+.metric .value.small { font-size: 12px; }
+.btn-action { padding: 4px 10px; background: #2a2a2a; border: 1px solid #555; color: #ddd; border-radius: 3px; cursor: pointer; }
+.btn-action:disabled { opacity: 0.5; cursor: not-allowed; }
+.history-controls { margin-bottom: 10px; }
+.history-controls select { padding: 5px 8px; background: #2a2a2a; border: 1px solid #444; color: #ddd; }
 table { width: 100%; border-collapse: collapse; font-size: 0.8rem; }
 th { background: #111; color: #888; padding: 6px 8px; text-align: left; border-bottom: 1px solid #333; }
 td { padding: 6px 8px; border-bottom: 1px solid #222; }

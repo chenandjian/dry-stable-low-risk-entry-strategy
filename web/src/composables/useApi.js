@@ -133,8 +133,9 @@ export function useApi() {
     const res = await fetch(`${API_BASE}/strategy2/backtests/status`)
     return res.json().catch(() => ({ running: false, stats: {} }))
   }
-  async function getStrategy2BacktestTasks() {
-    const res = await fetch(`${API_BASE}/strategy2/backtests`)
+  async function getStrategy2BacktestTasks(params = null) {
+    const qs = params ? params.toString() : ''
+    const res = await fetch(`${API_BASE}/strategy2/backtests${qs ? '?' + qs : ''}`)
     return res.json().catch(() => ({ tasks: [] }))
   }
   async function getStrategy2BacktestTask(taskId) {
@@ -155,6 +156,19 @@ export function useApi() {
     const res = await fetch(`${API_BASE}/strategy2/backtests/${encodeURIComponent(taskId)}/stocks/${encodeURIComponent(code)}`)
     return res.json().catch(() => ({ opportunities: [], total: 0 }))
   }
+  async function getStrategy2BacktestStocks(taskId, status = '') {
+    const qs = status ? `?status=${encodeURIComponent(status)}` : ''
+    const res = await fetch(`${API_BASE}/strategy2/backtests/${encodeURIComponent(taskId)}/stocks${qs}`)
+    return res.json().catch(() => ({ stocks: [], total: 0 }))
+  }
+  async function strategy2BacktestAction(taskId, action) {
+    const res = await fetch(`${API_BASE}/strategy2/backtests/${encodeURIComponent(taskId)}/${action}`, { method: 'POST' })
+    const body = await res.json().catch(() => ({}))
+    return { ...body, ok: res.ok, statusCode: res.status }
+  }
+  const resumeStrategy2Backtest = taskId => strategy2BacktestAction(taskId, 'resume')
+  const cancelStrategy2Backtest = taskId => strategy2BacktestAction(taskId, 'cancel')
+  const retryFailedStrategy2Backtest = taskId => strategy2BacktestAction(taskId, 'retry-failed')
 
   return {
     startScan, getScanStatus, getCandidates, getCandidate, getScanTasks,
@@ -166,6 +180,7 @@ export function useApi() {
     startStrategy2Backtest, getStrategy2BacktestStatus,
     getStrategy2BacktestTasks, getStrategy2BacktestTask,
     getStrategy2BacktestOpportunities, getStrategy2BacktestInsufficientStocks,
-    getStrategy2BacktestStockHistory,
+    getStrategy2BacktestStockHistory, getStrategy2BacktestStocks,
+    resumeStrategy2Backtest, cancelStrategy2Backtest, retryFailedStrategy2Backtest,
   }
 }

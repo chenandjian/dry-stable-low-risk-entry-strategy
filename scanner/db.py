@@ -1295,6 +1295,10 @@ def _ensure_strategy2_backtest_tables(conn: sqlite3.Connection):
     _ensure_column(conn, "strategy2_backtest_task_stocks", "earliest_date", "TEXT")
     _ensure_column(conn, "strategy2_backtest_task_stocks", "latest_date", "TEXT")
 
+    from strategy2.version import (
+        STRATEGY2_BACKTEST_ENGINE_VERSION,
+        STRATEGY2_STRATEGY_ENGINE_VERSION,
+    )
     # Historical tasks cannot remain trusted if they fail current baseline rules.
     conn.execute(
         "UPDATE strategy2_backtest_tasks "
@@ -1304,6 +1308,8 @@ def _ensure_strategy2_backtest_tables(conn: sqlite3.Connection):
         "LOWER(COALESCE(status, '')) <> 'completed' "
         "OR COALESCE(data_revision_id, '') = '' "
         "OR COALESCE(data_revision_version, '') <> ? "
+        "OR COALESCE(backtest_engine_version, '') <> ? "
+        "OR COALESCE(strategy_engine_version, '') <> ? "
         "OR summary_json IS NULL "
         "OR COALESCE(processed_stocks, 0) <> COALESCE(total_stocks, 0) "
         "OR COALESCE(failed_stocks_count, 0) > 0 "
@@ -1312,24 +1318,65 @@ def _ensure_strategy2_backtest_tables(conn: sqlite3.Connection):
         "           WHERE s.task_id=strategy2_backtest_tasks.id "
         "             AND s.status IN ('PENDING','RUNNING'))"
         ")",
-        (STRATEGY2_DATA_REVISION_VERSION,),
+        (
+            STRATEGY2_DATA_REVISION_VERSION,
+            STRATEGY2_BACKTEST_ENGINE_VERSION,
+            STRATEGY2_STRATEGY_ENGINE_VERSION,
+        ),
     )
 
 
+def mark_running_strategy2_backtests_interrupted() -> list[str]:
+    """Make backtests left running by a previous process explicitly resumable."""
+    conn = get_conn()
+    task_ids = [
+        row[0] for row in conn.execute(
+            "SELECT id FROM strategy2_backtest_tasks WHERE LOWER(status)='running'"
+        ).fetchall()
+    ]
+    if not task_ids:
+        return []
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        for task_id in task_ids:
+            conn.execute(
+                "UPDATE strategy2_backtest_tasks "
+                "SET status='INTERRUPTED', credibility_status='PHASE1_INCOMPLETE', "
+                "error='Interrupted by server restart' WHERE id=?",
+                (task_id,),
+            )
+            conn.execute(
+                "UPDATE strategy2_backtest_task_stocks SET status='PENDING' "
+                "WHERE task_id=? AND status='RUNNING'",
+                (task_id,),
+            )
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    return task_ids
+
+
 def create_strategy2_backtest_task(task_id: str, payload: dict, config_snapshot: str):
+    from strategy2.version import (
+        STRATEGY2_BACKTEST_ENGINE_VERSION,
+        STRATEGY2_STRATEGY_ENGINE_VERSION,
+    )
     conn = get_conn()
     conn.execute(
         """INSERT INTO strategy2_backtest_tasks
            (id, status, requested_start_date, requested_end_date,
             scope_type, requested_codes, max_stocks, config_snapshot,
-            total_stocks, started_at)
-           VALUES (?, 'running', ?, ?, ?, ?, ?, ?, 0, ?)""",
+            total_stocks, started_at, backtest_engine_version, strategy_engine_version)
+           VALUES (?, 'running', ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)""",
         (task_id, payload.get("startDate", ""), payload.get("endDate", ""),
          "market" if not payload.get("codes") else "single",
          ",".join(payload.get("codes") or []),
          payload.get("maxStocks", 200),
          config_snapshot,
-         datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")),
+         datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+         STRATEGY2_BACKTEST_ENGINE_VERSION,
+         STRATEGY2_STRATEGY_ENGINE_VERSION),
     )
     conn.commit()
 
@@ -1355,13 +1402,27 @@ def get_strategy2_backtest_task(task_id: str) -> dict | None:
     return dict(zip(cols, row))
 
 
-def get_strategy2_backtest_tasks() -> list[dict]:
+def get_strategy2_backtest_tasks(
+    page: int = 1, page_size: int = 20, status: str | None = None,
+) -> tuple[list[dict], int]:
     conn = get_conn()
+    page = max(page, 1)
+    page_size = min(max(page_size, 1), 100)
+    where = ""
+    params = []
+    if status:
+        where = " WHERE LOWER(status)=LOWER(?)"
+        params.append(status)
+    total = conn.execute(
+        "SELECT COUNT(*) FROM strategy2_backtest_tasks" + where, params
+    ).fetchone()[0]
     rows = conn.execute(
-        "SELECT * FROM strategy2_backtest_tasks ORDER BY started_at DESC"
+        "SELECT * FROM strategy2_backtest_tasks" + where
+        + " ORDER BY started_at DESC LIMIT ? OFFSET ?",
+        params + [page_size, (page - 1) * page_size],
     ).fetchall()
     cols = [d[1] for d in conn.execute("PRAGMA table_info(strategy2_backtest_tasks)")]
-    return [dict(zip(cols, r)) for r in rows]
+    return [dict(zip(cols, r)) for r in rows], total
 
 
 def save_strategy2_backtest_signal(task_id: str, signal):
@@ -1593,6 +1654,14 @@ def validate_strategy2_backtest_integrity(task_id: str) -> tuple:
         errors.append("missing data_revision_id")
     if t.get("data_revision_version") != STRATEGY2_DATA_REVISION_VERSION:
         errors.append(f"invalid data_revision_version: {t.get('data_revision_version')}")
+    from strategy2.version import (
+        STRATEGY2_BACKTEST_ENGINE_VERSION,
+        STRATEGY2_STRATEGY_ENGINE_VERSION,
+    )
+    if t.get("backtest_engine_version") != STRATEGY2_BACKTEST_ENGINE_VERSION:
+        errors.append(f"invalid backtest_engine_version: {t.get('backtest_engine_version')}")
+    if t.get("strategy_engine_version") != STRATEGY2_STRATEGY_ENGINE_VERSION:
+        errors.append(f"invalid strategy_engine_version: {t.get('strategy_engine_version')}")
 
     total = t.get("total_stocks", 0)
     processed = t.get("processed_stocks", 0)

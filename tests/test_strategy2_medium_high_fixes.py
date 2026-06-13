@@ -5,6 +5,17 @@ import threading
 import scanner.db as db
 import server as server_mod
 from fastapi.testclient import TestClient
+from strategy2.version import (
+    STRATEGY2_BACKTEST_ENGINE_VERSION,
+    STRATEGY2_STRATEGY_ENGINE_VERSION,
+)
+
+
+def _current_engine_versions():
+    return {
+        "backtest_engine_version": STRATEGY2_BACKTEST_ENGINE_VERSION,
+        "strategy_engine_version": STRATEGY2_STRATEGY_ENGINE_VERSION,
+    }
 
 
 def _create_finished_task(tmp_path, task_id: str, status: str = "completed"):
@@ -32,6 +43,7 @@ def _create_finished_task(tmp_path, task_id: str, status: str = "completed"):
         evaluation_error_days=0,
         data_revision_id="revision",
         data_revision_version=db.STRATEGY2_DATA_REVISION_VERSION,
+        **_current_engine_versions(),
     )
 
 
@@ -223,6 +235,7 @@ def test_init_db_preserves_current_valid_trusted_baseline(tmp_path):
         credibility_status="TRUSTED_BASELINE",
         data_revision_id="revision",
         data_revision_version=db.STRATEGY2_DATA_REVISION_VERSION,
+        **_current_engine_versions(),
         summary_json="{}",
         total_stocks=1,
         processed_stocks=1,
@@ -253,6 +266,7 @@ def test_no_local_data_path_records_audit_and_live_progress(tmp_path):
         data_snapshot_date="2025-06-01 09:00:00",
         data_revision_id=revision,
         data_revision_version=db.STRATEGY2_DATA_REVISION_VERSION,
+        **_current_engine_versions(),
     )
     running_state = {
         "running": True,
@@ -296,6 +310,7 @@ def _prepare_api_task(tmp_path, task_id: str, status: str, stock_statuses: dict[
         data_snapshot_date="2025-06-01 09:00:00",
         data_revision_id=revision,
         data_revision_version=db.STRATEGY2_DATA_REVISION_VERSION,
+        **_current_engine_versions(),
     )
     server_mod._backtest_running.update({
         "running": False, "task_id": None, "stats": {}, "cancel_event": None, "thread": None,
@@ -382,6 +397,7 @@ def test_retry_failed_rejects_turnover_revision_change(monkeypatch, tmp_path):
         data_snapshot_date="2025-06-01 09:00:00",
         data_revision_id=revision,
         data_revision_version=db.STRATEGY2_DATA_REVISION_VERSION,
+        **_current_engine_versions(),
     )
     db.save_ohlc("000001", [
         {"date": "2025-01-02", "open": 10, "high": 11, "low": 9, "close": 10, "volume": 100, "turnover": 200_000_000},
@@ -412,6 +428,7 @@ def test_cancelled_executor_leaves_pending_stocks_and_is_not_trusted(tmp_path):
         data_snapshot_date="2025-06-01 09:00:00",
         data_revision_id=revision,
         data_revision_version=db.STRATEGY2_DATA_REVISION_VERSION,
+        **_current_engine_versions(),
     )
     cancel_event = threading.Event()
     cancel_event.set()
@@ -473,6 +490,7 @@ def test_same_data_revision_tasks_have_identical_signal_and_opportunity_sets(mon
             data_snapshot_date="2025-06-01 09:00:00",
             data_revision_id=revision,
             data_revision_version=db.STRATEGY2_DATA_REVISION_VERSION,
+            **_current_engine_versions(),
         )
         cancel_event = threading.Event()
         state = {"running": True, "task_id": task_id, "stats": {}, "cancel_event": cancel_event}
@@ -504,3 +522,108 @@ def test_same_data_revision_tasks_have_identical_signal_and_opportunity_sets(mon
     assert stock["invalid_data_days"] == 2
     assert stock["earliest_date"] == "2025-01-02"
     assert stock["latest_date"] == "2025-01-02"
+
+
+def test_startup_marks_running_backtest_interrupted_and_preserves_completed_results(monkeypatch, tmp_path):
+    db_path = str(tmp_path / "startup-recovery.db")
+    db.init_db(db_path)
+    db.create_strategy2_backtest_task("restart-task", {}, "{}")
+    db.save_strategy2_backtest_task_stock("restart-task", "000001", status="RUNNING")
+    db.save_strategy2_backtest_task_stock("restart-task", "000002", status="COMPLETED")
+    db.get_conn().execute(
+        "INSERT INTO strategy2_backtest_signals "
+        "(task_id,code,name,evaluation_date,evaluation_index,score,level,current_close,"
+        "stop_loss,risk_ratio,volume_dry_score,price_stable_score,trend_type,"
+        "trend_evidence_score,evaluation_snapshot) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        ("restart-task", "000002", "", "2025-01-02", 1, 80, "", 10, 9, 0.1, 4, 4, "", 0, "{}"),
+    )
+    db.get_conn().commit()
+    monkeypatch.setattr(
+        server_mod,
+        "load_config",
+        lambda path="config.yaml": {"data": {"database_path": db_path}, "scheduler": {"enabled": False}},
+    )
+
+    with TestClient(server_mod.app):
+        task = db.get_strategy2_backtest_task("restart-task")
+        stocks = {row["code"]: row for row in db.get_strategy2_backtest_task_stocks("restart-task")}
+
+    assert task["status"] == "INTERRUPTED"
+    assert task["credibility_status"] == "PHASE1_INCOMPLETE"
+    assert stocks["000001"]["status"] == "PENDING"
+    assert stocks["000002"]["status"] == "COMPLETED"
+    assert db.get_conn().execute(
+        "SELECT COUNT(*) FROM strategy2_backtest_signals WHERE task_id='restart-task'"
+    ).fetchone()[0] == 1
+
+
+def test_resume_rejects_old_engine_revision_without_changing_results(monkeypatch, tmp_path):
+    config = _prepare_api_task(
+        tmp_path, "old-engine", "INTERRUPTED", {"000001": "PENDING", "000002": "COMPLETED"},
+    )
+    db.update_strategy2_backtest_task("old-engine", strategy_engine_version="strategy2-old")
+    db.get_conn().execute(
+        "INSERT INTO strategy2_backtest_signals "
+        "(task_id,code,name,evaluation_date,evaluation_index,score,level,current_close,"
+        "stop_loss,risk_ratio,volume_dry_score,price_stable_score,trend_type,"
+        "trend_evidence_score,evaluation_snapshot) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        ("old-engine", "000002", "", "2025-01-02", 1, 80, "", 10, 9, 0.1, 4, 4, "", 0, "{}"),
+    )
+    db.get_conn().commit()
+    monkeypatch.setattr(server_mod, "load_config", lambda path="config.yaml": config)
+
+    response = TestClient(server_mod.app).post("/api/strategy2/backtests/old-engine/resume")
+
+    assert response.status_code == 409
+    assert response.json()["error"] == "ENGINE_REVISION_CHANGED"
+    assert db.get_strategy2_backtest_task("old-engine")["status"] == "ENGINE_REVISION_CHANGED"
+    assert db.get_conn().execute(
+        "SELECT COUNT(*) FROM strategy2_backtest_signals WHERE task_id='old-engine'"
+    ).fetchone()[0] == 1
+
+
+def test_retry_failed_rejects_old_backtest_engine_revision(monkeypatch, tmp_path):
+    config = _prepare_api_task(
+        tmp_path, "old-backtester", "completed_with_errors", {"000001": "FAILED"},
+    )
+    db.update_strategy2_backtest_task("old-backtester", backtest_engine_version="phase1-old")
+    monkeypatch.setattr(server_mod, "load_config", lambda path="config.yaml": config)
+
+    response = TestClient(server_mod.app).post(
+        "/api/strategy2/backtests/old-backtester/retry-failed"
+    )
+
+    assert response.status_code == 409
+    assert response.json()["error"] == "ENGINE_REVISION_CHANGED"
+    assert db.get_strategy2_backtest_task("old-backtester")["status"] == "ENGINE_REVISION_CHANGED"
+
+
+def test_integrity_rejects_missing_strategy_engine_version(tmp_path):
+    _create_finished_task(tmp_path, "missing-engine")
+    summary = db.build_strategy2_backtest_summary("missing-engine")
+    db.update_strategy2_backtest_task(
+        "missing-engine", strategy_engine_version=None, summary_json=json.dumps(summary),
+    )
+
+    ok, errors = db.validate_strategy2_backtest_integrity("missing-engine")
+
+    assert ok is False
+    assert any("strategy_engine_version" in error for error in errors)
+
+
+def test_backtest_task_list_is_paginated_filtered_and_omits_large_fields(tmp_path):
+    db.init_db(str(tmp_path / "task-pages.db"))
+    for index, status in enumerate(("completed", "failed", "completed"), start=1):
+        db.create_strategy2_backtest_task(f"task-{index}", {}, f'{{"index": {index}}}')
+        db.update_strategy2_backtest_task(f"task-{index}", status=status, summary_json='{"large": true}')
+
+    response = TestClient(server_mod.app).get(
+        "/api/strategy2/backtests?page=1&page_size=1&status=completed"
+    )
+
+    body = response.json()
+    assert response.status_code == 200
+    assert body["total"] == 2
+    assert len(body["tasks"]) == 1
+    assert "config_snapshot" not in body["tasks"][0]
+    assert "summary_json" not in body["tasks"][0]

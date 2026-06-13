@@ -15,6 +15,10 @@ class DataRevisionChangedError(RuntimeError):
     """任务创建后的本地日线内容已经变化。"""
 
 
+class EngineRevisionChangedError(RuntimeError):
+    """任务创建后策略或回测实现版本已经变化。"""
+
+
 def _now_local() -> str:
     return datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
@@ -75,6 +79,33 @@ def validate_task_data_revision(task_id: str) -> None:
             ),
         )
         raise DataRevisionChangedError("Local daily OHLC data revision changed")
+
+
+def validate_task_engine_revision(task_id: str) -> None:
+    """Prevent old tasks from mixing results produced by a new implementation."""
+    from strategy2.version import (
+        STRATEGY2_BACKTEST_ENGINE_VERSION,
+        STRATEGY2_STRATEGY_ENGINE_VERSION,
+    )
+
+    task = db.get_strategy2_backtest_task(task_id)
+    if not task:
+        raise ValueError(f"Backtest task not found: {task_id}")
+    if (
+        task.get("backtest_engine_version") != STRATEGY2_BACKTEST_ENGINE_VERSION
+        or task.get("strategy_engine_version") != STRATEGY2_STRATEGY_ENGINE_VERSION
+    ):
+        db.update_strategy2_backtest_task(
+            task_id,
+            status="ENGINE_REVISION_CHANGED",
+            credibility_status="PHASE1_INCOMPLETE",
+            error=(
+                "ENGINE_REVISION_CHANGED: "
+                f"backtest={task.get('backtest_engine_version') or 'missing'} "
+                f"strategy={task.get('strategy_engine_version') or 'missing'}"
+            ),
+        )
+        raise EngineRevisionChangedError("Strategy2 implementation revision changed")
 
 
 def _finalize_task(task_id: str, cancel_event, elapsed: float) -> None:
@@ -154,6 +185,7 @@ def run_strategy2_backtest_task(
 ) -> None:
     """运行指定股票集合，并基于任务全部股票重新最终化。"""
     started = time.monotonic()
+    validate_task_engine_revision(task_id)
     validate_task_data_revision(task_id)
     snap_date = data_snapshot_date[:10]
     insufficient_rows = []
@@ -238,10 +270,11 @@ def run_strategy2_backtest_task(
 
         if insufficient_rows:
             db.save_strategy2_backtest_insufficient_stocks(task_id, insufficient_rows)
+        validate_task_engine_revision(task_id)
         validate_task_data_revision(task_id)
         _finalize_task(task_id, cancel_event, time.monotonic() - started)
     except Exception as exc:
-        if not isinstance(exc, DataRevisionChangedError):
+        if not isinstance(exc, (DataRevisionChangedError, EngineRevisionChangedError)):
             db.update_strategy2_backtest_task(
                 task_id, status="failed", credibility_status="PHASE1_INCOMPLETE",
                 error=str(exc), finished_at=_now_local(),

@@ -141,17 +141,12 @@ async def lifespan(app: FastAPI):
         start_scheduler(config)
         logger.info("Scheduler auto-started on server launch")
 
-    # 启动时恢复遗留的回测任务
+    # Mark Strategy2 backtests left by a previous process as explicitly resumable.
     try:
-        running = conn.execute(
-            "SELECT id FROM strategy2_backtest_tasks WHERE status='running'").fetchall()
-        for r in running:
-            conn.execute("UPDATE strategy2_backtest_tasks SET status='INTERRUPTED' WHERE id=?", (r[0],))
-            conn.execute("UPDATE strategy2_backtest_task_stocks SET status='PENDING' WHERE task_id=? AND status='RUNNING'", (r[0],))
-            conn.commit()
-            logger.info("Marked interrupted backtest task: %s", r[0])
+        for task_id in db.mark_running_strategy2_backtests_interrupted():
+            logger.info("Marked interrupted Strategy2 backtest task: %s", task_id)
     except Exception:
-        pass  # 表可能尚未创建
+        logger.exception("Failed to mark interrupted Strategy2 backtest tasks")
 
     yield
     from scheduler.scheduler import stop_scheduler
@@ -1448,8 +1443,14 @@ async def start_strategy2_backtest(payload: dict):
     data_snapshot_date = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     config_json = json.dumps(config, ensure_ascii=False)
     db.create_strategy2_backtest_task(task_id, payload, config_json)
+    from strategy2.version import (
+        STRATEGY2_BACKTEST_ENGINE_VERSION,
+        STRATEGY2_STRATEGY_ENGINE_VERSION,
+    )
     db.update_strategy2_backtest_task(task_id, status="running",
-        backtest_engine_version="phase1-v1", credibility_status="RUNNING_UNVERIFIED",
+        backtest_engine_version=STRATEGY2_BACKTEST_ENGINE_VERSION,
+        strategy_engine_version=STRATEGY2_STRATEGY_ENGINE_VERSION,
+        credibility_status="RUNNING_UNVERIFIED",
         execution_model=payload.get("executionModel", "NEXT_OPEN"),
         data_snapshot_date=data_snapshot_date)
 
@@ -1492,13 +1493,13 @@ async def strategy2_backtest_status():
 
 
 @app.get("/api/strategy2/backtests")
-async def strategy2_backtests():
+async def strategy2_backtests(page: int = 1, page_size: int = 20, status: str = None):
     """查询历史回测任务列表（摘要，不含 config/summary 大字段）。"""
-    tasks = db.get_strategy2_backtest_tasks()
+    tasks, total = db.get_strategy2_backtest_tasks(page=page, page_size=page_size, status=status)
     for t in tasks:
         t.pop("config_snapshot", None)
         t.pop("summary_json", None)
-    return {"tasks": tasks}
+    return {"tasks": tasks, "total": total, "page": max(page, 1), "page_size": min(max(page_size, 1), 100)}
 
 
 @app.get("/api/strategy2/backtests/{task_id}")
@@ -1589,9 +1590,17 @@ async def strategy2_backtest_resume(task_id: str):
     if not target_stocks:
         return JSONResponse({"error": "NO_UNFINISHED_STOCKS"}, status_code=409)
     config = json.loads(task["config_snapshot"])
-    from strategy2.backtest_service import DataRevisionChangedError, validate_task_data_revision
+    from strategy2.backtest_service import (
+        DataRevisionChangedError,
+        EngineRevisionChangedError,
+        validate_task_data_revision,
+        validate_task_engine_revision,
+    )
     try:
+        validate_task_engine_revision(task_id)
         validate_task_data_revision(task_id)
+    except EngineRevisionChangedError:
+        return JSONResponse({"error": "ENGINE_REVISION_CHANGED"}, status_code=409)
     except DataRevisionChangedError:
         return JSONResponse({"error": "DATA_REVISION_CHANGED"}, status_code=409)
     _launch_strategy2_backtest_task(
@@ -1630,9 +1639,17 @@ async def strategy2_backtest_retry_failed(task_id: str):
     if not target_stocks:
         return {"task_id": task_id, "status": "no_failed_stocks", "target_stocks": 0}
     config = json.loads(task["config_snapshot"])
-    from strategy2.backtest_service import DataRevisionChangedError, validate_task_data_revision
+    from strategy2.backtest_service import (
+        DataRevisionChangedError,
+        EngineRevisionChangedError,
+        validate_task_data_revision,
+        validate_task_engine_revision,
+    )
     try:
+        validate_task_engine_revision(task_id)
         validate_task_data_revision(task_id)
+    except EngineRevisionChangedError:
+        return JSONResponse({"error": "ENGINE_REVISION_CHANGED"}, status_code=409)
     except DataRevisionChangedError:
         return JSONResponse({"error": "DATA_REVISION_CHANGED"}, status_code=409)
     _launch_strategy2_backtest_task(

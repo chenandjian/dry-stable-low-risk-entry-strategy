@@ -325,3 +325,17 @@ b262c8b feat(strategy2): add scorer, rejection rules, and risk calculator
   - 5527 stocks: `18.2354s`
 - Final verification: offline backend suite passed `523` with one existing warning; frontend Vitest passed `25`; frontend production build, Python compileall, and `git diff --check` passed.
 - The first final frontend test run overlapped the frontend build and failed during Vitest sandbox-path module resolution before collecting tests. A standalone rerun passed all `25` tests.
+
+## 2026-06-13 (Strategy2 Phase 1 Final Acceptance Recheck Fixes)
+
+- Fixed Strategy2 backtest startup recovery: tasks left `running` by a previous process are transactionally marked `INTERRUPTED`, only `RUNNING` stocks return to `PENDING`, completed results remain intact, and startup failures are logged instead of silently ignored.
+- Added explicit implementation revisions in `strategy2/version.py`. New tasks persist both backtest and strategy engine versions; integrity validation, resume, retry-failed, and execution reject version mismatches with `ENGINE_REVISION_CHANGED`.
+- Historical trusted tasks with missing or old engine revisions are conservatively downgraded instead of being upgraded or resumed under new code.
+- Added paginated and status-filtered Strategy2 backtest history responses while keeping configuration and summary JSON out of list responses.
+- Completed the Strategy2 backtest frontend task-control loop: credibility/version display, failed-stock details, cancel/resume/retry actions, running-task restoration after refresh, automatic final-detail loading, and history pagination/filtering.
+- Added backend behavior tests for restart recovery, engine mismatch rejection with result preservation, integrity version checks, and history pagination; added frontend behavior tests for credibility, failed-stock retry, resume, revision-change blocking, and refreshed-task cancellation.
+- Verification:
+  - Strategy2 targeted and acceptance suites: **90 passed**.
+  - Offline backend full suite: **528 passed, 1 existing dateutil deprecation warning**.
+  - Frontend Vitest: **29 passed**.
+  - Frontend production build, Python compileall, and `git diff --check`: **passed**.
