@@ -115,43 +115,43 @@ npm --prefix web run preview
 
 ## Key Files
 
-| File | Purpose |
-|---|---|
-| `config.yaml` | 所有可调参数（市场/流动性/杯体/柄部/突破/评分/输出/调度/数据库） |
-| `scanner/db.py` | SQLite 数据库层 — 连接管理 + 5 表 CRUD |
-| `scanner/data_source.py` | `DataSourceManager` — 新浪+腾讯双源互斥锁 |
-| `scanner/sina_source.py` | `fetch_sina_daily(code, days)` → `list[dict] \| None` |
-| `scanner/tencent_source.py` | `fetch_tencent_daily(code, days)` → `list[dict] \| None`（纯腾讯源，回退由引擎层处理） |
-| `scanner/yfinance_source.py` | `fetch_yfinance_daily(code, days)` → `list[dict] \| None` — Yahoo Finance A 股日线；auto_adjust=True，turnover=close×volume |
-| `scanner/pattern_detector.py` | `detect_cup_handle(data, config)` → `CupHandleResult`；只负责杯柄检测 |
-| `scanner/scorer.py` | `score_cup_handle(result)` / `score_cup_handle_advanced(result, data)` → `int` (0-100) |
-| `scanner/engine.py` | `scan_all(config)` — 多线程全市场扫描主循环 |
-| `scanner/strategy_engine.py` | `CupHandleStrategyEngine.evaluate_at()` — 唯一策略判断入口；`select_strategy_window()` / `select_market_window()` — 共享窗口截断；`resolve_strategy_windows()` — 统一配置校验 |
-| `scanner/backtester.py` | `run_backtest(stocks, fetch_fn, config)` — 批量历史回测 |
-| `scanner/single_stock_backtest.py` | `run_single_stock_cuphandle_backtest(...)` — 单股杯柄回测 |
-| `analyzer/volume_dry.py` | `score_volume_dry(data)` → `VolumeDryResult` (0-10) |
-| `analyzer/price_stable.py` | `score_price_stable(data)` → `PriceStableResult` (0-10) |
-| `analyzer/pattern_score.py` | `score_pattern(result, data)` → `PatternScoreResult` (0-20, 杯柄/VCP 择优；VCP 识别在这里) |
-| `analyzer/key_prices.py` | `calculate_key_prices(...)` → `KeyPricesResult` (入场区间/支点/止损/目标) |
-| `analyzer/risk_reward.py` | `calculate_risk_reward(...)` → `RiskRewardResult` |
-| `analyzer/dry_stable.py` | `analyze_dry_stable(result, data, market_data)` → `dict` — 串联全部 8 个分析模块 |
-| `analyzer/decision.py` | `make_dry_stable_decision(...)` → `DryStableDecision` — 最终买入判决 |
-| `analyzer/market_env.py` | `assess_market_environment(market_data)` → `MarketEnvResult` |
-| `analyzer/invalid_rules.py` | `find_invalid_conditions(...)` → `list[str]` |
-| `scanner/index_source.py` | `fetch_market_index_daily(code)` → `list[dict]` (复用新浪源) |
-| `server.py` | FastAPI API + 扫描任务编排 — CORS/lifespan、恢复中断任务、失败重拉、配置读写、策略2 API |
-| `scanner/daily_data_service.py` | 共享四数据源拉取服务 — `fetch_with_retry()` / `FetchResult` / 锁/重试/缓存合并 |
-| `strategy2/models.py` | 策略2数据模型 — `Strategy2Indicators` / `Score` / `Risk` / `Evaluation` |
-| `strategy2/indicators.py` | 策略2指标计算 — V3/V5/V10/V20、分位、range、return |
-| `strategy2/scorer.py` | 策略2量干价稳评分 + 等级 |
-| `strategy2/rejection.py` | 策略2一票否决 — 5 条规则返回稳定错误码 |
-| `strategy2/risk.py` | 策略2风险 — `compute_key_support()` / `compute_risk()` |
-| `strategy2/trend.py` | 策略2趋势过滤 V2 — `evaluate_trend()` 价格路径+120日长期确认，8短中+3长期=11项证据 |
-| `strategy2/engine.py` | 策略2唯一入口 — `ExtremeDryStableStrategyEngine.evaluate_at()` |
-| `strategy2/scanner.py` | 策略2全市场扫描编排 — `scan_strategy2_all()` |
-| `web/src/pages/ScannerConsole.vue` | 前端首页 — 双策略启动按钮 |
-| `web/src/pages/Strategy2Results.vue` | 策略2结果页 — 任务选择器 + 候选表（总分/等级/量干/价稳/风险比/支撑/止损） |
-| `web/src/pages/StrategyConfig.vue` | 策略配置页 — 含策略2独立金色分区（7参数+启停开关） |
+| File                                 | Purpose                                                                                                                                                                       |
+| ------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `config.yaml`                        | 所有可调参数（市场/流动性/杯体/柄部/突破/评分/输出/调度/数据库）                                                                                                              |
+| `scanner/db.py`                      | SQLite 数据库层 — 连接管理 + 5 表 CRUD                                                                                                                                        |
+| `scanner/data_source.py`             | `DataSourceManager` — 新浪+腾讯双源互斥锁                                                                                                                                     |
+| `scanner/sina_source.py`             | `fetch_sina_daily(code, days)` → `list[dict] \| None`                                                                                                                         |
+| `scanner/tencent_source.py`          | `fetch_tencent_daily(code, days)` → `list[dict] \| None`（纯腾讯源，回退由引擎层处理）                                                                                        |
+| `scanner/yfinance_source.py`         | `fetch_yfinance_daily(code, days)` → `list[dict] \| None` — Yahoo Finance A 股日线；auto_adjust=True，turnover=close×volume                                                   |
+| `scanner/pattern_detector.py`        | `detect_cup_handle(data, config)` → `CupHandleResult`；只负责杯柄检测                                                                                                         |
+| `scanner/scorer.py`                  | `score_cup_handle(result)` / `score_cup_handle_advanced(result, data)` → `int` (0-100)                                                                                        |
+| `scanner/engine.py`                  | `scan_all(config)` — 多线程全市场扫描主循环                                                                                                                                   |
+| `scanner/strategy_engine.py`         | `CupHandleStrategyEngine.evaluate_at()` — 唯一策略判断入口；`select_strategy_window()` / `select_market_window()` — 共享窗口截断；`resolve_strategy_windows()` — 统一配置校验 |
+| `scanner/backtester.py`              | `run_backtest(stocks, fetch_fn, config)` — 批量历史回测                                                                                                                       |
+| `scanner/single_stock_backtest.py`   | `run_single_stock_cuphandle_backtest(...)` — 单股杯柄回测                                                                                                                     |
+| `analyzer/volume_dry.py`             | `score_volume_dry(data)` → `VolumeDryResult` (0-10)                                                                                                                           |
+| `analyzer/price_stable.py`           | `score_price_stable(data)` → `PriceStableResult` (0-10)                                                                                                                       |
+| `analyzer/pattern_score.py`          | `score_pattern(result, data)` → `PatternScoreResult` (0-20, 杯柄/VCP 择优；VCP 识别在这里)                                                                                    |
+| `analyzer/key_prices.py`             | `calculate_key_prices(...)` → `KeyPricesResult` (入场区间/支点/止损/目标)                                                                                                     |
+| `analyzer/risk_reward.py`            | `calculate_risk_reward(...)` → `RiskRewardResult`                                                                                                                             |
+| `analyzer/dry_stable.py`             | `analyze_dry_stable(result, data, market_data)` → `dict` — 串联全部 8 个分析模块                                                                                              |
+| `analyzer/decision.py`               | `make_dry_stable_decision(...)` → `DryStableDecision` — 最终买入判决                                                                                                          |
+| `analyzer/market_env.py`             | `assess_market_environment(market_data)` → `MarketEnvResult`                                                                                                                  |
+| `analyzer/invalid_rules.py`          | `find_invalid_conditions(...)` → `list[str]`                                                                                                                                  |
+| `scanner/index_source.py`            | `fetch_market_index_daily(code)` → `list[dict]` (复用新浪源)                                                                                                                  |
+| `server.py`                          | FastAPI API + 扫描任务编排 — CORS/lifespan、恢复中断任务、失败重拉、配置读写、策略2 API                                                                                       |
+| `scanner/daily_data_service.py`      | 共享四数据源拉取服务 — `fetch_with_retry()` / `FetchResult` / 锁/重试/缓存合并                                                                                                |
+| `strategy2/models.py`                | 策略2数据模型 — `Strategy2Indicators` / `Score` / `Risk` / `Evaluation`                                                                                                       |
+| `strategy2/indicators.py`            | 策略2指标计算 — V3/V5/V10/V20、分位、range、return                                                                                                                            |
+| `strategy2/scorer.py`                | 策略2量干价稳评分 + 等级                                                                                                                                                      |
+| `strategy2/rejection.py`             | 策略2一票否决 — 5 条规则返回稳定错误码                                                                                                                                        |
+| `strategy2/risk.py`                  | 策略2风险 — `compute_key_support()` / `compute_risk()`                                                                                                                        |
+| `strategy2/trend.py`                 | 策略2趋势过滤 V2 — `evaluate_trend()` 价格路径+120日长期确认，8短中+3长期=11项证据                                                                                            |
+| `strategy2/engine.py`                | 策略2唯一入口 — `ExtremeDryStableStrategyEngine.evaluate_at()`                                                                                                                |
+| `strategy2/scanner.py`               | 策略2全市场扫描编排 — `scan_strategy2_all()`                                                                                                                                  |
+| `web/src/pages/ScannerConsole.vue`   | 前端首页 — 双策略启动按钮                                                                                                                                                     |
+| `web/src/pages/Strategy2Results.vue` | 策略2结果页 — 任务选择器 + 候选表（总分/等级/量干/价稳/风险比/支撑/止损）                                                                                                     |
+| `web/src/pages/StrategyConfig.vue`   | 策略配置页 — 含策略2独立金色分区（7参数+启停开关）                                                                                                                            |
 
 ## Design Specs
 
@@ -298,6 +298,8 @@ npm --prefix web run preview
 - **趋势 V2 数据库字段**: `strategy2_candidates` 表兼容式新增 15 个趋势字段。旧候选空字段兼容显示 `--`。
 - **策略2回测**: `replace_strategy2_stock_backtest_result()` 原子替换单股结果（事务化）。`build_strategy2_backtest_summary()` 从 DB 完整明细生成汇总。`validate_strategy2_backtest_integrity()` 校验任务完整性。两阶段最终化：先写聚合字段→再校验→更新可信度。取消使用 `threading.Event`，工作线程每只股票前检查。
 - **策略2回测数据源**: 回测只读 `db.get_ohlc()` + `db.get_stock_pool()`，禁止调用 AKShare/百度/新浪/腾讯/yfinance。`data_snapshot_date` 精确到秒，过滤 ohlc。
+- **策略2本地数据优先**: 策略2实验、正式参数升级和验收分析默认只使用本地 `stock_pool` / `daily_ohlc`。没有用户明确要求时，不重新拉取百度/新浪/腾讯/yfinance/AKShare/Tushare 数据。
+- **外部数据源测试分离**: `test_akshare_hist.py`、`test_tushare_hist.py`、`test_yfinance_hist.py` 等真实网络测试仅手工按需运行；常规回归使用本地数据库测试和 mock 测试。
 - **策略2回测执行模型**: 默认 `NEXT_OPEN`——信号日次日开盘入场，目标=入场价×1.05，止损=前10日最低收盘价×0.97。同日触发按 FAILED。未入场标记 `UNOBSERVED_ENTRY`/`NO_ENTRY_GAP_BELOW_STOP`/`NO_ENTRY_ABOVE_BUY_ZONE`。
 - **策略2回测信号合并**: 使用 `evaluation_index + eval_results` 计算冷却期，10 个计入冷却期的未命中交易日拆分新机会。冷却期计入: LIQUIDITY/DOWNTREND/REJECTION/SCORE/RISK；不计入: INSUFFICIENT_DATA/INVALID_DATA/EVALUATION_ERROR。
 - **策略2 Volume Percentile 窗口弹性**: 日线数据不足 60 天但 ≥ `minimum_required_days` 时，`volume_percentile_days` 取实际可用窗口天数，不强制 60。评分阈值 `≤20%` 不变。
@@ -351,8 +353,11 @@ Allowed Git commands:
 - git log
 - git branch
 - git show
+- git add
+- git commit
+- git push
 
-Do not run git add, git commit, git push, git pull, git merge, or git rebase unless I explicitly ask.
+Codex/Claude may automatically `git add`, `git commit`, and `git push` after verified development work. Do not push only when the user explicitly says not to push.
 
 Never run destructive commands unless I explicitly approve the exact command:
 
@@ -363,9 +368,8 @@ Never run destructive commands unless I explicitly approve the exact command:
 - git restore .
 - rm -rf
 
-Before any commit:
+Before any commit or push:
 
-1. Show git status.
-2. Show the files to be committed.
-3. Summarize the changes.
-4. Wait for my confirmation.
+1. Show or inspect git status.
+2. Stage only files related to the current task unless the user explicitly asks to include more.
+3. Summarize the change in the final response.

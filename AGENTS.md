@@ -40,6 +40,8 @@ worktree 中运行前端命令必须使用 `npm --prefix web ...`，避免在错
 ## Current Strategy2 Backtest Invariants
 
 - 回测只读取本地 `stock_pool` 和 `daily_ohlc`，禁止请求任何外部数据源。
+- 策略2实验、正式参数升级和验收分析均优先使用本地股票数据；没有用户明确要求时，不重新拉取百度/新浪/腾讯/yfinance/AKShare/Tushare 数据。
+- 外部数据源验证脚本仅手工按需运行；常规回归使用本地数据库测试和 mock 测试。
 - `NEXT_OPEN` 是 Phase 1 可信基线执行模型；不得改回信号日收盘成交。
 - 同一股票两个命中之间累计 10 个有效未命中交易日后，才拆分为新机会。
 - 原始信号和机会必须可追溯；单股重跑必须原子替换且幂等。
@@ -66,7 +68,7 @@ worktree 中运行前端命令必须使用 `npm --prefix web ...`，避免在错
 4. 小步修改；不做无关重构，不改变公共契约或策略语义。
 5. 每个模块修改后运行对应专项测试，完成前运行全量门禁。
 6. 如实将重要执行结果、失败和风险记录到 `operations-log.md`。
-7. 修改完成并验证后自动执行 `git add` 和 `git commit`；不得自动 `git push`。
+7. 修改完成并验证后自动执行 `git add` ， `git commit` ，`git push`。
 
 ## Git Safety
 
