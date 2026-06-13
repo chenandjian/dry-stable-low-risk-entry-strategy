@@ -1318,6 +1318,77 @@ def _backtest_conflict_response():
     return None
 
 
+def _backtest_payload_from_task(task: dict) -> dict:
+    return {
+        "startDate": task.get("requested_start_date", ""),
+        "endDate": task.get("requested_end_date", ""),
+        "maxStocks": task.get("max_stocks"),
+        "codes": [code for code in (task.get("requested_codes") or "").split(",") if code],
+        "executionModel": task.get("execution_model", "NEXT_OPEN"),
+    }
+
+
+def _launch_strategy2_backtest_task(
+    *,
+    task_id: str,
+    target_stocks: list[dict],
+    config_snapshot: dict,
+    payload_snapshot: dict,
+    data_snapshot_date: str,
+    mode: str,
+):
+    """启动统一策略2回测执行器。"""
+    from strategy2.backtest_service import run_strategy2_backtest_task
+
+    cancel_event = threading.Event()
+    _backtest_running.update({
+        "running": True,
+        "task_id": task_id,
+        "started_at": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "cancel_event": cancel_event,
+        "stats": {
+            "total_stocks": len(target_stocks),
+            "processed_stocks": 0,
+            "current_code": "--",
+            "current_name": "--",
+            "opportunities_count": 0,
+            "insufficient_stocks_count": 0,
+        },
+    })
+    db.update_strategy2_backtest_task(
+        task_id,
+        status="running",
+        credibility_status="RUNNING_UNVERIFIED",
+        total_stocks=len(db.get_strategy2_backtest_task_stocks(task_id)),
+        error=None,
+        finished_at=None,
+    )
+
+    def worker():
+        try:
+            run_strategy2_backtest_task(
+                task_id=task_id,
+                target_stocks=target_stocks,
+                config_snapshot=config_snapshot,
+                payload_snapshot=payload_snapshot,
+                data_snapshot_date=data_snapshot_date,
+                cancel_event=cancel_event,
+                running_state=_backtest_running,
+                mode=mode,
+            )
+        except Exception:
+            logger.exception("Strategy2 backtest task %s failed", task_id)
+        finally:
+            if _backtest_running.get("task_id") == task_id:
+                _backtest_running["running"] = False
+                _backtest_running["task_id"] = None
+                _backtest_running["thread"] = None
+
+    thread = threading.Thread(target=worker, daemon=True)
+    _backtest_running["thread"] = thread
+    thread.start()
+
+
 @app.post("/api/strategy2/backtests")
 async def start_strategy2_backtest(payload: dict):
     """启动策略2本地数据库短线回测。"""
@@ -1387,180 +1458,25 @@ async def start_strategy2_backtest(payload: dict):
         db.save_strategy2_backtest_task_stock(task_id, s["code"],
             name=s.get("name", ""), status="PENDING")
 
-    _backtest_running["running"] = True
-    _backtest_running["task_id"] = task_id
-    _backtest_running["started_at"] = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    _backtest_running["cancel_event"] = threading.Event()
-    _backtest_running["stats"] = {
-        "total_stocks": len(resolved_stocks), "processed_stocks": 0,
-        "current_code": "--", "current_name": "--",
-        "opportunities_count": 0, "insufficient_stocks_count": 0,
-    }
-
-    def now_local():
-        return datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
-    snap_date = data_snapshot_date[:10] if data_snapshot_date else ""
-
-    def run_backtest():
-        import time as _time
-        from strategy2.backtester import run_strategy2_stock_backtest
-        t_start = _time.monotonic()
-
-        try:
-            stocks = resolved_stocks
-            total = len(stocks)
-            db.update_strategy2_backtest_task(task_id, total_stocks=total)
-            _backtest_running["stats"]["total_stocks"] = total
-
-            total = len(stocks)
-            db.update_strategy2_backtest_task(task_id, total_stocks=total)
-            _backtest_running["stats"]["total_stocks"] = total
-
-            all_opps = []
-            insufficient = []
-            failed_count = 0
-            stocks_with_opps = 0
-
-            for i, s in enumerate(stocks):
-                if _backtest_running.get("cancel_event") and _backtest_running["cancel_event"].is_set():
-                    break  # 用户取消
-                code = s["code"]
-                name = s.get("name", "")
-
-                db.save_strategy2_backtest_task_stock(task_id, code, status="RUNNING")
-                ohlc = db.get_ohlc(code)
-                # 数据快照过滤：只读取快照日期之前的数据
-                if snap_date and ohlc:
-                    ohlc = [d for d in ohlc if d["date"] <= snap_date]
-                if not ohlc:
-                    db.save_strategy2_backtest_task_stock(task_id, code,
-                        status="INSUFFICIENT", error_code="NO_LOCAL_DATA")
-                    insufficient.append({
-                        "code": code, "name": name,
-                        "reason_code": "NO_LOCAL_DATA",
-                        "available_days": 0,
-                        "required_days": config.get("strategy2", {}).get("minimum_required_days", 250),
-                    })
-                    _backtest_running["stats"]["insufficient_stocks_count"] = len(insufficient)
-                    continue
-
-                try:
-                    result = run_strategy2_stock_backtest(
-                        code, name, ohlc, config,
-                        payload.get("startDate", ""),
-                        payload.get("endDate", ""),
-                    )
-                except Exception as exc:
-                    failed_count += 1
-                    db.save_strategy2_backtest_task_stock(task_id, code,
-                        status="FAILED", error_code=type(exc).__name__, error_detail=str(exc)[:500],
-                        started_at=now_local(), finished_at=now_local())
-                    logger.warning("Strategy2 backtest stock %s failed: %s", code, exc)
-                    _backtest_running["stats"]["processed_stocks"] += 1
-                    continue
-
-                if result.get("insufficient"):
-                    db.save_strategy2_backtest_task_stock(task_id, code,
-                        status="INSUFFICIENT", error_code=result["insufficient"]["reason_code"],
-                        available_days=result["insufficient"]["available_days"],
-                        required_days=result["insufficient"]["required_days"],
-                        started_at=now_local(), finished_at=now_local())
-                    insufficient.append(result["insufficient"])
-                    _backtest_running["stats"]["insufficient_stocks_count"] = len(insufficient)
-                    _backtest_running["stats"]["processed_stocks"] += 1
-                    continue
-
-                # 原子保存：信号 + 机会 + 股票终态
-                db.replace_strategy2_stock_backtest_result(task_id, code, name, result)
-                opps = result.get("opportunities") or []
-                if opps:
-                    stocks_with_opps += 1
-                    all_opps.extend(opps)
-                _backtest_running["stats"]["processed_stocks"] += 1
-                _backtest_running["stats"]["opportunities_count"] = len(all_opps)
-
-            # 保存数据不足股票
-            if insufficient:
-                db.save_strategy2_backtest_insufficient_stocks(task_id, insufficient)
-
-            # 两阶段最终化
-            elapsed = round(_time.monotonic() - t_start, 1)
-            was_cancelled = _backtest_running.get("cancel_event") and _backtest_running["cancel_event"].is_set()
-            if was_cancelled:
-                status = "CANCELED"
-            else:
-                status = "completed" if failed_count == 0 else "completed_with_errors"
-
-            # 阶段1：从 task_stocks 聚合全部最终字段并写入
-            agg = db.get_conn().execute(
-                "SELECT MIN(actual_eval_start_date), MAX(actual_eval_end_date), "
-                "MAX(observation_data_end_date), "
-                "SUM(CASE WHEN status IN ('COMPLETED','INSUFFICIENT','FAILED') THEN 1 ELSE 0 END), "
-                "SUM(evaluation_days), SUM(evaluation_error_days), SUM(raw_signals_count) "
-                "FROM strategy2_backtest_task_stocks WHERE task_id=?", (task_id,)
-            ).fetchone()
-            actual_eval_start = agg[0] if agg else None
-            actual_eval_end = agg[1] if agg else None
-            obs_data_end = agg[2] if agg else None
-            terminal_stocks = agg[3] or 0
-            total_eval_days = agg[4] or 0
-            total_errors = agg[5] or 0
-            total_signals = agg[6] or 0
-
-            # 生成 summary
-            summary = db.build_strategy2_backtest_summary(task_id)
-            summary["integrity"] = {"errors": []}
-            summary["dateRange"] = {
-                "actual_evaluation_start_date": actual_eval_start,
-                "actual_evaluation_end_date": actual_eval_end,
-                "observation_data_end_date": obs_data_end,
-            }
-            summary_json = json.dumps(summary, ensure_ascii=False)
-
-            # 先写最终聚合和 summary
-            db.update_strategy2_backtest_task(
-                task_id,
-                status=status,
-                processed_stocks=terminal_stocks,
-                stocks_with_opportunities=stocks_with_opps,
-                opportunities_count=len(all_opps),
-                insufficient_stocks_count=len(insufficient),
-                failed_stocks_count=failed_count,
-                finished_at=now_local(), elapsed_seconds=elapsed,
-                actual_evaluation_start_date=actual_eval_start,
-                actual_evaluation_end_date=actual_eval_end,
-                observation_data_end_date=obs_data_end,
-                completed_evaluations=total_eval_days,
-                raw_signals_count=total_signals,
-                evaluation_error_days=total_errors,
-                summary_json=summary_json,
-            )
-
-            # 阶段2：对最终 DB 状态做完整性校验，更新可信度
-            integrity_ok, integrity_errors = db.validate_strategy2_backtest_integrity(task_id)
-            credibility = "TRUSTED_BASELINE" if integrity_ok else "PHASE1_INCOMPLETE"
-            summary["integrity"] = {"passed": integrity_ok, "errors": integrity_errors}
-            db.update_strategy2_backtest_task(
-                task_id,
-                credibility_status=credibility,
-                summary_json=json.dumps(summary, ensure_ascii=False),
-            )
-        except Exception as e:
-            import traceback
-            logger.error("Strategy2 backtest %s failed: %s\n%s", task_id, e, traceback.format_exc())
-            db.update_strategy2_backtest_task(task_id, status="failed", error=str(e))
-        finally:
-            _backtest_running["running"] = False
-            _backtest_running["task_id"] = None
-
-    threading.Thread(target=run_backtest, daemon=True).start()
+    from strategy2.backtest_service import calculate_daily_ohlc_revision
+    data_revision_id = calculate_daily_ohlc_revision(
+        data_snapshot_date,
+        [stock["code"] for stock in resolved_stocks],
+    )
+    db.update_strategy2_backtest_task(task_id, data_revision_id=data_revision_id)
+    _launch_strategy2_backtest_task(
+        task_id=task_id,
+        target_stocks=resolved_stocks,
+        config_snapshot=config,
+        payload_snapshot=payload,
+        data_snapshot_date=data_snapshot_date,
+        mode="start",
+    )
     return {
         "task_id": task_id, "status": "started",
         "maxStocks": payload.get("maxStocks", 200),
         "message": "回测任务已启动，只使用本地数据库数据",
     }
-
 
 @app.get("/api/strategy2/backtests/status")
 async def strategy2_backtest_status():
@@ -1663,10 +1579,29 @@ async def strategy2_backtest_resume(task_id: str):
         return JSONResponse({"error": "TASK_NOT_FOUND"}, status_code=404)
     if _backtest_running["running"]:
         return JSONResponse({"error": "TASK_CONFLICT", "message": "已有回测正在运行"}, status_code=409)
-    # 将遗留 RUNNING 股票恢复为 PENDING
-    config = json.loads(task["config_snapshot"]) if task.get("config_snapshot") else load_config()
-    # TODO: 完整恢复逻辑（使用原任务快照重新调度）
-    return {"task_id": task_id, "status": "resume_not_implemented"}
+    if str(task.get("status", "")).lower() not in {"interrupted", "canceled"}:
+        return JSONResponse({"error": "TASK_NOT_RESUMABLE"}, status_code=409)
+    target_stocks = [
+        stock for stock in db.get_strategy2_backtest_task_stocks(task_id)
+        if stock["status"] in {"PENDING", "RUNNING"}
+    ]
+    if not target_stocks:
+        return JSONResponse({"error": "NO_UNFINISHED_STOCKS"}, status_code=409)
+    config = json.loads(task["config_snapshot"])
+    from strategy2.backtest_service import DataRevisionChangedError, validate_task_data_revision
+    try:
+        validate_task_data_revision(task_id, [stock["code"] for stock in db.get_strategy2_backtest_task_stocks(task_id)])
+    except DataRevisionChangedError:
+        return JSONResponse({"error": "DATA_REVISION_CHANGED"}, status_code=409)
+    _launch_strategy2_backtest_task(
+        task_id=task_id,
+        target_stocks=target_stocks,
+        config_snapshot=config,
+        payload_snapshot=_backtest_payload_from_task(task),
+        data_snapshot_date=task.get("data_snapshot_date") or "",
+        mode="resume",
+    )
+    return {"task_id": task_id, "status": "resumed", "target_stocks": len(target_stocks)}
 
 
 @app.post("/api/strategy2/backtests/{task_id}/cancel")
@@ -1688,4 +1623,23 @@ async def strategy2_backtest_retry_failed(task_id: str):
         return JSONResponse({"error": "TASK_NOT_FOUND"}, status_code=404)
     if _backtest_running["running"]:
         return JSONResponse({"error": "TASK_CONFLICT"}, status_code=409)
-    return {"task_id": task_id, "status": "retry_not_implemented"}  # TODO
+    if str(task.get("status", "")).lower() == "running":
+        return JSONResponse({"error": "TASK_CONFLICT"}, status_code=409)
+    target_stocks = db.get_strategy2_backtest_task_stocks(task_id, status="FAILED")
+    if not target_stocks:
+        return {"task_id": task_id, "status": "no_failed_stocks", "target_stocks": 0}
+    config = json.loads(task["config_snapshot"])
+    from strategy2.backtest_service import DataRevisionChangedError, validate_task_data_revision
+    try:
+        validate_task_data_revision(task_id, [stock["code"] for stock in db.get_strategy2_backtest_task_stocks(task_id)])
+    except DataRevisionChangedError:
+        return JSONResponse({"error": "DATA_REVISION_CHANGED"}, status_code=409)
+    _launch_strategy2_backtest_task(
+        task_id=task_id,
+        target_stocks=target_stocks,
+        config_snapshot=config,
+        payload_snapshot=_backtest_payload_from_task(task),
+        data_snapshot_date=task.get("data_snapshot_date") or "",
+        mode="retry_failed",
+    )
+    return {"task_id": task_id, "status": "retrying", "target_stocks": len(target_stocks)}

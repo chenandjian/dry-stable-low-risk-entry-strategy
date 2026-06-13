@@ -40,6 +40,24 @@
         <div class="metric"><span class="label">耗时</span><span class="value">{{ fmtDuration(task.elapsed_seconds) }}</span></div>
       </div>
 
+      <div v-if="funnel" class="horizon-table">
+        <h4>评估漏斗</h4>
+        <table>
+          <thead>
+            <tr><th>评估日</th><th>流动性过滤</th><th>趋势过滤</th><th>一票否决</th><th>分数不足</th><th>风险过滤</th><th>无效数据</th><th>评估异常</th><th>原始信号</th><th>机会</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>{{ funnel.evaluation_days }}</td><td>{{ funnel.liquidity_filtered_days }}</td>
+              <td>{{ funnel.trend_filtered_days }}</td><td>{{ funnel.rejection_failed_days }}</td>
+              <td>{{ funnel.score_failed_days }}</td><td>{{ funnel.risk_failed_days }}</td>
+              <td>{{ funnel.invalid_data_days }}</td><td>{{ funnel.evaluation_error_days }}</td>
+              <td>{{ funnel.raw_signals_count }}</td><td>{{ funnel.opportunities_count }}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
       <!-- Horizon stats -->
       <div v-if="horizonStats" class="horizon-table">
         <h4>短线表现</h4>
@@ -51,7 +69,7 @@
         </div>
         <table>
           <thead>
-            <tr><th>周期</th><th>样本</th><th>成功</th><th>成功率</th><th>失败</th><th>未决</th><th>平均收益</th><th>平均最大上涨</th><th>平均最大回撤</th></tr>
+            <tr><th>周期</th><th>样本</th><th>成功</th><th>成功率</th><th>失败</th><th>未决</th><th>平均达标天数</th><th>平均止损天数</th><th>平均收益</th><th>平均最大上涨</th><th>平均最大回撤</th></tr>
           </thead>
           <tbody>
             <tr v-for="h in horizons" :key="h">
@@ -61,6 +79,8 @@
               <td class="green">{{ hs(h, 'success_rate') }}%</td>
               <td class="red">{{ hs(h, 'failed') }}</td>
               <td>{{ hs(h, 'unresolved') }}</td>
+              <td>{{ hs(h, 'avg_days_to_target') }}</td>
+              <td>{{ hs(h, 'avg_days_to_stop') }}</td>
               <td>{{ fmtPct(hs(h, 'avg_end_return')) }}</td>
               <td>{{ fmtPct(hs(h, 'avg_max_upside')) }}</td>
               <td class="red">{{ fmtPct(hs(h, 'avg_max_drawdown')) }}</td>
@@ -164,6 +184,9 @@ export default {
       if (this.task?.summary?.horizon_stats) return this.task.summary.horizon_stats
       if (this.task?.horizon_stats) return this.task.horizon_stats
       return null
+    },
+    funnel() {
+      return this.task?.summary?.funnel || null
     },
   },
   async mounted() {

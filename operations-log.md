@@ -279,3 +279,23 @@ b262c8b feat(strategy2): add scorer, rejection rules, and risk calculator
 - Direct reproduction confirmed a fully terminal `CANCELED` task passes integrity validation, while a complete zero-opportunity task fails due to missing horizon keys.
 - Found two medium-severity gaps: incomplete per-stock audit/progress fields and empty funnel/target-stop timing summaries.
 - Verification: Strategy2 targeted tests passed 26; acceptance-related tests passed 65; offline backend suite passed 508 with one warning; frontend Vitest passed 25; frontend build, compileall, and diff check passed.
+
+## 2026-06-13 (Strategy2 Phase 1 Medium/High Fixes)
+
+- Optimized `AGENTS.md` to match the current dual-strategy architecture, Strategy2 backtest invariants, worktree commands, TDD workflow, and automatic commit/no-push rule.
+- Added `strategy2/backtest_service.py` as the shared start/resume/retry-failed executor. Resume now targets only PENDING/RUNNING stocks; retry-failed targets only FAILED stocks; cancellation stops at stock boundaries and cannot become trusted.
+- Added task-level `data_revision_id` using a stable SHA-256 over selected local OHLC rows. Start, resume/retry, and finalization validate the same data revision; changed data marks the task `DATA_REVISION_CHANGED`.
+- Fixed integrity validation so only `completed` tasks can become `TRUSTED_BASELINE`; complete zero-opportunity tasks now produce full zero-value horizon summaries and can pass integrity checks.
+- Completed per-stock audit persistence for real `started_at`, `finished_at`, `invalid_data_days`, `earliest_date`, and `latest_date`; all terminal paths update live processed progress.
+- Completed task summary funnel aggregation and per-horizon `avg_days_to_target` / `avg_days_to_stop`; Strategy2Backtest now displays both.
+- Added `tests/test_strategy2_medium_high_fixes.py` with 10 behavior tests covering resume, retry-failed, cancel, data revision changes, zero opportunities, credibility, audit fields, funnel/timing summaries, and reproducibility.
+- Reproducibility integration result: two tasks using the same data revision produced signal symmetric difference `0` and opportunity symmetric difference `0`.
+- Verification before final commit:
+  - Strategy2 backtester + independence: **26 passed**.
+  - Acceptance/recheck/medium-high fixes: **54 passed**.
+  - Strategy2-related suite: **274 passed**.
+  - Offline backend full suite: **518 passed, 1 existing dateutil deprecation warning**.
+  - Frontend Vitest: **25 passed**.
+  - Frontend production build: **passed**.
+  - Python compileall and `git diff --check`: **passed**.
+- Full-market baseline rerun was not started in this repair session because it is a long-running operational job; reproducibility and behavior were verified with temporary SQLite integration tasks.

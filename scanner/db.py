@@ -1269,6 +1269,7 @@ def _ensure_strategy2_backtest_tables(conn: sqlite3.Connection):
     _ensure_column(conn, "strategy2_backtest_tasks", "sampling_method", "TEXT")
     _ensure_column(conn, "strategy2_backtest_tasks", "sampling_seed", "INTEGER")
     _ensure_column(conn, "strategy2_backtest_tasks", "data_snapshot_date", "TEXT")
+    _ensure_column(conn, "strategy2_backtest_tasks", "data_revision_id", "TEXT")
     _ensure_column(conn, "strategy2_backtest_tasks", "actual_evaluation_start_date", "TEXT")
     _ensure_column(conn, "strategy2_backtest_tasks", "actual_evaluation_end_date", "TEXT")
     _ensure_column(conn, "strategy2_backtest_tasks", "observation_data_end_date", "TEXT")
@@ -1288,6 +1289,8 @@ def _ensure_strategy2_backtest_tables(conn: sqlite3.Connection):
     _ensure_column(conn, "strategy2_backtest_task_stocks", "required_days", "INTEGER DEFAULT 0")
     _ensure_column(conn, "strategy2_backtest_task_stocks", "observation_data_end_date", "TEXT")
     _ensure_column(conn, "strategy2_backtest_task_stocks", "available_days", "INTEGER DEFAULT 0")
+    _ensure_column(conn, "strategy2_backtest_task_stocks", "earliest_date", "TEXT")
+    _ensure_column(conn, "strategy2_backtest_task_stocks", "latest_date", "TEXT")
 
 
 def create_strategy2_backtest_task(task_id: str, payload: dict, config_snapshot: str):
@@ -1454,13 +1457,11 @@ def build_strategy2_backtest_summary(task_id: str) -> dict:
     cols = [d[1] for d in conn.execute("PRAGMA table_info(strategy2_backtest_opportunities)")]
     opps = [dict(zip(cols, r)) for r in opps]
 
-    if not opps:
-        return {"horizon_stats": {}, "execution_stats": {}, "funnel": {}, "integrity": {"errors": ["no_opportunities"]}}
-
     # ── 周期观察统计（使用 horizon_N JSON）──
     horizon_stats = {}
     for h in ["3", "5", "10", "20"]:
         end_returns, max_upsides, max_drawdowns = [], [], []
+        days_to_target, days_to_stop = [], []
         observed, success, failed, unresolved, unobserved = 0, 0, 0, 0, 0
         for o in opps:
             try:
@@ -1478,8 +1479,12 @@ def build_strategy2_backtest_summary(task_id: str) -> dict:
                 max_drawdowns.append(d.get("max_drawdown", 0))
                 if r == "SUCCESS":
                     success += 1
+                    if d.get("days_to_target") is not None:
+                        days_to_target.append(d["days_to_target"])
                 elif r == "FAILED":
                     failed += 1
+                    if d.get("days_to_stop") is not None:
+                        days_to_stop.append(d["days_to_stop"])
                 elif r == "UNRESOLVED":
                     unresolved += 1
         decisive = success + failed
@@ -1498,7 +1503,8 @@ def build_strategy2_backtest_summary(task_id: str) -> dict:
             "median_max_upside": round(_st.median(max_upsides), 6) if max_upsides else 0,
             "avg_max_drawdown": round(_st.mean(max_drawdowns), 6) if max_drawdowns else 0,
             "median_max_drawdown": round(_st.median(max_drawdowns), 6) if max_drawdowns else 0,
-            "avg_days_to_target": None, "avg_days_to_stop": None,
+            "avg_days_to_target": round(_st.mean(days_to_target), 1) if days_to_target else None,
+            "avg_days_to_stop": round(_st.mean(days_to_stop), 1) if days_to_stop else None,
         }
 
     # ── 整笔交易执行统计（使用机会执行字段）──
@@ -1512,6 +1518,25 @@ def build_strategy2_backtest_summary(task_id: str) -> dict:
     holding_days = [o.get("holding_days") or 0 for o in entered_opps if o.get("holding_days")]
     positive = sum(1 for rr in realized_returns if rr > 0)
 
+    funnel_columns = [
+        "evaluation_days",
+        "liquidity_filtered_days",
+        "trend_filtered_days",
+        "rejection_failed_days",
+        "score_failed_days",
+        "risk_failed_days",
+        "invalid_data_days",
+        "evaluation_error_days",
+        "raw_signals_count",
+        "opportunities_count",
+    ]
+    funnel_row = conn.execute(
+        "SELECT " + ", ".join(f"COALESCE(SUM({column}), 0)" for column in funnel_columns)
+        + " FROM strategy2_backtest_task_stocks WHERE task_id=?",
+        (task_id,),
+    ).fetchone()
+    funnel = dict(zip(funnel_columns, funnel_row))
+
     return {
         "horizon_stats": horizon_stats,
         "execution_stats": {
@@ -1524,7 +1549,7 @@ def build_strategy2_backtest_summary(task_id: str) -> dict:
             "positive_rate": round(positive / entered * 100, 2) if entered else 0,
             "avg_holding_days": round(_st.mean(holding_days), 1) if holding_days else 0,
         },
-        "funnel": {},
+        "funnel": funnel,
         "integrity": {},
     }
 
@@ -1538,6 +1563,9 @@ def validate_strategy2_backtest_integrity(task_id: str) -> tuple:
         return False, ["task_not_found"]
     tcols = [d[1] for d in conn.execute("PRAGMA table_info(strategy2_backtest_tasks)")]
     t = dict(zip(tcols, task))
+
+    if str(t.get("status", "")).lower() != "completed":
+        errors.append(f"task status is {t.get('status')}, expected completed")
 
     total = t.get("total_stocks", 0)
     processed = t.get("processed_stocks", 0)
@@ -1670,6 +1698,7 @@ def replace_strategy2_stock_backtest_result(
             "rejection_failed_days": result.get("rejection_failed_days", 0),
             "score_failed_days": result.get("score_failed_days", 0),
             "risk_failed_days": result.get("risk_failed_days", 0),
+            "invalid_data_days": result.get("invalid_data_days", 0),
             "evaluation_error_days": result.get("evaluation_error_days", 0),
             "raw_signals_count": result.get("raw_signals_count", 0),
             "opportunities_count": result.get("opportunities_count", 0),
@@ -1678,6 +1707,10 @@ def replace_strategy2_stock_backtest_result(
             "observation_data_end_date": result.get("observation_data_end_date"),
             "available_days": result.get("available_days", 0),
             "required_days": result.get("required_days", 250),
+            "earliest_date": result.get("earliest_date"),
+            "latest_date": result.get("latest_date"),
+            "started_at": result.get("started_at"),
+            "finished_at": result.get("finished_at"),
         }.items() if v is not None}
         if update_kwargs:
             sets = ", ".join(f"{k}=?" for k in update_kwargs)
