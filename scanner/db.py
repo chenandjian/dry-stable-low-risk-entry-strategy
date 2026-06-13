@@ -1297,12 +1297,13 @@ def create_strategy2_backtest_task(task_id: str, payload: dict, config_snapshot:
            (id, status, requested_start_date, requested_end_date,
             scope_type, requested_codes, max_stocks, config_snapshot,
             total_stocks, started_at)
-           VALUES (?, 'running', ?, ?, ?, ?, ?, ?, 0, datetime('now'))""",
+           VALUES (?, 'running', ?, ?, ?, ?, ?, ?, 0, ?)""",
         (task_id, payload.get("startDate", ""), payload.get("endDate", ""),
          "market" if not payload.get("codes") else "single",
          ",".join(payload.get("codes") or []),
          payload.get("maxStocks", 200),
-         config_snapshot),
+         config_snapshot,
+         datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")),
     )
     conn.commit()
 
@@ -1485,6 +1486,8 @@ def build_strategy2_backtest_summary(task_id: str) -> dict:
         horizon_stats[h] = {
             "observed": observed, "unobserved": unobserved,
             "success": success, "failed": failed, "unresolved": unresolved,
+            "success_rate": round(success / observed * 100, 2) if observed else 0,       # 前端兼容
+            "failed_rate": round(failed / observed * 100, 2) if observed else 0,          # 前端兼容
             "target_hit_rate": round(success / observed * 100, 2) if observed else 0,
             "stop_hit_rate": round(failed / observed * 100, 2) if observed else 0,
             "unresolved_rate": round(unresolved / observed * 100, 2) if observed else 0,

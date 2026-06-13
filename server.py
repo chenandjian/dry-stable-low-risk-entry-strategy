@@ -638,7 +638,7 @@ async def re_evaluate_task_endpoint(task_id: str):
         import datetime
         try:
             result = re_evaluate_task(config, task_id)
-            now = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+            now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             conn2 = db.get_conn()
             conn2.execute(
                 "UPDATE scan_tasks SET status='completed', candidates_count=?, finished_at=? WHERE id=?",
@@ -1226,7 +1226,7 @@ async def strategy2_re_evaluate(task_id: str):
         try:
             from strategy2.scanner import re_evaluate_strategy2_task
             result = re_evaluate_strategy2_task(config, task_id)
-            now = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+            now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             conn2 = db.get_conn()
             conn2.execute(
                 "UPDATE scan_tasks SET status='completed', candidates_count=?, finished_at=? WHERE id=?",
@@ -1374,7 +1374,7 @@ async def start_strategy2_backtest(payload: dict):
     # ── 创建任务 ──
     suffix = ''.join(_random.choices(_string.ascii_lowercase + _string.digits, k=6))
     task_id = datetime.datetime.now().strftime(f"s2bt-%Y%m%d-%H%M%S-{suffix}")
-    data_snapshot_date = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+    data_snapshot_date = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     config_json = json.dumps(config, ensure_ascii=False)
     db.create_strategy2_backtest_task(task_id, payload, config_json)
     db.update_strategy2_backtest_task(task_id, status="running",
@@ -1389,7 +1389,7 @@ async def start_strategy2_backtest(payload: dict):
 
     _backtest_running["running"] = True
     _backtest_running["task_id"] = task_id
-    _backtest_running["started_at"] = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+    _backtest_running["started_at"] = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     _backtest_running["cancel_event"] = threading.Event()
     _backtest_running["stats"] = {
         "total_stocks": len(resolved_stocks), "processed_stocks": 0,
@@ -1397,8 +1397,8 @@ async def start_strategy2_backtest(payload: dict):
         "opportunities_count": 0, "insufficient_stocks_count": 0,
     }
 
-    def now_utc():
-        return datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+    def now_local():
+        return datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
     snap_date = data_snapshot_date[:10] if data_snapshot_date else ""
 
@@ -1455,7 +1455,7 @@ async def start_strategy2_backtest(payload: dict):
                     failed_count += 1
                     db.save_strategy2_backtest_task_stock(task_id, code,
                         status="FAILED", error_code=type(exc).__name__, error_detail=str(exc)[:500],
-                        started_at=now_utc(), finished_at=now_utc())
+                        started_at=now_local(), finished_at=now_local())
                     logger.warning("Strategy2 backtest stock %s failed: %s", code, exc)
                     _backtest_running["stats"]["processed_stocks"] += 1
                     continue
@@ -1465,7 +1465,7 @@ async def start_strategy2_backtest(payload: dict):
                         status="INSUFFICIENT", error_code=result["insufficient"]["reason_code"],
                         available_days=result["insufficient"]["available_days"],
                         required_days=result["insufficient"]["required_days"],
-                        started_at=now_utc(), finished_at=now_utc())
+                        started_at=now_local(), finished_at=now_local())
                     insufficient.append(result["insufficient"])
                     _backtest_running["stats"]["insufficient_stocks_count"] = len(insufficient)
                     _backtest_running["stats"]["processed_stocks"] += 1
@@ -1527,7 +1527,7 @@ async def start_strategy2_backtest(payload: dict):
                 opportunities_count=len(all_opps),
                 insufficient_stocks_count=len(insufficient),
                 failed_stocks_count=failed_count,
-                finished_at=now_utc(), elapsed_seconds=elapsed,
+                finished_at=now_local(), elapsed_seconds=elapsed,
                 actual_evaluation_start_date=actual_eval_start,
                 actual_evaluation_end_date=actual_eval_end,
                 observation_data_end_date=obs_data_end,
@@ -1576,8 +1576,11 @@ async def strategy2_backtest_status():
 
 @app.get("/api/strategy2/backtests")
 async def strategy2_backtests():
-    """查询历史回测任务列表。"""
+    """查询历史回测任务列表（摘要，不含 config/summary 大字段）。"""
     tasks = db.get_strategy2_backtest_tasks()
+    for t in tasks:
+        t.pop("config_snapshot", None)
+        t.pop("summary_json", None)
     return {"tasks": tasks}
 
 

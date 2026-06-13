@@ -65,8 +65,10 @@ npm --prefix web run preview
              ├─ analyzer/invalid_rules.py (形态失效条件)
              ├─ analyzer/market_env.py (大盘环境评估)
              └─ analyzer/decision.py (7 状态决策)
-回测层:    scanner/backtester.py (批量历史回测)
+回测层:    scanner/backtester.py (策略1批量历史回测)
            scanner/single_stock_backtest.py (单股杯柄回测)
+           strategy2/backtester.py (策略2本地数据库短线回测 · 只读本地 DB)
+           strategy2/backtest_models.py (策略2回测数据模型)
 指标层:    scanner/index_source.py (大盘指数数据)
 输出层:    output/csv_writer.py / json_writer.py
 策略2层:   strategy2/models.py (数据模型 — 5 个 dataclass)
@@ -274,13 +276,13 @@ npm --prefix web run preview
 
 ### 策略2「极致量干价稳」
 
-- **独立包 `strategy2/`**: 8 个模块 — models / indicators / scorer / rejection / risk / trend / engine / scanner。完全不依赖策略1的形态检测/评分/分析/决策。
-- **共享日线服务**: `scanner/daily_data_service.py` 从 engine.py 提取多源拉取/重试/缓存逻辑（默认 baidu/sina/tencent/yfinance），策略1和策略2共用。mootdx 已从生产链移除，yfinance 已加回。全源失败直接标记 failed，不使用缓存。数据源列表可通过 `config.yaml` 的 `data.daily_sources` 或前端 StrategyConfig 页面配置。
-- **数据库扩展**: `scan_tasks.strategy_type` 字段（向后兼容），`strategy2_candidates` 独立表（27 字段），3 条新索引。
-- **策略2 API**: 5 个端点 — `POST /api/strategy2/scans`（启动）、`GET status/tasks/candidates/candidate`（查询）。全局互斥增强（409 含 `strategyType`/`runningTaskId`）。
-- **前端**: 策略2结果页（`Strategy2Results.vue`）、配置分区（`StrategyConfig.vue` 金色独立区）、双策略按钮（`ScanEngine.vue`）、导航入口（`TopNav.vue`）、API composable 扩展。
-- **测试**: 策略2核心测试 + 修复验收 + 趋势 V2 35 项（含 002468/601607 离线回归 + 4 项反误杀）。策略1全部回归通过。后端全量 487 项。前端 vitest 25 项。
-- **修复轮次**: 历经 11 轮代码审查修复 + 趋势 V1 开发 + V2 升级。趋势 V2 使用 8 短中+3 长期=11 项证据评分，禁止端点收益。
+- **独立包 `strategy2/`**: 10 个模块 — models / indicators / scorer / rejection / risk / trend / engine / scanner / backtester / backtest_models。完全不依赖策略1的形态检测/评分/分析/决策。
+- **共享日线服务**: `scanner/daily_data_service.py` 从 engine.py 提取多源拉取/重试/缓存逻辑（默认 baidu/sina/tencent/yfinance），策略1和策略2共用。
+- **数据库扩展**: `scan_tasks.strategy_type` 字段，`strategy2_candidates` 独立表，`strategy2_backtest_tasks/signals/opportunities/task_stocks/insufficient_stocks` 5 张回测表，兼容式迁移。
+- **策略2 API**: 扫描 5 个端点 + 回测 10 个端点（启动/状态/列表/详情/机会/信号/股票状态/恢复/重试/取消）。
+- **前端**: 策略2结果页、配置分区、双策略按钮、回测页（`Strategy2Backtest.vue`）。
+- **测试**: 策略2核心 + 趋势 V2 35 项 + 回测 21 项。后端全量 508 项。前端 vitest 25 项。
+- **修复轮次**: 11 轮代码审查 + 趋势 V1→V2 + Phase 1 回测可信度修复（信号合并/原子持久化/NEXT_OPEN/完整性校验/两阶段最终化）。
 - **配置**: `config.yaml` 新增 `strategy2` 段（8 参数），前端可独立配置和校验。
 
 ### Gotchas（2026-06-10 策略2）
@@ -293,7 +295,11 @@ npm --prefix web run preview
 - **策略2 前端独立**: 策略2结果页不显示杯柄/VCP/突破/形态分等字段。扫描控制台双按钮分别调用不同 API（`/api/scan/start` vs `POST /api/strategy2/scans`）。任一策略运行时两个按钮同时禁用。
 - **策略2 前端配置 API**: `StrategyConfig.vue` 保存 payload 包含 `strategy2` 段，后端 `PUT /api/config` 通过 `_deep_merge` 写入 `config.yaml`。前端校验窗口天数关系和范围同步后端 `ValueError` 检查。
 - **策略2 趋势过滤 V2**: `evaluate_trend()` 使用价格路径+120日长期确认。必要条件：`close < MA20 AND MA20 < MA60`。8 项短中期证据 + 3 项长期证据，总分 ≥6 且 short≥4 且 long≥1 → DOWNTREND。禁止使用 RETURN_60/RETURN_120 端点收益。少于 120 日数据返回 `INSUFFICIENT_TREND_DATA` 并排除。趋势过滤在评分/风险/否决之前执行。重新评估后移除不再符合条件的旧候选，同步更新 `task_stocks` 状态。
-- **趋势 V2 数据库字段**: `strategy2_candidates` 表兼容式新增 15 个趋势字段（V1→V2 增量 5 个新字段 + 5 个替换字段）。旧候选空字段兼容显示 `--`。`downtrend_conditions` JSON 数组字段需 `_json_dumps` 序列化。
+- **趋势 V2 数据库字段**: `strategy2_candidates` 表兼容式新增 15 个趋势字段。旧候选空字段兼容显示 `--`。
+- **策略2回测**: `replace_strategy2_stock_backtest_result()` 原子替换单股结果（事务化）。`build_strategy2_backtest_summary()` 从 DB 完整明细生成汇总。`validate_strategy2_backtest_integrity()` 校验任务完整性。两阶段最终化：先写聚合字段→再校验→更新可信度。取消使用 `threading.Event`，工作线程每只股票前检查。
+- **策略2回测数据源**: 回测只读 `db.get_ohlc()` + `db.get_stock_pool()`，禁止调用 AKShare/百度/新浪/腾讯/yfinance。`data_snapshot_date` 精确到秒，过滤 ohlc。
+- **策略2回测执行模型**: 默认 `NEXT_OPEN`——信号日次日开盘入场，目标=入场价×1.05，止损=前10日最低收盘价×0.97。同日触发按 FAILED。未入场标记 `UNOBSERVED_ENTRY`/`NO_ENTRY_GAP_BELOW_STOP`/`NO_ENTRY_ABOVE_BUY_ZONE`。
+- **策略2回测信号合并**: 使用 `evaluation_index + eval_results` 计算冷却期，10 个计入冷却期的未命中交易日拆分新机会。冷却期计入: LIQUIDITY/DOWNTREND/REJECTION/SCORE/RISK；不计入: INSUFFICIENT_DATA/INVALID_DATA/EVALUATION_ERROR。
 - **策略2 Volume Percentile 窗口弹性**: 日线数据不足 60 天但 ≥ `minimum_required_days` 时，`volume_percentile_days` 取实际可用窗口天数，不强制 60。评分阈值 `≤20%` 不变。
 
 ### Gotchas（2026-06-11 策略2 验收修复）
@@ -323,6 +329,8 @@ npm --prefix web run preview
 - FINAL-COMPLETION 验收: `docs/reviews/2026-06-10-scan-window-unified-strategy-final-completion.md`
 - yfinance 四源并发设计: `docs/superpowers/specs/2026-06-10-yfinance-four-source-daily-kline-design.md`
 - 策略2趋势过滤V2: `docs/superpowers/specs/2026-06-11-strategy2-path-and-120d-trend-filter-v2.md`
+- 策略2本地数据库短线回测: `docs/superpowers/specs/2026-06-11-strategy2-local-database-backtest-design.md`
+- 策略2回测可信度修复: `docs/superpowers/specs/2026-06-12-strategy2-backtest-correctness-and-strategy-optimization-design.md`
 - 策略2极致量干价稳设计: `docs/superpowers/specs/2026-06-10-strategy2-extreme-dry-stable-design.md`
 - 策略2极致量干价稳实施计划: `docs/superpowers/plans/2026-06-10-strategy2-extreme-dry-stable.md`
 - 策略2修复审核文档: `docs/reviews/2026-06-10-strategy2-*.md` / `2026-06-11-strategy2-*.md`

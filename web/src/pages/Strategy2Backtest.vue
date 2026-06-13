@@ -43,6 +43,12 @@
       <!-- Horizon stats -->
       <div v-if="horizonStats" class="horizon-table">
         <h4>短线表现</h4>
+        <div class="result-legend">
+          <span class="green">● 成功</span> = 先触及 +5% 目标价（此前未触止损）
+          <span class="red">● 失败</span> = 先触发策略止损（或同日同时触发）
+          <span>● 未决</span> = 观察期内目标和止损均未触发
+          <span style="color:#666;margin-left:8px">| 目标 = 入场价 × 1.05 &nbsp; 止损 = 前10日最低收盘价 × 0.97</span>
+        </div>
         <table>
           <thead>
             <tr><th>周期</th><th>样本</th><th>成功</th><th>成功率</th><th>失败</th><th>未决</th><th>平均收益</th><th>平均最大上涨</th><th>平均最大回撤</th></tr>
@@ -69,7 +75,7 @@
       <h3>机会明细 ({{ oppsTotal }}) <span v-if="oppsHasMore" class="muted">当前显示 {{ opportunities.length }} 条</span></h3>
       <table class="opp-table">
         <thead>
-          <tr><th>股票</th><th>首次命中</th><th>最后命中</th><th>连续</th><th>分数</th><th>最高分</th><th>风险比</th><th>3日</th><th>5日</th><th>10日</th><th>20日</th></tr>
+          <tr><th>股票</th><th>首次命中</th><th>最后命中</th><th>连续</th><th>分数</th><th>最高分</th><th>风险比</th><th title="成功=先触+5% / 失败=先触止损 / 未决=均未触发">3日</th><th title="成功=先触+5% / 失败=先触止损 / 未决=均未触发">5日</th><th title="成功=先触+5% / 失败=先触止损 / 未决=均未触发">10日</th><th title="成功=先触+5% / 失败=先触止损 / 未决=均未触发">20日</th></tr>
         </thead>
         <tbody>
           <tr v-for="o in opportunities" :key="o.id">
@@ -287,4 +293,5 @@ td { padding: 6px 8px; border-bottom: 1px solid #222; }
 .pagination { display: flex; gap: 12px; align-items: center; justify-content: center; padding: 12px 0; font-size: 0.8rem; color: #aaa; }
 .pagination button { padding: 4px 12px; background: #2a2a2a; border: 1px solid #444; color: #ccc; border-radius: 3px; cursor: pointer; }
 .pagination button:disabled { opacity: 0.4; cursor: not-allowed; }
+.result-legend { font-size: 0.75rem; color: #888; margin-bottom: 10px; display: flex; gap: 20px; flex-wrap: wrap; }
 </style>

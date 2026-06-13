@@ -270,3 +270,12 @@ b262c8b feat(strategy2): add scorer, rejection rules, and risk calculator
 - Same config hash and same `data_snapshot_date` produced different results: 69 old-only and 53 new-only signals, with 4850 changed stock evaluation ranges.
 - New task result: 628 entries, 253 targets, 373 stops, 2 unresolved, 40.29% target-hit rate, and -0.4071% average realized return.
 - Verification: Strategy2 targeted tests passed 26; frontend Vitest passed 25; frontend build and compileall passed; backend suite had 508 passed and one external yfinance 429 failure.
+
+## 2026-06-13 (Strategy2 Phase 1 Medium/High Recheck)
+
+- Reviewed commit `997d8f8` plus current uncommitted changes and added `docs/reviews/2026-06-13-strategy2-phase1-medium-high-recheck.md`.
+- Confirmed corrected horizon statistics, two-phase finalization, observation-date aggregation, real cancellation signaling, real available-day persistence, and passing frontend tests.
+- Found three remaining high-severity issues: backtest resume/retry are still placeholders, same-day data changes are not protected by the date-only snapshot, and credibility validation mishandles canceled and zero-opportunity tasks.
+- Direct reproduction confirmed a fully terminal `CANCELED` task passes integrity validation, while a complete zero-opportunity task fails due to missing horizon keys.
+- Found two medium-severity gaps: incomplete per-stock audit/progress fields and empty funnel/target-stop timing summaries.
+- Verification: Strategy2 targeted tests passed 26; acceptance-related tests passed 65; offline backend suite passed 508 with one warning; frontend Vitest passed 25; frontend build, compileall, and diff check passed.
