@@ -97,6 +97,7 @@ class Strategy2Evaluation:
     risk: Strategy2Risk = None
     trend: Strategy2Trend = None
     current_close: float = 0.0
+    short_term_time_exit_days: int = 0
     status_reason: str | None = None
 
     def __post_init__(self):

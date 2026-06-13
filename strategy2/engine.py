@@ -47,6 +47,8 @@ class ExtremeDryStableStrategyEngine:
         self.strategy_window_days = resolved["strategy_window_days"]
         self.min_required = resolved["minimum_required_days"]
         self.candidate_min_score = resolved["candidate_min_score"]
+        self.minimum_volume_dry_score = resolved["minimum_volume_dry_score"]
+        self.short_term_time_exit_days = resolved["short_term_time_exit_days"]
         self.max_risk_ratio = resolved["max_risk_ratio"]
         self.support_lookback_days = resolved["support_lookback_days"]
         self.buy_zone_max_premium = resolved["buy_zone_max_premium"]
@@ -197,14 +199,15 @@ class ExtremeDryStableStrategyEngine:
 
         # 12. 入选条件判断
         score_ok = score.total_score >= self.candidate_min_score
+        volume_dry_ok = score.volume_dry_score >= self.minimum_volume_dry_score
         rejection_ok = len(reject_reasons) == 0
         risk_ok = risk.risk_ratio <= self.max_risk_ratio
 
-        passed = score_ok and rejection_ok and risk_ok
+        passed = score_ok and volume_dry_ok and rejection_ok and risk_ok
 
         if not passed:
             status_reason = _determine_status_reason(
-                score_ok, rejection_ok, risk_ok,
+                score_ok, volume_dry_ok, rejection_ok, risk_ok,
                 reject_reasons, score.total_score, risk.risk_ratio,
             )
         else:
@@ -225,12 +228,14 @@ class ExtremeDryStableStrategyEngine:
             risk=risk,
             trend=trend,
             current_close=current_close,
+            short_term_time_exit_days=self.short_term_time_exit_days,
             status_reason=status_reason,
         )
 
 
 def _determine_status_reason(
     score_ok: bool,
+    volume_dry_ok: bool,
     rejection_ok: bool,
     risk_ok: bool,
     reject_reasons: list[str],
@@ -242,6 +247,8 @@ def _determine_status_reason(
         return reject_reasons[0] if reject_reasons else "REJECTION_FAILED"
     if not score_ok:
         return "SCORE_BELOW_THRESHOLD"
+    if not volume_dry_ok:
+        return "VOLUME_DRY_BELOW_THRESHOLD"
     if not risk_ok:
         return "RISK_RATIO_TOO_HIGH"
     return "STRATEGY2_EVALUATION_ERROR"

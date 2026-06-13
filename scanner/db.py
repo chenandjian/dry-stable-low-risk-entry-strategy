@@ -967,6 +967,7 @@ def _ensure_strategy2_candidates_table(conn: sqlite3.Connection):
     _ensure_column(conn, "strategy2_candidates", "return_20", "REAL")
     _ensure_column(conn, "strategy2_candidates", "return_60", "REAL")
     _ensure_column(conn, "strategy2_candidates", "downtrend_conditions", "TEXT")
+    _ensure_column(conn, "strategy2_candidates", "short_term_time_exit_days", "INTEGER DEFAULT 0")
 
 
 def _ensure_column(conn: sqlite3.Connection, table: str, column: str, col_type: str):
@@ -1001,6 +1002,7 @@ def upsert_strategy2_candidate(task_id: str, d: dict):
         "drawdown_from_high_60", "center_shift_20", "price_position_60",
         "linear_trend_60", "drawdown_from_high_120", "center_shift_40",
         "return_20", "return_60", "downtrend_conditions",
+        "short_term_time_exit_days",
     ]
     values = (
         task_id, d["code"], d["name"], d["evaluation_date"],
@@ -1024,6 +1026,7 @@ def upsert_strategy2_candidate(task_id: str, d: dict):
         d.get("drawdown_from_high_120", 0.0), d.get("center_shift_40", 0.0),
         d.get("return_20", 0.0), d.get("return_60", 0.0),
         d.get("downtrend_conditions", "[]"),
+        d.get("short_term_time_exit_days", 0),
     )
     value_marks = ", ".join("?" for _ in columns)
     update_assignments = ", ".join(f"{c}=excluded.{c}" for c in columns if c not in ("task_id", "code"))

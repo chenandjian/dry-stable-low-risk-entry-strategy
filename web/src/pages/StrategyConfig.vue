@@ -270,6 +270,18 @@
           <span class="default">默认 70 · 0-100</span>
         </div>
         <div class="param">
+          <label title="量干评分低于此值时，即使总分达标也不进入策略2正式候选">正式量干最低分</label>
+          <input type="number" v-model.number="config.strategy2.minimum_volume_dry_score"
+            @input="markDirty" min="0" max="100" />
+          <span class="default">优化后 40 · 0-100</span>
+        </div>
+        <div class="param">
+          <label title="短线观察建议退出天数，仅用于候选展示和策略说明，不改变入选硬过滤">短线退出建议 <span class="unit">交易日</span></label>
+          <input type="number" v-model.number="config.strategy2.short_term_time_exit_days"
+            @input="markDirty" min="0" max="20" />
+          <span class="default">优化后 5 · 0 表示关闭</span>
+        </div>
+        <div class="param">
           <label title="风险比超过此值强制排除。风险比 = (收盘价 - 止损) / 收盘价">最大风险比 <span class="unit">%</span></label>
           <input type="range" min="1" max="10" step="0.5" v-model.number="maxRiskRatioPct" @input="markDirty" />
           <div class="range-val">{{ maxRiskRatioPct }}%</div>
@@ -330,7 +342,8 @@ const config = reactive({
   risk_reward: { atr_stop_multiplier: 1.2 },
   strategy2: {
     enabled: true, strategy_window_days: 120, minimum_required_days: 60,
-    candidate_min_score: 70, max_risk_ratio: 0.05, support_lookback_days: 10,
+    candidate_min_score: 70, minimum_volume_dry_score: 40, short_term_time_exit_days: 5,
+    max_risk_ratio: 0.05, support_lookback_days: 10,
     buy_zone_max_premium: 0.03, stop_loss_buffer: 0.03,
   },
 })
@@ -470,6 +483,8 @@ function validate() {
   if (s2.minimum_required_days < 60) errors.push('策略2: 最低有效数据天数 ≥ 60')
   if (s2.strategy_window_days > (liq.min_listing_days || 250)) errors.push('策略2: 计算天数不能超过日线拉取天数')
   if (s2.candidate_min_score < 0 || s2.candidate_min_score > 100) errors.push('策略2: 候选最低分需在 0-100')
+  if (s2.minimum_volume_dry_score < 0 || s2.minimum_volume_dry_score > 100) errors.push('策略2: 正式量干最低分需在 0-100')
+  if (s2.short_term_time_exit_days < 0 || s2.short_term_time_exit_days > 20) errors.push('策略2: 短线退出建议需在 0-20 天')
   if (s2.max_risk_ratio <= 0 || s2.max_risk_ratio >= 1) errors.push('策略2: 最大风险比需在 (0, 1) 之间')
   if (s2.support_lookback_days < 2) errors.push('策略2: 支撑回看天数 ≥ 2')
   if (s2.buy_zone_max_premium <= 0 || s2.buy_zone_max_premium > 0.2) errors.push('策略2: 买入溢价需在 (0, 20%] 之间')

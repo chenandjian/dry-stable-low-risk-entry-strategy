@@ -104,6 +104,8 @@ strategy2:
   strategy_window_days: 350
   minimum_required_days: 250
   candidate_min_score: 70
+  minimum_volume_dry_score: 40
+  short_term_time_exit_days: 5
   max_risk_ratio: 0.05
   support_lookback_days: 10
   buy_zone_max_premium: 0.03

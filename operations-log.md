@@ -383,3 +383,33 @@ b262c8b feat(strategy2): add scorer, rejection rules, and risk calculator
   - Frontend Vitest: **31 passed**.
   - Frontend production build: **passed**.
   - Python compileall and `git diff --check`: **passed**.
+
+## 2026-06-13 (Strategy2 Formal Optimized Parameter Enablement)
+
+- Enabled Strategy2 optimized formal version `strategy2-v3` based on the trusted baseline and comparable Phase 2 experiment results.
+- Decision baseline task: `s2bt-20260613-174358-baseline`.
+- Adopted evidence:
+  - `s2bt-20260613-174929-vol40`: `minimumVolumeDryScore=40`, average return `0.001903`, delta average return `+0.005974`, success-rate delta `+0.066875`.
+  - `s2bt-20260613-175657-vol40-exit5`: `minimumVolumeDryScore=40 + timeExitDays=5`, average return `0.006787`, delta average return `+0.010858`.
+- Formal parameters:
+  - `strategy2.candidate_min_score=70` unchanged.
+  - `strategy2.minimum_volume_dry_score=40` added as a formal scan hard filter.
+  - `strategy2.short_term_time_exit_days=5` added as candidate display / short-term observation guidance, not as an entry hard filter.
+  - `entry_confirmation` remains disabled for formal scan because `BREAK_RECENT_5D_HIGH` produced too few entries and negative average return.
+- Code changes:
+  - `strategy2/validation.py` validates the new formal parameters.
+  - `strategy2/engine.py` rejects formal candidates with `VOLUME_DRY_BELOW_THRESHOLD`.
+  - `strategy2/version.py` bumped strategy engine version to `strategy2-v3`.
+  - `scanner/db.py` persists `short_term_time_exit_days` on Strategy2 candidates.
+  - `web/src/pages/StrategyConfig.vue` exposes the new formal parameters.
+  - `web/src/pages/Strategy2Results.vue` displays the 5-day short-term observation guidance.
+- Optimized strategy document: `docs/superpowers/specs/2026-06-13-strategy2-optimized-strategy-parameters.md`.
+- Rollback plan: restore `minimum_volume_dry_score=0`, `short_term_time_exit_days=0`, and strategy version behavior if repeated scans become too sparse or new comparable backtests underperform `strategy2-v2`.
+- Verification:
+  - TDD red checks confirmed missing formal config parsing, missing volume-dry hard filter, and missing candidate persistence before implementation.
+  - Strategy2 targeted tests: **164 passed**.
+  - Frontend Vitest: **31 passed**.
+  - Frontend production build: **passed**.
+  - Python compileall: **passed**.
+  - Local full test set excluding external yfinance network tests: **529 passed**.
+  - Full `python -m pytest tests -q`: **555 passed, 1 failed**; the only failure was `tests/test_yfinance_hist.py::test_yfinance_daily` due to Yahoo `YFRateLimitError: Too Many Requests`, unrelated to Strategy2 changes.

@@ -487,3 +487,25 @@ class TestJsonDeserialization:
         assert isinstance(c["score_reasons"], list), f"Expected list, got {type(c['score_reasons'])}: {c['score_reasons']!r}"
         assert isinstance(c["reject_reasons"], list), f"Expected list, got {type(c['reject_reasons'])}: {c['reject_reasons']!r}"
         assert len(c["score_reasons"]) == 2
+
+    def test_strategy2_candidate_persists_formal_short_term_exit_days(self, tmp_path):
+        import scanner.db as db
+        db_path = str(tmp_path / "formal-exit.db")
+        db.init_db(db_path)
+        db.create_scan_task("formal-test", "2026-06-13 09:00:00",
+                            strategy_type="STRATEGY_2_EXTREME_DRY_STABLE")
+
+        db.upsert_strategy2_candidate("formal-test", {
+            "code": "000001", "name": "test", "evaluation_date": "2026-06-13",
+            "total_score": 80, "level": "重点观察",
+            "volume_dry_score": 40, "price_stable_score": 40,
+            "current_close": 10.0,
+            "key_support": 9.7, "buy_zone_low": 9.7, "buy_zone_high": 10.0,
+            "stop_loss": 9.4, "risk_ratio": 0.04, "risk_level": "风险可接受",
+            "score_reasons": [], "reject_reasons": [],
+            "short_term_time_exit_days": 5,
+        })
+
+        candidates = db.get_strategy2_candidates(task_id="formal-test")
+
+        assert candidates[0]["short_term_time_exit_days"] == 5

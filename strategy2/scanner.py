@@ -334,6 +334,7 @@ def _build_strategy2_discovery(evaluation, fetch_result=None) -> dict:
         "stop_loss": risk.stop_loss,
         "risk_ratio": risk.risk_ratio,
         "risk_level": risk.risk_level,
+        "short_term_time_exit_days": getattr(evaluation, "short_term_time_exit_days", 0),
         "score_reasons": evaluation.score_reasons,
         "reject_reasons": evaluation.reject_reasons,
         "data_source": fetch_result.primary_source if fetch_result else "",

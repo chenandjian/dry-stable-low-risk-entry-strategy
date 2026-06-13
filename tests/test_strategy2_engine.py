@@ -2,7 +2,8 @@
 """策略2引擎集成测试 — ExtremeDryStableStrategyEngine。"""
 import pytest
 from strategy2.engine import ExtremeDryStableStrategyEngine
-from strategy2.models import Strategy2Evaluation
+from strategy2.models import Strategy2Evaluation, Strategy2Indicators, Strategy2Risk, Strategy2Score, Strategy2Trend
+from strategy2.validation import resolve_strategy2_config
 
 
 def _strategy2_cfg(**overrides):
@@ -11,6 +12,8 @@ def _strategy2_cfg(**overrides):
         "strategy_window_days": 120,
         "minimum_required_days": 60,
         "candidate_min_score": 70,
+        "minimum_volume_dry_score": 40,
+        "short_term_time_exit_days": 5,
         "max_risk_ratio": 0.05,
         "support_lookback_days": 10,
         "buy_zone_max_premium": 0.03,
@@ -55,6 +58,16 @@ class TestEngineConstruction:
     def test_enforce_candidate_min_score_range(self):
         with pytest.raises(ValueError, match="candidate_min_score"):
             ExtremeDryStableStrategyEngine(_strategy2_cfg(candidate_min_score=101))
+
+    def test_resolves_formal_optimized_strategy_parameters(self):
+        resolved = resolve_strategy2_config(_strategy2_cfg())
+
+        assert resolved["minimum_volume_dry_score"] == 40
+        assert resolved["short_term_time_exit_days"] == 5
+
+    def test_enforce_minimum_volume_dry_score_range(self):
+        with pytest.raises(ValueError, match="minimum_volume_dry_score"):
+            ExtremeDryStableStrategyEngine(_strategy2_cfg(minimum_volume_dry_score=101))
 
     def test_enforce_max_risk_ratio_range(self):
         with pytest.raises(ValueError, match="max_risk_ratio"):
@@ -110,6 +123,37 @@ class TestEngineEvaluateAt:
         data = _make_flat_data(120)
         ev = engine.evaluate_at(data, code="000001", name="test")
         assert ev.passed is False
+
+    def test_minimum_volume_dry_score_is_formal_hard_filter(self, monkeypatch):
+        """Formal Strategy2 scan rejects candidates below optimized volume-dry threshold."""
+        import strategy2.engine as engine_mod
+
+        monkeypatch.setattr(engine_mod, "compute_indicators", lambda _data: Strategy2Indicators(v20=1))
+        monkeypatch.setattr(engine_mod, "evaluate_trend", lambda _data: Strategy2Trend(trend_type="UPTREND_OR_SIDEWAYS"))
+        monkeypatch.setattr(engine_mod, "compute_key_support", lambda _data, _days: 9.8)
+        monkeypatch.setattr(engine_mod, "compute_risk", lambda **_kwargs: Strategy2Risk(risk_ratio=0.03, key_support=9.8))
+        monkeypatch.setattr(engine_mod, "check_rejection_rules", lambda *_args, **_kwargs: [])
+        monkeypatch.setattr(
+            engine_mod,
+            "compute_total_score",
+            lambda *_args, **_kwargs: Strategy2Score(
+                volume_dry_score=35,
+                price_stable_score=40,
+                total_score=75,
+                level="普通观察",
+            ),
+        )
+
+        ev = ExtremeDryStableStrategyEngine(_strategy2_cfg(minimum_volume_dry_score=40)).evaluate_at(
+            _make_flat_data(120),
+            code="000001",
+            name="test",
+        )
+
+        assert ev.passed is False
+        assert ev.total_score == 75
+        assert ev.volume_dry_score == 35
+        assert ev.status_reason == "VOLUME_DRY_BELOW_THRESHOLD"
 
     def test_strict_no_future_data_leakage(self):
         """Engine must only use data up to and including evaluation date."""

@@ -44,6 +44,7 @@
           <th>走势趋势</th>
           <th>风险比</th>
           <th>风险等级</th>
+          <th>短线建议</th>
           <th>支撑</th>
           <th>止损</th>
           <th>详情</th>
@@ -64,12 +65,13 @@
             <td><span class="trend-type">{{ trendLabel(c.trend_type) }}</span></td>
             <td>{{ formatPct(c.risk_ratio) }}</td>
             <td>{{ c.risk_level }}</td>
+            <td>{{ c.short_term_time_exit_days ? c.short_term_time_exit_days + '日观察' : '--' }}</td>
             <td>{{ c.key_support?.toFixed(2) }}</td>
             <td>{{ c.stop_loss?.toFixed(2) }}</td>
             <td class="expand-cell">{{ expandedCode === c.code ? '▾' : '▸' }}</td>
           </tr>
           <tr v-if="expandedCode === c.code" class="detail-row">
-            <td colspan="11">
+            <td colspan="12">
               <div class="detail-panel">
                 <div class="detail-grid">
                   <div class="detail-section">
@@ -96,6 +98,7 @@
                     <h4>风险</h4>
                     <div>买入: {{ c.buy_zone_low?.toFixed(2) }} ~ {{ c.buy_zone_high?.toFixed(2) }}</div>
                     <div>止损: {{ c.stop_loss?.toFixed(2) }} &nbsp; 风险比: {{ formatPct(c.risk_ratio) }}</div>
+                    <div>短线退出建议: {{ c.short_term_time_exit_days ? c.short_term_time_exit_days + ' 个交易日' : '未启用' }}（观察建议，非自动交易）</div>
                     <div>评估日: {{ c.evaluation_date }}</div>
                   </div>
                   <div class="detail-section">

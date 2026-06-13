@@ -60,6 +60,8 @@ def resolve_strategy2_config(full_config: dict) -> dict:
     strategy_window_days = _strict_int(s2.get("strategy_window_days", 120), "strategy_window_days", min_val=60)
     minimum_required_days = _strict_int(s2.get("minimum_required_days", 60), "minimum_required_days", min_val=60)
     candidate_min_score = _strict_int(s2.get("candidate_min_score", 70), "candidate_min_score", min_val=0, max_val=100)
+    minimum_volume_dry_score = _strict_int(s2.get("minimum_volume_dry_score", 0), "minimum_volume_dry_score", min_val=0, max_val=100)
+    short_term_time_exit_days = _strict_int(s2.get("short_term_time_exit_days", 0), "short_term_time_exit_days", min_val=0, max_val=20)
     support_lookback_days = _strict_int(s2.get("support_lookback_days", 10), "support_lookback_days", min_val=2)
 
     max_risk_ratio = _strict_float(s2.get("max_risk_ratio", 0.05), "max_risk_ratio", min_val=0.0, max_val=1.0)
@@ -77,6 +79,8 @@ def resolve_strategy2_config(full_config: dict) -> dict:
         "strategy_window_days": strategy_window_days,
         "minimum_required_days": minimum_required_days,
         "candidate_min_score": candidate_min_score,
+        "minimum_volume_dry_score": minimum_volume_dry_score,
+        "short_term_time_exit_days": short_term_time_exit_days,
         "max_risk_ratio": max_risk_ratio,
         "support_lookback_days": support_lookback_days,
         "buy_zone_max_premium": buy_zone_max_premium,
