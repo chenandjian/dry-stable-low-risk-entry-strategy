@@ -25,16 +25,36 @@ def test_two_sources_independent():
 
 
 def test_try_acquire_any():
-    """自动获取空闲数据源"""
+    """自动获取空闲数据源 — 四个数据源。"""
     mgr = DataSourceManager()
     ds = mgr.try_acquire_any()
-    assert ds in ("sina", "tencent")
+    assert ds in ("baidu", "sina", "tencent", "yfinance")
     ds2 = mgr.try_acquire_any()
-    assert ds2 in ("sina", "tencent")
-    assert ds2 != ds  # 第二个源不同于第一个
-    assert mgr.try_acquire_any() is None  # 两个都忙
+    assert ds2 in ("baidu", "sina", "tencent", "yfinance")
+    assert ds2 != ds
+    ds3 = mgr.try_acquire_any()
+    assert ds3 in ("baidu", "sina", "tencent", "yfinance")
+    assert ds3 not in (ds, ds2)
+    ds4 = mgr.try_acquire_any()
+    assert ds4 in ("baidu", "sina", "tencent", "yfinance")
+    assert ds4 not in (ds, ds2, ds3)
+    assert mgr.try_acquire_any() is None  # 四源全忙
     mgr.release(ds)
     mgr.release(ds2)
+    mgr.release(ds3)
+    mgr.release(ds4)
+
+
+def test_tencent_lock_independent():
+    """tencent 锁可获取和释放，与其他源互不影响 (ACCEPT-S2-004)。"""
+    mgr = DataSourceManager()
+    assert mgr.acquire("tencent") is True
+    assert mgr.acquire("baidu") is True  # 不同源不冲突
+    assert mgr.acquire("tencent") is False  # tencent 已被占
+    mgr.release("tencent")
+    assert mgr.acquire("tencent") is True   # 释放后可获取
+    mgr.release("tencent")
+    mgr.release("baidu")
 
 
 def test_release_always_safe():

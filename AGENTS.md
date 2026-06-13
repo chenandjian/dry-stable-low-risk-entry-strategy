@@ -1,192 +1,158 @@
 # AGENTS.md
 
-This file provides guidance to Codex (Codex.ai/code) when working with code in this repository.
+本文件约束 Codex 在当前 worktree 中的开发行为。项目事实、历史决策和更完整的 Gotchas 以同目录 `CLAUDE.md` 为准；开始非简单任务前必须先读 `CLAUDE.md`，再读相关设计文档、代码和测试。若文档、代码、测试冲突，以当前代码和可复现实验为最终依据，并同步修正文档。
+
+## Codex 双角色闭环流程
+
+以后在 Codex 中开发，按这个标准流程执行：
+
+1. 先阅读设计文档、`CLAUDE.md`、相关代码、数据模型和测试。
+2. 以程序员角色开发，保持小步提交、可编译、可验证。
+3. 开发完成后切换为审核专家角色验收，重点看业务正确性、数据一致性、缓存/并发、边界条件和回归风险。
+4. 发现中/高等级问题后，切回程序员角色修复。
+5. 再次验收，循环直到没有中/高等级问题。
+6. 遇到无法判断或无法安全修复的问题，向用户提问。
+7. 验证通过后自动 `git add`、`git commit`、`git push`；如果用户明确说不要 push，或网络 push 失败，则保留本地提交并如实报告。
+
+Bug 修复优先使用 TDD：先写能稳定复现问题的失败测试，再做最小修复，最后运行专项和回归测试。
 
 ## Project
 
-CupHandleScan — A股杯柄结构（Cup & Handle）自动扫描系统。Python 3.10+。
+CupHandleScan 是 Python 3.10+ 的 A 股扫描系统，当前 worktree 包含两套独立策略：
+
+- 策略1：杯柄/VCP 扫描，统一入口 `scanner/strategy_engine.py::CupHandleStrategyEngine.evaluate_at()`。
+- 策略2：极致量干价稳扫描，统一入口 `strategy2/engine.py::ExtremeDryStableStrategyEngine.evaluate_at()`。
+
+策略2不得导入策略1的形态检测、评分、分析或决策模块。允许复用共享数据层、流动性过滤、SQLite 基础能力和 `scanner/daily_data_service.py`。
 
 ## Commands
 
+后端常规验证：
+
 ```bash
-# 运行所有测试
-python -m pytest tests/ -v
+python -m pytest tests/ -q --ignore=tests/test_akshare_hist.py --ignore=tests/test_tushare_hist.py --ignore=tests/test_yfinance_hist.py
+python -m pytest tests/test_strategy2_backtester.py -v
+python -m compileall scanner strategy2 server.py -q
+```
 
-# 运行单个测试文件
-python -m pytest tests/test_data_source.py -v
+前端命令必须从仓库/worktree 根目录使用 `--prefix`：
 
-# 运行单个测试函数
-python -m pytest tests/test_data_source.py::test_acquire_release_single_source -v
+```bash
+npm --prefix web install
+npm --prefix web test -- --run
+npm --prefix web run build
+```
 
-# 安装依赖
-pip install -r requirements.txt
+真实外部数据源测试仅手工按需运行，不纳入常规回归：
 
-# 前端开发
-cd web && npm install && npm run dev
-
-# 前端构建
-cd web && npm run build
+```bash
+python -m pytest tests/test_akshare_hist.py -v
+python -m pytest tests/test_tushare_hist.py -v
+python -m pytest tests/test_yfinance_hist.py -v
 ```
 
 ## Architecture
 
-```
-入口层:    main.py (CLI)  /  server.py (FastAPI)  /  scheduler/scheduler.py
-引擎层:    scanner/engine.py (双线程扫描调度)
-数据层:    scanner/db.py (SQLite 持久化)
-           scanner/data_source.py (互斥锁管理)
-           scanner/sina_source.py / tencent_source.py (HTTP抓取)
-           scanner/stock_pool.py (股票池)
-算法层:    scanner/pattern_detector.py (杯柄识别)
-           scanner/liquidity_filter.py (流动性过滤)
-           scanner/scorer.py (评分 0-100)
-分析层:    analyzer/volume_dry.py (量干评分 0-10)
-           analyzer/price_stable.py (价稳评分 0-10)
-           analyzer/pattern_score.py (形态评分 0-20)
-           analyzer/key_prices.py + risk_reward.py (关键价格/仓位)
-回测层:    scanner/backtester.py (历史回测)
-输出层:    output/csv_writer.py / json_writer.py
-前端:      web/ (Vue 3 + ECharts · 深色金融终端风格)
+```text
+入口: main.py / server.py / scheduler/scheduler.py
+策略1: scanner/engine.py + scanner/strategy_engine.py
+策略2: strategy2/scanner.py + strategy2/engine.py
+共享数据: scanner/db.py + scanner/daily_data_service.py + scanner/data_source.py
+策略2回测: strategy2/backtester.py + strategy2/backtest_models.py + server.py 回测任务编排
+前端: web/ Vue 3 + lightweight-charts
 ```
 
-**核心设计决策:**
+关键边界：
 
-- **数据源互斥锁：** 两个扫描线程不能同时请求同一个数据源（新浪/腾讯）。`DataSourceManager` 用 `threading.Lock(blocking=False)` 实现非阻塞互斥。线程取不到锁时 sleep 0.1s 后重试。
-- **三级回退：** 主数据源 → 备用数据源 → 本地缓存。AKShare 仅用于获取股票池，不用于OHLC数据。
-- **单只失败不中断：** 全市场扫描中，单只股票异常（超时/解析错误/停牌）记录日志后跳过，不中断整体任务。
-- **数据源锁必须释放：** `try...finally` 确保异常路径也释放锁。
-- **配置文件驱动：** 所有阈值（杯体深度、柄部回撤、流动性等）在 `config.yaml` 中可调。
-- **形态评分维度：** 杯体结构 35 + 柄部结构 25 + 成交量结构 20 + 前置趋势 10 + 突破确认 10 = 100 分。
-- **A股配色：** 红涨绿跌。金色仅用于 ≥80 分 A 级信号。
-- **SQLite 持久化：** 数据存储于 `data/cuphandle.db`（stock_pool, daily_ohlc, scan_tasks, candidates）。线程级连接 + WAL 模式。
-- **新浪 API：** `quotes.sina.cn/cn/api/jsonp_v2.php/data/CN_MarketDataService.getKLineData` — 返回 JSONP 需手动解析。腾讯 API 不可用时内部回退到新浪。
+- `CupHandleStrategyEngine.evaluate_at()` 是策略1唯一候选判断入口；调用方不得重复实现评分门槛、形态类型、决策状态或突破排除规则。
+- `ExtremeDryStableStrategyEngine.evaluate_at()` 是策略2唯一判断入口；策略2不使用杯柄/VCP形态判断。
+- `scan_tasks.strategy_type` 区分 `STRATEGY_1_CUP_HANDLE` 与 `STRATEGY_2_EXTREME_DRY_STABLE`。
+- 策略2候选写入 `strategy2_candidates`，不得写入策略1的 `candidates`。
+- 策略2 API、任务、候选、回测结果必须与策略1隔离，跨策略 task_id 应返回 `TASK_STRATEGY_MISMATCH`。
 
-## Key Files
+## Strategy2 数据与回测规则
 
-| File                               | Purpose                                                                                |
-| ---------------------------------- | -------------------------------------------------------------------------------------- |
-| `config.yaml`                      | 所有可调参数（市场/流动性/杯体/柄部/突破/评分/输出/调度/数据库）                       |
-| `scanner/db.py`                    | SQLite 数据库层 — 连接管理 + 5 表 CRUD                                                 |
-| `scanner/data_source.py`           | `DataSourceManager` — 新浪+腾讯双源互斥锁                                              |
-| `scanner/sina_source.py`           | `fetch_sina_daily(code, days)` → `list[dict] \| None`                                  |
-| `scanner/tencent_source.py`        | `fetch_tencent_daily(code, days)` → `list[dict] \| None`（内部回退新浪）               |
-| `scanner/pattern_detector.py`      | `detect_cup_handle(data, config)` → `CupHandleResult`                                  |
-| `scanner/scorer.py`                | `score_cup_handle(result)` / `score_cup_handle_advanced(result, data)` → `int` (0-100) |
-| `scanner/engine.py`                | `scan_all(config)` — 双线程全市场扫描主循环                                            |
-| `scanner/backtester.py`            | `run_backtest(stocks, fetch_fn, config)` — 历史回测                                    |
-| `analyzer/volume_dry.py`           | `score_volume_dry(data)` → `VolumeDryResult` (0-10)                                    |
-| `analyzer/price_stable.py`         | `score_price_stable(data)` → `PriceStableResult` (0-10)                                |
-| `analyzer/risk_reward.py`          | `calculate_risk_reward(...)` → `RiskRewardResult`                                      |
-| `server.py`                        | FastAPI 服务 — CORS + lifespan + 历史持久化                                            |
-| `web/src/pages/ScannerConsole.vue` | 前端首页 — 机会雷达控制台                                                              |
+- 策略2扫描、实验、正式参数升级、验收分析和回测默认只使用本地 `stock_pool` / `daily_ohlc`。
+- 没有用户明确要求时，不重新拉取 Baidu/Sina/Tencent/yfinance/AKShare/Tushare 数据。
+- 三数据源或多数据源全部在线失败时，不使用旧缓存产出扫描结果；股票应标记为失败并保留失败原因。
+- 回测只读本地 DB，禁止调用任何外部行情源。
+- `NEXT_OPEN` 是可信基线执行模型，不得改回信号日收盘成交。
+- 同一股票两个命中之间累计 10 个有效未命中交易日后，才拆分为新机会。
+- 原始信号和机会必须可追溯；单股重跑必须原子替换且幂等。
+- `strategy2_backtest_task_stocks` 是逐股状态、进度、漏斗和审计的事实来源。
+- 任务必须保存原配置快照、股票范围、数据快照日期和数据版本；恢复/重试不得使用最新配置或变化后的数据。
+- 只有状态为 `completed`、全部股票终态、汇总完整且无失败/评估异常的任务可以成为 `TRUSTED_BASELINE`。
+- `CANCELED`、`INTERRUPTED`、`FAILED`、`completed_with_errors` 均不得成为可信基线。
+- 完整执行但零机会是合法结果，必须生成完整零值汇总。
 
-## Design Specs
+## Strategy2 规则边界
 
-- 系统设计: `docs/superpowers/specs/2026-06-03-cuphandle-scan-design.md`
-- Phase 1 计划: `docs/superpowers/plans/2026-06-03-cuphandle-scan-phase1.md`
-- 原始开发需求: `docs/DEVELOPMENT_DOC.md` (杯柄扫描) + `docs/dry-stable-low-risk-entry-strategy.md` (干稳低吸策略)
-- 前端设计需求: `docs/art.md`
+- 评分体系：量干 50 + 价稳 50，总分 100。
+- 一票否决：`return_5<-5%`、放量下跌、`range_5>8%`、收盘低于 `key_support`、`return_3>=8%`。
+- `key_support` 不含评估日 T，只取 T 之前的历史窗口。
+- 入选条件：总分达到配置阈值、无否决、风险比不超过配置阈值。
+- 趋势过滤 V2 在评分/风险/否决之前执行；少于 120 日趋势数据时返回 `INSUFFICIENT_TREND_DATA` 并排除。
+- Phase 1 回测可信度修复不得顺手改变策略2评分、趋势、否决、风险规则和信号语义。
 
-## Gotchas
+## Database Rules
 
-- **`PRAGMA table_info`**: 返回 `(cid, name, type, ...)`，取列名用 `d[1]`，不是 `d[0]`。`db.py` 中 `get_candidates` 和 `get_candidate` 用错了会返回整数 key。
-- **进程管理**: Windows 下 `taskkill //F //IM python.exe`（双斜杠），单斜杠会解析失败。服务重启前必须确保所有旧 Python 进程已死，否则旧代码继续跑在新端口上。
-- **新浪 API**: 返回 JSONP 格式 `data([...]);`，需要手动 `text[5:-2]` 后解析 JSON。
-- **Scan 线程崩溃**: `server.py` 中 scan 线程的 `except` 现已含 `traceback.format_exc()`，但需检查日志才能看到。`_running["stats"]` 为空即扫描未正常启动。
-- **config.yaml 中的假参数**: `data.cache_dir`、`data.start_date`、`cup.filter_v_shape`、`output.csv/json/charts`、`scheduler.webhook_url` 等键存在于 yaml 但代码中未使用。新增配置项前先确认代码已接入。
+- SQLite 使用线程级连接和 WAL。
+- `PRAGMA table_info` 取列名必须用 `d[1]`。
+- 兼容迁移使用 `_ensure_column()`；不得执行破坏性 schema 变更。
+- 逐股信号、机会、任务股票终态必须在同一事务中写入。
+- 新增任务字段必须兼容旧库；旧任务不可被错误升级为可信基线。
+- `replace_strategy2_stock_backtest_result()` 必须保持单股结果原子替换。
+- `build_strategy2_backtest_summary()` 汇总应从 DB 完整明细生成，不依赖易漂移的内存计数。
 
-## .gitignore Policy
+## Frontend Rules
 
-向 `.gitignore` 新增条目前，先告知用户确认。当前已忽略: Python 产物、虚拟环境、IDE 配置、`output_data/`、`logs/`、`cache/`、`data/`、`node_modules/`、`.superpowers/`。
+- worktree 中前端命令使用 `npm --prefix web ...`。
+- 策略2结果页不显示杯柄/VCP/突破/形态分等策略1字段。
+- 扫描控制台双策略按钮分别调用 `/api/scan/start` 和 `POST /api/strategy2/scans`。
+- 任一策略运行时两个启动按钮应同时禁用。
+- 历史任务上下文以 URL `?task=` 为准；异步响应必须防 stale context 覆盖当前页面。
+- 轮询终态刷新失败时，应保留能成功加载的数据，并明确展示刷新失败信息。
 
-# Git Safety Rules
+## Git Safety
 
-Codex may read files, modify files, and run tests.
+允许在验证后自动执行：
 
-Never run destructive commands unless I explicitly approve the exact command:
+- `git status`
+- `git diff`
+- `git log`
+- `git branch`
+- `git show`
+- `git add`
+- `git commit`
+- `git push`
 
-- git reset --hard
-- git clean -fd
-- git clean -fdx
-- git checkout .
-- git restore .
-- rm -rf
+禁止在未获得用户对精确命令的明确批准时执行：
 
-## 8. 开发哲学
+- `git reset --hard`
+- `git clean -fd`
+- `git clean -fdx`
+- `git checkout .`
+- `git restore .`
+- `rm -rf`
 
-| instruction                                      | notes        |
-| ------------------------------------------------ | ------------ |
-| 必须坚持渐进式迭代，保持每次改动可编译、可验证   | 小步快跑     |
-| 必须在实现前研读既有代码或文档，吸收现有经验     | 学习优先     |
-| 必须保持务实态度，优先满足真实需求而非理想化设计 | 实用主义     |
-| 必须选择表达清晰的实现，拒绝炫技式写法           | 可读性优先   |
-| 必须偏向简单方案，避免过度架构或早期优化         | 简单优于复杂 |
-| 必须遵循既有代码风格，包括导入顺序、命名与格式化 | 保持一致性   |
+不得覆盖或回退用户已有修改。向 `.gitignore` 新增条目前先告知用户确认。
 
-**简单性定义**：
+## Worktree Merge Flow
 
-- 每个函数或类必须仅承担单一责任
-- 禁止过早抽象；重复出现三次以上再考虑通用化
-- 禁止使用"聪明"技巧，以可读性为先
-- 如果需要额外解释，说明实现仍然过于复杂，应继续简化
+正常 worktree 开发完成后：
 
-**项目集成原则**：
+1. 在 worktree 中确认 `git status`、运行必要测试并提交当前分支。
+2. 回到主仓库 main，确认不会覆盖用户未提交修改。
+3. 合并 worktree 分支到 main。
+4. 在 main 上至少运行与改动相关的轻量验证；涉及代码时运行完整门禁。
+5. push main；如果 push 失败，不要反复纠缠，报告本地已合并和失败原因。
 
-- 必须寻找至少 3 个相似特性或组件，理解其设计与复用方式
-- 必须识别项目中通用模式与约定，并在新实现中沿用
-- 必须优先使用既有库、工具或辅助函数
-- 必须遵循既有测试编排，沿用断言与夹具结构
-- 必须使用项目现有构建系统，不得私自新增脚本
-- 必须使用项目既定的测试框架与运行方式
-- 必须使用项目的格式化/静态检查设置
+## Delivery
 
-## 9. 行为准则
+最终回复必须包含：
 
-| instruction                                                | notes        |
-| ---------------------------------------------------------- | ------------ |
-| 自主规划和决策，仅在真正需要用户输入时才询问               | 最大化自主性 |
-| 基于观察和分析做出最终判断和决策                           | 自主决策     |
-| 充分分析和思考后再执行，避免盲目决策                       | 深思熟虑     |
-| 禁止假设或猜测，所有结论必须援引代码或文档证据             | 证据驱动     |
-| 如实报告执行结果，包括失败和问题，记录到 operations-log.md | 透明记录     |
-| 在实现复杂任务前完成详尽规划并记录                         | 规划先行     |
-| 对复杂任务维护 TODO 清单并及时更新进度                     | 进度跟踪     |
-| 保持小步交付，确保每次提交处于可用状态                     | 质量保证     |
-| 主动学习既有实现的优缺点并加以复用或改进                   | 持续改进     |
-| 连续三次失败后必须暂停操作，重新评估策略                   | 策略调整     |
-
-**极少数例外需要用户确认的情况**（仅以下场景）：
-
-- 删除核心配置文件（package.json、tsconfig.json、.env 等）
-- 数据库 schema 的破坏性变更（DROP TABLE、ALTER COLUMN 等）
-- Git push 到远程仓库（特别是 main/master 分支）
-- 连续3次相同错误后需要策略调整
-- 用户明确要求确认的操作
-
-**默认自动执行**（无需确认）：
-
-- 所有文件读写操作
-- 代码编写、修改、重构
-- 文档生成和更新
-- 测试执行和验证
-- 依赖安装和包管理
-- Git 操作（add、commit、diff、status、 push等）
-- 构建和编译操作
-- 工具调用（code-index、exa、grep、find 等）
-- 按计划执行的所有步骤
-- 错误修复和重试（最多3次）
-
-**判断原则**：
-
-- 如果不在"极少数例外"清单中 → 自动执行
-- 如有疑问 → 自动执行（而非询问）
-- 宁可执行后修复，也不要频繁打断工作流程
-
----
-
-**协作原则总结**：
-
-- 我规划，我决策
-- 我观察，我判断
-- 我执行，我验证
-- 遇疑问，评估后决策或询问用户
+- 修改文件与核心变化。
+- 已运行命令及真实结果。
+- 未验证部分与残余风险。
+- commit hash。
+- push 是否成功；如果失败，说明失败原因。

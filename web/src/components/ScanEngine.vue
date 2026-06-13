@@ -44,7 +44,12 @@
       </div>
     </div>
     <div v-if="!running" class="scan-controls">
-      <button class="btn-primary" @click="$emit('start')">开始扫描</button>
+      <button class="btn-primary" @click="$emit('start')" title="策略1: 杯柄/VCP形态识别">
+        启动策略1扫描
+      </button>
+      <button class="btn-secondary" @click="$emit('startStrategy2')" title="策略2: 极致量干价稳">
+        启动策略2扫描
+      </button>
     </div>
   </div>
 </template>
@@ -64,7 +69,7 @@ const props = defineProps({
   stockPoolSource: String,
   logLines: { type: Array, default: () => [] },
 })
-defineEmits(['start'])
+defineEmits(['start', 'startStrategy2'])
 
 const logExpanded = ref(true)
 const progressPct = computed(() => props.total > 0 ? Math.round(props.scanned / props.total * 100) : 0)

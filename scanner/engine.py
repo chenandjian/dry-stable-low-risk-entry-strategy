@@ -1,4 +1,5 @@
 # scanner/engine.py
+import json
 import logging
 import threading
 import time
@@ -8,16 +9,20 @@ from typing import Callable
 
 import scanner.db as db
 from scanner.data_source import DataSourceManager
-from scanner.mootdx_source import fetch_mootdx_daily
 from scanner.baidu_source import fetch_baidu_daily
 from scanner.sina_source import fetch_sina_daily
 from scanner.tencent_source import fetch_tencent_daily
+from scanner.yfinance_source import fetch_yfinance_daily
 from scanner.index_source import fetch_market_index_daily
 from scanner.liquidity_filter import passes_liquidity_filter
-from scanner.pattern_detector import detect_cup_handle
 from scanner.pattern_detector import CupHandleResult
-from scanner.scorer import score_cup_handle_advanced
 from analyzer.dry_stable import analyze_dry_stable
+from scanner.strategy_engine import (
+    CupHandleStrategyEngine,
+    resolve_strategy_windows,
+    select_market_window,
+    select_strategy_window,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -31,7 +36,12 @@ class FetchResult:
     fallback_attempts: int = 0
     primary_error: str | None = None
     fallback_error: str | None = None
+    source_errors: dict = None  # ds_name -> error string for ALL attempted sources
     from_cache: bool = False
+
+    def __post_init__(self):
+        if self.source_errors is None:
+            self.source_errors = {}
 
 
 def scan_all(
@@ -41,9 +51,9 @@ def scan_all(
     task_id: str = None,
     stocks: list[dict] = None,
     retry_policy: str = "normal",
-    worker_count: int = 2,
+    worker_count: int = 4,
 ) -> dict:
-    """双线程全市场扫描。"""
+    """多线程全市场扫描。"""
     from scanner.stock_pool import get_a_stock_pool
 
     db_path = config.get("data", {}).get("database_path", "data/cuphandle.db")
@@ -54,10 +64,12 @@ def scan_all(
 
     start_offset = 0
     if stocks is None and resume_task_id:
-        info = db.get_interrupted_task()
-        if info:
-            start_offset = info.get("scanned", 0)
-            stocks = db.get_pending_stocks(resume_task_id, from_idx=start_offset)
+        # 直接按 resume_task_id 查询，不依赖 get_interrupted_task() 的最新任务匹配
+        stocks = db.get_pending_stocks(resume_task_id, from_idx=start_offset)
+        if stocks:
+            # 估算已扫描数：总数 - 剩余待处理数
+            total = len(db.get_task_stocks(resume_task_id, limit=100000))
+            start_offset = max(0, total - len(stocks))
 
     if stocks is None:
         stocks = get_a_stock_pool(config)
@@ -72,8 +84,8 @@ def scan_all(
         fallback_attempts = 2
 
     configured_workers = config.get("data", {}).get("worker_count")
-    if configured_workers is not None and worker_count == 2:
-        worker_count = configured_workers
+    if configured_workers is not None:
+        worker_count = int(configured_workers)
     worker_count = max(1, worker_count)
 
     stock_queue = Queue()
@@ -90,16 +102,28 @@ def scan_all(
     busy_retries_by_code = {}
     busy_retry_lock = threading.Lock()
 
-    cup_cfg = config.get("cup", {})
-    handle_cfg = config.get("handle", {})
-    breakout_cfg = config.get("breakout", {})
-    handle_prefixed = {f"handle_{k}": v for k, v in handle_cfg.items()}
-    pattern_cfg = {**cup_cfg, **handle_prefixed, **breakout_cfg}
     liquidity_cfg = config.get("liquidity", {})
-    scoring_cfg = config.get("scoring", {})
     daily_sources = config.get("data", {}).get("daily_sources") or DEFAULT_DAILY_SOURCES
+    windows = resolve_strategy_windows(config)
+
+    # 并发不足警告
+    num_sources = len(daily_sources)
+    if worker_count < num_sources:
+        logger.warning(
+            "工作线程数 %d 小于启用数据源数 %d，无法保证所有数据源同时参与拉取。",
+            worker_count, num_sources,
+        )
+    logger.info("数据源列表: %s, 工作线程: %d", daily_sources, worker_count)
+    kline_days = windows.min_listing_days
+    scan_window_days = windows.scan_window_days
+    logger.info(
+        "窗口配置: min_listing_days=%s, scan_window_days=%s, backtest_window_days=%s",
+        windows.min_listing_days, windows.scan_window_days, windows.backtest_window_days,
+    )
+    strategy_engine = CupHandleStrategyEngine(config)
     max_busy_retries = config.get("data", {}).get("source_busy_max_retries", 3)
-    market_data = fetch_market_index_daily()
+    market_cfg = config.get("market_environment", {})
+    market_data = fetch_market_index_daily(market_cfg.get("index_symbol"))
 
     start_time = time.time()
 
@@ -113,30 +137,24 @@ def scan_all(
             except Exception:
                 break
 
-            ds = mgr.try_acquire_any()
-            if ds is None:
-                time.sleep(0.1)
-                stock_queue.put(stock)
-                continue
-
             code = stock["code"]
-            fallback_ds = "tencent" if ds == "sina" else "sina"
             try:
                 db.update_task_stock(
                     task_id,
                     code,
                     status="fetching",
-                    primary_source=ds,
-                    fallback_source=fallback_ds,
+                    primary_source=daily_sources[0],
+                    fallback_source=daily_sources[-1],
                     started_at=_now(),
                 )
                 fetch_result = _fetch_with_retry(
                     code,
-                    ds if ds in daily_sources else daily_sources[0],
+                    daily_sources[0],
                     retry_attempts=primary_attempts,
                     fallback_attempts=fallback_attempts,
                     mgr=mgr,
                     source_chain=daily_sources,
+                    kline_days=kline_days,
                 )
                 data = fetch_result.data
                 if data is None:
@@ -167,6 +185,8 @@ def scan_all(
                             skip_count[0] += 1
                         with busy_retry_lock:
                             busy_retries_by_code.pop(code, None)
+                        if progress_callback:
+                            progress_callback("scanning", start_offset + failed_count[0] + skip_count[0] + scanned_count[0], start_offset + len(stocks), f"{code} {stock.get('name', '')}")
                         continue
                     db.update_task_stock(
                         task_id,
@@ -179,6 +199,7 @@ def scan_all(
                         fallback_attempts=fetch_result.fallback_attempts,
                         primary_error=fetch_result.primary_error,
                         fallback_error=fetch_result.fallback_error,
+                        source_errors=_encode_source_errors(fetch_result.source_errors),
                         finished_at=_now(),
                     )
                     db.refresh_scan_task_counts(task_id)
@@ -187,17 +208,19 @@ def scan_all(
                         skip_count[0] += 1
                     with busy_retry_lock:
                         busy_retries_by_code.pop(code, None)
+                    if progress_callback:
+                        progress_callback("scanning", start_offset + failed_count[0] + skip_count[0] + scanned_count[0], start_offset + len(stocks), f"{code} {stock.get('name', '')}")
                     continue
 
                 latest_trade_date = data[-1].get("date") if data else None
-                min_listing = liquidity_cfg.get("min_listing_days", 250)
-                if len(data) < min_listing:
+                if len(data) < kline_days:
                     db.update_task_stock(
                         task_id,
                         code,
                         status="skipped",
                         status_reason="上市天数不足",
                         kline_latest_date=latest_trade_date,
+                        source_errors=_encode_source_errors(fetch_result.source_errors),
                         finished_at=_now(),
                     )
                     db.refresh_scan_task_counts(task_id)
@@ -205,6 +228,8 @@ def scan_all(
                         skip_count[0] += 1
                     with busy_retry_lock:
                         busy_retries_by_code.pop(code, None)
+                    if progress_callback:
+                        progress_callback("scanning", start_offset + failed_count[0] + skip_count[0] + scanned_count[0], start_offset + len(stocks), f"{code} {stock.get('name', '')}")
                     continue
 
                 stock["latest_close"] = data[-1]["close"]
@@ -217,6 +242,7 @@ def scan_all(
                         status="skipped",
                         status_reason="流动性过滤未通过",
                         kline_latest_date=latest_trade_date,
+                        source_errors=_encode_source_errors(fetch_result.source_errors),
                         finished_at=_now(),
                     )
                     db.refresh_scan_task_counts(task_id)
@@ -224,86 +250,105 @@ def scan_all(
                         skip_count[0] += 1
                     with busy_retry_lock:
                         busy_retries_by_code.pop(code, None)
+                    if progress_callback:
+                        progress_callback("scanning", start_offset + failed_count[0] + skip_count[0] + scanned_count[0], start_offset + len(stocks), f"{code} {stock.get('name', '')}")
                     continue
 
-                result = detect_cup_handle(data, pattern_cfg)
-                if result.found:
-                    result.code = code
-                    result.name = stock.get("name", "")
-                    result.score = score_cup_handle_advanced(result, data, scoring_cfg)
-                    dry_stable = analyze_dry_stable(result, data, market_data=market_data)
-                else:
-                    result = CupHandleResult(found=False, code=code, name=stock.get("name", ""))
-                    dry_stable = analyze_dry_stable(result, data, market_data=market_data)
-                    pattern20 = dry_stable["pattern_score"]["score"]
-                    if dry_stable["pattern_score"].get("key_pattern_type") != "vcp" or pattern20 < 13:
-                        dry_stable = None
+                # 截取固定策略窗口
+                strategy_data = select_strategy_window(data, scan_window_days)
+                if strategy_data is None:
+                    db.update_task_stock(
+                        task_id,
+                        code,
+                        status="skipped",
+                        status_reason=f"策略计算数据不足：需要 {scan_window_days} 日，实际 {len(data)} 日",
+                        kline_latest_date=latest_trade_date,
+                        source_errors=_encode_source_errors(fetch_result.source_errors),
+                        finished_at=_now(),
+                    )
+                    db.refresh_scan_task_counts(task_id)
+                    with stats_lock:
+                        skip_count[0] += 1
+                    with busy_retry_lock:
+                        busy_retries_by_code.pop(code, None)
+                    if progress_callback:
+                        progress_callback("scanning", start_offset + failed_count[0] + skip_count[0] + scanned_count[0], start_offset + len(stocks), f"{code} {stock.get('name', '')}")
+                    continue
 
-                is_candidate = False
-                if dry_stable:
+                decision_date = strategy_data[-1]["date"]
+                market_window = select_market_window(market_data, decision_date)
+                evaluation = strategy_engine.evaluate_at(
+                    strategy_data,
+                    code=code,
+                    name=stock.get("name", ""),
+                    market_data=market_window,
+                )
+                result = evaluation.result
+                dry_stable = evaluation.dry_stable
+
+                if evaluation.passed:
                     if result.score == 0:
                         result.score = min(100, dry_stable["pattern_score"]["score"] * 5)
                     stock["dry_stable"] = dry_stable
                     strategy_verdict = dry_stable["decision"]["verdict"]
-                    if result.score >= scoring_cfg.get("medium_threshold", 70) - 10 and strategy_verdict != "不建议买入":
-                        with candidate_lock:
-                            candidate_by_code[code] = (stock, result)
-                            unique_candidates = len(candidate_by_code)
-                        is_candidate = True
-                        db.update_task_stock(
-                            task_id,
-                            code,
-                            status="candidate",
-                            kline_latest_date=latest_trade_date,
-                            quote_status="not_requested",
-                            finished_at=_now(),
+                    with candidate_lock:
+                        candidate_by_code[code] = (stock, result)
+                        unique_candidates = len(candidate_by_code)
+                    db.update_task_stock(
+                        task_id,
+                        code,
+                        status="candidate",
+                        kline_latest_date=latest_trade_date,
+                        quote_status="not_requested",
+                        source_errors=_encode_source_errors(fetch_result.source_errors),
+                        finished_at=_now(),
+                    )
+                    if progress_callback:
+                        progress_callback(
+                            "discovery",
+                            start_offset + unique_candidates,
+                            start_offset + len(stocks),
+                            f"{code} {stock.get('name', '')}",
+                            {
+                                "code": code,
+                                "name": stock.get("name", ""),
+                                "score": result.score,
+                                "is_breakout": result.is_breakout,
+                                "is_volume_breakout": result.is_volume_breakout,
+                                "breakout_price": result.breakout_price,
+                                "cup_depth_pct": result.cup_depth_pct,
+                                "cup_duration": result.cup_duration,
+                                "handle_depth_pct": result.handle_depth_pct,
+                                "vol_multiplier": result.vol_multiplier,
+                                "latest_close": stock.get("latest_close", 0),
+                                "dry_stable_verdict": strategy_verdict,
+                                "dry_stable_summary": dry_stable["decision"]["summary"],
+                                "volume_dry_score": dry_stable["volume_dry"]["score"],
+                                "price_stable_score": dry_stable["price_stable"]["score"],
+                                "pattern_score_20": dry_stable["pattern_score"]["score"],
+                                "pattern_type": dry_stable["pattern_score"]["type"],
+                                "key_pattern_type": dry_stable["pattern_score"]["key_pattern_type"],
+                                "risk_percent": dry_stable["risk_reward"]["risk_percent"],
+                                "rr1": dry_stable["risk_reward"]["rr1"],
+                                "position_advice": dry_stable["risk_reward"]["position_advice"],
+                                "entry_zone_low": dry_stable["key_prices"]["entry_zone_low"],
+                                "entry_zone_high": dry_stable["key_prices"]["entry_zone_high"],
+                                "pivot": dry_stable["key_prices"]["pivot"],
+                                "stop_loss": dry_stable["key_prices"]["stop_loss"],
+                                "target_1": dry_stable["key_prices"]["target_1"],
+                                "target_2": dry_stable["key_prices"]["target_2"],
+                                "market_status": dry_stable["market_environment"]["status"],
+                                "market_position_advice": dry_stable["market_environment"]["position_advice"],
+                            },
                         )
-                        if progress_callback:
-                            progress_callback(
-                                "discovery",
-                                start_offset + unique_candidates,
-                                start_offset + len(stocks),
-                                f"{code} {stock.get('name', '')}",
-                                {
-                                    "code": code,
-                                    "name": stock.get("name", ""),
-                                    "score": result.score,
-                                    "is_breakout": result.is_breakout,
-                                    "is_volume_breakout": result.is_volume_breakout,
-                                    "breakout_price": result.breakout_price,
-                                    "cup_depth_pct": result.cup_depth_pct,
-                                    "cup_duration": result.cup_duration,
-                                    "handle_depth_pct": result.handle_depth_pct,
-                                    "vol_multiplier": result.vol_multiplier,
-                                    "latest_close": stock.get("latest_close", 0),
-                                    "dry_stable_verdict": strategy_verdict,
-                                    "dry_stable_summary": dry_stable["decision"]["summary"],
-                                    "volume_dry_score": dry_stable["volume_dry"]["score"],
-                                    "price_stable_score": dry_stable["price_stable"]["score"],
-                                    "pattern_score_20": dry_stable["pattern_score"]["score"],
-                                    "pattern_type": dry_stable["pattern_score"]["type"],
-                                    "key_pattern_type": dry_stable["pattern_score"]["key_pattern_type"],
-                                    "risk_percent": dry_stable["risk_reward"]["risk_percent"],
-                                    "rr1": dry_stable["risk_reward"]["rr1"],
-                                    "position_advice": dry_stable["risk_reward"]["position_advice"],
-                                    "entry_zone_low": dry_stable["key_prices"]["entry_zone_low"],
-                                    "entry_zone_high": dry_stable["key_prices"]["entry_zone_high"],
-                                    "pivot": dry_stable["key_prices"]["pivot"],
-                                    "stop_loss": dry_stable["key_prices"]["stop_loss"],
-                                    "target_1": dry_stable["key_prices"]["target_1"],
-                                    "target_2": dry_stable["key_prices"]["target_2"],
-                                    "market_status": dry_stable["market_environment"]["status"],
-                                    "market_position_advice": dry_stable["market_environment"]["position_advice"],
-                                },
-                            )
-
-                if not is_candidate:
+                else:
                     db.update_task_stock(
                         task_id,
                         code,
                         status="scanned",
                         kline_latest_date=latest_trade_date,
                         quote_status="not_requested",
+                        source_errors=_encode_source_errors(fetch_result.source_errors),
                         finished_at=_now(),
                     )
 
@@ -332,8 +377,10 @@ def scan_all(
                     skip_count[0] += 1
                 with busy_retry_lock:
                     busy_retries_by_code.pop(code, None)
+                if progress_callback:
+                    progress_callback("scanning", start_offset + failed_count[0] + skip_count[0] + scanned_count[0], start_offset + len(stocks), f"{code} {stock.get('name', '')}")
             finally:
-                mgr.release(ds)
+                pass
 
     threads = [threading.Thread(target=worker, args=(f"t{i+1}",), daemon=True) for i in range(worker_count)]
     for thread in threads:
@@ -363,15 +410,160 @@ def scan_all(
         "task_id": task_id,
     }
 
-DEFAULT_DAILY_SOURCES = ["mootdx", "baidu", "sina", "tencent"]
+
+def _build_discovery(code: str, name: str, result, dry_stable: dict, latest_close: float) -> dict:
+    """Build a discovery dict in the same format as the scan progress callback."""
+    return {
+        "code": code,
+        "name": name,
+        "score": result.score,
+        "is_breakout": result.is_breakout,
+        "is_volume_breakout": result.is_volume_breakout,
+        "breakout_price": result.breakout_price,
+        "cup_depth_pct": result.cup_depth_pct,
+        "cup_duration": result.cup_duration,
+        "handle_depth_pct": result.handle_depth_pct,
+        "vol_multiplier": result.vol_multiplier,
+        "latest_close": latest_close,
+        "dry_stable_verdict": dry_stable["decision"]["verdict"],
+        "verdict_key": dry_stable["decision"].get("verdict_key", ""),
+        "positive_factors": dry_stable["decision"].get("positive_factors", []),
+        "warnings": dry_stable["decision"].get("warnings", []),
+        "reject_reasons": dry_stable["decision"].get("reject_reasons", []),
+        "raw_volume_dry_score": dry_stable["volume_dry"].get("raw_score", 0),
+        "raw_price_stable_score": dry_stable["price_stable"].get("raw_score", 0),
+        "score_caps": dry_stable["volume_dry"].get("caps", []) + dry_stable["price_stable"].get("caps", []),
+        "dry_stable_summary": dry_stable["decision"]["summary"],
+        "volume_dry_score": dry_stable["volume_dry"]["score"],
+        "price_stable_score": dry_stable["price_stable"]["score"],
+        "pattern_score_20": dry_stable["pattern_score"]["score"],
+        "pattern_type": dry_stable["pattern_score"]["type"],
+        "key_pattern_type": dry_stable["pattern_score"]["key_pattern_type"],
+        "cup_handle_score": dry_stable["pattern_score"].get("cup_handle_score", 0),
+        "vcp_score": dry_stable["pattern_score"].get("vcp_score", 0),
+        "vcp_contractions": dry_stable["pattern_score"].get("vcp_contractions", 0),
+        "risk_percent": dry_stable["risk_reward"]["risk_percent"],
+        "rr1": dry_stable["risk_reward"]["rr1"],
+        "position_advice": dry_stable["risk_reward"]["position_advice"],
+        "entry_zone_low": dry_stable["key_prices"]["entry_zone_low"],
+        "entry_zone_high": dry_stable["key_prices"]["entry_zone_high"],
+        "pivot": dry_stable["key_prices"]["pivot"],
+        "stop_loss": dry_stable["key_prices"]["stop_loss"],
+        "target_1": dry_stable["key_prices"]["target_1"],
+        "target_2": dry_stable["key_prices"]["target_2"],
+        "market_status": dry_stable["market_environment"]["status"],
+        "market_position_advice": dry_stable["market_environment"]["position_advice"],
+        # Pattern detail fields
+        "handle_duration": result.handle_duration,
+        "lip_deviation_pct": result.lip_deviation_pct,
+        "left_high_price": result.left_high_price,
+        "cup_low_price": result.cup_low_price,
+        "right_high_price": result.right_high_price,
+        "handle_low_price": result.handle_low_price,
+        "left_high_date": result.left_high_date or "",
+        "cup_low_date": result.cup_low_date or "",
+        "right_high_date": result.right_high_date or "",
+        "handle_low_date": result.handle_low_date or "",
+    }
+
+
+def re_evaluate_task(
+    config: dict,
+    task_id: str,
+    progress_callback=None,
+) -> dict:
+    """Re-run strategy evaluation on existing OHLC data for a completed task.
+
+    Does NOT re-fetch stock data — only re-applies liquidity filter, pattern
+    detection and dry-stable analysis using the current config.  Old candidates
+    are replaced with new ones.
+    """
+    db_path = config.get("data", {}).get("database_path", "data/cuphandle.db")
+    db.init_db(db_path)
+
+    stocks = db.get_task_stocks(task_id, limit=100000, offset=0)
+    if not stocks:
+        return {"task_id": task_id, "status": "no_stocks", "candidates_found": 0}
+
+    liquidity_cfg = config.get("liquidity", {})
+    windows = resolve_strategy_windows(config)
+    kline_days = windows.min_listing_days
+    scan_window_days = windows.scan_window_days
+    strategy_engine = CupHandleStrategyEngine(config)
+    market_cfg = config.get("market_environment", {})
+    market_data = fetch_market_index_daily(market_cfg.get("index_symbol"))
+    old_candidates = {c["code"] for c in db.get_candidates(task_id=task_id)}
+    total = len(stocks)
+    new_codes = set()
+
+    for i, stock in enumerate(stocks):
+        code = stock["code"]
+        name = stock.get("name", "")
+        data = db.get_ohlc(code, max_rows=kline_days)
+        if not data:
+            continue
+
+        try:
+            if not passes_liquidity_filter(data, liquidity_cfg):
+                continue
+
+            # 截取固定策略窗口
+            strategy_data = select_strategy_window(data, scan_window_days)
+            if strategy_data is None:
+                continue
+
+            decision_date = strategy_data[-1]["date"]
+            market_window = select_market_window(market_data, decision_date)
+            evaluation = strategy_engine.evaluate_at(
+                strategy_data, code=code, name=name, market_data=market_window,
+            )
+            result = evaluation.result
+            dry_stable = evaluation.dry_stable
+
+            if evaluation.passed:
+                if result.score == 0:
+                    result.score = min(100, dry_stable["pattern_score"]["score"] * 5)
+                latest_close = data[-1]["close"]
+                discovery = _build_discovery(code, name, result, dry_stable, latest_close)
+                db.upsert_candidate(task_id, discovery)
+                new_codes.add(code)
+                if progress_callback:
+                    progress_callback("discovery", len(new_codes), total,
+                                      f"{code} {name}", discovery)
+        except Exception:
+            pass
+
+        if progress_callback and (i + 1) % 100 == 0:
+            progress_callback("scanning", i + 1, total, f"{code} {name}")
+
+    # Remove candidates that no longer qualify
+    removed = old_candidates - new_codes
+    if removed:
+        conn = db.get_conn()
+        for code in removed:
+            conn.execute("DELETE FROM candidates WHERE task_id=? AND code=?", (task_id, code))
+        conn.commit()
+
+    db.refresh_scan_task_counts(task_id)
+    return {
+        "task_id": task_id,
+        "status": "completed",
+        "candidates_found": len(new_codes),
+        "total_stocks": total,
+        "added": len(new_codes - old_candidates),
+        "removed": len(removed),
+    }
+
+
+DEFAULT_DAILY_SOURCES = ["baidu", "sina", "tencent", "yfinance"]
 
 
 def _daily_fetch_fn(ds_name: str):
     fetchers = {
-        "mootdx": fetch_mootdx_daily,
         "baidu": fetch_baidu_daily,
         "sina": fetch_sina_daily,
         "tencent": fetch_tencent_daily,
+        "yfinance": fetch_yfinance_daily,
     }
     if ds_name not in fetchers:
         raise ValueError(f"Unknown daily data source: {ds_name}")
@@ -387,18 +579,6 @@ def _normalize_source_chain(source_chain: list[str] | None, primary_ds: str) -> 
     return chain
 
 
-def _manager_handles_source(mgr: DataSourceManager | None, ds_name: str) -> bool:
-    if mgr is None:
-        return False
-    locks = getattr(mgr, "_locks", None)
-    if isinstance(locks, dict):
-        return ds_name in locks
-    acquire_results = getattr(mgr, "acquire_results", None)
-    if isinstance(acquire_results, dict):
-        return ds_name in acquire_results
-    return True
-
-
 def _fetch_with_retry(
     code: str,
     primary_ds: str,
@@ -407,51 +587,82 @@ def _fetch_with_retry(
     sleep_fn: Callable[[float], None] = time.sleep,
     mgr: DataSourceManager | None = None,
     source_chain: list[str] | None = None,
+    kline_days: int = 250,
 ) -> FetchResult:
-    """Fetch fresh K-line data from the configured source chain, then merge with cache."""
+    """Fetch K-line by trying sources in config order.
+
+    Iterates source_chain in order.  For each source:
+    - Acquire lock (non-blocking).  Busy → skip, try next.
+    - Lock acquired → fetch with retries (primary: retry_attempts, fallback: fallback_attempts).
+    - Success → merge cache, save, return.
+    - Failure → mark failed, release lock, try next.
+    - All busy → data source busy (requeue).
+    - All failed → None (no cache fallback).
+
+    This respects config priority while letting different threads
+    naturally use different sources via lock contention.
+    """
     chain = _normalize_source_chain(source_chain, primary_ds)
     cached = db.get_ohlc(code)
-    result = FetchResult(data=None, primary_source=chain[0], fallback_source=chain[0])
-    saw_source_busy = False
+    saw_busy = False
+    source_errors: dict[str, str] = {}
+    failed_sources: set[str] = set()
 
-    for index, ds_name in enumerate(chain):
-        attempts_allowed = retry_attempts if index == 0 else fallback_attempts
-        if index > 0:
-            result.fallback_source = ds_name
+    for i, ds_name in enumerate(chain):
+        if ds_name in failed_sources:
+            continue
 
-        if index > 0 and _manager_handles_source(mgr, ds_name):
+        is_primary = (ds_name == chain[0])
+        attempts = retry_attempts if is_primary else fallback_attempts
+
+        # Try to acquire this source's lock
+        locked = False
+        if mgr is not None:
             if not mgr.acquire(ds_name):
-                result.fallback_attempts = 0
-                result.fallback_error = "data source busy"
-                saw_source_busy = True
+                saw_busy = True
+                source_errors[ds_name] = "busy"
+                logger.debug("%s  %s  ⏳ busy", code, ds_name)
                 continue
-            try:
-                data, attempts, error = _try_fetch_source(code, ds_name, attempts_allowed, sleep_fn)
-            finally:
-                mgr.release(ds_name)
-        else:
-            data, attempts, error = _try_fetch_source(code, ds_name, attempts_allowed, sleep_fn)
+            locked = True
 
-        if index == 0:
-            result.primary_attempts = attempts
-            result.primary_error = error
-        else:
-            result.fallback_attempts = attempts
-            result.fallback_error = error
-        if error == "data source busy":
-            saw_source_busy = True
+        try:
+            data, used_attempts, error = _try_fetch_source(code, ds_name, attempts, sleep_fn, kline_days)
+        finally:
+            if locked and mgr is not None:
+                mgr.release(ds_name)
+
+        if error:
+            logger.warning("%s  %s  ✗ %s", code, ds_name, error)
+            source_errors[ds_name] = f"attempts={used_attempts} error={error}"
+            if "data source busy" in str(error):
+                saw_busy = True
+            failed_sources.add(ds_name)
+            continue
 
         if data:
-            merged = _merge_data(cached or [], data)
+            merged = _merge_data(cached or [], data, max_rows=kline_days)
             db.save_ohlc(code, merged)
-            result.data = merged
-            if index > 0:
-                result.fallback_error = None
-            return result
 
-    if saw_source_busy:
-        result.fallback_error = "data source busy"
-    return result
+            recent = data[-1]
+            prev = data[-2] if len(data) >= 2 else None
+            parts = [f"{code}  {ds_name}  {len(data)}行"]
+            if prev:
+                parts.append(f"{prev['date'][5:]}: O{prev['open']:.2f} H{prev['high']:.2f} L{prev['low']:.2f} C{prev['close']:.2f}")
+            parts.append(f"{recent['date'][5:]}: O{recent['open']:.2f} H{recent['high']:.2f} L{recent['low']:.2f} C{recent['close']:.2f}")
+            logger.info("  ".join(parts))
+
+            result = FetchResult(
+                data=merged,
+                primary_source=chain[0],
+                fallback_source=ds_name if ds_name != chain[0] else chain[0],
+                source_errors=source_errors,
+            )
+            return _apply_source_compatibility_fields(
+                result, chain, source_errors,
+                selected_source=ds_name, selected_attempts=used_attempts,
+            )
+
+    return _build_all_failed_result(chain, source_errors)
 
 
 def _is_transient_source_busy(fetch_result: FetchResult) -> bool:
@@ -465,13 +676,14 @@ def _try_fetch_source(
     ds_name: str,
     attempts: int,
     sleep_fn: Callable[[float], None],
+    kline_days: int = 250,
 ) -> tuple[list[dict] | None, int, str | None]:
     """Try fetching from a data source with retries and backoff."""
     last_error = None
     for attempt in range(1, attempts + 1):
         try:
             fetch_fn = _daily_fetch_fn(ds_name)
-            data = fetch_fn(code)
+            data = _call_fetch_fn(fetch_fn, code, kline_days)
             if data:
                 return data, attempt, None
             last_error = "empty response"
@@ -485,6 +697,153 @@ def _try_fetch_source(
 
 
 
+def _apply_source_compatibility_fields(
+    result: FetchResult,
+    chain: list[str],
+    source_errors: dict[str, str],
+    *,
+    selected_source: str | None = None,
+    selected_attempts: int = 0,
+) -> FetchResult:
+    """Fill primary_*/fallback_* fields consistently from source_errors and actual result.
+
+    Args:
+        result: FetchResult to fill (data and source_errors already set).
+        chain: ordered source names.
+        source_errors: per-source error/busy entries.
+        selected_source: the source that produced data (success) or the last
+            actual-failure source (all-failed).  None means all-busy.
+        selected_attempts: network attempts for selected_source.
+    """
+    primary = chain[0]
+
+    # --- primary fields from chain[0] ---
+    result.primary_source = primary
+    primary_entry = source_errors.get(primary)
+    if primary_entry is not None:
+        attempts, error = _parse_source_error_entry(primary_entry)
+        result.primary_attempts = attempts
+        result.primary_error = "data source busy" if primary_entry == "busy" else error
+    elif selected_source == primary:
+        result.primary_attempts = selected_attempts
+        result.primary_error = None  # success
+
+    # --- fallback fields from selected_source (if different from primary) ---
+    if selected_source and selected_source != primary:
+        result.fallback_source = selected_source
+        result.fallback_attempts = selected_attempts
+        # For failed path, parse the actual error from source_errors
+        if result.data is None:
+            fb_entry = source_errors.get(selected_source, "")
+            if fb_entry:
+                _, fb_error = _parse_source_error_entry(fb_entry)
+                result.fallback_error = "data source busy" if fb_entry == "busy" else fb_error
+        else:
+            result.fallback_error = None  # success
+    else:
+        # No distinct fallback; when data is None, this is a total failure
+        # with no separate fallback — truly mirror primary
+        if result.data is None:
+            result.fallback_source = primary
+            result.fallback_attempts = result.primary_attempts
+            result.fallback_error = result.primary_error
+        else:
+            # Success — fallback was never needed
+            result.fallback_source = primary
+            result.fallback_attempts = 0
+            result.fallback_error = None
+
+    return result
+
+
+def _build_all_failed_result(
+    chain: list[str],
+    source_errors: dict[str, str],
+) -> FetchResult:
+    """Build FetchResult when all sources failed, using unified compatibility helper."""
+    result = FetchResult(data=None, primary_source=chain[0], fallback_source=chain[-1],
+                         source_errors=source_errors)
+
+    # Find the last source that actually attempted a fetch (not just busy)
+    selected_source = None
+    for ds_name in reversed(chain):
+        entry = source_errors.get(ds_name, "")
+        if entry and entry != "busy":
+            selected_source = ds_name
+            break
+
+    if selected_source is None:
+        # All sources busy
+        result.primary_source = chain[0]
+        result.primary_error = "data source busy"
+        result.fallback_source = chain[-1] if len(chain) > 1 else chain[0]
+        result.fallback_attempts = 0
+        result.fallback_error = "data source busy"
+        return result
+
+    selected_attempts, _ = _parse_source_error_entry(source_errors.get(selected_source, ""))
+    result = _apply_source_compatibility_fields(
+        result, chain, source_errors,
+        selected_source=selected_source, selected_attempts=selected_attempts,
+    )
+
+    # FINAL-001: If primary is the only actual failure and all fallbacks are busy,
+    # the else-branch would set fallback to mirror primary with 0/Nothing.
+    # Instead, point fallback at the last busy fallback source.
+    if selected_source == chain[0] and len(chain) > 1:
+        busy_fallbacks = [
+            ds for ds in chain[1:]
+            if source_errors.get(ds) == "busy"
+        ]
+        if busy_fallbacks:
+            result.fallback_source = busy_fallbacks[-1]
+            result.fallback_attempts = 0
+            result.fallback_error = "data source busy"
+        else:
+            # Single-source chain edge case: truly mirror primary
+            result.fallback_source = result.primary_source
+            result.fallback_attempts = result.primary_attempts
+            result.fallback_error = result.primary_error
+
+    return result
+
+
+def _parse_source_error_entry(entry: str) -> tuple[int, str | None]:
+    """Parse a source_errors value like 'attempts=3 error=timeout' into (3, 'timeout').
+
+    Handles multi-word error messages like 'attempts=1 error=data source busy'.
+    """
+    if not entry or entry == "busy":
+        return 0, entry or None
+    attempts = 0
+    error = None
+    # Split on " error=" first to separate attempts from the error message
+    if " error=" in entry:
+        head, error = entry.split(" error=", 1)
+        for part in head.split(" "):
+            if part.startswith("attempts="):
+                try:
+                    attempts = int(part.split("=", 1)[1])
+                except ValueError:
+                    pass
+    else:
+        # Fallback: parse space-delimited parts
+        for part in entry.split(" "):
+            if part.startswith("attempts="):
+                try:
+                    attempts = int(part.split("=", 1)[1])
+                except ValueError:
+                    pass
+    return attempts, error
+
+
+def _encode_source_errors(source_errors: dict | None) -> str | None:
+    """Encode source_errors dict as a stable JSON string for persistence."""
+    if not source_errors:
+        return None
+    return json.dumps(source_errors, ensure_ascii=False, separators=(",", ":"))
+
+
 def _classify_fetch_error(exc: Exception) -> str:
     text = str(exc)
     if "456" in text or "429" in text:
@@ -492,10 +851,19 @@ def _classify_fetch_error(exc: Exception) -> str:
     return text
 
 
-def _merge_data(cached: list[dict], fresh: list[dict]) -> list[dict]:
-    """合并缓存和新数据，去重按日期排序。"""
+def _call_fetch_fn(fetch_fn, code: str, days: int) -> list[dict] | None:
+    try:
+        return fetch_fn(code, days=days)
+    except TypeError:
+        return fetch_fn(code)
+
+
+def _merge_data(cached: list[dict], fresh: list[dict], max_rows: int = 0) -> list[dict]:
+    """合并缓存和新数据，去重按日期排序。可限制最大行数。"""
     seen = {d["date"]: d for d in cached}
     for d in fresh:
         seen[d["date"]] = d
     merged = sorted(seen.values(), key=lambda x: x["date"])
+    if max_rows and len(merged) > max_rows:
+        merged = merged[-max_rows:]
     return merged

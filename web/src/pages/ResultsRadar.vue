@@ -76,7 +76,7 @@
               <td class="center">
                 <span class="score-num" :class="scoreColorClass(c.score)">{{ c.score }}</span>
               </td>
-              <td class="center">{{ c.pattern_type || '--' }}</td>
+              <td class="center">{{ c.pattern_type || '--' }}<span class="vcp-tag" v-if="c.vcp_contractions"> VCP{{ c.vcp_contractions }}T</span></td>
               <td class="center">
                 <SignalBadge :type="verdictType(c)">
                   {{ c.dry_stable_verdict || c.rating || '观察' }}
@@ -120,12 +120,13 @@
 
 <script setup>
 import { ref, computed, onMounted } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRouter, useRoute } from 'vue-router'
 import { useApi } from '../composables/useApi.js'
 import MetricCard from '../components/MetricCard.vue'
 import SignalBadge from '../components/SignalBadge.vue'
 
 const router = useRouter()
+const route = useRoute()
 const { getCandidates, getScanTasks } = useApi()
 
 const candidates = ref([])
@@ -175,13 +176,21 @@ const avgScore = computed(() => {
 })
 const maxScore = computed(() => candidates.value.reduce((m, c) => Math.max(m, c.score), 0))
 
-function goToStock(code) { selectedCode.value = code; router.push(`/stock/${code}`) }
+function goToStock(code) {
+  selectedCode.value = code
+  const q = selectedTaskId.value ? `?task_id=${selectedTaskId.value}` : ''
+  router.push(`/stock/${code}${q}`)
+}
 function barClass(c) { return c.score >= 80 ? 'bar-gold' : c.score >= 70 ? 'bar-blue' : 'bar-gray' }
 function scoreColorClass(s) { return s >= 80 ? 'sc-gold' : s >= 70 ? 'sc-blue' : 'sc-muted' }
 function price(v) { return v ? Number(v).toFixed(2) : '--' }
 function verdictType(c) {
-  if (c.dry_stable_verdict === '可低吸') return 'strong'
-  if (c.dry_stable_verdict === '突破确认') return 'breakout'
+  const vk = c.verdict_key || ''
+  if (vk === 'BUY_LOW' || c.dry_stable_verdict === '可低吸') return 'strong'
+  if (vk === 'WATCH_BREAKOUT' || c.dry_stable_verdict === '突破确认') return 'confirm'
+  if (vk.startsWith('WAIT_')) return 'wait'
+  if (vk === 'REJECT' || c.dry_stable_verdict === '不建议买入') return 'weak'
+  if (c.is_breakout) return 'breakout'
   return c.score >= 70 ? 'medium' : 'weak'
 }
 function marketClass(s) {
@@ -232,14 +241,17 @@ async function loadTasks() {
   try {
     const data = await getScanTasks()
     tasks.value = (data.tasks || []).filter(t => !t.running)
-    // 默认选中最近一次已完成的
+    // Prefer task_id from query param, then fall back to latest completed
+    const queryTaskId = route.query.task_id
+    if (queryTaskId) {
+      const match = tasks.value.find(t => t.id === queryTaskId)
+      if (match) selectedTaskId.value = match.id
+    }
     if (!selectedTaskId.value && tasks.value.length) {
       const completed = tasks.value.find(t => t.status === 'completed')
-      if (completed) {
-        selectedTaskId.value = completed.id
-        await loadCandidates()
-      }
+      if (completed) selectedTaskId.value = completed.id
     }
+    if (selectedTaskId.value) await loadCandidates()
   } catch (e) { console.error('Failed to load tasks:', e) }
 }
 
@@ -338,4 +350,5 @@ onMounted(async () => {
 .bar-blue { background: var(--accent); }
 .bar-gray { background: var(--text-muted); }
 .empty-row { text-align: center; padding: 40px; color: var(--text-muted); }
+.vcp-tag { font-size: 10px; color: var(--accent); font-weight: 600; }
 </style>

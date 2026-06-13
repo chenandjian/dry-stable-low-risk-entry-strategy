@@ -18,15 +18,30 @@
           <SignalBadge type="medium" v-if="stock.pattern_type">{{ stock.pattern_type }}</SignalBadge>
           <SignalBadge :type="dryVerdictType" v-if="stock.dry_stable_verdict">{{ stock.dry_stable_verdict }}</SignalBadge>
         </div>
+        <button class="backtest-link" @click="router.push(`/backtest/cup-handle/${stock.code}`)">
+          用该股票回测
+        </button>
       </div>
 
       <div class="section-label">干稳低吸</div>
       <div class="kv-list">
         <div class="kv"><span class="k">量干 / 价稳</span><span class="v blue">{{ stock.volume_dry_score ?? '--' }} / {{ stock.price_stable_score ?? '--' }}</span></div>
-        <div class="kv"><span class="k">形态分</span><span class="v">{{ stock.pattern_score_20 ?? '--' }} / 20</span></div>
-        <div class="kv"><span class="k">形态类型</span><span class="v">{{ stock.pattern_type || '--' }}</span></div>
+        <div class="kv"><span class="k">形态分</span><span class="v">{{ stock.pattern_score_20 ?? '--' }} / 20 <span class="sub">杯柄{{ stock.cup_handle_score ?? 0 }} VCP{{ stock.vcp_score ?? 0 }}</span></span></div>
+        <div class="kv"><span class="k">形态类型</span><span class="v">{{ stock.pattern_type || '--' }}<span class="sub" v-if="stock.vcp_contractions">VCP {{ stock.vcp_contractions }}T</span></span></div>
         <div class="kv"><span class="k">大盘环境</span><span class="v" :class="marketClass">{{ stock.market_status || '一般' }}</span></div>
         <div class="kv"><span class="k">建议仓位</span><span class="v">{{ stock.position_advice || '--' }}</span></div>
+      </div>
+
+      <div v-if="hasDiagnostics" class="diagnostics">
+        <div class="diag-item warn" v-for="w in parseList(stock.warnings)" :key="w">⚠ {{ w }}</div>
+        <div class="diag-item reject" v-for="r in parseList(stock.reject_reasons)" :key="r">✗ {{ r }}</div>
+        <div class="diag-item cap" v-for="c in parseList(stock.score_caps)" :key="c">⊡ {{ c }}</div>
+        <div class="diag-item raw" v-if="stock.raw_volume_dry_score && stock.raw_volume_dry_score !== stock.volume_dry_score">
+          量干原始 {{ stock.raw_volume_dry_score }} → 封顶 {{ stock.volume_dry_score }}
+        </div>
+        <div class="diag-item raw" v-if="stock.raw_price_stable_score && stock.raw_price_stable_score !== stock.price_stable_score">
+          价稳原始 {{ stock.raw_price_stable_score }} → 封顶 {{ stock.price_stable_score }}
+        </div>
       </div>
 
       <div class="section-label">形态评分</div>
@@ -78,6 +93,27 @@
         <div class="kv"><span class="k">杯底</span><span class="v">{{ stock.cup_low_date || '--' }}</span></div>
         <div class="kv"><span class="k">右杯口</span><span class="v">{{ stock.right_high_date || '--' }}</span></div>
         <div class="kv"><span class="k">柄部低点</span><span class="v">{{ stock.handle_low_date || '--' }}</span></div>
+      </div>
+
+      <!-- Current Config Re-analysis (BUG-007) -->
+      <div class="section-label" v-if="stock.current_analysis">当前配置重新分析</div>
+      <div class="reanalysis-notice" v-if="stock.analysis_notice">
+        ⓘ {{ stock.analysis_notice }}
+      </div>
+      <div class="kv-list" v-if="stock.current_analysis">
+        <div class="kv"><span class="k">策略结论</span><span class="v" :class="stock.current_analysis.passed ? 'blue' : 'red'">{{ stock.current_analysis.passed ? '✓ 通过' : '✗ 不通过' }}</span></div>
+        <div class="kv"><span class="k">形态评分</span><span class="v">{{ stock.current_analysis.score ?? '--' }}</span></div>
+        <div class="kv" v-if="stock.current_analysis.pattern">
+          <span class="k">形态类型</span><span class="v">{{ stock.current_analysis.pattern.patternKind || '--' }}</span>
+        </div>
+        <div class="kv" v-if="stock.current_analysis.dryStable">
+          <span class="k">干稳结论</span><span class="v">{{ stock.current_analysis.dryStable.decision?.verdict || '--' }}</span>
+        </div>
+      </div>
+      <div v-if="stock.current_analysis?.failedRules?.length" class="diagnostics">
+        <div class="diag-item reject" v-for="r in stock.current_analysis.failedRules" :key="r.ruleName">
+          ✗ {{ r.ruleName }}: {{ r.explanation }}
+        </div>
       </div>
 
       <RiskBox>
@@ -225,6 +261,8 @@ async function loadStock(code) {
   try {
     const data = await getCandidate(code)
     if (data) {
+      // Preserve task_id from route query if available (for watchlist context)
+      if (!data.task_id && route.query.task_id) data.task_id = route.query.task_id
       stock.value = data
       score.value = data.score || 0
     }
@@ -234,7 +272,8 @@ async function loadStock(code) {
 }
 
 async function loadWatchlist() {
-  const taskId = stock.value.task_id
+  // Prefer URL query param (user context) over stock's own task_id
+  const taskId = route.query.task_id || stock.value.task_id
   const cands = taskId
     ? await getCandidates({ task_id: taskId })
     : await getCandidates()
@@ -290,6 +329,17 @@ const dryVerdictType = computed(() => {
   if (stock.value.dry_stable_verdict === '突破确认') return 'breakout'
   return 'medium'
 })
+const hasDiagnostics = computed(() => {
+  const s = stock.value
+  return (s.warnings || s.reject_reasons || s.score_caps ||
+    (s.raw_volume_dry_score && s.raw_volume_dry_score !== s.volume_dry_score) ||
+    (s.raw_price_stable_score && s.raw_price_stable_score !== s.price_stable_score))
+})
+function parseList(v) {
+  if (!v) return []
+  if (Array.isArray(v)) return v
+  try { return JSON.parse(v) } catch { return [v] }
+}
 const marketClass = computed(() => {
   if (stock.value.market_status === '良好') return 'red'
   if (stock.value.market_status === '较差') return 'green'
@@ -363,7 +413,8 @@ function distFromBreakout(w) {
 }
 
 function goToStock(code) {
-  router.push(`/stock/${code}`)
+  const q = route.query.task_id ? `?task_id=${route.query.task_id}` : ''
+  router.push(`/stock/${code}${q}`)
 }
 
 async function initChart() {
@@ -574,6 +625,19 @@ onUnmounted(() => {
 .green { color: var(--down-green); }
 .change { font-size: 14px; }
 .tags { display: flex; gap: 6px; margin-top: 10px; flex-wrap: wrap; }
+.backtest-link {
+  margin-top: 10px;
+  width: 100%;
+  border: 1px solid var(--accent);
+  background: rgba(79, 125, 255, 0.12);
+  color: var(--accent);
+  border-radius: 4px;
+  padding: 8px 10px;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
+}
+.backtest-link:hover { background: rgba(79, 125, 255, 0.2); }
 
 .section-label {
   font-size: 11px; font-weight: 600; color: var(--text-muted);
@@ -663,4 +727,12 @@ onUnmounted(() => {
 .wl-score { font-size: 16px; font-weight: 700; font-family: var(--font-mono); flex-shrink: 0; color: var(--text-primary); }
 .wl-score.gold { color: var(--gold); }
 .wl-score.muted { color: var(--text-muted); }
+.diagnostics { margin-top: 12px; padding: 10px 12px; background: rgba(0,0,0,0.15); border-radius: 4px; }
+.diag-item { font-size: 11px; line-height: 1.6; padding: 2px 0; }
+.diag-item.warn { color: var(--warn-orange); }
+.diag-item.reject { color: var(--up-red); }
+.diag-item.cap { color: var(--text-muted); }
+.diag-item.raw { color: var(--accent); font-family: var(--font-mono); }
+.reanalysis-notice { font-size: 11px; color: var(--text-muted); padding: 6px 12px; background: rgba(59,130,246,0.08); border-radius: 4px; margin-bottom: 8px; line-height: 1.5; }
+.sub { font-size: 10px; color: var(--text-muted); margin-left: 6px; }
 </style>

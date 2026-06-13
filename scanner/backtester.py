@@ -13,9 +13,13 @@ Core approach:
 
 import logging
 from dataclasses import dataclass, field
-from scanner.pattern_detector import detect_cup_handle
-from scanner.scorer import score_cup_handle
-from analyzer.dry_stable import analyze_dry_stable
+from scanner.strategy_engine import (
+    CupHandleStrategyEngine,
+    resolve_strategy_windows,
+    select_market_window,
+    select_strategy_window,
+)
+from scanner.index_source import fetch_market_index_daily
 
 logger = logging.getLogger(__name__)
 
@@ -46,23 +50,29 @@ class BacktestResult:
     ret_20d: float | None = None
     ret_60d: float | None = None
 
-    # Success flags
-    hit_5d: bool = False     # ret > 0
-    hit_10d: bool = False
-    hit_20d: bool = False
-    hit_60d: bool = False
+    # Success flags: None = insufficient future data (not observed)
+    hit_5d: bool | None = None
+    hit_10d: bool | None = None
+    hit_20d: bool | None = None
+    hit_60d: bool | None = None
 
-    # False breakout: price drops below breakout_price within N days
-    false_breakout_5d: bool = False
-    false_breakout_10d: bool = False
-    false_breakout_20d: bool = False
-    false_breakout_60d: bool = False
+    # False breakout: None = insufficient future data / not applicable
+    false_breakout_5d: bool | None = None
+    false_breakout_10d: bool | None = None
+    false_breakout_20d: bool | None = None
+    false_breakout_60d: bool | None = None
 
-    # Stop loss hit: price drops below (breakout_price * 0.95)
-    stop_loss_hit_5d: bool = False
-    stop_loss_hit_10d: bool = False
-    stop_loss_hit_20d: bool = False
-    stop_loss_hit_60d: bool = False
+    # Strategy actual stop-loss (from unified engine, not breakout_price * 0.95)
+    actual_stop_loss: float = 0.0
+    entry_zone_low: float = 0.0
+    entry_zone_high: float = 0.0
+    pattern_kind: str = ""
+
+    # Stop loss hit: None = not computable (no valid stop), False = valid stop not hit, True = hit
+    stop_loss_hit_5d: bool | None = None
+    stop_loss_hit_10d: bool | None = None
+    stop_loss_hit_20d: bool | None = None
+    stop_loss_hit_60d: bool | None = None
 
 
 @dataclass
@@ -115,14 +125,33 @@ class BacktestReport:
     # Parameter suggestions
     parameter_suggestions: dict = field(default_factory=dict)
 
+    # Report filter metadata (BUG-009)
+    report_filter: dict | None = None
+
+
+def _call_backtest_fetch(fetch_fn, code: str, days: int) -> list[dict] | None:
+    """Call fetch_fn with days if supported, fall back to no-arg call."""
+    import inspect
+    try:
+        sig = inspect.signature(fetch_fn)
+        if "days" in sig.parameters:
+            return fetch_fn(code, days=days)
+    except (TypeError, ValueError):
+        pass
+    try:
+        return fetch_fn(code)
+    except TypeError:
+        return fetch_fn(code, days=days)
+
 
 def run_backtest(
     stocks: list[dict],
     fetch_fn,
     config: dict,
-    window_min: int = 250,
-    min_score: int = 60,
+    window_min: int = None,
+    min_score: int = None,
     max_stocks: int | None = None,  # Limit for testing
+    market_data: list[dict] | None = None,  # Inject fixed market data (None = auto-fetch)
 ) -> BacktestReport:
     """Run historical backtest across a stock universe.
 
@@ -130,21 +159,24 @@ def run_backtest(
         stocks: list of {code, name} stock dicts
         fetch_fn: function(code) -> list[dict] OHLC data
         config: full config dict
-        window_min: minimum data points before starting detection
-        min_score: minimum pattern score to include
+        window_min: [deprecated] use backtest_window_days from config instead
+        min_score: [deprecated] only used for report display filtering
         max_stocks: limit number of stocks (for speed)
+        market_data: optional pre-fetched market index data for reproducibility.
+                     When None (default), fetches live via fetch_market_index_daily.
 
     Returns:
         BacktestReport with aggregated statistics
     """
-    report = BacktestReport()
+    if window_min is not None:
+        logger.warning("window_min 参数已废弃，使用 config.data.backtest_window_days 替代")
+    if min_score is not None:
+        logger.warning(
+            "WARNING: --min-score 已废弃，仅用于回测报告展示过滤，"
+            "不参与策略候选判断；下一版本将删除。"
+        )
 
-    # Build pattern config
-    cup_cfg = config.get("cup", {})
-    handle_cfg = config.get("handle", {})
-    breakout_cfg = config.get("breakout", {})
-    handle_prefixed = {f"handle_{k}": v for k, v in handle_cfg.items()}
-    pattern_cfg = {**cup_cfg, **handle_prefixed, **breakout_cfg}
+    report = BacktestReport()
 
     all_results = []
     stocks_tested = 0
@@ -152,51 +184,81 @@ def run_backtest(
 
     stock_list = stocks[:max_stocks] if max_stocks else stocks
 
+    # Read backtest window config via unified resolver
+    windows = resolve_strategy_windows(config)
+    backtest_window_days = windows.backtest_window_days
+    min_forward_days = 60
+    required_days = backtest_window_days + min_forward_days
+
+    # Use the unified strategy engine (per plan-review: same config, same entry point)
+    engine = CupHandleStrategyEngine(config)
+    # Per-date market data: use injected data if provided, else fetch live
+    if market_data is not None:
+        market_data_full = market_data
+    else:
+        market_cfg = config.get("market_environment", {})
+        market_data_full = fetch_market_index_daily(market_cfg.get("index_symbol")) or []
+
     for stock in stock_list:
         stocks_tested += 1
         code = stock["code"]
         name = stock.get("name", "")
 
         try:
-            data = fetch_fn(code)
+            data = _call_backtest_fetch(fetch_fn, code, required_days)
         except Exception:
             continue
 
-        if not data or len(data) < window_min + 60:
+        if not data or len(data) < required_days:
+            if data and len(data) < required_days:
+                logger.info(
+                    "Backtest data insufficient for %s: need %s days, got %s",
+                    code, required_days, len(data),
+                )
             continue
 
         n = len(data)
         stock_has_pattern = False
 
-        # Slide window: detect at each position from window_min to n-60
-        for i in range(window_min, n - 60):
-            window_data = data[:i]
+        # Slide window: detect at each position from backtest_window_days to n-min_forward_days
+        # +1 ensures the last position with 60 full forward days is included
+        for i in range(backtest_window_days, n - min_forward_days + 1):
+            history_data = data[:i]
             future_data = data[i:]
+            detect_date = history_data[-1]["date"]
 
-            # Detect pattern using only data available at time i
-            result = detect_cup_handle(window_data, pattern_cfg)
-            if not result.found:
+            # Truncate to fixed backtest window
+            window_data = select_strategy_window(history_data, backtest_window_days)
+            if window_data is None:
                 continue
 
-            result.score = score_cup_handle(result)
-            if result.score < min_score:
+            # Per-date market data (no future leakage)
+            market_window = select_market_window(market_data_full, detect_date)
+
+            # Unified strategy evaluation (handles cup_handle AND VCP)
+            evaluation = engine.evaluate_at(
+                window_data, code=code, name=name, market_data=market_window,
+            )
+            if not evaluation.passed:
                 continue
 
+            r = evaluation.result
+            # Deprecated min_score: used only as report display filter
+            if min_score is not None and r.score < min_score:
+                continue
+            dry = evaluation.dry_stable
             stock_has_pattern = True
-            result.code = code
-            result.name = name
-            dry = analyze_dry_stable(result, window_data)
 
             br = BacktestResult(
                 code=code,
                 name=name,
-                detect_date=window_data[-1]["date"],
-                score=result.score,
-                cup_depth_pct=result.cup_depth_pct,
-                cup_duration=result.cup_duration,
-                handle_depth_pct=result.handle_depth_pct,
-                handle_duration=result.handle_duration,
-                breakout_price=result.breakout_price,
+                detect_date=detect_date,
+                score=r.score,
+                cup_depth_pct=r.cup_depth_pct,
+                cup_duration=r.cup_duration,
+                handle_depth_pct=r.handle_depth_pct,
+                handle_duration=r.handle_duration,
+                breakout_price=r.breakout_price,
                 detect_close=window_data[-1]["close"],
                 verdict=dry["decision"]["verdict"],
                 volume_dry_score=dry["volume_dry"]["score"],
@@ -204,12 +266,16 @@ def run_backtest(
                 pattern_score_20=dry["pattern_score"]["score"],
                 risk_percent=dry["risk_reward"]["risk_percent"],
                 rr1=dry["risk_reward"]["rr1"],
+                actual_stop_loss=dry["key_prices"]["stop_loss"],
+                entry_zone_low=dry["key_prices"].get("entry_zone_low", 0),
+                entry_zone_high=dry["key_prices"].get("entry_zone_high", 0),
+                pattern_kind=getattr(r, "pattern_kind", "cup_handle"),
             )
 
             # Calculate forward returns
             detect_close = window_data[-1]["close"]
 
-            _calc_forward(br, detect_close, result.breakout_price, future_data)
+            _calc_forward(br, detect_close, r.breakout_price, future_data)
             all_results.append(br)
 
         if stock_has_pattern:
@@ -224,6 +290,10 @@ def run_backtest(
     report.stocks_with_patterns = stocks_with_patterns
     report.total_patterns = len(all_results)
     report.results = all_results
+    if min_score is not None:
+        report.report_filter = {"min_score": min_score, "applied": True}
+    else:
+        report.report_filter = {"applied": False}
 
     if all_results:
         _aggregate(report, all_results)
@@ -250,15 +320,17 @@ def _calc_forward(br: BacktestResult, detect_close: float, breakout_price: float
         setattr(br, f"ret_{label}", round(ret, 2))
         setattr(br, f"hit_{label}", ret > 0)
 
-        # False breakout: price dropped below breakout_price * 0.97
-        # (within the 3% buffer, meaning the breakout failed)
+        # False breakout: only for cup_handle with valid breakout_price
         future_lows = [d["low"] for d in future[:days]]
         min_low = min(future_lows)
-        setattr(br, f"false_breakout_{label}", min_low < breakout_price * 0.97)
+        if br.pattern_kind == "cup_handle" and breakout_price > 0:
+            setattr(br, f"false_breakout_{label}", min_low < breakout_price * 0.97)
+        else:
+            setattr(br, f"false_breakout_{label}", None)
 
-        # Stop loss hit: 5% below breakout
-        sl_price = breakout_price * 0.95
-        setattr(br, f"stop_loss_hit_{label}", min_low < sl_price)
+        # Stop loss hit: use strategy's actual stop_loss only
+        if br.actual_stop_loss > 0:
+            setattr(br, f"stop_loss_hit_{label}", min_low < br.actual_stop_loss)
 
 
 def _aggregate(report: BacktestReport, results: list[BacktestResult]):
@@ -309,18 +381,37 @@ def _score_stratify(report: BacktestReport, results: list[BacktestResult]):
 
 
 def summarize_by_verdict(rows: list) -> dict:
-    """Group backtest rows by dry-stable verdict."""
+    """Group backtest rows by dry-stable verdict.
+
+    Returns per-verdict dict with:
+      - count: total samples (including unobservable)
+      - observed_10d_count: samples with valid 10-day forward data
+      - avg_ret_10d: average of observed returns, or None if none observable
+    """
     grouped = {}
     for row in rows:
         verdict = row.get("verdict", "未知") if isinstance(row, dict) else getattr(row, "verdict", "未知")
-        ret_10d = row.get("ret_10d", 0.0) if isinstance(row, dict) else getattr(row, "ret_10d", 0.0)
-        grouped.setdefault(verdict or "未知", {"count": 0, "returns": []})
-        grouped[verdict or "未知"]["count"] += 1
-        grouped[verdict or "未知"]["returns"].append(ret_10d or 0.0)
+        ret_10d = row.get("ret_10d") if isinstance(row, dict) else getattr(row, "ret_10d", None)
+        key = verdict or "未知"
+
+        group = grouped.setdefault(
+            key,
+            {"count": 0, "observed_10d_count": 0, "returns": []},
+        )
+        group["count"] += 1
+        if ret_10d is not None:
+            group["observed_10d_count"] += 1
+            group["returns"].append(ret_10d)
+
     return {
         k: {
             "count": v["count"],
-            "avg_ret_10d": round(sum(v["returns"]) / len(v["returns"]), 2) if v["returns"] else 0.0,
+            "observed_10d_count": v["observed_10d_count"],
+            "avg_ret_10d": (
+                round(sum(v["returns"]) / len(v["returns"]), 2)
+                if v["returns"]
+                else None
+            ),
         }
         for k, v in grouped.items()
     }
@@ -394,6 +485,7 @@ def backtest_report_to_dict(report: BacktestReport) -> dict:
         "by_dry_stable_verdict": report.by_dry_stable_verdict,
         "results": [_backtest_result_to_dict(r) for r in report.results],
         "parameter_suggestions": report.parameter_suggestions,
+        "report_filter": report.report_filter,
     }
 
 

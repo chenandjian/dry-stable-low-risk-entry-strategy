@@ -11,6 +11,7 @@ class CupHandleResult:
     found: bool = False
     code: str = ""
     name: str = ""
+    pattern_kind: str = "cup_handle"  # "cup_handle" | "vcp"
 
     # 关键点索引
     left_high_idx: int = -1

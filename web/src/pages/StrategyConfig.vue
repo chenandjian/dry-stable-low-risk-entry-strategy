@@ -20,7 +20,7 @@
       <h3 class="section-title">基础参数</h3>
       <div class="param-grid">
         <div class="param">
-          <label title="近20日平均成交额低于此值的股票将被过滤（单位：元）">平均成交额阈值 <span class="unit">万元</span></label>
+          <label title="近20日平均成交额低于此值的股票将被过滤（单位：元）">平均成交额阈值 <span class="unit">元</span></label>
           <input type="number" v-model.number="config.liquidity.min_avg_turnover"
             @input="markDirty" step="1000000" />
           <span class="default">默认 1亿</span>
@@ -32,10 +32,32 @@
           <span class="default">默认 10元</span>
         </div>
         <div class="param">
-          <label title="上市交易日少于此天数的股票将被过滤">新股最短上市天数 <span class="unit">交易日</span></label>
+          <label title="每只股票拉取的日线数量，低于此天数的股票自动过滤">日线拉取天数 <span class="unit">交易日</span></label>
           <input type="number" v-model.number="config.liquidity.min_listing_days"
             @input="markDirty" step="10" min="30" />
           <span class="default">默认 250天</span>
+        </div>
+        <div class="param">
+          <label title="扫描时传入统一策略引擎的最近交易日数量，用于杯柄/VCP形态检测和干稳低吸分析">扫描分析天数 <span class="unit">交易日</span></label>
+          <input type="number" v-model.number="config.data.scan_window_days"
+            @input="markDirty" step="50" min="30" />
+          <span class="default">默认 250天</span>
+        </div>
+        <div class="param">
+          <label title="回测时每次形态分析使用的交易日数，逐日滑动评估历史数据中的每个交易日">回测分析天数 <span class="unit">交易日</span></label>
+          <input type="number" v-model.number="config.data.backtest_window_days"
+            @input="markDirty" step="50" min="30" />
+          <span class="default">默认 250天</span>
+        </div>
+      </div>
+      <div class="param-group" style="margin-top:12px">
+        <label class="param-label" title="按优先级排列，首位为主数据源，拉取失败时按顺序尝试后续数据源">日线数据源 <span class="unit">按优先级排列</span></label>
+        <div class="toggle-grid">
+          <label v-for="src in availableSources" :key="src.key" class="toggle-item">
+            <span class="toggle-label" :title="src.tip">{{ src.label }}</span>
+            <button class="toggle" :class="{ active: (config.data.daily_sources || []).includes(src.key) }"
+              @click="toggleSource(src.key)">{{ (config.data.daily_sources || []).includes(src.key) ? '开' : '关' }}</button>
+          </label>
         </div>
       </div>
     </section>
@@ -55,7 +77,7 @@
             <span class="default">默认 500万</span>
           </div>
           <div class="param">
-            <label title="最近交易日成交额低于此值的股票将被过滤（单位：元）">最新成交额阈值 <span class="unit">万元</span></label>
+            <label title="最近交易日成交额低于此值的股票将被过滤（单位：元）">最新成交额阈值 <span class="unit">元</span></label>
             <input type="number" v-model.number="config.liquidity.min_latest_turnover"
               @input="markDirty" step="1000000" />
             <span class="default">默认 8000万</span>
@@ -128,6 +150,162 @@
             <div class="range-val">{{ config.breakout.volume_multiplier }}×</div>
           </div>
         </div>
+
+        <h4 class="sub-group-title">决策规则</h4>
+        <div class="param-grid">
+          <div class="param">
+            <label title="止损空间超过此值直接拒绝买入">止损空间上限 <span class="unit">%</span></label>
+            <input type="range" min="5" max="15" step="0.5" v-model.number="maxRiskPercent" @input="markDirty" />
+            <div class="range-val">{{ maxRiskPercent }}%</div>
+          </div>
+          <div class="param">
+            <label title="量干评分低于此值直接拒绝（满分12）">量干最低分</label>
+            <input type="range" min="4" max="10" v-model.number="config.decision.min_volume_dry_score" @input="markDirty" />
+            <div class="range-val">{{ config.decision.min_volume_dry_score }} 分</div>
+          </div>
+          <div class="param">
+            <label title="价稳评分低于此值直接拒绝">价稳最低分</label>
+            <input type="range" min="3" max="8" v-model.number="config.decision.min_price_stable_score" @input="markDirty" />
+            <div class="range-val">{{ config.decision.min_price_stable_score }} 分</div>
+          </div>
+          <div class="param">
+            <label title="形态评分低于此值直接拒绝">形态最低分</label>
+            <input type="range" min="5" max="12" v-model.number="config.decision.min_pattern_score" @input="markDirty" />
+            <div class="range-val">{{ config.decision.min_pattern_score }} 分</div>
+          </div>
+          <div class="param">
+            <label title="第一目标盈亏比低于此值直接拒绝">盈亏比下限</label>
+            <input type="range" min="1.0" max="3.0" step="0.1" v-model.number="config.decision.min_rr1" @input="markDirty" />
+            <div class="range-val">{{ config.decision.min_rr1 }} : 1</div>
+          </div>
+          <div class="param">
+            <label title="可低吸额外要求：止损空间上限">可低吸止损上限 <span class="unit">%</span></label>
+            <input type="range" min="3" max="10" step="0.5" v-model.number="config.decision.low_buy_max_risk_percent" @input="markDirty" />
+            <div class="range-val">{{ config.decision.low_buy_max_risk_percent }}%</div>
+          </div>
+        </div>
+
+        <h4 class="sub-group-title">量干进阶</h4>
+        <div class="param-grid">
+          <div class="param">
+            <label title="近10日价格线性回归斜率低于此值且收盘低于MA20时，量干最高分被限制">缩量阴跌封顶分</label>
+            <input type="range" min="5" max="10" v-model.number="config.volume_dry.bad_shrink_max_score" @input="markDirty" />
+            <div class="range-val">{{ config.volume_dry.bad_shrink_max_score }} 分</div>
+          </div>
+          <div class="param">
+            <label title="股价处于近60日区间下半部时量干最高分">低位缩量封顶分</label>
+            <input type="range" min="5" max="10" v-model.number="config.volume_dry.low_position_max_score" @input="markDirty" />
+            <div class="range-val">{{ config.volume_dry.low_position_max_score }} 分</div>
+          </div>
+          <div class="param">
+            <label title="近5天放量但不涨时量干最高分">放量滞涨封顶分</label>
+            <input type="range" min="5" max="10" v-model.number="config.volume_dry.volume_stall_max_score" @input="markDirty" />
+            <div class="range-val">{{ config.volume_dry.volume_stall_max_score }} 分</div>
+          </div>
+          <div class="param">
+            <label title="近3天放量大阴线时量干最高分">大阴线封顶分</label>
+            <input type="range" min="4" max="9" v-model.number="config.volume_dry.big_bear_max_score" @input="markDirty" />
+            <div class="range-val">{{ config.volume_dry.big_bear_max_score }} 分</div>
+          </div>
+        </div>
+
+        <h4 class="sub-group-title">价稳进阶</h4>
+        <div class="param-grid">
+          <div class="param">
+            <label title="近5日收盘价波动≤此值视为价格紧致">收盘紧致度 <span class="unit">%</span></label>
+            <input type="range" min="1" max="8" v-model.number="config.price_stable.close_tightness_strong_pct" @input="markDirty" />
+            <div class="range-val">{{ config.price_stable.close_tightness_strong_pct }}%</div>
+          </div>
+          <div class="param">
+            <label title="跌破柄底/MA50时价稳最高分">支撑跌破封顶分</label>
+            <input type="range" min="3" max="7" v-model.number="config.price_stable.support_break_max_score" @input="markDirty" />
+            <div class="range-val">{{ config.price_stable.support_break_max_score }} 分</div>
+          </div>
+        </div>
+
+        <h4 class="sub-group-title">风报进阶</h4>
+        <div class="param-grid">
+          <div class="param">
+            <label title="止损空间必须≥ATR14×此倍数，否则发出警告">ATR止损倍数</label>
+            <input type="range" min="1.0" max="2.0" step="0.1" v-model.number="config.risk_reward.atr_stop_multiplier" @input="markDirty" />
+            <div class="range-val">{{ config.risk_reward.atr_stop_multiplier }}×</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 策略2：极致量干价稳 -->
+    <section class="section strategy2-section">
+      <h3 class="section-title strategy2-title">策略2 · 极致量干价稳</h3>
+      <p class="section-hint">
+        策略2 独立扫描全部股票，不依赖杯柄/VCP 形态识别。日线拉取天数沿用全局配置；本期不支持回测。
+      </p>
+
+      <!-- 启停开关 -->
+      <div class="toggle-grid" style="margin-bottom:16px">
+        <label class="toggle-item">
+          <span class="toggle-label">启用策略2</span>
+          <button class="toggle" :class="{ active: config.strategy2?.enabled !== false }"
+            @click="toggleStrategy2('enabled')">{{ config.strategy2?.enabled !== false ? '开' : '关' }}</button>
+        </label>
+      </div>
+
+      <div class="param-grid">
+        <div class="param">
+          <label title="策略2计算仅使用最近 N 个有效交易日的数据">策略计算天数 <span class="unit">交易日</span></label>
+          <input type="number" v-model.number="config.strategy2.strategy_window_days"
+            @input="markDirty" step="10" min="60" />
+          <span class="default">默认 120 · 须 ≥ 最低有效数据天数</span>
+        </div>
+        <div class="param">
+          <label title="有效数据不足此天数时跳过该股票">最低有效数据天数 <span class="unit">交易日</span></label>
+          <input type="number" v-model.number="config.strategy2.minimum_required_days"
+            @input="markDirty" step="5" min="60" />
+          <span class="default">默认 60 · ≥ 60</span>
+        </div>
+        <div class="param">
+          <label title="总分 ≥ 此值且无否决且风险比达标才入选">候选最低分</label>
+          <input type="number" v-model.number="config.strategy2.candidate_min_score"
+            @input="markDirty" min="0" max="100" />
+          <span class="default">默认 70 · 0-100</span>
+        </div>
+        <div class="param">
+          <label title="量干评分低于此值时，即使总分达标也不进入策略2正式候选">正式量干最低分</label>
+          <input type="number" v-model.number="config.strategy2.minimum_volume_dry_score"
+            @input="markDirty" min="0" max="100" />
+          <span class="default">优化后 40 · 0-100</span>
+        </div>
+        <div class="param">
+          <label title="短线观察建议退出天数，仅用于候选展示和策略说明，不改变入选硬过滤">短线退出建议 <span class="unit">交易日</span></label>
+          <input type="number" v-model.number="config.strategy2.short_term_time_exit_days"
+            @input="markDirty" min="0" max="20" />
+          <span class="default">优化后 5 · 0 表示关闭</span>
+        </div>
+        <div class="param">
+          <label title="风险比超过此值强制排除。风险比 = (收盘价 - 止损) / 收盘价">最大风险比 <span class="unit">%</span></label>
+          <input type="range" min="1" max="10" step="0.5" v-model.number="maxRiskRatioPct" @input="markDirty" />
+          <div class="range-val">{{ maxRiskRatioPct }}%</div>
+        </div>
+        <div class="param">
+          <label title="关键支撑 = 不含评估日的前 N 个交易日最低收盘价">支撑回看天数 <span class="unit">交易日</span></label>
+          <input type="number" v-model.number="config.strategy2.support_lookback_days"
+            @input="markDirty" min="2" />
+          <span class="default">默认 10 · ≥ 2</span>
+        </div>
+        <div class="param">
+          <label title="买入区间上限 = 关键支撑 × (1 + 溢价比例)">买入区间溢价 <span class="unit">%</span></label>
+          <input type="range" min="1" max="10" step="0.5" v-model.number="buyZonePremiumPct" @input="markDirty" />
+          <div class="range-val">{{ buyZonePremiumPct }}%</div>
+        </div>
+        <div class="param">
+          <label title="止损价 = 关键支撑 × (1 - 缓冲比例)">止损缓冲比例 <span class="unit">%</span></label>
+          <input type="range" min="1" max="10" step="0.5" v-model.number="stopLossBufferPct" @input="markDirty" />
+          <div class="range-val">{{ stopLossBufferPct }}%</div>
+        </div>
+      </div>
+
+      <div class="info-msg">
+        ⓘ 日线拉取天数使用全局配置 ({{ config.liquidity?.min_listing_days || '--' }} 天) · 策略2不使用杯柄/VCP判断 · 本期不支持回测
       </div>
     </section>
 
@@ -154,9 +332,20 @@ const { getConfig, updateConfig } = useApi()
 const config = reactive({
   market: {},
   liquidity: {},
+  data: { scan_window_days: 250, backtest_window_days: 250, daily_sources: ['baidu', 'sina', 'tencent', 'yfinance'] },
   cup: {},
   handle: {},
   breakout: {},
+  decision: {},
+  volume_dry: { bad_shrink_max_score: 7, low_position_max_score: 7, volume_stall_max_score: 7, big_bear_max_score: 6 },
+  price_stable: { close_tightness_strong_pct: 3, support_break_max_score: 5 },
+  risk_reward: { atr_stop_multiplier: 1.2 },
+  strategy2: {
+    enabled: true, strategy_window_days: 120, minimum_required_days: 60,
+    candidate_min_score: 70, minimum_volume_dry_score: 40, short_term_time_exit_days: 5,
+    max_risk_ratio: 0.05, support_lookback_days: 10,
+    buy_zone_max_premium: 0.03, stop_loss_buffer: 0.03,
+  },
 })
 
 const dirty = ref(false)
@@ -198,6 +387,36 @@ const breakoutBuffer = computed({
   get: () => Math.round((config.breakout?.buffer_pct || 0.02) * 100),
   set: (v) => { config.breakout.buffer_pct = v / 100 },
 })
+const maxRiskPercent = computed({
+  get: () => config.decision?.max_risk_percent ?? 8,
+  set: (v) => { config.decision.max_risk_percent = v },
+})
+
+// Strategy2 computed: percentage sliders
+const maxRiskRatioPct = computed({
+  get: () => Math.round((config.strategy2?.max_risk_ratio ?? 0.05) * 100),
+  set: (v) => { config.strategy2.max_risk_ratio = v / 100 },
+})
+const buyZonePremiumPct = computed({
+  get: () => Math.round((config.strategy2?.buy_zone_max_premium ?? 0.03) * 100),
+  set: (v) => { config.strategy2.buy_zone_max_premium = v / 100 },
+})
+const stopLossBufferPct = computed({
+  get: () => Math.round((config.strategy2?.stop_loss_buffer ?? 0.03) * 100),
+  set: (v) => { config.strategy2.stop_loss_buffer = v / 100 },
+})
+
+function toggleStrategy2(key) {
+  config.strategy2[key] = !config.strategy2[key]
+  markDirty()
+}
+
+const availableSources = [
+  { key: 'baidu', label: '百度', tip: '百度股票API，国内数据源，稳定可靠' },
+  { key: 'sina', label: '新浪', tip: '新浪财经API，数据覆盖全' },
+  { key: 'tencent', label: '腾讯', tip: '腾讯财经API，实时性好' },
+  { key: 'yfinance', label: 'Yahoo Finance', tip: 'Yahoo Finance 国际数据源，需稳定外网连接' },
+]
 
 const markets = [
   { key: 'include_sh', label: '沪市主板', tip: '上证主板股票，代码 60xxxx' },
@@ -210,6 +429,20 @@ const markets = [
 
 function toggle(section, key) {
   config[section][key] = !config[section][key]
+  markDirty()
+}
+
+function toggleSource(key) {
+  if (!config.data.daily_sources) {
+    config.data.daily_sources = availableSources.map(s => s.key)
+  }
+  const idx = config.data.daily_sources.indexOf(key)
+  if (idx >= 0) {
+    if (config.data.daily_sources.length <= 1) return  // 至少保留一个
+    config.data.daily_sources.splice(idx, 1)
+  } else {
+    config.data.daily_sources.push(key)
+  }
   markDirty()
 }
 
@@ -235,9 +468,27 @@ function validate() {
   if (handle.max_depth < 0.08 || handle.max_depth > 0.25) errors.push('柄部最大回撤需在 8%-25% 之间')
 
   const liq = config.liquidity
+  const dataCfg = config.data || {}
   if (liq.min_avg_turnover < 10000000) errors.push('成交额阈值最低 1000万')
   if (liq.min_stock_price < 1) errors.push('最低股价不能低于 1元')
-  if (liq.min_listing_days < 30) errors.push('上市天数最低 30天')
+  if (liq.min_listing_days < 30) errors.push('拉取天数最低 30天')
+  if (dataCfg.scan_window_days < 30) errors.push('扫描分析天数最低 30天')
+  if (dataCfg.backtest_window_days < 30) errors.push('回测分析天数最低 30天')
+  if (dataCfg.scan_window_days > liq.min_listing_days) errors.push('扫描分析天数不能超过日线拉取天数')
+  if (!dataCfg.daily_sources || dataCfg.daily_sources.length === 0) errors.push('至少选择一个日线数据源')
+
+  // Strategy2 validation
+  const s2 = config.strategy2 || {}
+  if (s2.strategy_window_days < s2.minimum_required_days) errors.push('策略2: 计算天数不能小于最低有效数据天数')
+  if (s2.minimum_required_days < 60) errors.push('策略2: 最低有效数据天数 ≥ 60')
+  if (s2.strategy_window_days > (liq.min_listing_days || 250)) errors.push('策略2: 计算天数不能超过日线拉取天数')
+  if (s2.candidate_min_score < 0 || s2.candidate_min_score > 100) errors.push('策略2: 候选最低分需在 0-100')
+  if (s2.minimum_volume_dry_score < 0 || s2.minimum_volume_dry_score > 100) errors.push('策略2: 正式量干最低分需在 0-100')
+  if (s2.short_term_time_exit_days < 0 || s2.short_term_time_exit_days > 20) errors.push('策略2: 短线退出建议需在 0-20 天')
+  if (s2.max_risk_ratio <= 0 || s2.max_risk_ratio >= 1) errors.push('策略2: 最大风险比需在 (0, 1) 之间')
+  if (s2.support_lookback_days < 2) errors.push('策略2: 支撑回看天数 ≥ 2')
+  if (s2.buy_zone_max_premium <= 0 || s2.buy_zone_max_premium > 0.2) errors.push('策略2: 买入溢价需在 (0, 20%] 之间')
+  if (s2.stop_loss_buffer <= 0 || s2.stop_loss_buffer > 0.2) errors.push('策略2: 止损缓冲需在 (0, 20%] 之间')
 
   return errors
 }
@@ -255,6 +506,7 @@ async function saveConfig() {
     const payload = {
       market: { ...config.market },
       liquidity: { ...config.liquidity },
+      data: { ...config.data },
       cup: {
         min_duration: config.cup.min_duration,
         max_duration: config.cup.max_duration,
@@ -272,6 +524,11 @@ async function saveConfig() {
         buffer_pct: config.breakout.buffer_pct,
         volume_multiplier: config.breakout.volume_multiplier,
       },
+      decision: { ...config.decision },
+      volume_dry: { ...config.volume_dry },
+      price_stable: { ...config.price_stable },
+      risk_reward: { ...config.risk_reward },
+      strategy2: { ...config.strategy2 },
     }
     const res = await updateConfig(payload)
     if (res.status === 'ok') {
@@ -373,5 +630,15 @@ onMounted(async () => {
 }
 .btn-save.dirty {
   background: var(--accent); color: #fff;
+}
+
+/* Strategy2 section */
+.strategy2-section { border-color: rgba(255, 215, 0, 0.2); }
+.strategy2-title { color: #ffd700; }
+.section-hint { font-size: 12px; color: var(--text-muted); margin: -10px 0 16px; line-height: 1.5; }
+.info-msg {
+  margin-top: 16px; padding: 10px 14px; border-radius: 4px;
+  background: rgba(255, 215, 0, 0.06); border: 1px solid rgba(255, 215, 0, 0.15);
+  font-size: 12px; color: var(--text-muted); line-height: 1.5;
 }
 </style>

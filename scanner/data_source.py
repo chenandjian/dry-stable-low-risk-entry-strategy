@@ -14,8 +14,10 @@ class DataSourceManager:
 
     def __init__(self):
         self._locks: dict[str, threading.Lock] = {
+            "baidu": threading.Lock(),
             "sina": threading.Lock(),
             "tencent": threading.Lock(),
+            "yfinance": threading.Lock(),
         }
 
     def acquire(self, ds_name: str) -> bool:
@@ -38,8 +40,12 @@ class DataSourceManager:
 
     def try_acquire_any(self) -> str | None:
         """尝试获取任意一个空闲数据源，返回数据源名称。
-        如果全部被占用，返回 None。"""
-        for name in self._locks:
+        如果全部被占用，返回 None。
+        源顺序随机化，避免低并发时总抢同一个源。"""
+        import random
+        names = list(self._locks.keys())
+        random.shuffle(names)
+        for name in names:
             if self.acquire(name):
                 return name
         return None

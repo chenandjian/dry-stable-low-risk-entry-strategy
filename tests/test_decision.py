@@ -29,7 +29,7 @@ def _rr(risk_percent=4.8, rr1=2.1, rr2=3.0, can_buy=True):
 def test_low_buy_requires_price_in_entry_zone():
     decision = make_dry_stable_decision(
         pattern_score=15,
-        volume_dry_score=8,
+        volume_dry_score=9,
         price_stable_score=8,
         key_prices=_key_prices(current=10.3),
         risk_reward=_rr(),
@@ -42,7 +42,7 @@ def test_low_buy_requires_price_in_entry_zone():
 def test_high_scores_above_entry_zone_are_not_low_buy():
     decision = make_dry_stable_decision(
         pattern_score=15,
-        volume_dry_score=8,
+        volume_dry_score=9,
         price_stable_score=8,
         key_prices=_key_prices(current=10.8),
         risk_reward=_rr(),
@@ -55,7 +55,7 @@ def test_high_scores_above_entry_zone_are_not_low_buy():
 def test_price_more_than_five_percent_above_pivot_is_chasing():
     decision = make_dry_stable_decision(
         pattern_score=15,
-        volume_dry_score=8,
+        volume_dry_score=9,
         price_stable_score=8,
         key_prices=_key_prices(current=11.6, pivot=11.0),
         risk_reward=_rr(),
@@ -66,6 +66,7 @@ def test_price_more_than_five_percent_above_pivot_is_chasing():
 
 
 def test_hard_rules_block_buying():
+    """量干不足时应返回 WAIT_VOLUME 而非直接 REJECT。"""
     decision = make_dry_stable_decision(
         pattern_score=15,
         volume_dry_score=5,
@@ -74,14 +75,15 @@ def test_hard_rules_block_buying():
         risk_reward=_rr(),
     )
 
-    assert decision.verdict == "不建议买入"
-    assert "量能未干" in decision.summary
+    assert decision.verdict == "等量能萎缩"
+    assert decision.verdict_key == "WAIT_VOLUME"
+    assert "量干" in decision.summary
 
 
 def test_bad_market_environment_blocks_buying():
     decision = make_dry_stable_decision(
         pattern_score=15,
-        volume_dry_score=8,
+        volume_dry_score=9,
         price_stable_score=8,
         key_prices=_key_prices(current=10.3),
         risk_reward=_rr(),
