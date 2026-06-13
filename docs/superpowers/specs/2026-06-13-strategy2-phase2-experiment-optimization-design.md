@@ -1296,6 +1296,8 @@ docs/superpowers/specs/YYYY-MM-DD-strategy2-optimized-strategy-parameters.md
 
 ## 14. AI 开始开发提示语
 
+### 14.1 Phase 2 实验功能开发提示语
+
 ```text
 请开发策略2 Phase 2“回测实验与策略优化评估”功能。
 
@@ -1332,6 +1334,186 @@ docs/superpowers/specs/2026-06-13-strategy2-phase2-experiment-optimization-desig
 21. 正式启用后必须新增“优化后的策略文档”，写清楚所有正式参数名、参数值、证据、风险、回滚方案、启用状态和版本号。
 
 直接开始实施，不需要再次确认本文档已明确的事项。
+```
+
+### 14.2 端到端开发、实验、策略优化与正式启用提示语
+
+以下提示语用于交给 AI 开发工具执行完整闭环：先开发 Phase 2 实验能力，再运行可信基线与实验任务，最后在证据充分时确定优化策略并直接启用为策略2正式版本。
+
+```text
+请按照以下要求，完整执行策略2 Phase 2 实验能力开发、实验回测、策略优化决策和正式版本启用。
+
+工作目录：
+D:\game\claude\dry-stable-low-risk-entry-strategy\.claude\worktrees\strategy2-extreme-dry-stable
+
+核心文档：
+docs/superpowers/specs/2026-06-13-strategy2-phase2-experiment-optimization-design.md
+
+必须先阅读：
+1. docs/superpowers/specs/2026-06-11-strategy2-local-database-backtest-design.md
+2. docs/superpowers/specs/2026-06-12-strategy2-backtest-correctness-and-strategy-optimization-design.md
+3. docs/reviews/2026-06-13-strategy2-phase1-final-acceptance-completion.md
+4. strategy2/backtester.py
+5. strategy2/backtest_service.py
+6. scanner/db.py
+7. server.py
+8. web/src/pages/Strategy2Backtest.vue
+9. config.yaml
+
+第一阶段：开发 Phase 2 实验能力
+1. 新增或完善 strategy2/backtest_experiments.py。
+2. 支持 experiment_snapshot 持久化。
+3. 支持 minimum_total_score、minimum_volume_dry_score、minimum_price_stable_score。
+4. 支持 time_exit_days = null / 5 / 10。
+5. 支持 entry_confirmation：
+   - NONE
+   - BREAK_RECENT_5D_HIGH
+   - CLOSE_ABOVE_MA20
+   - BREAK_HIGH_WITH_MODERATE_VOLUME
+6. 支持 opportunity_type：
+   - CONTINUATION
+   - REVERSAL
+   - NEUTRAL
+7. 增加本地等权市场 5/10/20 日环境统计。
+8. 增加 baseline comparison 接口。
+9. 前端增加实验模式开关、实验参数区、EXPERIMENTAL 标识、基线对比区和实验汇总展示。
+10. experiment 缺失或 enabled=false 时，结果必须等同 Phase 1 基线行为。
+11. experiment.enabled=true 时，任务 credibility_status 必须为 EXPERIMENTAL。
+12. 被实验过滤的原始信号必须保存并记录 experiment_filter_reason，不能静默丢弃。
+13. 不复制 ExtremeDryStableStrategyEngine.evaluate_at() 的判断逻辑。
+14. 不修改策略2正式扫描规则。
+15. 不修改策略1。
+16. 不访问百度、新浪、腾讯、yfinance、AKShare 或任何外部数据源。
+
+第二阶段：验证 Phase 2 功能
+1. 运行策略2专项测试。
+2. 运行后端全量测试。
+3. 运行前端测试。
+4. 运行前端构建。
+5. 验证实验关闭时与 Phase 1 基线一致。
+6. 验证实验任务为 EXPERIMENTAL。
+7. 验证对比接口能识别可比较与不可比较任务。
+8. 将测试结果写入 operations-log.md。
+
+第三阶段：运行可信基线
+1. 使用最新代码运行新的全市场策略2回测任务。
+2. 实验必须关闭：experiment.enabled=false。
+3. 任务完成后必须确认：
+   - status = completed
+   - credibility_status = TRUSTED_BASELINE
+   - backtest_engine_version 符合当前版本
+   - strategy_engine_version 符合当前版本
+   - data_revision_version 符合当前版本
+4. 记录可信基线 task_id。
+5. 如果基线任务失败、中断或完整性校验失败，先修复问题，不得进入策略优化。
+
+第四阶段：运行实验任务
+至少运行以下可比较实验任务：
+1. minimum_volume_dry_score = 40。
+2. minimum_volume_dry_score = 50。
+3. minimum_volume_dry_score = 40 + time_exit_days = 5。
+4. minimum_volume_dry_score = 40 + time_exit_days = 10。
+5. minimum_volume_dry_score = 40 + entry_confirmation.type = BREAK_RECENT_5D_HIGH。
+6. 如数据支持，可补充 CLOSE_ABOVE_MA20 和 BREAK_HIGH_WITH_MODERATE_VOLUME 实验。
+
+所有实验任务必须满足：
+1. 与可信基线使用相同日期范围。
+2. 与可信基线使用相同股票范围。
+3. 与可信基线使用相同执行模型。
+4. 与可信基线使用相同数据版本。
+5. 对比接口返回 comparable=true。
+6. 任务 credibility_status = EXPERIMENTAL。
+
+第五阶段：分析并确定优化策略
+由 AI 自主完成策略分析和正式策略决策，用户已授权不需要再次确认具体参数。
+
+分析至少包括：
+1. 机会数变化。
+2. 实际入场数变化。
+3. 5 日成功率变化。
+4. 10 日成功率变化。
+5. 止损率变化。
+6. 平均实际收益变化。
+7. 中位实际收益变化。
+8. 跑赢市场比例变化。
+9. 按月份分组表现。
+10. 按 opportunity_type 分组表现。
+11. 按量干分段表现。
+12. 按价稳分段表现。
+13. 按市场环境表现。
+14. 未采用实验参数的原因。
+
+决策原则：
+1. 不采用只在单一月份有效的参数。
+2. 不采用机会数下降过度且收益改善不足的参数。
+3. 不采用止损率没有改善且收益提升不稳定的参数。
+4. 优先选择收益改善、止损率下降、机会数仍可接受的参数组合。
+5. 如启动确认显著减少入场但改善不稳定，可作为交易建议，不一定作为硬过滤。
+6. 如 time_exit_days 改善明显，可作为短线退出建议或正式展示参数。
+7. 所有正式参数必须能在代码、配置或前端中追溯。
+
+第六阶段：正式启用策略2优化版本
+用户已授权：当实验结果支持正式升级，并且完成策略升级建议、测试验证和优化后策略文档后，可以直接把优化策略作为策略2正式版本启用，不需要再次确认具体参数。
+
+正式启用要求：
+1. 修改策略2正式配置参数或正式扫描规则。
+2. 更新前端配置页或策略说明展示。
+3. 补充或更新测试。
+4. 运行策略2专项测试、后端全量测试、前端测试和前端构建。
+5. 在 operations-log.md 记录：
+   - 启用原因
+   - 基线任务 ID
+   - 实验任务 ID
+   - 最终参数
+   - 测试结果
+   - 回滚方案
+6. 不修改策略1。
+7. 不引入第二份策略2判断代码。
+8. 不删除 Phase 2 实验能力。
+9. 不在测试失败、证据不足或回滚方案缺失时启用正式版本。
+
+第七阶段：交付优化后的策略文档
+正式启用后，必须新增：
+docs/superpowers/specs/YYYY-MM-DD-strategy2-optimized-strategy-parameters.md
+
+文档必须包含：
+1. 策略版本号。
+2. 生效日期。
+3. 是否已启用为策略2正式版本。
+4. 启用提交或版本号。
+5. 最终参数表，必须包含参数名、旧值、新值、生效位置、调整原因。
+6. 最终过滤规则。
+7. 最终评分门槛。
+8. 最终趋势规则。
+9. 最终风险规则。
+10. 启动确认规则，如未启用也要说明原因。
+11. 时间退出规则，如未启用也要说明原因。
+12. 可信基线任务 ID。
+13. 实验任务 ID。
+14. 核心对比结果。
+15. 分组表现。
+16. 不采用的实验参数及原因。
+17. 已知风险和适用边界。
+18. 回滚触发条件。
+19. 回滚参数清单。
+20. 回滚验证方式。
+21. 后续观察指标。
+
+最终交付必须说明：
+1. Phase 2 实验功能是否完成。
+2. 可信基线 task_id。
+3. 实验 task_id 列表。
+4. 最终启用的策略2正式参数。
+5. 修改文件清单。
+6. 数据库变更说明。
+7. API 变更说明。
+8. 前端变更说明。
+9. 测试结果。
+10. 优化后策略文档路径。
+11. 是否已作为策略2正式版本启用。
+12. 回滚方式。
+
+直接开始执行，不需要再次确认本文档已经明确的事项。
 ```
 
 ---
