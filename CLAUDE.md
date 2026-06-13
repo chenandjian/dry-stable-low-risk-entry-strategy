@@ -2,6 +2,8 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+Codex-specific execution workflow, verification rules, and git automation rules live in `AGENTS.md`. When development is performed in Codex, read `AGENTS.md` first for process rules, then use this file for project facts, architecture, commands, and gotchas.
+
 ## Project
 
 CupHandleScan — A股杯柄结构（Cup & Handle）自动扫描系统。Python 3.10+。
