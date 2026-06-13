@@ -166,6 +166,19 @@ export function useApi() {
     const body = await res.json().catch(() => ({}))
     return { ...body, ok: res.ok, statusCode: res.status }
   }
+  async function previewStrategy2BacktestExperiment(payload) {
+    const res = await fetch(`${API_BASE}/strategy2/backtests/experiments/preview`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    })
+    const body = await res.json().catch(() => ({}))
+    return { ...body, ok: res.ok, statusCode: res.status }
+  }
+  async function getStrategy2BacktestComparison(taskId, baselineTaskId) {
+    const qs = new URLSearchParams({ baselineTaskId }).toString()
+    const res = await fetch(`${API_BASE}/strategy2/backtests/${encodeURIComponent(taskId)}/comparison?${qs}`)
+    return res.json().catch(() => ({ comparable: false, reasons: ['request_failed'] }))
+  }
   const resumeStrategy2Backtest = taskId => strategy2BacktestAction(taskId, 'resume')
   const cancelStrategy2Backtest = taskId => strategy2BacktestAction(taskId, 'cancel')
   const retryFailedStrategy2Backtest = taskId => strategy2BacktestAction(taskId, 'retry-failed')
@@ -181,6 +194,7 @@ export function useApi() {
     getStrategy2BacktestTasks, getStrategy2BacktestTask,
     getStrategy2BacktestOpportunities, getStrategy2BacktestInsufficientStocks,
     getStrategy2BacktestStockHistory, getStrategy2BacktestStocks,
+    previewStrategy2BacktestExperiment, getStrategy2BacktestComparison,
     resumeStrategy2Backtest, cancelStrategy2Backtest, retryFailedStrategy2Backtest,
   }
 }

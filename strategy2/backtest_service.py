@@ -117,19 +117,37 @@ def _finalize_task(task_id: str, cancel_event, elapsed: float) -> None:
         "SUM(CASE WHEN status='INSUFFICIENT' THEN 1 ELSE 0 END), "
         "SUM(CASE WHEN status IN ('PENDING','RUNNING') THEN 1 ELSE 0 END), "
         "SUM(evaluation_days), SUM(evaluation_error_days), SUM(raw_signals_count), "
-        "MIN(actual_eval_start_date), MAX(actual_eval_end_date), MAX(observation_data_end_date) "
+        "MIN(actual_eval_start_date), MAX(actual_eval_end_date), MAX(observation_data_end_date), "
+        "SUM(experiment_filtered_days), SUM(experiment_volume_filtered_days), "
+        "SUM(experiment_score_filtered_days), SUM(entry_confirmation_failed_count), "
+        "SUM(time_exit_count) "
         "FROM strategy2_backtest_task_stocks WHERE task_id=?",
         (task_id,),
     ).fetchone()
     processed, failed, insufficient, unfinished = (value or 0 for value in counts[:4])
     evaluations, evaluation_errors, raw_signals = (value or 0 for value in counts[4:7])
     actual_start, actual_end, observation_end = counts[7:10]
+    (
+        experiment_filtered,
+        experiment_volume_filtered,
+        experiment_score_filtered,
+        entry_confirmation_failed,
+        time_exit_count,
+    ) = (value or 0 for value in counts[10:15])
     opportunities = conn.execute(
         "SELECT COUNT(*) FROM strategy2_backtest_opportunities WHERE task_id=?", (task_id,)
     ).fetchone()[0]
     stocks_with_opportunities = conn.execute(
         "SELECT COUNT(DISTINCT code) FROM strategy2_backtest_opportunities WHERE task_id=?", (task_id,)
     ).fetchone()[0]
+    task_row = db.get_strategy2_backtest_task(task_id) or {}
+    experiment_snapshot = {}
+    if task_row.get("experiment_snapshot"):
+        try:
+            experiment_snapshot = json.loads(task_row["experiment_snapshot"])
+        except Exception:
+            experiment_snapshot = {}
+    is_experiment = bool(experiment_snapshot.get("enabled"))
 
     if cancel_event.is_set():
         status = "CANCELED"
@@ -162,13 +180,22 @@ def _finalize_task(task_id: str, cancel_event, elapsed: float) -> None:
         completed_evaluations=evaluations,
         raw_signals_count=raw_signals,
         evaluation_error_days=evaluation_errors,
+        experiment_filtered_days=experiment_filtered,
+        experiment_volume_filtered_days=experiment_volume_filtered,
+        experiment_score_filtered_days=experiment_score_filtered,
+        entry_confirmation_failed_count=entry_confirmation_failed,
+        time_exit_count=time_exit_count,
         summary_json=json.dumps(summary, ensure_ascii=False),
     )
     integrity_ok, integrity_errors = db.validate_strategy2_backtest_integrity(task_id)
     summary["integrity"] = {"passed": integrity_ok, "errors": integrity_errors}
+    if is_experiment and integrity_ok:
+        credibility_status = "EXPERIMENTAL"
+    else:
+        credibility_status = "TRUSTED_BASELINE" if integrity_ok else "PHASE1_INCOMPLETE"
     db.update_strategy2_backtest_task(
         task_id,
-        credibility_status="TRUSTED_BASELINE" if integrity_ok else "PHASE1_INCOMPLETE",
+        credibility_status=credibility_status,
         summary_json=json.dumps(summary, ensure_ascii=False),
     )
 
@@ -233,6 +260,7 @@ def run_strategy2_backtest_task(
                     code, name, ohlc, config_snapshot,
                     payload_snapshot.get("startDate", ""),
                     payload_snapshot.get("endDate", ""),
+                    experiment=payload_snapshot.get("experiment"),
                 )
                 if result.get("insufficient"):
                     insufficient = result["insufficient"]

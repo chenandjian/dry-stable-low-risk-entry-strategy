@@ -12,6 +12,9 @@ const api = {
   cancelStrategy2Backtest: vi.fn(),
   retryFailedStrategy2Backtest: vi.fn(),
   getStrategy2BacktestStatus: vi.fn(),
+  previewStrategy2BacktestExperiment: vi.fn(),
+  getStrategy2BacktestComparison: vi.fn(),
+  startStrategy2Backtest: vi.fn(),
 }
 vi.mock('../../composables/useApi.js', () => ({ useApi: () => api }))
 
@@ -52,6 +55,9 @@ describe('Strategy2Backtest task controls', () => {
       stocks: [{ code: '000001', name: '失败股', error_code: 'ValueError', error_detail: 'bad row' }],
     })
     api.getStrategy2BacktestStatus.mockResolvedValue({ running: false, taskId: null, stats: {} })
+    api.previewStrategy2BacktestExperiment.mockResolvedValue({ valid: true, normalizedExperiment: { enabled: true } })
+    api.getStrategy2BacktestComparison.mockResolvedValue({ comparable: true, baseline: {}, experiment: {}, delta: {} })
+    api.startStrategy2Backtest.mockResolvedValue({ ok: true, task_id: 'bt-new', credibilityStatus: 'EXPERIMENTAL' })
     api.retryFailedStrategy2Backtest.mockResolvedValue({ ok: true })
     api.resumeStrategy2Backtest.mockResolvedValue({ ok: true })
     api.cancelStrategy2Backtest.mockResolvedValue({ ok: true })
@@ -118,5 +124,52 @@ describe('Strategy2Backtest task controls', () => {
     const cancel = wrapper.findAll('button').find(button => button.text() === '取消')
     await cancel.trigger('click')
     expect(api.cancelStrategy2Backtest).toHaveBeenCalledWith('bt-running')
+  })
+
+  it('sends normalized experiment payload when experiment mode is enabled', async () => {
+    api.getStrategy2BacktestTask.mockResolvedValue(task())
+    wrapper = mount(Strategy2Backtest)
+    await flushUi()
+
+    wrapper.vm.experimentEnabled = true
+    wrapper.vm.experimentForm.minimumVolumeDryScore = 40
+    wrapper.vm.experimentForm.timeExitDays = 5
+    wrapper.vm.experimentForm.entryConfirmationType = 'BREAK_RECENT_5D_HIGH'
+    wrapper.vm.baselineTaskId = 'baseline-1'
+    await wrapper.vm.startBacktest()
+
+    expect(api.startStrategy2Backtest).toHaveBeenCalled()
+    const payload = api.startStrategy2Backtest.mock.calls[0][0]
+    expect(payload.baselineTaskId).toBe('baseline-1')
+    expect(payload.experiment.enabled).toBe(true)
+    expect(payload.experiment.minimumVolumeDryScore).toBe(40)
+    expect(payload.experiment.timeExitDays).toBe(5)
+    expect(payload.experiment.entryConfirmation.type).toBe('BREAK_RECENT_5D_HIGH')
+  })
+
+  it('shows experimental badge, snapshot, and comparison result', async () => {
+    api.getStrategy2BacktestTask.mockResolvedValue(task({
+      credibility_status: 'EXPERIMENTAL',
+      baseline_task_id: 'baseline-1',
+      experiment_snapshot: JSON.stringify({
+        enabled: true,
+        minimum_volume_dry_score: 40,
+        time_exit_days: 5,
+        entry_confirmation: { type: 'BREAK_RECENT_5D_HIGH' },
+      }),
+      summary: {
+        horizon_stats: {},
+        funnel: { experiment_filtered_days: 3, entry_confirmation_failed_count: 1, time_exit_count: 2 },
+      },
+    }))
+    wrapper = mount(Strategy2Backtest)
+    await flushUi()
+    await wrapper.vm.loadTask('bt-1')
+    await flushUi()
+
+    expect(wrapper.text()).toContain('EXPERIMENTAL')
+    expect(wrapper.text()).toContain('最低量干分')
+    expect(wrapper.text()).toContain('baseline-1')
+    expect(api.getStrategy2BacktestComparison).toHaveBeenCalledWith('bt-1', 'baseline-1')
   })
 })

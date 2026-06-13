@@ -400,6 +400,7 @@ def run_strategy2_stock_backtest(
     config_snapshot: dict,
     start_date: str,
     end_date: str,
+    experiment: dict | None = None,
 ) -> dict:
     """对单只股票执行历史逐日回放。
 
@@ -419,8 +420,17 @@ def run_strategy2_stock_backtest(
     """
     from strategy2.engine import ExtremeDryStableStrategyEngine
     from strategy2.scanner import _build_strategy2_discovery
+    from strategy2.backtest_experiments import (
+        apply_entry_confirmation,
+        apply_signal_experiment_filter,
+        apply_time_exit,
+        is_experiment_enabled,
+        normalize_experiment_config,
+    )
     from scanner.liquidity_filter import passes_liquidity_filter
 
+    experiment = normalize_experiment_config(experiment)
+    experiment_enabled = is_experiment_enabled(experiment)
     strategy2_cfg = config_snapshot.get("strategy2", {})
     liquidity_cfg = config_snapshot.get("liquidity", {})
     min_required = strategy2_cfg.get("minimum_required_days", 250)
@@ -446,6 +456,7 @@ def run_strategy2_stock_backtest(
     date_to_index = {d["date"]: i for i, d in enumerate(ohlc_data)}
 
     signals: list[BacktestSignal] = []
+    experiment_passed_signals: list[BacktestSignal] = []
     eval_results: dict[int, str] = {}
     eval_days = 0
     liquidity_filtered = 0
@@ -456,6 +467,11 @@ def run_strategy2_stock_backtest(
     invalid_data = 0
     error_days = 0
     evaluation_errors: list[dict] = []
+    experiment_filtered = 0
+    experiment_volume_filtered = 0
+    experiment_score_filtered = 0
+    entry_confirmation_failed = 0
+    time_exit_count = 0
     actual_eval_start = None
     actual_eval_end = None
     obs_data_end = None
@@ -508,7 +524,17 @@ def run_strategy2_stock_backtest(
                 evaluation_snapshot=_build_strategy2_discovery(evaluation),
             )
             signals.append(signal)
-            eval_results[evaluation_index] = "PASSED"
+            experiment_passed, filter_reason = apply_signal_experiment_filter(signal, experiment)
+            if experiment_passed:
+                experiment_passed_signals.append(signal)
+                eval_results[evaluation_index] = "PASSED"
+            else:
+                experiment_filtered += 1
+                if filter_reason == "MIN_VOLUME_DRY_SCORE":
+                    experiment_volume_filtered += 1
+                elif filter_reason in {"MIN_TOTAL_SCORE", "MIN_PRICE_STABLE_SCORE"}:
+                    experiment_score_filtered += 1
+                eval_results[evaluation_index] = "SCORE_BELOW_THRESHOLD"
         elif evaluation.status_reason == "DOWNTREND_FILTERED":
             trend_skipped += 1
             eval_results[evaluation_index] = "DOWNTREND_FILTERED"
@@ -530,18 +556,42 @@ def run_strategy2_stock_backtest(
             eval_results[evaluation_index] = "RISK_RATIO_TOO_HIGH"
 
     # 合并连续信号 + 执行模型 + 未来表现
-    opportunities = merge_consecutive_signals(signals, eval_results)
+    opportunities = merge_consecutive_signals(
+        experiment_passed_signals if experiment_enabled else signals,
+        eval_results,
+    )
     for opp in opportunities:
+        if opp.signal_ids:
+            first_signal_idx = opp.signal_ids[0]
+            first_signal = next((s for s in signals if s.evaluation_index == first_signal_idx), None)
+            if first_signal is not None:
+                opp.opportunity_type = first_signal.opportunity_type
+        if experiment_enabled and not apply_entry_confirmation(opp, ohlc_data, date_to_index, experiment):
+            entry_confirmation_failed += 1
+            for h in HORIZONS:
+                opp.horizons[str(h)] = HorizonPerformance(horizon_days=h, result="UNOBSERVED")
+            continue
+
         buy_zone_high = float("inf")
         if opp.evaluation_snapshot:
             buy_zone_high = opp.evaluation_snapshot.get("buy_zone_high", float("inf"))
-        calculate_execution_outcome(opp, ohlc_data, date_to_index, buy_zone_high)
+        if experiment_enabled and opp.entry_confirmation_date:
+            original_signal_date = opp.first_detected_date
+            opp.first_detected_date = opp.entry_confirmation_date
+            try:
+                calculate_execution_outcome(opp, ohlc_data, date_to_index, buy_zone_high)
+            finally:
+                opp.first_detected_date = original_signal_date
+        else:
+            calculate_execution_outcome(opp, ohlc_data, date_to_index, buy_zone_high)
+        if experiment_enabled and apply_time_exit(opp, ohlc_data, date_to_index, experiment):
+            time_exit_count += 1
 
         # 计算各周期 horizon（仅当成功入场时）
         if opp.entry_price > 0:
-            signal_idx = date_to_index.get(opp.first_detected_date)
-            if signal_idx is not None:
-                future = ohlc_data[signal_idx + 1:]
+            entry_idx = date_to_index.get(opp.entry_date)
+            if entry_idx is not None:
+                future = ohlc_data[entry_idx:]
                 for h in HORIZONS:
                     opp.horizons[str(h)] = calculate_horizon_performance(
                         future, opp.entry_price, opp.stop_loss, h,
@@ -569,6 +619,11 @@ def run_strategy2_stock_backtest(
         "evaluation_errors": evaluation_errors,
         "raw_signals_count": len(signals),
         "opportunities_count": len(opportunities),
+        "experiment_filtered_days": experiment_filtered,
+        "experiment_volume_filtered_days": experiment_volume_filtered,
+        "experiment_score_filtered_days": experiment_score_filtered,
+        "entry_confirmation_failed_count": entry_confirmation_failed,
+        "time_exit_count": time_exit_count,
         "available_days": len(ohlc_data),
         "required_days": min_required,
         "earliest_date": ohlc_data[0]["date"] if ohlc_data else "",
@@ -604,6 +659,13 @@ def opps_to_dicts(opportunities: list[BacktestOpportunity]) -> list[dict]:
             "mark_to_market_end_return": o.mark_to_market_end_return,
             "holding_days": o.holding_days,
             "available_forward_days": o.available_forward_days,
+            "opportunity_type": o.opportunity_type,
+            "entry_confirmation_type": o.entry_confirmation_type,
+            "entry_confirmation_date": o.entry_confirmation_date,
+            "entry_confirmation_price": o.entry_confirmation_price,
+            "entry_confirmation_status": o.entry_confirmation_status,
+            "time_exit_days": o.time_exit_days,
+            "market_context_json": json.dumps(o.market_context or {}, ensure_ascii=False),
             "evaluation_snapshot": json.dumps(o.evaluation_snapshot) if o.evaluation_snapshot else "{}",
             "horizon_3": json.dumps(o.horizons.get("3", HorizonPerformance(horizon_days=3)).to_dict()) if "3" in o.horizons else "{}",
             "horizon_5": json.dumps(o.horizons.get("5", HorizonPerformance(horizon_days=5)).to_dict()) if "5" in o.horizons else "{}",

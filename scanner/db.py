@@ -1281,6 +1281,33 @@ def _ensure_strategy2_backtest_tables(conn: sqlite3.Connection):
     _ensure_column(conn, "strategy2_backtest_tasks", "raw_signals_count", "INTEGER DEFAULT 0")
     _ensure_column(conn, "strategy2_backtest_tasks", "evaluation_error_days", "INTEGER DEFAULT 0")
     _ensure_column(conn, "strategy2_backtest_tasks", "summary_json", "TEXT")
+    _ensure_column(conn, "strategy2_backtest_tasks", "experiment_snapshot", "TEXT")
+    _ensure_column(conn, "strategy2_backtest_tasks", "baseline_task_id", "TEXT")
+    _ensure_column(conn, "strategy2_backtest_tasks", "comparison_summary_json", "TEXT")
+    _ensure_column(conn, "strategy2_backtest_tasks", "experiment_filtered_days", "INTEGER DEFAULT 0")
+    _ensure_column(conn, "strategy2_backtest_tasks", "experiment_volume_filtered_days", "INTEGER DEFAULT 0")
+    _ensure_column(conn, "strategy2_backtest_tasks", "experiment_score_filtered_days", "INTEGER DEFAULT 0")
+    _ensure_column(conn, "strategy2_backtest_tasks", "entry_confirmation_failed_count", "INTEGER DEFAULT 0")
+    _ensure_column(conn, "strategy2_backtest_tasks", "time_exit_count", "INTEGER DEFAULT 0")
+    _ensure_column(conn, "strategy2_backtest_signals", "baseline_passed", "INTEGER DEFAULT 1")
+    _ensure_column(conn, "strategy2_backtest_signals", "experiment_passed", "INTEGER DEFAULT 1")
+    _ensure_column(conn, "strategy2_backtest_signals", "experiment_filter_reason", "TEXT")
+    _ensure_column(conn, "strategy2_backtest_signals", "opportunity_type", "TEXT")
+    _ensure_column(conn, "strategy2_backtest_opportunities", "opportunity_type", "TEXT")
+    _ensure_column(conn, "strategy2_backtest_opportunities", "entry_confirmation_type", "TEXT")
+    _ensure_column(conn, "strategy2_backtest_opportunities", "entry_confirmation_date", "TEXT")
+    _ensure_column(conn, "strategy2_backtest_opportunities", "entry_confirmation_price", "REAL")
+    _ensure_column(conn, "strategy2_backtest_opportunities", "entry_confirmation_status", "TEXT")
+    _ensure_column(conn, "strategy2_backtest_opportunities", "time_exit_days", "INTEGER")
+    _ensure_column(conn, "strategy2_backtest_opportunities", "market_context_json", "TEXT")
+    _ensure_column(conn, "strategy2_backtest_task_stocks", "experiment_filtered_days", "INTEGER DEFAULT 0")
+    _ensure_column(conn, "strategy2_backtest_task_stocks", "experiment_volume_filtered_days", "INTEGER DEFAULT 0")
+    _ensure_column(conn, "strategy2_backtest_task_stocks", "experiment_score_filtered_days", "INTEGER DEFAULT 0")
+    _ensure_column(conn, "strategy2_backtest_task_stocks", "entry_confirmation_failed_count", "INTEGER DEFAULT 0")
+    _ensure_column(conn, "strategy2_backtest_task_stocks", "time_exit_count", "INTEGER DEFAULT 0")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_s2_bt_task_baseline ON strategy2_backtest_tasks(baseline_task_id)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_s2_bt_signal_experiment ON strategy2_backtest_signals(task_id, experiment_passed, experiment_filter_reason)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_s2_bt_opp_type ON strategy2_backtest_opportunities(task_id, opportunity_type)")
 
     # Mark old tasks as untrusted
     conn.execute(
@@ -1378,6 +1405,20 @@ def create_strategy2_backtest_task(task_id: str, payload: dict, config_snapshot:
          STRATEGY2_BACKTEST_ENGINE_VERSION,
          STRATEGY2_STRATEGY_ENGINE_VERSION),
     )
+    updates = {}
+    experiment_snapshot = payload.get("experiment_snapshot")
+    if experiment_snapshot is None and payload.get("experiment") is not None:
+        experiment_snapshot = payload.get("experiment")
+    if experiment_snapshot is not None:
+        updates["experiment_snapshot"] = (
+            experiment_snapshot if isinstance(experiment_snapshot, str)
+            else json.dumps(experiment_snapshot, ensure_ascii=False)
+        )
+    if payload.get("baselineTaskId"):
+        updates["baseline_task_id"] = payload.get("baselineTaskId")
+    if updates:
+        sets = ", ".join(f"{key}=?" for key in updates)
+        conn.execute(f"UPDATE strategy2_backtest_tasks SET {sets} WHERE id=?", list(updates.values()) + [task_id])
     conn.commit()
 
 
@@ -1436,17 +1477,25 @@ def save_strategy2_backtest_signal(task_id: str, signal):
                (task_id, code, name, evaluation_date, evaluation_index,
                 score, level, current_close, stop_loss, risk_ratio,
                 volume_dry_score, price_stable_score, trend_type, trend_evidence_score,
-                evaluation_snapshot)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                evaluation_snapshot, baseline_passed, experiment_passed,
+                experiment_filter_reason, opportunity_type)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                ON CONFLICT(task_id, code, evaluation_date) DO UPDATE SET
                 score=excluded.score, level=excluded.level,
                 current_close=excluded.current_close, stop_loss=excluded.stop_loss,
-                risk_ratio=excluded.risk_ratio""",
+                risk_ratio=excluded.risk_ratio,
+                experiment_passed=excluded.experiment_passed,
+                experiment_filter_reason=excluded.experiment_filter_reason,
+                opportunity_type=excluded.opportunity_type""",
             (task_id, signal.code, signal.name, signal.evaluation_date,
              signal.evaluation_index, signal.score, signal.level,
              signal.current_close, signal.stop_loss, signal.risk_ratio,
              signal.volume_dry_score, signal.price_stable_score,
-             signal.trend_type, signal.trend_evidence_score, snapshot_json),
+             signal.trend_type, signal.trend_evidence_score, snapshot_json,
+             1 if getattr(signal, "baseline_passed", True) else 0,
+             1 if getattr(signal, "experiment_passed", True) else 0,
+             getattr(signal, "experiment_filter_reason", ""),
+             getattr(signal, "opportunity_type", "")),
         )
     else:
         # 兼容 dict
@@ -1455,8 +1504,9 @@ def save_strategy2_backtest_signal(task_id: str, signal):
                (task_id, code, name, evaluation_date, evaluation_index,
                 score, level, current_close, stop_loss, risk_ratio,
                 volume_dry_score, price_stable_score, trend_type, trend_evidence_score,
-                evaluation_snapshot)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                evaluation_snapshot, baseline_passed, experiment_passed,
+                experiment_filter_reason, opportunity_type)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                ON CONFLICT(task_id, code, evaluation_date) DO NOTHING""",
             (task_id, signal.get("code"), signal.get("name"),
              signal.get("evaluation_date"), signal.get("evaluation_index", 0),
@@ -1465,7 +1515,11 @@ def save_strategy2_backtest_signal(task_id: str, signal):
              signal.get("risk_ratio", 0.0), signal.get("volume_dry_score", 0),
              signal.get("price_stable_score", 0), signal.get("trend_type", ""),
              signal.get("trend_evidence_score", 0),
-             json.dumps(signal.get("evaluation_snapshot", {}), ensure_ascii=False)),
+             json.dumps(signal.get("evaluation_snapshot", {}), ensure_ascii=False),
+             1 if signal.get("baseline_passed", True) else 0,
+             1 if signal.get("experiment_passed", True) else 0,
+             signal.get("experiment_filter_reason", ""),
+             signal.get("opportunity_type", "")),
         )
     conn.commit()
 
@@ -1480,8 +1534,11 @@ def save_strategy2_backtest_opportunity(task_id: str, opp: dict):
             evaluation_snapshot, horizon_3, horizon_5, horizon_10, horizon_20,
             signal_count, execution_model, entry_date, entry_price,
             exit_date, exit_price, exit_reason, realized_return,
-            mark_to_market_end_return, holding_days, available_forward_days)
-           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            mark_to_market_end_return, holding_days, available_forward_days,
+            opportunity_type, entry_confirmation_type, entry_confirmation_date,
+            entry_confirmation_price, entry_confirmation_status, time_exit_days,
+            market_context_json)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
         (task_id, opp["code"], opp.get("name", ""), opp["first_detected_date"],
          opp["last_detected_date"], opp["consecutive_hit_days"],
          opp["first_score"], opp["max_score"], opp.get("level", ""),
@@ -1495,7 +1552,14 @@ def save_strategy2_backtest_opportunity(task_id: str, opp: dict):
          opp.get("entry_price", 0), opp.get("exit_date", ""),
          opp.get("exit_price", 0), opp.get("exit_reason", ""),
          opp.get("realized_return", 0), opp.get("mark_to_market_end_return", 0),
-         opp.get("holding_days", 0), opp.get("available_forward_days", 0)),
+         opp.get("holding_days", 0), opp.get("available_forward_days", 0),
+         opp.get("opportunity_type", ""),
+         opp.get("entry_confirmation_type", ""),
+         opp.get("entry_confirmation_date", ""),
+         opp.get("entry_confirmation_price", 0),
+         opp.get("entry_confirmation_status", ""),
+         opp.get("time_exit_days"),
+         opp.get("market_context_json", "{}")),
     )
     conn.commit()
 
@@ -1620,6 +1684,19 @@ def build_strategy2_backtest_summary(task_id: str) -> dict:
         (task_id,),
     ).fetchone()
     funnel = dict(zip(funnel_columns, funnel_row))
+    experiment_columns = [
+        "experiment_filtered_days",
+        "experiment_volume_filtered_days",
+        "experiment_score_filtered_days",
+        "entry_confirmation_failed_count",
+        "time_exit_count",
+    ]
+    experiment_row = conn.execute(
+        "SELECT " + ", ".join(f"COALESCE(SUM({column}), 0)" for column in experiment_columns)
+        + " FROM strategy2_backtest_task_stocks WHERE task_id=?",
+        (task_id,),
+    ).fetchone()
+    experiment_funnel = dict(zip(experiment_columns, experiment_row))
 
     return {
         "horizon_stats": horizon_stats,
@@ -1634,6 +1711,7 @@ def build_strategy2_backtest_summary(task_id: str) -> dict:
             "avg_holding_days": round(_st.mean(holding_days), 1) if holding_days else 0,
         },
         "funnel": funnel,
+        "experiment_funnel": experiment_funnel,
         "integrity": {},
     }
 
@@ -1730,12 +1808,17 @@ def replace_strategy2_stock_backtest_result(
                        (task_id, code, name, evaluation_date, evaluation_index,
                         score, level, current_close, stop_loss, risk_ratio,
                         volume_dry_score, price_stable_score, trend_type, trend_evidence_score,
-                        evaluation_snapshot)
-                       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                        evaluation_snapshot, baseline_passed, experiment_passed,
+                        experiment_filter_reason, opportunity_type)
+                       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                     (task_id, code, name, edate, sig.evaluation_index, sig.score,
                      sig.level, sig.current_close, sig.stop_loss, sig.risk_ratio,
                      sig.volume_dry_score, sig.price_stable_score, sig.trend_type,
-                     sig.trend_evidence_score, snapshot),
+                     sig.trend_evidence_score, snapshot,
+                     1 if getattr(sig, "baseline_passed", True) else 0,
+                     1 if getattr(sig, "experiment_passed", True) else 0,
+                     getattr(sig, "experiment_filter_reason", ""),
+                     getattr(sig, "opportunity_type", "")),
                 )
                 signal_id_by_date[edate] = c.lastrowid
             else:
@@ -1744,14 +1827,19 @@ def replace_strategy2_stock_backtest_result(
                     """INSERT INTO strategy2_backtest_signals
                        (task_id, code, name, evaluation_date, evaluation_index, score, level,
                         current_close, stop_loss, risk_ratio, volume_dry_score,
-                        price_stable_score, trend_type, trend_evidence_score, evaluation_snapshot)
-                       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                        price_stable_score, trend_type, trend_evidence_score, evaluation_snapshot,
+                        baseline_passed, experiment_passed, experiment_filter_reason, opportunity_type)
+                       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                     (task_id, code, name, edate, sig.get("evaluation_index", 0),
                      sig.get("score", 0), sig.get("level", ""), sig.get("current_close", 0),
                      sig.get("stop_loss", 0), sig.get("risk_ratio", 0), sig.get("volume_dry_score", 0),
                      sig.get("price_stable_score", 0), sig.get("trend_type", ""),
                      sig.get("trend_evidence_score", 0),
-                     json.dumps(sig.get("evaluation_snapshot", {}), ensure_ascii=False)),
+                     json.dumps(sig.get("evaluation_snapshot", {}), ensure_ascii=False),
+                     1 if sig.get("baseline_passed", True) else 0,
+                     1 if sig.get("experiment_passed", True) else 0,
+                     sig.get("experiment_filter_reason", ""),
+                     sig.get("opportunity_type", "")),
                 )
                 signal_id_by_date[edate] = c.lastrowid
 
@@ -1768,8 +1856,11 @@ def replace_strategy2_stock_backtest_result(
                     signal_count, execution_model, entry_date, entry_price,
                     exit_date, exit_price, exit_reason, realized_return,
                     mark_to_market_end_return, holding_days, available_forward_days,
-                    first_signal_id, last_signal_id)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                    first_signal_id, last_signal_id, opportunity_type,
+                    entry_confirmation_type, entry_confirmation_date,
+                    entry_confirmation_price, entry_confirmation_status,
+                    time_exit_days, market_context_json)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (task_id, code, name, opp["first_detected_date"], opp["last_detected_date"],
                  opp["consecutive_hit_days"], opp["first_score"], opp["max_score"],
                  opp.get("level", ""), opp["entry_close"], opp["stop_loss"],
@@ -1782,7 +1873,14 @@ def replace_strategy2_stock_backtest_result(
                  opp.get("exit_date", ""), opp.get("exit_price", 0),
                  opp.get("exit_reason", ""), opp.get("realized_return", 0),
                  opp.get("mark_to_market_end_return", 0), opp.get("holding_days", 0),
-                 opp.get("available_forward_days", 0), first_sid, last_sid),
+                 opp.get("available_forward_days", 0), first_sid, last_sid,
+                 opp.get("opportunity_type", ""),
+                 opp.get("entry_confirmation_type", ""),
+                 opp.get("entry_confirmation_date", ""),
+                 opp.get("entry_confirmation_price", 0),
+                 opp.get("entry_confirmation_status", ""),
+                 opp.get("time_exit_days"),
+                 opp.get("market_context_json", "{}")),
             )
 
         # 更新股票终态
@@ -1805,6 +1903,11 @@ def replace_strategy2_stock_backtest_result(
             "required_days": result.get("required_days", 250),
             "earliest_date": result.get("earliest_date"),
             "latest_date": result.get("latest_date"),
+            "experiment_filtered_days": result.get("experiment_filtered_days", 0),
+            "experiment_volume_filtered_days": result.get("experiment_volume_filtered_days", 0),
+            "experiment_score_filtered_days": result.get("experiment_score_filtered_days", 0),
+            "entry_confirmation_failed_count": result.get("entry_confirmation_failed_count", 0),
+            "time_exit_count": result.get("time_exit_count", 0),
             "started_at": result.get("started_at"),
             "finished_at": result.get("finished_at"),
         }.items() if v is not None}
@@ -1839,6 +1942,83 @@ def get_strategy2_backtest_opportunities(
         "PRAGMA table_info(strategy2_backtest_opportunities)"
     )]
     return [dict(zip(cols, r)) for r in rows]
+
+
+def summarize_strategy2_backtest_for_comparison(task_id: str) -> dict:
+    """Return compact execution metrics for baseline/experiment comparison."""
+    conn = get_conn()
+    row = conn.execute(
+        "SELECT COUNT(*), "
+        "SUM(CASE WHEN COALESCE(entry_price,0)>0 THEN 1 ELSE 0 END), "
+        "SUM(CASE WHEN exit_reason='TARGET' THEN 1 ELSE 0 END), "
+        "SUM(CASE WHEN exit_reason='STOP' THEN 1 ELSE 0 END), "
+        "AVG(CASE WHEN COALESCE(entry_price,0)>0 THEN COALESCE(realized_return,0) END) "
+        "FROM strategy2_backtest_opportunities WHERE task_id=?",
+        (task_id,),
+    ).fetchone()
+    opportunities, entered, target, stop, avg_return = row
+    opportunities = opportunities or 0
+    entered = entered or 0
+    target = target or 0
+    stop = stop or 0
+    return {
+        "opportunities": opportunities,
+        "entered": entered,
+        "target": target,
+        "stop": stop,
+        "successRate": round(target / entered, 6) if entered else 0.0,
+        "stopRate": round(stop / entered, 6) if entered else 0.0,
+        "averageRealizedReturn": round(avg_return or 0.0, 6),
+    }
+
+
+def compare_strategy2_backtest_tasks(experiment_task_id: str, baseline_task_id: str) -> dict:
+    """Compare two completed Strategy2 backtest tasks and explain incompatibility."""
+    baseline = get_strategy2_backtest_task(baseline_task_id)
+    experiment = get_strategy2_backtest_task(experiment_task_id)
+    if not baseline or not experiment:
+        return {
+            "comparable": False,
+            "baselineTaskId": baseline_task_id,
+            "experimentTaskId": experiment_task_id,
+            "reasons": ["task_not_found"],
+        }
+
+    checks = [
+        "requested_start_date",
+        "requested_end_date",
+        "requested_codes",
+        "max_stocks",
+        "execution_model",
+        "backtest_engine_version",
+        "strategy_engine_version",
+        "data_revision_version",
+        "data_revision_id",
+    ]
+    reasons = [key for key in checks if (baseline.get(key) or "") != (experiment.get(key) or "")]
+    if baseline.get("credibility_status") != "TRUSTED_BASELINE":
+        reasons.append("baseline_credibility_status")
+    if experiment.get("credibility_status") != "EXPERIMENTAL":
+        reasons.append("experiment_credibility_status")
+
+    base_summary = summarize_strategy2_backtest_for_comparison(baseline_task_id)
+    exp_summary = summarize_strategy2_backtest_for_comparison(experiment_task_id)
+    delta = {
+        key: round(exp_summary.get(key, 0) - base_summary.get(key, 0), 6)
+        for key in {
+            "opportunities", "entered", "target", "stop",
+            "successRate", "stopRate", "averageRealizedReturn",
+        }
+    }
+    return {
+        "comparable": len(reasons) == 0,
+        "baselineTaskId": baseline_task_id,
+        "experimentTaskId": experiment_task_id,
+        "reasons": reasons,
+        "baseline": base_summary,
+        "experiment": exp_summary,
+        "delta": delta,
+    }
 
 
 def save_strategy2_backtest_insufficient_stocks(task_id: str, stocks: list[dict]):

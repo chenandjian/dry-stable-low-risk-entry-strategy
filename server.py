@@ -1416,6 +1416,14 @@ async def start_strategy2_backtest(payload: dict):
     if start_date and end_date and start_date > end_date:
         return JSONResponse({"error": "INVALID_PARAM", "message": "startDate must be <= endDate"}, status_code=422)
 
+    from strategy2.backtest_experiments import normalize_experiment_config, is_experiment_enabled
+    try:
+        experiment_snapshot = normalize_experiment_config(payload.get("experiment"))
+    except ValueError as exc:
+        return JSONResponse({"error": "INVALID_EXPERIMENT", "message": str(exc)}, status_code=422)
+    payload = {**payload, "experiment": experiment_snapshot, "experiment_snapshot": experiment_snapshot}
+    experiment_enabled = is_experiment_enabled(experiment_snapshot)
+
     # 检查数据库
     conn = db.get_conn()
     has_data = conn.execute("SELECT COUNT(*) FROM daily_ohlc").fetchone()[0]
@@ -1450,7 +1458,7 @@ async def start_strategy2_backtest(payload: dict):
     db.update_strategy2_backtest_task(task_id, status="running",
         backtest_engine_version=STRATEGY2_BACKTEST_ENGINE_VERSION,
         strategy_engine_version=STRATEGY2_STRATEGY_ENGINE_VERSION,
-        credibility_status="RUNNING_UNVERIFIED",
+        credibility_status="EXPERIMENTAL" if experiment_enabled else "RUNNING_UNVERIFIED",
         execution_model=payload.get("executionModel", "NEXT_OPEN"),
         data_snapshot_date=data_snapshot_date)
 
@@ -1476,8 +1484,35 @@ async def start_strategy2_backtest(payload: dict):
     )
     return {
         "task_id": task_id, "status": "started",
+        "credibilityStatus": "EXPERIMENTAL" if experiment_enabled else "RUNNING_UNVERIFIED",
+        "baselineTaskId": payload.get("baselineTaskId"),
         "maxStocks": payload.get("maxStocks", 200),
         "message": "回测任务已启动，只使用本地数据库数据",
+    }
+
+
+@app.post("/api/strategy2/backtests/experiments/preview")
+async def strategy2_backtest_experiment_preview(payload: dict):
+    """Validate and normalize a Strategy2 experiment payload."""
+    config = load_config()
+    db_path = config.get("data", {}).get("database_path", "data/cuphandle.db")
+    db.init_db(db_path)
+    from strategy2.backtest_experiments import normalize_experiment_config, is_experiment_enabled
+    try:
+        normalized = normalize_experiment_config(payload)
+    except ValueError as exc:
+        return JSONResponse(
+            {"valid": False, "error": "INVALID_EXPERIMENT", "message": str(exc)},
+            status_code=422,
+        )
+    return {
+        "valid": True,
+        "normalizedExperiment": normalized,
+        "credibilityStatus": "EXPERIMENTAL" if is_experiment_enabled(normalized) else "RUNNING_UNVERIFIED",
+        "warnings": [
+            "实验任务不会影响正式扫描规则",
+            "实验结论需要与可信基线对比",
+        ],
     }
 
 @app.get("/api/strategy2/backtests/status")
@@ -1500,6 +1535,24 @@ async def strategy2_backtests(page: int = 1, page_size: int = 20, status: str = 
         t.pop("config_snapshot", None)
         t.pop("summary_json", None)
     return {"tasks": tasks, "total": total, "page": max(page, 1), "page_size": min(max(page_size, 1), 100)}
+
+
+@app.get("/api/strategy2/backtests/{task_id}/comparison")
+async def strategy2_backtest_comparison(task_id: str, baselineTaskId: str):
+    """Compare an EXPERIMENTAL task with a trusted baseline task."""
+    config = load_config()
+    db_path = config.get("data", {}).get("database_path", "data/cuphandle.db")
+    db.init_db(db_path)
+    result = db.compare_strategy2_backtest_tasks(task_id, baselineTaskId)
+    if "task_not_found" in result.get("reasons", []):
+        return JSONResponse(result, status_code=404)
+    if result.get("comparable"):
+        db.update_strategy2_backtest_task(
+            task_id,
+            baseline_task_id=baselineTaskId,
+            comparison_summary_json=json.dumps(result, ensure_ascii=False),
+        )
+    return result
 
 
 @app.get("/api/strategy2/backtests/{task_id}")

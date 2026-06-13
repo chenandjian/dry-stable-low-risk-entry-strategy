@@ -43,6 +43,10 @@ class BacktestSignal:
     trend_type: str = ""
     trend_evidence_score: int = 0
     evaluation_snapshot: dict | None = None
+    baseline_passed: bool = True
+    experiment_passed: bool = True
+    experiment_filter_reason: str = ""
+    opportunity_type: str = ""
 
 
 @dataclass
@@ -77,6 +81,13 @@ class BacktestOpportunity:
     mark_to_market_end_return: float = 0.0
     holding_days: int = 0
     available_forward_days: int = 0
+    opportunity_type: str = ""
+    entry_confirmation_type: str = ""
+    entry_confirmation_date: str = ""
+    entry_confirmation_price: float = 0.0
+    entry_confirmation_status: str = ""
+    time_exit_days: int | None = None
+    market_context: dict | None = None
 
 
 @dataclass

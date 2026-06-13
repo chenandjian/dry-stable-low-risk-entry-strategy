@@ -339,3 +339,25 @@ b262c8b feat(strategy2): add scorer, rejection rules, and risk calculator
   - Offline backend full suite: **528 passed, 1 existing dateutil deprecation warning**.
   - Frontend Vitest: **29 passed**.
   - Frontend production build, Python compileall, and `git diff --check`: **passed**.
+
+## 2026-06-13 (Strategy2 Phase 2 Experiment Layer Development)
+
+- Implemented Strategy2 Phase 2 backtest experiment layer without changing formal Strategy2 scan rules or `config.yaml`.
+- Added `strategy2/backtest_experiments.py` for experiment config normalization, post-signal filters, opportunity type labels, entry confirmation, and time-exit handling.
+- Wired `experiment` payload through Strategy2 backtest start, service execution, per-stock backtest, DB persistence, task summaries, preview API, and baseline comparison API.
+- Added compatible SQLite migrations for `experiment_snapshot`, `baseline_task_id`, comparison summary, filtered signal traceability, entry confirmation, time-exit, opportunity type, and experiment funnel counters.
+- Experimental tasks now freeze normalized `experiment_snapshot` and finalize as `EXPERIMENTAL`; disabled/missing experiments preserve Phase 1 baseline behavior.
+- Filtered baseline-passed signals are retained in `strategy2_backtest_signals` with `experiment_passed=0` and `experiment_filter_reason`.
+- Added Strategy2Backtest UI controls for experiment mode, score thresholds, time exit, entry confirmation, baseline task ID, EXPERIMENTAL badge, experiment snapshot, experiment funnel, and comparison summary.
+- Reviewer fixes during this session:
+  - Rolled up experiment funnel counts to task fields and `summary_json`.
+  - Corrected horizon performance to start from actual entry date after entry confirmation.
+  - Corrected time-exit precedence so only earlier TARGET/STOP overrides time exit; later TARGET/STOP is replaced by `TIME_EXIT`.
+  - Added experiment fields to legacy save helpers to avoid traceability loss outside the main replace path.
+- Verification:
+  - Phase 2 backend tests: **22 passed**.
+  - Strategy2 backtester + medium/high regression set: **62 passed**.
+  - Frontend Vitest: **31 passed**.
+  - Frontend production build: **passed**.
+  - Python compileall: **passed**.
+- Not performed in this development step: full-market trusted baseline run, experiment task batch run, or formal Strategy2 parameter upgrade. Those require operational backtest evidence from completed comparable tasks.

@@ -16,6 +16,37 @@
       设 0 或清空则全市场回测（约 5000 只，~50 万次判断，需数分钟）。
     </div>
 
+    <div class="panel experiment-panel">
+      <label class="switch-row">
+        <input type="checkbox" v-model="experimentEnabled">
+        <span>启用策略实验</span>
+        <span v-if="experimentEnabled" class="badge experimental">EXPERIMENTAL</span>
+      </label>
+      <div class="params-hint">实验任务仅用于回测评估，不会修改策略2正式扫描规则。</div>
+      <div v-if="experimentEnabled" class="experiment-grid">
+        <label>最低总分 <input type="number" v-model.number="experimentForm.minimumTotalScore" min="0" max="100" placeholder="空=沿用基线"></label>
+        <label>最低量干分 <input type="number" v-model.number="experimentForm.minimumVolumeDryScore" min="0" max="100" placeholder="如 40"></label>
+        <label>最低价稳分 <input type="number" v-model.number="experimentForm.minimumPriceStableScore" min="0" max="100" placeholder="空=不限"></label>
+        <label>时间退出
+          <select v-model="experimentForm.timeExitDays">
+            <option :value="null">关闭</option>
+            <option :value="5">5日</option>
+            <option :value="10">10日</option>
+          </select>
+        </label>
+        <label>启动确认
+          <select v-model="experimentForm.entryConfirmationType">
+            <option value="NONE">不启用</option>
+            <option value="BREAK_RECENT_5D_HIGH">突破近5日高点</option>
+            <option value="CLOSE_ABOVE_MA20">收盘站上MA20</option>
+            <option value="BREAK_HIGH_WITH_MODERATE_VOLUME">温和放量突破</option>
+          </select>
+        </label>
+        <label>最大等待天数 <input type="number" v-model.number="experimentForm.maxWaitDays" min="1" max="10"></label>
+        <label>基线任务ID <input type="text" v-model="baselineTaskId" placeholder="可选，用于对比"></label>
+      </div>
+    </div>
+
     <!-- Error -->
     <div v-if="error" class="error-msg">{{ error }}</div>
 
@@ -36,12 +67,31 @@
       <h3>可信度与版本</h3>
       <div class="summary-grid">
         <div class="metric"><span class="label">可信度</span><span class="value small" :class="credibilityClass">{{ task.credibility_status || '--' }}</span></div>
+        <div class="metric" v-if="isExperimentalTask"><span class="label">任务类型</span><span class="value small experimental">EXPERIMENTAL</span></div>
         <div class="metric"><span class="label">回测引擎</span><span class="value small">{{ task.backtest_engine_version || '--' }}</span></div>
         <div class="metric"><span class="label">策略引擎</span><span class="value small">{{ task.strategy_engine_version || '--' }}</span></div>
         <div class="metric"><span class="label">数据版本算法</span><span class="value small">{{ task.data_revision_version || '--' }}</span></div>
         <div class="metric"><span class="label">数据指纹</span><span class="value small code">{{ shortRevision }}</span></div>
         <div class="metric"><span class="label">执行模型</span><span class="value small">{{ task.execution_model || '--' }}</span></div>
         <div class="metric"><span class="label">数据快照</span><span class="value small">{{ task.data_snapshot_date || '--' }}</span></div>
+      </div>
+    </div>
+
+    <div class="panel" v-if="isExperimentalTask">
+      <h3>实验配置快照</h3>
+      <div class="summary-grid">
+        <div class="metric"><span class="label">最低总分</span><span class="value small">{{ experimentSnapshot.minimum_total_score ?? '沿用' }}</span></div>
+        <div class="metric"><span class="label">最低量干分</span><span class="value small">{{ experimentSnapshot.minimum_volume_dry_score ?? '沿用' }}</span></div>
+        <div class="metric"><span class="label">最低价稳分</span><span class="value small">{{ experimentSnapshot.minimum_price_stable_score ?? '沿用' }}</span></div>
+        <div class="metric"><span class="label">时间退出</span><span class="value small">{{ experimentSnapshot.time_exit_days ? experimentSnapshot.time_exit_days + '日' : '关闭' }}</span></div>
+        <div class="metric"><span class="label">启动确认</span><span class="value small">{{ experimentSnapshot.entry_confirmation?.type || 'NONE' }}</span></div>
+        <div class="metric"><span class="label">基线任务</span><span class="value small code">{{ task.baseline_task_id || baselineTaskId || '暂无' }}</span></div>
+      </div>
+      <div v-if="comparison" class="comparison-box">
+        <strong>基线对比：</strong>
+        <span :class="comparison.comparable ? 'green' : 'red'">{{ comparison.comparable ? '可比较' : '不可比较' }}</span>
+        <span v-if="comparison.reasons?.length">原因：{{ comparison.reasons.join(', ') }}</span>
+        <span v-if="comparison.delta">平均收益差：{{ fmtPct(comparison.delta.averageRealizedReturn) }}</span>
       </div>
     </div>
 
@@ -70,6 +120,22 @@
               <td>{{ funnel.score_failed_days }}</td><td>{{ funnel.risk_failed_days }}</td>
               <td>{{ funnel.invalid_data_days }}</td><td>{{ funnel.evaluation_error_days }}</td>
               <td>{{ funnel.raw_signals_count }}</td><td>{{ funnel.opportunities_count }}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div v-if="experimentFunnel" class="horizon-table">
+        <h4>实验漏斗</h4>
+        <table>
+          <thead><tr><th>实验过滤</th><th>量干过滤</th><th>分数过滤</th><th>未确认入场</th><th>时间退出</th></tr></thead>
+          <tbody>
+            <tr>
+              <td>{{ experimentFunnel.experiment_filtered_days || 0 }}</td>
+              <td>{{ experimentFunnel.experiment_volume_filtered_days || 0 }}</td>
+              <td>{{ experimentFunnel.experiment_score_filtered_days || 0 }}</td>
+              <td>{{ experimentFunnel.entry_confirmation_failed_count || 0 }}</td>
+              <td>{{ experimentFunnel.time_exit_count || 0 }}</td>
             </tr>
           </tbody>
         </table>
@@ -216,6 +282,18 @@ export default {
       oppsTotal: 0, oppsHasMore: false, oppPage: 1, oppLimit: 100,
       activeTaskId: null, actionPending: false, actionError: '',
       taskPage: 1, taskPageSize: 20, taskTotal: 0, taskStatusFilter: '',
+      experimentEnabled: false,
+      baselineTaskId: '',
+      experimentForm: {
+        minimumTotalScore: null,
+        minimumVolumeDryScore: null,
+        minimumPriceStableScore: null,
+        timeExitDays: null,
+        entryConfirmationType: 'NONE',
+        maxWaitDays: 5,
+        moderateVolumeMaxRatio: 1.8,
+      },
+      comparison: null,
     }
   },
   computed: {
@@ -253,6 +331,16 @@ export default {
       return 'red'
     },
     shortRevision() { return this.task?.data_revision_id?.slice(0, 12) || '--' },
+    isExperimentalTask() { return this.task?.credibility_status === 'EXPERIMENTAL' || this.experimentSnapshot.enabled },
+    experimentSnapshot() {
+      const raw = this.task?.experiment_snapshot
+      if (!raw) return {}
+      if (typeof raw === 'object') return raw
+      try { return JSON.parse(raw) } catch { return {} }
+    },
+    experimentFunnel() {
+      return this.task?.summary?.experiment_funnel || this.task?.summary?.funnel || null
+    },
   },
   async mounted() {
     await this.loadTasks()
@@ -277,6 +365,8 @@ export default {
       if (maxVal === '' || maxVal == null || Number(maxVal) === 0) maxVal = null
       const payload = { startDate: this.startDate, endDate: this.endDate, maxStocks: maxVal }
       if (this.codesInput.trim()) payload.codes = this.codesInput.split(',').map(s => s.trim()).filter(Boolean)
+      payload.experiment = this.buildExperimentPayload()
+      if (this.baselineTaskId.trim()) payload.baselineTaskId = this.baselineTaskId.trim()
       const res = await api.startStrategy2Backtest(payload)
       if (res.ok) {
         this.running = true; this.activeTaskId = res.task_id; this.task = { id: res.task_id, status: 'running' }
@@ -315,6 +405,11 @@ export default {
     async loadTask(taskId) {
       const api = useApi()
       this.task = await api.getStrategy2BacktestTask(taskId)
+      this.comparison = null
+      const baselineId = this.task?.baseline_task_id || this.baselineTaskId
+      if ((this.task?.credibility_status === 'EXPERIMENTAL' || this.experimentSnapshot.enabled) && baselineId) {
+        this.comparison = await api.getStrategy2BacktestComparison(taskId, baselineId)
+      }
       this.oppPage = 1
       await this.loadOpps(1)
       const iRes = await api.getStrategy2BacktestInsufficientStocks(taskId)
@@ -353,6 +448,22 @@ export default {
         this.task.status = 'canceling'
       }
       this.actionPending = false
+    },
+    buildExperimentPayload() {
+      const blankToNull = v => (v === '' || v == null ? null : Number(v))
+      return {
+        enabled: !!this.experimentEnabled,
+        minimumTotalScore: blankToNull(this.experimentForm.minimumTotalScore),
+        minimumVolumeDryScore: blankToNull(this.experimentForm.minimumVolumeDryScore),
+        minimumPriceStableScore: blankToNull(this.experimentForm.minimumPriceStableScore),
+        timeExitDays: this.experimentForm.timeExitDays || null,
+        entryConfirmation: {
+          type: this.experimentForm.entryConfirmationType || 'NONE',
+          maxWaitDays: Number(this.experimentForm.maxWaitDays || 5),
+          moderateVolumeMaxRatio: Number(this.experimentForm.moderateVolumeMaxRatio || 1.8),
+        },
+        marketContext: { enabled: true },
+      }
     },
     hs(h, key) {
       const stats = this.horizonStats
@@ -394,6 +505,13 @@ h1 { font-size: 1.5rem; color: #ffd700; margin-bottom: 4px; }
 .params-bar label { font-size: 12px; color: #aaa; }
 .params-bar input { display: block; margin-top: 4px; padding: 6px 8px; background: #2a2a2a; border: 1px solid #444; color: #e0e0e0; border-radius: 4px; font-size: 13px; width: 130px; }
 .params-bar input[type="number"] { width: 80px; }
+.experiment-panel { border-color: #4f7dff55; }
+.switch-row { display: flex; gap: 8px; align-items: center; font-size: 13px; color: #ddd; margin-bottom: 8px; }
+.badge.experimental, .experimental { color: #ffb84d; font-weight: 700; }
+.experiment-grid { display: flex; gap: 12px; flex-wrap: wrap; align-items: flex-end; margin-top: 12px; }
+.experiment-grid label { font-size: 12px; color: #aaa; }
+.experiment-grid input, .experiment-grid select { display: block; margin-top: 4px; padding: 6px 8px; background: #2a2a2a; border: 1px solid #444; color: #e0e0e0; border-radius: 4px; font-size: 13px; width: 150px; }
+.comparison-box { margin-top: 12px; color: #aaa; font-size: 12px; display: flex; gap: 12px; flex-wrap: wrap; }
 .btn-start { padding: 8px 24px; background: var(--accent); color: #fff; border: none; border-radius: 4px; cursor: pointer; font-size: 13px; font-weight: 600; }
 .btn-start:disabled { opacity: 0.5; cursor: not-allowed; }
 .note { font-size: 11px; color: #666; }
