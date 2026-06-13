@@ -84,29 +84,29 @@ npm --prefix web run preview
 
 ## Key Files
 
-| File | Purpose |
-|---|---|
-| `config.yaml` | 所有可调参数（市场/流动性/杯体/柄部/突破/评分/输出/调度/数据库） |
-| `scanner/db.py` | SQLite 数据库层 — 连接管理 + 5 表 CRUD |
-| `scanner/data_source.py` | `DataSourceManager` — 新浪+腾讯双源互斥锁 |
-| `scanner/sina_source.py` | `fetch_sina_daily(code, days)` → `list[dict] \| None` |
-| `scanner/tencent_source.py` | `fetch_tencent_daily(code, days)` → `list[dict] \| None`（纯腾讯源，回退由引擎层处理） |
-| `scanner/pattern_detector.py` | `detect_cup_handle(data, config)` → `CupHandleResult`；只负责杯柄检测 |
-| `scanner/scorer.py` | `score_cup_handle(result)` / `score_cup_handle_advanced(result, data)` → `int` (0-100) |
-| `scanner/engine.py` | `scan_all(config)` — 双线程全市场扫描主循环 |
-| `scanner/backtester.py` | `run_backtest(stocks, fetch_fn, config)` — 历史回测 |
-| `analyzer/volume_dry.py` | `score_volume_dry(data)` → `VolumeDryResult` (0-10) |
-| `analyzer/price_stable.py` | `score_price_stable(data)` → `PriceStableResult` (0-10) |
-| `analyzer/pattern_score.py` | `score_pattern(result, data)` → `PatternScoreResult` (0-20, 杯柄/VCP 择优；VCP 识别在这里) |
-| `analyzer/key_prices.py` | `calculate_key_prices(...)` → `KeyPricesResult` (入场区间/支点/止损/目标) |
-| `analyzer/risk_reward.py` | `calculate_risk_reward(...)` → `RiskRewardResult` |
-| `analyzer/dry_stable.py` | `analyze_dry_stable(result, data, market_data)` → `dict` — 串联全部 8 个分析模块 |
-| `analyzer/decision.py` | `make_dry_stable_decision(...)` → `DryStableDecision` — 最终买入判决 |
-| `analyzer/market_env.py` | `assess_market_environment(market_data)` → `MarketEnvResult` |
-| `analyzer/invalid_rules.py` | `find_invalid_conditions(...)` → `list[str]` |
-| `scanner/index_source.py` | `fetch_market_index_daily(code)` → `list[dict]` (复用新浪源) |
-| `server.py` | FastAPI API + 扫描任务编排 — CORS/lifespan、恢复中断任务、失败重拉、配置读写 |
-| `web/src/pages/ScannerConsole.vue` | 前端首页 — 机会雷达控制台 |
+| File                               | Purpose                                                                                    |
+| ---------------------------------- | ------------------------------------------------------------------------------------------ |
+| `config.yaml`                      | 所有可调参数（市场/流动性/杯体/柄部/突破/评分/输出/调度/数据库）                           |
+| `scanner/db.py`                    | SQLite 数据库层 — 连接管理 + 5 表 CRUD                                                     |
+| `scanner/data_source.py`           | `DataSourceManager` — 新浪+腾讯双源互斥锁                                                  |
+| `scanner/sina_source.py`           | `fetch_sina_daily(code, days)` → `list[dict] \| None`                                      |
+| `scanner/tencent_source.py`        | `fetch_tencent_daily(code, days)` → `list[dict] \| None`（纯腾讯源，回退由引擎层处理）     |
+| `scanner/pattern_detector.py`      | `detect_cup_handle(data, config)` → `CupHandleResult`；只负责杯柄检测                      |
+| `scanner/scorer.py`                | `score_cup_handle(result)` / `score_cup_handle_advanced(result, data)` → `int` (0-100)     |
+| `scanner/engine.py`                | `scan_all(config)` — 双线程全市场扫描主循环                                                |
+| `scanner/backtester.py`            | `run_backtest(stocks, fetch_fn, config)` — 历史回测                                        |
+| `analyzer/volume_dry.py`           | `score_volume_dry(data)` → `VolumeDryResult` (0-10)                                        |
+| `analyzer/price_stable.py`         | `score_price_stable(data)` → `PriceStableResult` (0-10)                                    |
+| `analyzer/pattern_score.py`        | `score_pattern(result, data)` → `PatternScoreResult` (0-20, 杯柄/VCP 择优；VCP 识别在这里) |
+| `analyzer/key_prices.py`           | `calculate_key_prices(...)` → `KeyPricesResult` (入场区间/支点/止损/目标)                  |
+| `analyzer/risk_reward.py`          | `calculate_risk_reward(...)` → `RiskRewardResult`                                          |
+| `analyzer/dry_stable.py`           | `analyze_dry_stable(result, data, market_data)` → `dict` — 串联全部 8 个分析模块           |
+| `analyzer/decision.py`             | `make_dry_stable_decision(...)` → `DryStableDecision` — 最终买入判决                       |
+| `analyzer/market_env.py`           | `assess_market_environment(market_data)` → `MarketEnvResult`                               |
+| `analyzer/invalid_rules.py`        | `find_invalid_conditions(...)` → `list[str]`                                               |
+| `scanner/index_source.py`          | `fetch_market_index_daily(code)` → `list[dict]` (复用新浪源)                               |
+| `server.py`                        | FastAPI API + 扫描任务编排 — CORS/lifespan、恢复中断任务、失败重拉、配置读写               |
+| `web/src/pages/ScannerConsole.vue` | 前端首页 — 机会雷达控制台                                                                  |
 
 ## Design Specs
 
@@ -151,8 +151,6 @@ Allowed Git commands:
 - git log
 - git branch
 - git show
-
-Do not run git add, git commit, git push, git pull, git merge, or git rebase unless I explicitly ask.
 
 Never run destructive commands unless I explicitly approve the exact command:
 

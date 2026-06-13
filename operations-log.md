@@ -16,3 +16,10 @@
 - Documentation verification: placeholder and contradiction scans completed; `git diff --check` passed.
 - Added the yfinance four-source daily K-line design, preserving the existing model where independent data-source locks process different stocks concurrently.
 - Defined yfinance A-share symbol mapping, explicit adjusted-price behavior, normalized SQLite OHLC fields, rate-limit propagation, four-source concurrency tests, and offline CI boundaries.
+
+## 2026-06-13
+
+- Synchronized Codex session provider metadata after switching the active provider to `custom` in `C:\Users\pp\.codex\config.toml`.
+- Backed up `state_5.sqlite` and the affected session JSONL files to `C:\Users\pp\.codex\backups\provider-sync-20260613-144650` before writing changes.
+- Updated 76 `threads.model_provider` rows in `state_5.sqlite` and 79 `session_meta.payload.model_provider` entries in `C:\Users\pp\.codex\sessions` from `openai` to `custom`.
+- Verification: `state_5.sqlite` provider counts are now `custom=76`; session meta provider counts are now `custom=80`; no non-current provider entries or JSON parse errors remain.

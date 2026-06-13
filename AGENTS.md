@@ -170,7 +170,7 @@ Never run destructive commands unless I explicitly approve the exact command:
 - 文档生成和更新
 - 测试执行和验证
 - 依赖安装和包管理
-- Git 操作（add、commit、diff、status 等，push 除外）
+- Git 操作（add、commit、diff、status、 push等）
 - 构建和编译操作
 - 工具调用（code-index、exa、grep、find 等）
 - 按计划执行的所有步骤
