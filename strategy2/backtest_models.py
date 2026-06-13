@@ -63,6 +63,8 @@ class BacktestOpportunity:
     entry_close: float = 0.0
     stop_loss: float = 0.0
     risk_ratio: float = 0.0
+    volume_dry_score: int = 0
+    price_stable_score: int = 0
     trend_type: str = ""
     trend_evidence_score: int = 0
     evaluation_snapshot: dict | None = None

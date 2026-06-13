@@ -1294,6 +1294,8 @@ def _ensure_strategy2_backtest_tables(conn: sqlite3.Connection):
     _ensure_column(conn, "strategy2_backtest_signals", "experiment_filter_reason", "TEXT")
     _ensure_column(conn, "strategy2_backtest_signals", "opportunity_type", "TEXT")
     _ensure_column(conn, "strategy2_backtest_opportunities", "opportunity_type", "TEXT")
+    _ensure_column(conn, "strategy2_backtest_opportunities", "volume_dry_score", "INTEGER DEFAULT 0")
+    _ensure_column(conn, "strategy2_backtest_opportunities", "price_stable_score", "INTEGER DEFAULT 0")
     _ensure_column(conn, "strategy2_backtest_opportunities", "entry_confirmation_type", "TEXT")
     _ensure_column(conn, "strategy2_backtest_opportunities", "entry_confirmation_date", "TEXT")
     _ensure_column(conn, "strategy2_backtest_opportunities", "entry_confirmation_price", "REAL")
@@ -1535,10 +1537,11 @@ def save_strategy2_backtest_opportunity(task_id: str, opp: dict):
             signal_count, execution_model, entry_date, entry_price,
             exit_date, exit_price, exit_reason, realized_return,
             mark_to_market_end_return, holding_days, available_forward_days,
-            opportunity_type, entry_confirmation_type, entry_confirmation_date,
+            opportunity_type, volume_dry_score, price_stable_score,
+            entry_confirmation_type, entry_confirmation_date,
             entry_confirmation_price, entry_confirmation_status, time_exit_days,
             market_context_json)
-           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
         (task_id, opp["code"], opp.get("name", ""), opp["first_detected_date"],
          opp["last_detected_date"], opp["consecutive_hit_days"],
          opp["first_score"], opp["max_score"], opp.get("level", ""),
@@ -1554,6 +1557,8 @@ def save_strategy2_backtest_opportunity(task_id: str, opp: dict):
          opp.get("realized_return", 0), opp.get("mark_to_market_end_return", 0),
          opp.get("holding_days", 0), opp.get("available_forward_days", 0),
          opp.get("opportunity_type", ""),
+         opp.get("volume_dry_score", 0),
+         opp.get("price_stable_score", 0),
          opp.get("entry_confirmation_type", ""),
          opp.get("entry_confirmation_date", ""),
          opp.get("entry_confirmation_price", 0),
@@ -1698,6 +1703,63 @@ def build_strategy2_backtest_summary(task_id: str) -> dict:
     ).fetchone()
     experiment_funnel = dict(zip(experiment_columns, experiment_row))
 
+    def _score_band(value) -> str:
+        try:
+            ivalue = int(value or 0)
+        except Exception:
+            ivalue = 0
+        lower = max(0, min(100, (ivalue // 10) * 10))
+        if lower == 100:
+            return "100"
+        return f"{lower}-{lower + 9}"
+
+    def _group_key(row: dict, kind: str) -> str:
+        if kind == "month":
+            return str(row.get("first_detected_date") or "")[:7] or "UNKNOWN"
+        if kind == "opportunity_type":
+            return row.get("opportunity_type") or "UNKNOWN"
+        if kind == "volume_dry_score_band":
+            return _score_band(row.get("volume_dry_score"))
+        if kind == "price_stable_score_band":
+            return _score_band(row.get("price_stable_score"))
+        if kind == "total_score_band":
+            return _score_band(row.get("first_score"))
+        if kind == "entry_confirmation_status":
+            return row.get("entry_confirmation_status") or "UNKNOWN"
+        return "UNKNOWN"
+
+    def _summarize_group(rows: list[dict]) -> dict:
+        entered_rows = [row for row in rows if row.get("entry_price") and row["entry_price"] > 0]
+        realized_returns = [row.get("realized_return") or 0 for row in entered_rows]
+        target = sum(1 for row in rows if row.get("exit_reason") == "TARGET")
+        stop = sum(1 for row in rows if row.get("exit_reason") == "STOP")
+        entered = len(entered_rows)
+        return {
+            "opportunities": len(rows),
+            "entered": entered,
+            "target": target,
+            "stop": stop,
+            "target_hit_rate": round(target / entered * 100, 2) if entered else 0,
+            "stop_hit_rate": round(stop / entered * 100, 2) if entered else 0,
+            "average_realized_return": round(_st.mean(realized_returns), 6) if realized_returns else 0,
+            "median_realized_return": round(_st.median(realized_returns), 6) if realized_returns else 0,
+        }
+
+    def _group_by(kind: str) -> dict:
+        grouped = {}
+        for row in opps:
+            grouped.setdefault(_group_key(row, kind), []).append(row)
+        return {key: _summarize_group(rows) for key, rows in sorted(grouped.items())}
+
+    groups = {
+        "by_month": _group_by("month"),
+        "by_opportunity_type": _group_by("opportunity_type"),
+        "by_volume_dry_score_band": _group_by("volume_dry_score_band"),
+        "by_price_stable_score_band": _group_by("price_stable_score_band"),
+        "by_total_score_band": _group_by("total_score_band"),
+        "by_entry_confirmation_status": _group_by("entry_confirmation_status"),
+    }
+
     return {
         "horizon_stats": horizon_stats,
         "execution_stats": {
@@ -1712,6 +1774,7 @@ def build_strategy2_backtest_summary(task_id: str) -> dict:
         },
         "funnel": funnel,
         "experiment_funnel": experiment_funnel,
+        "groups": groups,
         "integrity": {},
     }
 
@@ -1857,10 +1920,11 @@ def replace_strategy2_stock_backtest_result(
                     exit_date, exit_price, exit_reason, realized_return,
                     mark_to_market_end_return, holding_days, available_forward_days,
                     first_signal_id, last_signal_id, opportunity_type,
+                    volume_dry_score, price_stable_score,
                     entry_confirmation_type, entry_confirmation_date,
                     entry_confirmation_price, entry_confirmation_status,
                     time_exit_days, market_context_json)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (task_id, code, name, opp["first_detected_date"], opp["last_detected_date"],
                  opp["consecutive_hit_days"], opp["first_score"], opp["max_score"],
                  opp.get("level", ""), opp["entry_close"], opp["stop_loss"],
@@ -1875,6 +1939,8 @@ def replace_strategy2_stock_backtest_result(
                  opp.get("mark_to_market_end_return", 0), opp.get("holding_days", 0),
                  opp.get("available_forward_days", 0), first_sid, last_sid,
                  opp.get("opportunity_type", ""),
+                 opp.get("volume_dry_score", 0),
+                 opp.get("price_stable_score", 0),
                  opp.get("entry_confirmation_type", ""),
                  opp.get("entry_confirmation_date", ""),
                  opp.get("entry_confirmation_price", 0),

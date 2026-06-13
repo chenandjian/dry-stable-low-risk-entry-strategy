@@ -204,6 +204,58 @@ def test_finalize_rolls_up_experiment_funnel_counts(tmp_path):
     assert summary["experiment_funnel"]["time_exit_count"] == 5
 
 
+def test_summary_includes_experiment_group_statistics(tmp_path):
+    db.init_db(str(tmp_path / "phase2-groups.db"))
+    db.create_strategy2_backtest_task("group-task", {}, "{}")
+    db.save_strategy2_backtest_opportunity("group-task", {
+        "code": "000001",
+        "first_detected_date": "2025-03-02",
+        "last_detected_date": "2025-03-02",
+        "consecutive_hit_days": 1,
+        "first_score": 72,
+        "max_score": 80,
+        "entry_close": 10,
+        "stop_loss": 9.5,
+        "entry_price": 10,
+        "exit_reason": "TARGET",
+        "realized_return": 0.05,
+        "volume_dry_score": 45,
+        "price_stable_score": 35,
+        "opportunity_type": "CONTINUATION",
+        "entry_confirmation_status": "ENTRY_CONFIRMED",
+    })
+    db.save_strategy2_backtest_opportunity("group-task", {
+        "code": "000002",
+        "first_detected_date": "2025-04-02",
+        "last_detected_date": "2025-04-02",
+        "consecutive_hit_days": 1,
+        "first_score": 58,
+        "max_score": 58,
+        "entry_close": 10,
+        "stop_loss": 9.5,
+        "entry_price": 10,
+        "exit_reason": "STOP",
+        "realized_return": -0.03,
+        "volume_dry_score": 25,
+        "price_stable_score": 20,
+        "opportunity_type": "REVERSAL",
+        "entry_confirmation_status": "NO_ENTRY_CONFIRMATION",
+    })
+
+    summary = db.build_strategy2_backtest_summary("group-task")
+
+    groups = summary["groups"]
+    assert groups["by_month"]["2025-03"]["opportunities"] == 1
+    assert groups["by_month"]["2025-04"]["stop"] == 1
+    assert groups["by_opportunity_type"]["CONTINUATION"]["target"] == 1
+    assert groups["by_opportunity_type"]["REVERSAL"]["stop"] == 1
+    assert groups["by_volume_dry_score_band"]["40-49"]["opportunities"] == 1
+    assert groups["by_volume_dry_score_band"]["20-29"]["opportunities"] == 1
+    assert groups["by_price_stable_score_band"]["30-39"]["opportunities"] == 1
+    assert groups["by_total_score_band"]["70-79"]["average_realized_return"] == 0.05
+    assert groups["by_entry_confirmation_status"]["NO_ENTRY_CONFIRMATION"]["stop"] == 1
+
+
 def test_experiment_preview_endpoint_normalizes_payload(monkeypatch, tmp_path):
     db_path = str(tmp_path / "preview.db")
     config = {"data": {"database_path": db_path}}

@@ -361,3 +361,25 @@ b262c8b feat(strategy2): add scorer, rejection rules, and risk calculator
   - Frontend production build: **passed**.
   - Python compileall: **passed**.
 - Not performed in this development step: full-market trusted baseline run, experiment task batch run, or formal Strategy2 parameter upgrade. Those require operational backtest evidence from completed comparable tasks.
+
+## 2026-06-13 (Strategy2 Phase 2 Experiment Results and Grouped Summary Fix)
+
+- Ran and analyzed one trusted baseline plus five comparable experimental Strategy2 backtest tasks on the local dataset.
+- Baseline task `s2bt-20260613-174358-baseline` was corrected to `total_stocks=5527` after the manual runner initially omitted the field; final integrity passed as `TRUSTED_BASELINE`.
+- Baseline result: 5527 processed stocks, 669 opportunities, 1373 raw signals, 0 failed stocks, 635 insufficient stocks, average realized return `-0.004071`, target hit rate `40.29%`.
+- Comparable experiment results:
+  - `s2bt-20260613-174929-vol40`: `minimumVolumeDryScore=40`, 377 opportunities, 347 entered, average return `0.001903`, delta average return `+0.005974`, success-rate delta `+0.066875`.
+  - `s2bt-20260613-175258-vol50`: 160 opportunities, 148 entered, average return `0.003014`, delta average return `+0.007085`, success-rate delta `+0.076864`.
+  - `s2bt-20260613-175657-vol40-exit5`: 377 opportunities, 347 entered, average return `0.006787`, 169 time exits, delta average return `+0.010858`.
+  - `s2bt-20260613-180134-vol40-exit10`: 377 opportunities, 347 entered, average return `0.005287`, 48 time exits, delta average return `+0.009358`.
+  - `s2bt-20260613-180601-vol40-break5`: entry confirmation failed 206 times, only 29 entered, average return `-0.023904`; this confirmation rule should not be promoted without redesign.
+- Review finding fixed in this session: Phase 2 design required grouped experiment statistics, but `summary_json` did not expose grouped stats and opportunities did not persist `volume_dry_score` / `price_stable_score`.
+- Added grouped summary buckets under `summary["groups"]`: month, opportunity type, volume-dry score band, price-stable score band, total score band, and entry-confirmation status.
+- Added compatible opportunity-table migrations and propagated volume/price scores from `BacktestSignal` to `BacktestOpportunity`, API dicts, and both opportunity persistence paths.
+- Current interpretation: `minimum_volume_dry_score=50` improves average return and success rate while sharply reducing opportunity count; `minimum_volume_dry_score=40 + time_exit_days=5` has the best average return in this batch but changes exit semantics. No formal Strategy2 scan parameter upgrade was made.
+- Verification:
+  - Grouped summary TDD test: **1 passed** after first confirming the red failure.
+  - Strategy2 Phase 2 / backtester / medium-high regression set: **64 passed**.
+  - Frontend Vitest: **31 passed**.
+  - Frontend production build: **passed**.
+  - Python compileall and `git diff --check`: **passed**.
