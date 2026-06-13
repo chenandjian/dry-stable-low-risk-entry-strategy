@@ -299,3 +299,29 @@ b262c8b feat(strategy2): add scorer, rejection rules, and risk calculator
   - Frontend production build: **passed**.
   - Python compileall and `git diff --check`: **passed**.
 - Full-market baseline rerun was not started in this repair session because it is a long-running operational job; reproducibility and behavior were verified with temporary SQLite integration tasks.
+
+## 2026-06-13 (Strategy2 Phase 1 Final Acceptance)
+
+- Reviewed fix commit `7a3430e` against baseline `997d8f8` and added `docs/reviews/2026-06-13-strategy2-phase1-final-acceptance.md`.
+- Confirmed real resume/retry-failed/cancel behavior, completed-only credibility validation, complete zero-opportunity summaries, funnel/timing aggregation, per-stock audit fields, and data revision enforcement.
+- Found two remaining high-severity issues: the data revision fingerprint omits `turnover`, although liquidity filtering depends on it; and historical failed/running or revision-less tasks can remain labeled `TRUSTED_BASELINE`.
+- Found one remaining medium-severity issue: revision calculation reads all market rows and filters task stocks in Python, causing avoidable startup and validation delay for small tasks.
+- Direct reproduction confirmed that changing only `turnover` changes liquidity eligibility while leaving the revision unchanged.
+- Database inspection found 11 currently trusted tasks that violate the current completed/revision-backed credibility rules.
+- Verification: Strategy2 targeted and acceptance tests passed 70; offline backend suite passed 518 with one warning; frontend Vitest passed 25; frontend build, compileall, `git show --check`, and `git diff --check` passed.
+
+## 2026-06-13 (Strategy2 Phase 1 Final Acceptance Fixes)
+
+- Fixed ACCEPT-001: Strategy2 task data revisions now hash `code/date/open/high/low/close/volume/turnover`; changing only turnover changes the SHA-256 and blocks resume/retry-failed.
+- Fixed ACCEPT-002: added explicit revision algorithm version `daily-ohlc-v2`. Compatibility migration conservatively downgrades historical trusted tasks with an old/missing revision version, non-completed status, missing summary/revision, incomplete processing, pending/running stocks, failures, or evaluation errors.
+- Fixed ACCEPT-003: production revision calculation now joins `daily_ohlc` to `strategy2_backtest_task_stocks` by task ID, so small tasks only read their own stocks.
+- Actual database migration check: remaining trusted tasks before migration `0`, newly downgraded `0`, existing `LEGACY_UNTRUSTED` tasks `21`. Temporary migration tests prove old-algorithm and otherwise-invalid trusted tasks are downgraded while a current valid task is preserved.
+- Turnover-only proof:
+  - Before: `1745e21d6668ff2e91b9265f8b99eb4129c3c92d1164c6f8ffdc762712ae7fe2`
+  - After: `e499155246f19bdcd1b19673ca08a056713067cd85117e6c7f59f12fd0eaf09e`
+- Actual database revision timings:
+  - Single stock: `0.002596s`
+  - 200 stocks: `0.4497s`
+  - 5527 stocks: `18.2354s`
+- Final verification: offline backend suite passed `523` with one existing warning; frontend Vitest passed `25`; frontend production build, Python compileall, and `git diff --check` passed.
+- The first final frontend test run overlapped the frontend build and failed during Vitest sandbox-path module resolution before collecting tests. A standalone rerun passed all `25` tests.

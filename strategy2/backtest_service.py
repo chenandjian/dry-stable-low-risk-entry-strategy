@@ -21,34 +21,58 @@ def _now_local() -> str:
 
 def calculate_daily_ohlc_revision(snapshot_date: str, codes: list[str] | None = None) -> str:
     """计算指定股票范围和快照日期内 OHLC 内容的稳定 SHA-256。"""
-    code_filter = set(codes or [])
-    rows = db.get_conn().execute(
-        "SELECT code,date,open,high,low,close,volume FROM daily_ohlc "
-        "WHERE date<=? ORDER BY code,date",
-        (snapshot_date[:10],),
-    ).fetchall()
+    params = [snapshot_date[:10]]
+    query = (
+        "SELECT code,date,open,high,low,close,volume,turnover FROM daily_ohlc "
+        "WHERE date<=?"
+    )
+    if codes:
+        placeholders = ",".join("?" for _ in codes)
+        query += f" AND code IN ({placeholders})"
+        params.extend(codes)
+    query += " ORDER BY code,date"
+    rows = db.get_conn().execute(query, params)
     digest = hashlib.sha256()
     for row in rows:
-        if code_filter and row[0] not in code_filter:
-            continue
         digest.update(json.dumps(row, ensure_ascii=True, separators=(",", ":")).encode("ascii"))
         digest.update(b"\n")
     return digest.hexdigest()
 
 
-def validate_task_data_revision(task_id: str, codes: list[str]) -> None:
+def calculate_task_daily_ohlc_revision(task_id: str, snapshot_date: str) -> str:
+    """按任务股票范围计算稳定 OHLC 内容指纹。"""
+    rows = db.get_conn().execute(
+        "SELECT o.code,o.date,o.open,o.high,o.low,o.close,o.volume,o.turnover "
+        "FROM daily_ohlc o "
+        "JOIN strategy2_backtest_task_stocks s ON s.code=o.code "
+        "WHERE s.task_id=? AND o.date<=? "
+        "ORDER BY o.code,o.date",
+        (task_id, snapshot_date[:10]),
+    )
+    digest = hashlib.sha256()
+    for row in rows:
+        digest.update(json.dumps(row, ensure_ascii=True, separators=(",", ":")).encode("ascii"))
+        digest.update(b"\n")
+    return digest.hexdigest()
+
+
+def validate_task_data_revision(task_id: str) -> None:
     """确认任务仍读取创建时冻结的数据版本。"""
     task = db.get_strategy2_backtest_task(task_id)
     if not task:
         raise ValueError(f"Backtest task not found: {task_id}")
     expected = task.get("data_revision_id")
-    actual = calculate_daily_ohlc_revision(task.get("data_snapshot_date") or "", codes)
-    if not expected or expected != actual:
+    revision_version = task.get("data_revision_version")
+    actual = calculate_task_daily_ohlc_revision(task_id, task.get("data_snapshot_date") or "")
+    if revision_version != db.STRATEGY2_DATA_REVISION_VERSION or not expected or expected != actual:
         db.update_strategy2_backtest_task(
             task_id,
             status="DATA_REVISION_CHANGED",
             credibility_status="PHASE1_INCOMPLETE",
-            error=f"DATA_REVISION_CHANGED: expected={expected or 'missing'} actual={actual}",
+            error=(
+                f"DATA_REVISION_CHANGED: version={revision_version or 'missing'} "
+                f"expected={expected or 'missing'} actual={actual}"
+            ),
         )
         raise DataRevisionChangedError("Local daily OHLC data revision changed")
 
@@ -130,8 +154,7 @@ def run_strategy2_backtest_task(
 ) -> None:
     """运行指定股票集合，并基于任务全部股票重新最终化。"""
     started = time.monotonic()
-    codes = [stock["code"] for stock in db.get_strategy2_backtest_task_stocks(task_id)]
-    validate_task_data_revision(task_id, codes)
+    validate_task_data_revision(task_id)
     snap_date = data_snapshot_date[:10]
     insufficient_rows = []
     stats = running_state.setdefault("stats", {})
@@ -215,7 +238,7 @@ def run_strategy2_backtest_task(
 
         if insufficient_rows:
             db.save_strategy2_backtest_insufficient_stocks(task_id, insufficient_rows)
-        validate_task_data_revision(task_id, codes)
+        validate_task_data_revision(task_id)
         _finalize_task(task_id, cancel_event, time.monotonic() - started)
     except Exception as exc:
         if not isinstance(exc, DataRevisionChangedError):

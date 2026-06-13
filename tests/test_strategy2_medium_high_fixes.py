@@ -30,6 +30,8 @@ def _create_finished_task(tmp_path, task_id: str, status: str = "completed"):
         observation_data_end_date="2025-06-01",
         failed_stocks_count=0,
         evaluation_error_days=0,
+        data_revision_id="revision",
+        data_revision_version=db.STRATEGY2_DATA_REVISION_VERSION,
     )
 
 
@@ -140,6 +142,99 @@ def test_daily_ohlc_revision_changes_when_same_day_content_changes(tmp_path):
     assert first != second
 
 
+def test_task_daily_ohlc_revision_changes_when_turnover_changes(tmp_path):
+    from strategy2.backtest_service import calculate_task_daily_ohlc_revision
+
+    db.init_db(str(tmp_path / "turnover-revision.db"))
+    db.create_strategy2_backtest_task("turnover-task", {}, "{}")
+    db.save_strategy2_backtest_task_stock("turnover-task", "000001", status="PENDING")
+    db.save_ohlc("000001", [
+        {"date": "2025-01-02", "open": 10, "high": 11, "low": 9, "close": 10, "volume": 100, "turnover": 1000},
+    ])
+    first = calculate_task_daily_ohlc_revision("turnover-task", "2025-01-02")
+
+    db.save_ohlc("000001", [
+        {"date": "2025-01-02", "open": 10, "high": 11, "low": 9, "close": 10, "volume": 100, "turnover": 200_000_000},
+    ])
+    second = calculate_task_daily_ohlc_revision("turnover-task", "2025-01-02")
+
+    assert first != second
+
+
+def test_task_daily_ohlc_revision_filters_stock_scope_in_sql(tmp_path):
+    from strategy2.backtest_service import calculate_task_daily_ohlc_revision
+
+    db.init_db(str(tmp_path / "scoped-revision.db"))
+    db.create_strategy2_backtest_task("single-stock", {}, "{}")
+    db.save_strategy2_backtest_task_stock("single-stock", "000001", status="PENDING")
+    db.save_ohlc("000001", [
+        {"date": "2025-01-02", "open": 10, "high": 11, "low": 9, "close": 10, "volume": 100, "turnover": 1000},
+    ])
+    db.save_ohlc("999999", [
+        {"date": "2025-01-02", "open": 20, "high": 21, "low": 19, "close": 20, "volume": 200, "turnover": 4000},
+    ])
+    statements = []
+    db.get_conn().set_trace_callback(statements.append)
+
+    calculate_task_daily_ohlc_revision("single-stock", "2025-01-02")
+
+    revision_queries = [statement for statement in statements if "FROM daily_ohlc" in statement]
+    assert len(revision_queries) == 1
+    assert "JOIN strategy2_backtest_task_stocks" in revision_queries[0]
+    assert "single-stock" in revision_queries[0]
+
+
+def test_init_db_downgrades_historical_untrusted_baselines(tmp_path):
+    db_path = str(tmp_path / "legacy-trusted.db")
+    db.init_db(db_path)
+    for task_id, status, revision, summary in [
+        ("failed-trusted", "failed", "rev", "{}"),
+        ("running-trusted", "running", "rev", "{}"),
+        ("revisionless-trusted", "completed", None, "{}"),
+        ("summaryless-trusted", "completed", "rev", None),
+        ("legacy-revision-trusted", "completed", "old-algorithm-revision", "{}"),
+    ]:
+        db.create_strategy2_backtest_task(task_id, {}, "{}")
+        db.update_strategy2_backtest_task(
+            task_id,
+            status=status,
+            credibility_status="TRUSTED_BASELINE",
+            data_revision_id=revision,
+            summary_json=summary,
+        )
+
+    db.init_db(db_path)
+
+    for task_id in (
+        "failed-trusted", "running-trusted", "revisionless-trusted",
+        "summaryless-trusted", "legacy-revision-trusted",
+    ):
+        assert db.get_strategy2_backtest_task(task_id)["credibility_status"] == "LEGACY_UNTRUSTED"
+
+
+def test_init_db_preserves_current_valid_trusted_baseline(tmp_path):
+    db_path = str(tmp_path / "valid-trusted.db")
+    db.init_db(db_path)
+    db.create_strategy2_backtest_task("valid-trusted", {}, "{}")
+    db.save_strategy2_backtest_task_stock("valid-trusted", "000001", status="COMPLETED")
+    db.update_strategy2_backtest_task(
+        "valid-trusted",
+        status="completed",
+        credibility_status="TRUSTED_BASELINE",
+        data_revision_id="revision",
+        data_revision_version=db.STRATEGY2_DATA_REVISION_VERSION,
+        summary_json="{}",
+        total_stocks=1,
+        processed_stocks=1,
+        failed_stocks_count=0,
+        evaluation_error_days=0,
+    )
+
+    db.init_db(db_path)
+
+    assert db.get_strategy2_backtest_task("valid-trusted")["credibility_status"] == "TRUSTED_BASELINE"
+
+
 def test_no_local_data_path_records_audit_and_live_progress(tmp_path):
     from strategy2.backtest_service import (
         calculate_daily_ohlc_revision,
@@ -157,6 +252,7 @@ def test_no_local_data_path_records_audit_and_live_progress(tmp_path):
         task_id,
         data_snapshot_date="2025-06-01 09:00:00",
         data_revision_id=revision,
+        data_revision_version=db.STRATEGY2_DATA_REVISION_VERSION,
     )
     running_state = {
         "running": True,
@@ -199,6 +295,7 @@ def _prepare_api_task(tmp_path, task_id: str, status: str, stock_statuses: dict[
         status=status,
         data_snapshot_date="2025-06-01 09:00:00",
         data_revision_id=revision,
+        data_revision_version=db.STRATEGY2_DATA_REVISION_VERSION,
     )
     server_mod._backtest_running.update({
         "running": False, "task_id": None, "stats": {}, "cancel_event": None, "thread": None,
@@ -267,6 +364,39 @@ def test_resume_rejects_changed_data_revision(monkeypatch, tmp_path):
     assert db.get_strategy2_backtest_task("changed-revision")["status"] == "DATA_REVISION_CHANGED"
 
 
+def test_retry_failed_rejects_turnover_revision_change(monkeypatch, tmp_path):
+    from strategy2.backtest_service import calculate_task_daily_ohlc_revision
+
+    db_path = str(tmp_path / "retry-turnover.db")
+    db.init_db(db_path)
+    config = {"data": {"database_path": db_path}, "strategy2": {"minimum_required_days": 60}}
+    db.save_ohlc("000001", [
+        {"date": "2025-01-02", "open": 10, "high": 11, "low": 9, "close": 10, "volume": 100, "turnover": 1000},
+    ])
+    db.create_strategy2_backtest_task("retry-turnover", {}, json.dumps(config))
+    db.save_strategy2_backtest_task_stock("retry-turnover", "000001", status="FAILED")
+    revision = calculate_task_daily_ohlc_revision("retry-turnover", "2025-06-01")
+    db.update_strategy2_backtest_task(
+        "retry-turnover",
+        status="completed_with_errors",
+        data_snapshot_date="2025-06-01 09:00:00",
+        data_revision_id=revision,
+        data_revision_version=db.STRATEGY2_DATA_REVISION_VERSION,
+    )
+    db.save_ohlc("000001", [
+        {"date": "2025-01-02", "open": 10, "high": 11, "low": 9, "close": 10, "volume": 100, "turnover": 200_000_000},
+    ])
+    server_mod._backtest_running.update({
+        "running": False, "task_id": None, "stats": {}, "cancel_event": None, "thread": None,
+    })
+    monkeypatch.setattr(server_mod, "load_config", lambda path="config.yaml": config)
+
+    response = TestClient(server_mod.app).post("/api/strategy2/backtests/retry-turnover/retry-failed")
+
+    assert response.status_code == 409
+    assert response.json()["error"] == "DATA_REVISION_CHANGED"
+
+
 def test_cancelled_executor_leaves_pending_stocks_and_is_not_trusted(tmp_path):
     from strategy2.backtest_service import calculate_daily_ohlc_revision, run_strategy2_backtest_task
 
@@ -281,6 +411,7 @@ def test_cancelled_executor_leaves_pending_stocks_and_is_not_trusted(tmp_path):
         task_id,
         data_snapshot_date="2025-06-01 09:00:00",
         data_revision_id=revision,
+        data_revision_version=db.STRATEGY2_DATA_REVISION_VERSION,
     )
     cancel_event = threading.Event()
     cancel_event.set()
@@ -341,6 +472,7 @@ def test_same_data_revision_tasks_have_identical_signal_and_opportunity_sets(mon
             task_id,
             data_snapshot_date="2025-06-01 09:00:00",
             data_revision_id=revision,
+            data_revision_version=db.STRATEGY2_DATA_REVISION_VERSION,
         )
         cancel_event = threading.Event()
         state = {"running": True, "task_id": task_id, "stats": {}, "cancel_event": cancel_event}

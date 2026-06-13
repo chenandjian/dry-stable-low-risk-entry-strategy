@@ -1458,12 +1458,13 @@ async def start_strategy2_backtest(payload: dict):
         db.save_strategy2_backtest_task_stock(task_id, s["code"],
             name=s.get("name", ""), status="PENDING")
 
-    from strategy2.backtest_service import calculate_daily_ohlc_revision
-    data_revision_id = calculate_daily_ohlc_revision(
-        data_snapshot_date,
-        [stock["code"] for stock in resolved_stocks],
+    from strategy2.backtest_service import calculate_task_daily_ohlc_revision
+    data_revision_id = calculate_task_daily_ohlc_revision(task_id, data_snapshot_date)
+    db.update_strategy2_backtest_task(
+        task_id,
+        data_revision_id=data_revision_id,
+        data_revision_version=db.STRATEGY2_DATA_REVISION_VERSION,
     )
-    db.update_strategy2_backtest_task(task_id, data_revision_id=data_revision_id)
     _launch_strategy2_backtest_task(
         task_id=task_id,
         target_stocks=resolved_stocks,
@@ -1590,7 +1591,7 @@ async def strategy2_backtest_resume(task_id: str):
     config = json.loads(task["config_snapshot"])
     from strategy2.backtest_service import DataRevisionChangedError, validate_task_data_revision
     try:
-        validate_task_data_revision(task_id, [stock["code"] for stock in db.get_strategy2_backtest_task_stocks(task_id)])
+        validate_task_data_revision(task_id)
     except DataRevisionChangedError:
         return JSONResponse({"error": "DATA_REVISION_CHANGED"}, status_code=409)
     _launch_strategy2_backtest_task(
@@ -1631,7 +1632,7 @@ async def strategy2_backtest_retry_failed(task_id: str):
     config = json.loads(task["config_snapshot"])
     from strategy2.backtest_service import DataRevisionChangedError, validate_task_data_revision
     try:
-        validate_task_data_revision(task_id, [stock["code"] for stock in db.get_strategy2_backtest_task_stocks(task_id)])
+        validate_task_data_revision(task_id)
     except DataRevisionChangedError:
         return JSONResponse({"error": "DATA_REVISION_CHANGED"}, status_code=409)
     _launch_strategy2_backtest_task(

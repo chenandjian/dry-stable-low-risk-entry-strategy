@@ -14,6 +14,7 @@ from contextlib import contextmanager
 
 DB_PATH = None
 _local = threading.local()
+STRATEGY2_DATA_REVISION_VERSION = "daily-ohlc-v2"
 
 
 def init_db(path: str = "data/cuphandle.db"):
@@ -1140,6 +1141,7 @@ def _ensure_strategy2_backtest_tables(conn: sqlite3.Connection):
             sampling_method          TEXT,
             sampling_seed            INTEGER,
             data_snapshot_date       TEXT,
+            data_revision_version    TEXT,
             estimated_evaluations    INTEGER DEFAULT 0,
             completed_evaluations    INTEGER DEFAULT 0,
             raw_signals_count        INTEGER DEFAULT 0,
@@ -1270,6 +1272,7 @@ def _ensure_strategy2_backtest_tables(conn: sqlite3.Connection):
     _ensure_column(conn, "strategy2_backtest_tasks", "sampling_seed", "INTEGER")
     _ensure_column(conn, "strategy2_backtest_tasks", "data_snapshot_date", "TEXT")
     _ensure_column(conn, "strategy2_backtest_tasks", "data_revision_id", "TEXT")
+    _ensure_column(conn, "strategy2_backtest_tasks", "data_revision_version", "TEXT")
     _ensure_column(conn, "strategy2_backtest_tasks", "actual_evaluation_start_date", "TEXT")
     _ensure_column(conn, "strategy2_backtest_tasks", "actual_evaluation_end_date", "TEXT")
     _ensure_column(conn, "strategy2_backtest_tasks", "observation_data_end_date", "TEXT")
@@ -1291,6 +1294,26 @@ def _ensure_strategy2_backtest_tables(conn: sqlite3.Connection):
     _ensure_column(conn, "strategy2_backtest_task_stocks", "available_days", "INTEGER DEFAULT 0")
     _ensure_column(conn, "strategy2_backtest_task_stocks", "earliest_date", "TEXT")
     _ensure_column(conn, "strategy2_backtest_task_stocks", "latest_date", "TEXT")
+
+    # Historical tasks cannot remain trusted if they fail current baseline rules.
+    conn.execute(
+        "UPDATE strategy2_backtest_tasks "
+        "SET credibility_status='LEGACY_UNTRUSTED', "
+        "backtest_engine_version=COALESCE(backtest_engine_version, 'legacy-v1') "
+        "WHERE credibility_status='TRUSTED_BASELINE' AND ("
+        "LOWER(COALESCE(status, '')) <> 'completed' "
+        "OR COALESCE(data_revision_id, '') = '' "
+        "OR COALESCE(data_revision_version, '') <> ? "
+        "OR summary_json IS NULL "
+        "OR COALESCE(processed_stocks, 0) <> COALESCE(total_stocks, 0) "
+        "OR COALESCE(failed_stocks_count, 0) > 0 "
+        "OR COALESCE(evaluation_error_days, 0) > 0 "
+        "OR EXISTS (SELECT 1 FROM strategy2_backtest_task_stocks s "
+        "           WHERE s.task_id=strategy2_backtest_tasks.id "
+        "             AND s.status IN ('PENDING','RUNNING'))"
+        ")",
+        (STRATEGY2_DATA_REVISION_VERSION,),
+    )
 
 
 def create_strategy2_backtest_task(task_id: str, payload: dict, config_snapshot: str):
@@ -1566,6 +1589,10 @@ def validate_strategy2_backtest_integrity(task_id: str) -> tuple:
 
     if str(t.get("status", "")).lower() != "completed":
         errors.append(f"task status is {t.get('status')}, expected completed")
+    if not t.get("data_revision_id"):
+        errors.append("missing data_revision_id")
+    if t.get("data_revision_version") != STRATEGY2_DATA_REVISION_VERSION:
+        errors.append(f"invalid data_revision_version: {t.get('data_revision_version')}")
 
     total = t.get("total_stocks", 0)
     processed = t.get("processed_stocks", 0)
