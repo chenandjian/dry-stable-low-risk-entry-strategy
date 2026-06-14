@@ -191,3 +191,42 @@ def test_run_strategy1_stock_backtest_uses_engine_and_disabled_experiment_equiva
     assert baseline["opportunities_count"] == missing["opportunities_count"]
     assert baseline["signals"][0].evaluation_date == "2025-01-30"
     assert calls
+
+
+def test_run_strategy1_stock_backtest_requires_min_listing_days_before_evaluating(monkeypatch):
+    import scanner.strategy1_backtester as backtester
+
+    data = _ohlc(40)
+    calls = []
+
+    class FakeEngine:
+        strategy_version = "fake-v1"
+
+        def __init__(self, config):
+            self.config_hash = "hash"
+
+        def evaluate_at(self, window, code="", name="", market_data=None):
+            calls.append(window[-1]["date"])
+            return type("Eval", (), {
+                "passed": False,
+                "result": type("Result", (), {})(),
+                "dry_stable": {},
+                "strategy_version": "fake-v1",
+                "config_hash": "hash",
+                "to_dict": lambda self: {"passed": False},
+            })()
+
+    monkeypatch.setattr(backtester, "CupHandleStrategyEngine", FakeEngine)
+    config = {
+        "data": {"scan_window_days": 30, "backtest_window_days": 30},
+        "liquidity": {"min_listing_days": 35},
+    }
+
+    result = backtester.run_strategy1_stock_backtest(
+        "600000", "Test", data, config, "2025-01-30", "2025-02-03",
+    )
+
+    assert result["raw_signals_count"] == 0
+    assert calls == []
+    insufficient = [reason for reason in result["eval_results"].values() if reason == "INSUFFICIENT_LISTING_DAYS"]
+    assert len(insufficient) == 5

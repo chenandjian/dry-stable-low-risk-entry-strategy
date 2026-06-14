@@ -263,6 +263,34 @@ def test_strategy1_integrity_accepts_completed_zero_opportunity_task(tmp_path):
     assert errors == []
 
 
+def test_strategy1_service_uses_min_listing_days_for_insufficient_stock(tmp_path):
+    from scanner.strategy1_backtest_service import run_strategy1_backtest_task
+
+    _init(tmp_path)
+    rows = [
+        {"date": f"2025-01-{i + 1:02d}", "open": 10, "high": 10, "low": 10, "close": 10, "volume": 1, "turnover": 10}
+        for i in range(40)
+    ]
+    db.save_stock_pool([{"code": "600000", "name": "浦发银行", "market": "SH"}])
+    db.save_ohlc("600000", rows)
+    task_id = "s1bt-min-listing"
+    config = {
+        "data": {"scan_window_days": 30, "backtest_window_days": 30},
+        "liquidity": {"min_listing_days": 50},
+    }
+    payload = {"startDate": "2025-01-01", "endDate": "2025-02-09", "experiment": {"enabled": False}}
+    db.create_strategy1_backtest_task(task_id, payload, json.dumps(config))
+    db.replace_strategy1_stock_backtest_result(task_id, "600000", "浦发银行", {"status": "PENDING"})
+    db.update_strategy1_backtest_task(task_id, total_stocks=1, data_revision_id="rev-1", data_revision_version=db.STRATEGY1_DATA_REVISION_VERSION, strategy_engine_version="cuphandle-v1", backtest_engine_version="strategy1-backtest-v1")
+
+    run_strategy1_backtest_task(task_id=task_id, target_stocks=[{"code": "600000", "name": "浦发银行"}], config_snapshot=config, payload_snapshot=payload)
+
+    stock = db.get_strategy1_backtest_task_stocks(task_id)[0]
+    assert stock["status"] == "INSUFFICIENT_DATA"
+    assert stock["required_days"] == 50
+    assert stock["available_days"] == 40
+
+
 def test_strategy1_experiment_preview_endpoint_normalizes_payload(monkeypatch, tmp_path):
     db_path = str(tmp_path / "preview.db")
     monkeypatch.setattr(server_mod, "load_config", lambda path="config.yaml": {"data": {"database_path": db_path}})

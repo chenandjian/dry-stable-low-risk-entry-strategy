@@ -9,6 +9,7 @@ import json
 import scanner.db as db
 from scanner.strategy1_backtest_experiments import apply_signal_experiment_filter
 from scanner.strategy1_backtest_models import Strategy1BacktestSignal
+from scanner.strategy_engine import resolve_strategy_windows
 from scanner.strategy1_backtester import (
     apply_strategy1_time_exit,
     calculate_strategy1_execution_outcome,
@@ -70,7 +71,8 @@ def run_strategy1_backtest_task(
                 }
 
             rows = db.get_ohlc(code, max_rows=0) or []
-            required_days = int((config_snapshot.get("data") or {}).get("backtest_window_days") or 250)
+            windows = resolve_strategy_windows(config_snapshot)
+            required_days = windows.min_listing_days
             if len(rows) < required_days:
                 insufficient += 1
                 db.replace_strategy1_stock_backtest_result(
