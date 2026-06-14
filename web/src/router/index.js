@@ -6,6 +6,7 @@ const routes = [
   { path: '/tasks', name: 'TaskCenter', component: () => import('../pages/TaskCenter.vue') },
   { path: '/config', name: 'StrategyConfig', component: () => import('../pages/StrategyConfig.vue') },
   { path: '/backtest/cup-handle/:code?', name: 'SingleStockBacktest', component: () => import('../pages/SingleStockBacktest.vue') },
+  { path: '/strategy1/backtest', name: 'Strategy1Backtest', component: () => import('../pages/Strategy1Backtest.vue') },
   { path: '/stock/:code', name: 'StockDetail', component: () => import('../pages/StockDetail.vue') },
   { path: '/strategy2/results', name: 'Strategy2Results', component: () => import('../pages/Strategy2Results.vue') },
   { path: '/strategy2/backtest', name: 'Strategy2Backtest', component: () => import('../pages/Strategy2Backtest.vue') },

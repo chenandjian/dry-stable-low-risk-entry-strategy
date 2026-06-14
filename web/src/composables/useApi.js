@@ -179,6 +179,57 @@ export function useApi() {
     const res = await fetch(`${API_BASE}/strategy2/backtests/${encodeURIComponent(taskId)}/comparison?${qs}`)
     return res.json().catch(() => ({ comparable: false, reasons: ['request_failed'] }))
   }
+
+  // Strategy1 Backtest API
+  async function startStrategy1Backtest(payload) {
+    const res = await fetch(`${API_BASE}/strategy1/backtests`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    })
+    const body = await res.json().catch(() => ({}))
+    return { ...body, ok: res.ok, statusCode: res.status }
+  }
+  async function getStrategy1BacktestStatus() {
+    const res = await fetch(`${API_BASE}/strategy1/backtests/status`)
+    return res.json().catch(() => ({ running: false, stats: {} }))
+  }
+  async function getStrategy1BacktestTasks(params = null) {
+    const qs = params ? params.toString() : ''
+    const res = await fetch(`${API_BASE}/strategy1/backtests${qs ? '?' + qs : ''}`)
+    return res.json().catch(() => ({ tasks: [], total: 0 }))
+  }
+  async function getStrategy1BacktestTask(taskId) {
+    const res = await fetch(`${API_BASE}/strategy1/backtests/${encodeURIComponent(taskId)}`)
+    return res.json().catch(() => null)
+  }
+  async function getStrategy1BacktestOpportunities(taskId, params = {}) {
+    const qs = new URLSearchParams(params).toString()
+    const res = await fetch(`${API_BASE}/strategy1/backtests/${encodeURIComponent(taskId)}/opportunities${qs ? '?' + qs : ''}`)
+    return res.json().catch(() => ({ opportunities: [], total: 0 }))
+  }
+  async function getStrategy1BacktestSignals(taskId, params = {}) {
+    const qs = new URLSearchParams(params).toString()
+    const res = await fetch(`${API_BASE}/strategy1/backtests/${encodeURIComponent(taskId)}/signals${qs ? '?' + qs : ''}`)
+    return res.json().catch(() => ({ signals: [], total: 0 }))
+  }
+  async function getStrategy1BacktestStocks(taskId, status = '') {
+    const qs = status ? `?status=${encodeURIComponent(status)}` : ''
+    const res = await fetch(`${API_BASE}/strategy1/backtests/${encodeURIComponent(taskId)}/stocks${qs}`)
+    return res.json().catch(() => ({ stocks: [], total: 0 }))
+  }
+  async function previewStrategy1BacktestExperiment(payload) {
+    const res = await fetch(`${API_BASE}/strategy1/backtests/experiments/preview`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    })
+    const body = await res.json().catch(() => ({}))
+    return { ...body, ok: res.ok, statusCode: res.status }
+  }
+  async function getStrategy1BacktestComparison(taskId, baselineTaskId) {
+    const qs = new URLSearchParams({ baselineTaskId }).toString()
+    const res = await fetch(`${API_BASE}/strategy1/backtests/${encodeURIComponent(taskId)}/comparison?${qs}`)
+    return res.json().catch(() => ({ comparable: false, reasons: ['request_failed'] }))
+  }
   const resumeStrategy2Backtest = taskId => strategy2BacktestAction(taskId, 'resume')
   const cancelStrategy2Backtest = taskId => strategy2BacktestAction(taskId, 'cancel')
   const retryFailedStrategy2Backtest = taskId => strategy2BacktestAction(taskId, 'retry-failed')
@@ -196,5 +247,10 @@ export function useApi() {
     getStrategy2BacktestStockHistory, getStrategy2BacktestStocks,
     previewStrategy2BacktestExperiment, getStrategy2BacktestComparison,
     resumeStrategy2Backtest, cancelStrategy2Backtest, retryFailedStrategy2Backtest,
+    startStrategy1Backtest, getStrategy1BacktestStatus,
+    getStrategy1BacktestTasks, getStrategy1BacktestTask,
+    getStrategy1BacktestOpportunities, getStrategy1BacktestSignals,
+    getStrategy1BacktestStocks, previewStrategy1BacktestExperiment,
+    getStrategy1BacktestComparison,
   }
 }
