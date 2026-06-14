@@ -118,16 +118,12 @@ def run_strategy1_backtest_task(
                 )
             processed += 1
 
-        summary = db.build_strategy1_backtest_summary(task_id)
         status = "completed" if failed == 0 else "completed_with_errors"
         experiment = payload_snapshot.get("experiment") or {}
-        credibility = "EXPERIMENTAL" if experiment.get("enabled") else (
-            "TRUSTED_BASELINE" if status == "completed" else "INCOMPLETE"
-        )
         db.update_strategy1_backtest_task(
             task_id,
             status=status,
-            credibility_status=credibility,
+            credibility_status="EXPERIMENTAL" if experiment.get("enabled") else "RUNNING_UNVERIFIED",
             processed_stocks=processed,
             failed_stocks_count=failed,
             insufficient_stocks_count=insufficient,
@@ -136,9 +132,17 @@ def run_strategy1_backtest_task(
             actual_evaluation_start_date=actual_start,
             actual_evaluation_end_date=actual_end,
             observation_data_end_date=observation_end,
-            summary_json=json.dumps(summary, ensure_ascii=False),
+            summary_json=json.dumps(db.build_strategy1_backtest_summary(task_id), ensure_ascii=False),
             finished_at=datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         )
+        if experiment.get("enabled"):
+            credibility = "EXPERIMENTAL"
+        else:
+            ok, errors = db.validate_strategy1_backtest_integrity(task_id)
+            credibility = "TRUSTED_BASELINE" if ok else "INCOMPLETE"
+            if errors:
+                db.update_strategy1_backtest_task(task_id, error="; ".join(errors))
+        db.update_strategy1_backtest_task(task_id, credibility_status=credibility)
     except Exception as exc:
         db.update_strategy1_backtest_task(
             task_id,

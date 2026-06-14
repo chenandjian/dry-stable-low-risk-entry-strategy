@@ -2592,6 +2592,84 @@ def build_strategy1_backtest_summary(task_id: str) -> dict:
     }
 
 
+def validate_strategy1_backtest_integrity(task_id: str) -> tuple[bool, list[str]]:
+    """Validate whether a Strategy1 backtest task can be trusted as baseline."""
+    conn = get_conn()
+    errors: list[str] = []
+    task = get_strategy1_backtest_task(task_id)
+    if not task:
+        return False, ["task_not_found"]
+
+    if str(task.get("status", "")).lower() != "completed":
+        errors.append(f"task status is {task.get('status')}, expected completed")
+    if not task.get("data_revision_id"):
+        errors.append("missing data_revision_id")
+    if task.get("data_revision_version") != STRATEGY1_DATA_REVISION_VERSION:
+        errors.append(f"invalid data_revision_version: {task.get('data_revision_version')}")
+    if not task.get("strategy_engine_version"):
+        errors.append("missing strategy_engine_version")
+    if not task.get("backtest_engine_version"):
+        errors.append("missing backtest_engine_version")
+
+    total = int(task.get("total_stocks") or 0)
+    processed = int(task.get("processed_stocks") or 0)
+    stocks_count = conn.execute(
+        "SELECT COUNT(*) FROM strategy1_backtest_task_stocks WHERE task_id=?",
+        (task_id,),
+    ).fetchone()[0]
+    if stocks_count != total:
+        errors.append(f"task_stocks count mismatch: {stocks_count} != {total}")
+    if processed != total:
+        errors.append(f"processed {processed} != total {total}")
+
+    pending = conn.execute(
+        "SELECT COUNT(*) FROM strategy1_backtest_task_stocks "
+        "WHERE task_id=? AND status IN ('PENDING','RUNNING')",
+        (task_id,),
+    ).fetchone()[0]
+    if pending:
+        errors.append(f"{pending} stocks still PENDING/RUNNING")
+
+    signal_count = conn.execute(
+        "SELECT COUNT(*) FROM strategy1_backtest_signals WHERE task_id=?",
+        (task_id,),
+    ).fetchone()[0]
+    stock_signal_count = conn.execute(
+        "SELECT COALESCE(SUM(raw_signals_count),0) FROM strategy1_backtest_task_stocks WHERE task_id=?",
+        (task_id,),
+    ).fetchone()[0]
+    if signal_count != stock_signal_count:
+        errors.append(f"signal delta: {signal_count} vs {stock_signal_count}")
+
+    opp_count = conn.execute(
+        "SELECT COUNT(*) FROM strategy1_backtest_opportunities WHERE task_id=?",
+        (task_id,),
+    ).fetchone()[0]
+    stock_opp_count = conn.execute(
+        "SELECT COALESCE(SUM(opportunities_count),0) FROM strategy1_backtest_task_stocks WHERE task_id=?",
+        (task_id,),
+    ).fetchone()[0]
+    if opp_count != stock_opp_count:
+        errors.append(f"opportunity delta: {opp_count} vs {stock_opp_count}")
+
+    if int(task.get("failed_stocks_count") or 0) > 0:
+        errors.append(f"failed_stocks_count={task.get('failed_stocks_count')} > 0")
+    if not task.get("observation_data_end_date"):
+        errors.append("missing observation_data_end_date")
+    if not task.get("summary_json"):
+        errors.append("missing summary_json")
+    else:
+        try:
+            summary = json.loads(task["summary_json"])
+            for key in ["total_opportunities", "raw_signals_count", "entered_count"]:
+                if key not in summary:
+                    errors.append(f"missing summary key {key}")
+        except Exception:
+            errors.append("invalid summary_json")
+
+    return len(errors) == 0, errors
+
+
 def compare_strategy1_backtest_tasks(experiment_task_id: str, baseline_task_id: str) -> dict:
     baseline = get_strategy1_backtest_task(baseline_task_id)
     experiment = get_strategy1_backtest_task(experiment_task_id)

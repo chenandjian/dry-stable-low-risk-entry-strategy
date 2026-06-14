@@ -211,6 +211,58 @@ def test_strategy1_running_backtests_mark_interrupted_on_restart(tmp_path):
     assert stocks[0]["status"] == "PENDING"
 
 
+def test_strategy1_integrity_rejects_pending_and_missing_summary(tmp_path):
+    _init(tmp_path)
+    db.create_strategy1_backtest_task("s1bt-bad", {"startDate": "", "endDate": ""}, "{}")
+    db.replace_strategy1_stock_backtest_result("s1bt-bad", "600000", "浦发银行", {"status": "PENDING"})
+    db.update_strategy1_backtest_task(
+        "s1bt-bad",
+        status="completed",
+        total_stocks=1,
+        processed_stocks=1,
+        failed_stocks_count=0,
+        data_revision_id="rev-1",
+        data_revision_version=db.STRATEGY1_DATA_REVISION_VERSION,
+        strategy_engine_version="cuphandle-v1",
+        backtest_engine_version="strategy1-backtest-v1",
+    )
+
+    ok, errors = db.validate_strategy1_backtest_integrity("s1bt-bad")
+
+    assert ok is False
+    assert any("PENDING" in error for error in errors)
+    assert "missing summary_json" in errors
+
+
+def test_strategy1_integrity_accepts_completed_zero_opportunity_task(tmp_path):
+    _init(tmp_path)
+    db.create_strategy1_backtest_task("s1bt-zero", {"startDate": "", "endDate": ""}, "{}")
+    db.replace_strategy1_stock_backtest_result(
+        "s1bt-zero",
+        "600000",
+        "浦发银行",
+        {"status": "INSUFFICIENT_DATA", "available_days": 10, "required_days": 250},
+    )
+    db.update_strategy1_backtest_task(
+        "s1bt-zero",
+        status="completed",
+        total_stocks=1,
+        processed_stocks=1,
+        failed_stocks_count=0,
+        data_revision_id="rev-1",
+        data_revision_version=db.STRATEGY1_DATA_REVISION_VERSION,
+        strategy_engine_version="cuphandle-v1",
+        backtest_engine_version="strategy1-backtest-v1",
+        observation_data_end_date="2026-06-12",
+        summary_json=json.dumps(db.build_strategy1_backtest_summary("s1bt-zero")),
+    )
+
+    ok, errors = db.validate_strategy1_backtest_integrity("s1bt-zero")
+
+    assert ok is True
+    assert errors == []
+
+
 def test_strategy1_experiment_preview_endpoint_normalizes_payload(monkeypatch, tmp_path):
     db_path = str(tmp_path / "preview.db")
     monkeypatch.setattr(server_mod, "load_config", lambda path="config.yaml": {"data": {"database_path": db_path}})
