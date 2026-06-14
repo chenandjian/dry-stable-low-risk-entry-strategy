@@ -16,14 +16,14 @@ def _init(tmp_path):
     return path
 
 
-def _signal(code="600000", date="2025-01-02", idx=1):
+def _signal(code="600000", date="2025-01-02", idx=1, score=76):
     return Strategy1BacktestSignal(
         code=code,
         name="浦发银行",
         evaluation_date=date,
         evaluation_index=idx,
         pattern_kind="cup_handle",
-        score=76,
+        score=score,
         current_close=10.0,
         volume_dry_score=8,
         price_stable_score=7,
@@ -297,7 +297,6 @@ def test_strategy1_start_backtest_saves_snapshot_and_launches(monkeypatch, tmp_p
             "startDate": "2025-01-01",
             "endDate": "2025-03-31",
             "codes": ["600000"],
-            "baselineTaskId": "baseline-1",
             "experiment": {"enabled": True, "minimumTotalScore": 75},
         },
     )
@@ -309,9 +308,41 @@ def test_strategy1_start_backtest_saves_snapshot_and_launches(monkeypatch, tmp_p
     task = db.get_strategy1_backtest_task(body["task_id"])
     snapshot = json.loads(task["experiment_snapshot"])
     assert snapshot["minimum_total_score"] == 75
-    assert task["baseline_task_id"] == "baseline-1"
+    assert task["baseline_task_id"] is None
     assert launched["target_stocks"] == [{"code": "600000", "name": "浦发银行"}]
     assert launched["payload_snapshot"]["experiment"]["minimum_total_score"] == 75
+
+
+def test_strategy1_start_experiment_with_baseline_derives_without_launcher(monkeypatch, tmp_path):
+    db_path = str(tmp_path / "derive-api.db")
+    db.init_db(db_path)
+    db.save_stock_pool([{"code": "600000", "name": "浦发银行", "market": "SH"}])
+    db.save_ohlc("600000", [{"date": "2025-01-01", "open": 10, "high": 10, "low": 10, "close": 10, "volume": 1, "turnover": 10}])
+    config = {"data": {"database_path": db_path, "scan_window_days": 30, "backtest_window_days": 30}, "liquidity": {"min_listing_days": 30}}
+    db.create_strategy1_backtest_task("baseline-1", {"startDate": "2025-01-01", "endDate": "2025-03-31", "codes": ["600000"], "maxStocks": 1}, json.dumps(config))
+    db.update_strategy1_backtest_task("baseline-1", status="completed", credibility_status="TRUSTED_BASELINE")
+    derived = {}
+    monkeypatch.setattr(server_mod, "load_config", lambda path="config.yaml": config)
+    monkeypatch.setattr(server_mod, "_launch_strategy1_backtest_task", lambda **kwargs: (_ for _ in ()).throw(AssertionError("launcher should not run")))
+    monkeypatch.setattr(server_mod, "run_strategy1_experiment_from_baseline", lambda **kwargs: derived.update(kwargs), raising=False)
+    server_mod._backtest_running.update({"running": False, "task_id": None, "stats": {}, "cancel_event": None, "thread": None})
+    server_mod._running.update({"running": False, "task_id": None, "strategy_type": None, "stats": {}})
+
+    response = TestClient(server_mod.app).post(
+        "/api/strategy1/backtests",
+        json={
+            "startDate": "2025-01-01",
+            "endDate": "2025-03-31",
+            "codes": ["600000"],
+            "baselineTaskId": "baseline-1",
+            "experiment": {"enabled": True, "minimumTotalScore": 80},
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "completed"
+    assert derived["baseline_task_id"] == "baseline-1"
+    assert derived["experiment_snapshot"]["minimum_total_score"] == 80
 
 
 def test_strategy1_detail_opportunity_signal_and_comparison_endpoints(monkeypatch, tmp_path):
@@ -355,3 +386,94 @@ def test_strategy1_detail_opportunity_signal_and_comparison_endpoints(monkeypatc
     assert signals.json()["signals"][0]["code"] == "600000"
     assert comparison.status_code == 200
     assert comparison.json()["comparable"] is True
+
+
+def test_strategy1_experiment_can_be_derived_from_trusted_baseline(tmp_path):
+    from scanner.strategy1_backtest_experiments import normalize_experiment_config
+    from scanner.strategy1_backtest_service import (
+        STRATEGY1_BACKTEST_ENGINE_VERSION,
+        STRATEGY1_STRATEGY_ENGINE_VERSION,
+        run_strategy1_experiment_from_baseline,
+    )
+
+    _init(tmp_path)
+    rows = []
+    for i in range(40):
+        rows.append({
+            "date": f"2025-01-{i + 1:02d}" if i < 31 else f"2025-02-{i - 30:02d}",
+            "open": 10 + i * 0.1,
+            "high": 10.5 + i * 0.1,
+            "low": 9.5 + i * 0.1,
+            "close": 10.1 + i * 0.1,
+            "volume": 1_000_000,
+            "turnover": 10_000_000,
+        })
+    db.save_stock_pool([{"code": "600000", "name": "浦发银行", "market": "SH"}])
+    db.save_ohlc("600000", rows)
+    baseline_id = "s1bt-baseline"
+    experiment_id = "s1bt-experiment"
+    config_snapshot = {"data": {"scan_window_days": 30, "backtest_window_days": 30}, "liquidity": {"min_listing_days": 30}}
+    db.create_strategy1_backtest_task(
+        baseline_id,
+        {"startDate": "2025-01-01", "endDate": "2025-02-09", "codes": ["600000"], "maxStocks": 1},
+        json.dumps(config_snapshot),
+    )
+    baseline_signal = _signal(date="2025-01-20", idx=19, score=76)
+    baseline_opp = _opportunity(first="2025-01-20")
+    baseline_opp.last_detected_date = "2025-01-20"
+    db.replace_strategy1_stock_backtest_result(
+        baseline_id,
+        "600000",
+        "浦发银行",
+        {
+            "signals": [baseline_signal],
+            "opportunities": [baseline_opp],
+            "raw_signals_count": 1,
+            "opportunities_count": 1,
+            "evaluation_days": 40,
+            "available_days": 40,
+            "required_days": 30,
+            "latest_date": "2025-02-09",
+        },
+    )
+    summary = db.build_strategy1_backtest_summary(baseline_id)
+    db.update_strategy1_backtest_task(
+        baseline_id,
+        status="completed",
+        credibility_status="TRUSTED_BASELINE",
+        requested_start_date="2025-01-01",
+        requested_end_date="2025-02-09",
+        requested_codes="600000",
+        max_stocks=1,
+        total_stocks=1,
+        processed_stocks=1,
+        failed_stocks_count=0,
+        raw_signals_count=1,
+        opportunities_count=1,
+        observation_data_end_date="2025-02-09",
+        summary_json=json.dumps(summary),
+        data_revision_id="rev-1",
+        data_revision_version=db.STRATEGY1_DATA_REVISION_VERSION,
+        strategy_engine_version=STRATEGY1_STRATEGY_ENGINE_VERSION,
+        backtest_engine_version=STRATEGY1_BACKTEST_ENGINE_VERSION,
+        execution_model="NEXT_OPEN",
+    )
+    experiment = normalize_experiment_config({"enabled": True, "minimumTotalScore": 80})
+
+    run_strategy1_experiment_from_baseline(
+        experiment_task_id=experiment_id,
+        baseline_task_id=baseline_id,
+        experiment_snapshot=experiment,
+    )
+
+    task = db.get_strategy1_backtest_task(experiment_id)
+    signals = db.get_strategy1_backtest_signals(experiment_id)
+    comparison = db.compare_strategy1_backtest_tasks(experiment_id, baseline_id)
+    assert task["credibility_status"] == "EXPERIMENTAL"
+    assert task["baseline_task_id"] == baseline_id
+    assert task["raw_signals_count"] == 1
+    assert task["opportunities_count"] == 0
+    assert signals[0]["experiment_passed"] == 0
+    assert signals[0]["experiment_filter_reason"] == "MIN_TOTAL_SCORE"
+    assert comparison["comparable"] is True
+    assert comparison["delta"]["opportunities"] == -1

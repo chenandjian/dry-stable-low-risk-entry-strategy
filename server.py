@@ -32,6 +32,7 @@ from scanner.single_stock_backtest import (
     DataCoverageError,
     run_single_stock_cuphandle_backtest,
 )
+from scanner.strategy1_backtest_service import run_strategy1_experiment_from_baseline
 
 logger = logging.getLogger(__name__)
 
@@ -1546,6 +1547,22 @@ async def start_strategy1_backtest(payload: dict):
         data_revision_id=data_revision_id,
         data_revision_version=db.STRATEGY1_DATA_REVISION_VERSION,
     )
+
+    if is_experiment_enabled(experiment) and payload.get("baselineTaskId"):
+        try:
+            run_strategy1_experiment_from_baseline(
+                experiment_task_id=task_id,
+                baseline_task_id=payload["baselineTaskId"],
+                experiment_snapshot=experiment,
+            )
+        except ValueError as exc:
+            return JSONResponse({"error": "INVALID_BASELINE", "message": str(exc)}, status_code=400)
+        return {
+            "task_id": task_id,
+            "taskId": task_id,
+            "status": "completed",
+            "credibilityStatus": "EXPERIMENTAL",
+        }
 
     _launch_strategy1_backtest_task(
         task_id=task_id,

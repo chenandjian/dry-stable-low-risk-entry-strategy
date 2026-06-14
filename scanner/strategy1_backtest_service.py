@@ -7,6 +7,13 @@ import hashlib
 import json
 
 import scanner.db as db
+from scanner.strategy1_backtest_experiments import apply_signal_experiment_filter
+from scanner.strategy1_backtest_models import Strategy1BacktestSignal
+from scanner.strategy1_backtester import (
+    apply_strategy1_time_exit,
+    calculate_strategy1_execution_outcome,
+    merge_strategy1_signals,
+)
 from scanner.strategy1_backtester import run_strategy1_stock_backtest
 
 STRATEGY1_BACKTEST_ENGINE_VERSION = "strategy1-backtest-v1"
@@ -152,3 +159,159 @@ def run_strategy1_backtest_task(
             finished_at=datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         )
         raise
+
+
+def run_strategy1_experiment_from_baseline(
+    *,
+    experiment_task_id: str,
+    baseline_task_id: str,
+    experiment_snapshot: dict,
+) -> None:
+    """Create a fast experiment task by filtering trusted baseline signals."""
+    baseline = db.get_strategy1_backtest_task(baseline_task_id)
+    if not baseline:
+        raise ValueError(f"Baseline task not found: {baseline_task_id}")
+    if baseline.get("credibility_status") != "TRUSTED_BASELINE":
+        raise ValueError(f"Baseline task is not trusted: {baseline.get('credibility_status')}")
+
+    config_snapshot = baseline.get("config_snapshot") or "{}"
+    payload = {
+        "startDate": baseline.get("requested_start_date", ""),
+        "endDate": baseline.get("requested_end_date", ""),
+        "codes": [code for code in (baseline.get("requested_codes") or "").split(",") if code],
+        "maxStocks": baseline.get("max_stocks"),
+        "baselineTaskId": baseline_task_id,
+        "experiment": experiment_snapshot,
+        "experiment_snapshot": experiment_snapshot,
+    }
+    existing = db.get_strategy1_backtest_task(experiment_task_id)
+    if not existing:
+        db.create_strategy1_backtest_task(experiment_task_id, payload, config_snapshot)
+
+    db.update_strategy1_backtest_task(
+        experiment_task_id,
+        status="running",
+        credibility_status="EXPERIMENTAL",
+        baseline_task_id=baseline_task_id,
+        requested_start_date=baseline.get("requested_start_date"),
+        requested_end_date=baseline.get("requested_end_date"),
+        requested_codes=baseline.get("requested_codes"),
+        max_stocks=baseline.get("max_stocks"),
+        total_stocks=baseline.get("total_stocks") or 0,
+        processed_stocks=0,
+        config_snapshot=config_snapshot,
+        experiment_snapshot=json.dumps(experiment_snapshot, ensure_ascii=False),
+        data_revision_id=baseline.get("data_revision_id"),
+        data_revision_version=baseline.get("data_revision_version"),
+        strategy_engine_version=baseline.get("strategy_engine_version"),
+        backtest_engine_version=baseline.get("backtest_engine_version"),
+        execution_model=experiment_snapshot.get("execution_model", baseline.get("execution_model") or "NEXT_OPEN"),
+        error=None,
+    )
+
+    stock_rows = db.get_strategy1_backtest_task_stocks(baseline_task_id)
+    processed = 0
+    raw_signals_total = 0
+    opportunities_total = 0
+    for stock in stock_rows:
+        code = stock["code"]
+        name = stock.get("name") or ""
+        signal_rows = db.get_strategy1_backtest_signals(baseline_task_id, code=code, limit=100000)
+        signals = [_signal_from_row(row) for row in signal_rows]
+        eval_results: dict[int, str] = {}
+        experiment_signals: list[Strategy1BacktestSignal] = []
+        for signal in signals:
+            passed, reason = apply_signal_experiment_filter(signal, experiment_snapshot)
+            experiment_signals.append(signal)
+            eval_results[signal.evaluation_index] = "PASSED" if passed else reason or "EXPERIMENT_FILTERED"
+
+        passed_signals = [signal for signal in experiment_signals if signal.experiment_passed]
+        opportunities = merge_strategy1_signals(passed_signals, eval_results)
+        ohlc_rows = db.get_ohlc(code, max_rows=0) or []
+        date_to_index = {row["date"]: idx for idx, row in enumerate(ohlc_rows)}
+        for opportunity in opportunities:
+            calculate_strategy1_execution_outcome(opportunity, ohlc_rows, date_to_index)
+            apply_strategy1_time_exit(opportunity, ohlc_rows, date_to_index, experiment_snapshot)
+
+        db.replace_strategy1_stock_backtest_result(
+            experiment_task_id,
+            code,
+            name,
+            {
+                "signals": experiment_signals,
+                "opportunities": opportunities,
+                "raw_signals_count": len(experiment_signals),
+                "opportunities_count": len(opportunities),
+                "evaluation_days": stock.get("evaluation_days") or 0,
+                "filtered_days": len(experiment_signals) - len(passed_signals),
+                "available_days": stock.get("available_days") or 0,
+                "required_days": stock.get("required_days") or 0,
+                "earliest_date": stock.get("earliest_date") or "",
+                "latest_date": stock.get("latest_date") or "",
+                "actual_start_date": stock.get("actual_start_date") or "",
+                "actual_end_date": stock.get("actual_end_date") or "",
+            },
+        )
+        processed += 1
+        raw_signals_total += len(experiment_signals)
+        opportunities_total += len(opportunities)
+
+    summary = db.build_strategy1_backtest_summary(experiment_task_id)
+    comparison = db.compare_strategy1_backtest_tasks(experiment_task_id, baseline_task_id)
+    db.update_strategy1_backtest_task(
+        experiment_task_id,
+        status="completed",
+        credibility_status="EXPERIMENTAL",
+        processed_stocks=processed,
+        failed_stocks_count=0,
+        insufficient_stocks_count=baseline.get("insufficient_stocks_count") or 0,
+        raw_signals_count=raw_signals_total,
+        opportunities_count=opportunities_total,
+        actual_evaluation_start_date=baseline.get("actual_evaluation_start_date"),
+        actual_evaluation_end_date=baseline.get("actual_evaluation_end_date"),
+        observation_data_end_date=baseline.get("observation_data_end_date"),
+        summary_json=json.dumps(summary, ensure_ascii=False),
+        comparison_summary_json=json.dumps(comparison, ensure_ascii=False),
+        finished_at=datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+    )
+
+
+def _signal_from_row(row: dict) -> Strategy1BacktestSignal:
+    snapshot = {}
+    if row.get("evaluation_snapshot"):
+        try:
+            snapshot = json.loads(row["evaluation_snapshot"])
+        except Exception:
+            snapshot = {}
+    return Strategy1BacktestSignal(
+        code=row.get("code") or "",
+        name=row.get("name") or "",
+        evaluation_date=row.get("evaluation_date") or "",
+        evaluation_index=int(row.get("evaluation_index") or 0),
+        pattern_kind=row.get("pattern_kind") or "",
+        score=int(row.get("score") or 0),
+        cup_depth_pct=float(row.get("cup_depth_pct") or 0),
+        cup_duration=int(row.get("cup_duration") or 0),
+        handle_depth_pct=float(row.get("handle_depth_pct") or 0),
+        handle_duration=int(row.get("handle_duration") or 0),
+        lip_deviation_pct=float(row.get("lip_deviation_pct") or 0),
+        is_breakout=bool(row.get("is_breakout")),
+        is_volume_breakout=bool(row.get("is_volume_breakout")),
+        breakout_price=float(row.get("breakout_price") or 0),
+        current_close=float(row.get("current_close") or 0),
+        volume_dry_score=int(row.get("volume_dry_score") or 0),
+        price_stable_score=int(row.get("price_stable_score") or 0),
+        pattern_score_20=int(row.get("pattern_score_20") or 0),
+        verdict_key=row.get("verdict_key") or "",
+        risk_percent=float(row.get("risk_percent") or 0),
+        rr1=float(row.get("rr1") or 0),
+        entry_zone_low=float(row.get("entry_zone_low") or 0),
+        entry_zone_high=float(row.get("entry_zone_high") or 0),
+        stop_loss=float(row.get("stop_loss") or 0),
+        target_1=float(row.get("target_1") or 0),
+        target_2=float(row.get("target_2") or 0),
+        baseline_passed=bool(row.get("baseline_passed", 1)),
+        experiment_passed=bool(row.get("experiment_passed", 1)),
+        experiment_filter_reason=row.get("experiment_filter_reason") or "",
+        evaluation_snapshot=snapshot,
+    )
