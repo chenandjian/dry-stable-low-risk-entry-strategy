@@ -120,6 +120,7 @@ def init_db(path: str = "data/cuphandle.db"):
         conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_candidates_task_code ON candidates(task_id, code)")
         _ensure_strategy2_candidates_table(conn)
         _ensure_strategy2_backtest_tables(conn)
+        _ensure_strategy1_backtest_tables(conn)
         conn.commit()
 
 
@@ -2120,3 +2121,525 @@ def get_strategy2_backtest_insufficient_stocks(task_id: str) -> list[dict]:
         "PRAGMA table_info(strategy2_backtest_insufficient_stocks)"
     )]
     return [dict(zip(cols, r)) for r in rows]
+
+
+# ====== Strategy1 Trusted Backtest ======
+
+STRATEGY1_DATA_REVISION_VERSION = "daily-ohlc-v1"
+
+
+def _ensure_strategy1_backtest_tables(conn: sqlite3.Connection):
+    conn.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS strategy1_backtest_tasks (
+            id TEXT PRIMARY KEY,
+            status TEXT NOT NULL,
+            credibility_status TEXT,
+            requested_start_date TEXT,
+            requested_end_date TEXT,
+            actual_evaluation_start_date TEXT,
+            actual_evaluation_end_date TEXT,
+            observation_data_end_date TEXT,
+            scope_type TEXT,
+            requested_codes TEXT,
+            max_stocks INTEGER,
+            config_snapshot TEXT NOT NULL,
+            experiment_snapshot TEXT,
+            baseline_task_id TEXT,
+            comparison_summary_json TEXT,
+            strategy_engine_version TEXT,
+            backtest_engine_version TEXT,
+            data_revision_version TEXT,
+            data_revision_id TEXT,
+            execution_model TEXT,
+            total_stocks INTEGER DEFAULT 0,
+            processed_stocks INTEGER DEFAULT 0,
+            failed_stocks_count INTEGER DEFAULT 0,
+            insufficient_stocks_count INTEGER DEFAULT 0,
+            raw_signals_count INTEGER DEFAULT 0,
+            opportunities_count INTEGER DEFAULT 0,
+            summary_json TEXT,
+            started_at TEXT,
+            finished_at TEXT,
+            elapsed_seconds REAL,
+            error TEXT
+        );
+
+        CREATE TABLE IF NOT EXISTS strategy1_backtest_task_stocks (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            task_id TEXT NOT NULL,
+            code TEXT NOT NULL,
+            name TEXT,
+            status TEXT NOT NULL,
+            available_days INTEGER DEFAULT 0,
+            required_days INTEGER DEFAULT 0,
+            earliest_date TEXT,
+            latest_date TEXT,
+            actual_start_date TEXT,
+            actual_end_date TEXT,
+            raw_signals_count INTEGER DEFAULT 0,
+            opportunities_count INTEGER DEFAULT 0,
+            evaluation_days INTEGER DEFAULT 0,
+            filtered_days INTEGER DEFAULT 0,
+            error_code TEXT,
+            error_detail TEXT,
+            UNIQUE(task_id, code)
+        );
+
+        CREATE TABLE IF NOT EXISTS strategy1_backtest_signals (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            task_id TEXT NOT NULL,
+            code TEXT NOT NULL,
+            name TEXT,
+            evaluation_date TEXT NOT NULL,
+            evaluation_index INTEGER DEFAULT 0,
+            pattern_kind TEXT,
+            score INTEGER DEFAULT 0,
+            cup_depth_pct REAL DEFAULT 0,
+            cup_duration INTEGER DEFAULT 0,
+            handle_depth_pct REAL DEFAULT 0,
+            handle_duration INTEGER DEFAULT 0,
+            lip_deviation_pct REAL DEFAULT 0,
+            is_breakout INTEGER DEFAULT 0,
+            is_volume_breakout INTEGER DEFAULT 0,
+            breakout_price REAL DEFAULT 0,
+            current_close REAL DEFAULT 0,
+            volume_dry_score INTEGER DEFAULT 0,
+            price_stable_score INTEGER DEFAULT 0,
+            pattern_score_20 INTEGER DEFAULT 0,
+            verdict_key TEXT,
+            risk_percent REAL DEFAULT 0,
+            rr1 REAL DEFAULT 0,
+            entry_zone_low REAL DEFAULT 0,
+            entry_zone_high REAL DEFAULT 0,
+            stop_loss REAL DEFAULT 0,
+            target_1 REAL DEFAULT 0,
+            target_2 REAL DEFAULT 0,
+            baseline_passed INTEGER DEFAULT 1,
+            experiment_passed INTEGER DEFAULT 1,
+            experiment_filter_reason TEXT,
+            evaluation_snapshot TEXT,
+            UNIQUE(task_id, code, evaluation_date)
+        );
+
+        CREATE TABLE IF NOT EXISTS strategy1_backtest_opportunities (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            task_id TEXT NOT NULL,
+            code TEXT NOT NULL,
+            name TEXT,
+            first_detected_date TEXT NOT NULL,
+            last_detected_date TEXT,
+            pattern_kind TEXT,
+            first_score INTEGER DEFAULT 0,
+            max_score INTEGER DEFAULT 0,
+            signal_count INTEGER DEFAULT 0,
+            entry_date TEXT,
+            entry_price REAL DEFAULT 0,
+            stop_loss REAL DEFAULT 0,
+            exit_date TEXT,
+            exit_price REAL DEFAULT 0,
+            exit_reason TEXT,
+            realized_return REAL,
+            mark_to_market_end_return REAL,
+            holding_days INTEGER DEFAULT 0,
+            available_forward_days INTEGER DEFAULT 0,
+            horizon_3 TEXT,
+            horizon_5 TEXT,
+            horizon_10 TEXT,
+            horizon_20 TEXT,
+            market_context_json TEXT,
+            evaluation_snapshot TEXT,
+            UNIQUE(task_id, code, first_detected_date)
+        );
+
+        CREATE TABLE IF NOT EXISTS strategy1_backtest_insufficient_stocks (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            task_id TEXT NOT NULL,
+            code TEXT NOT NULL,
+            name TEXT,
+            reason_code TEXT,
+            available_days INTEGER DEFAULT 0,
+            required_days INTEGER DEFAULT 0,
+            earliest_date TEXT,
+            latest_date TEXT,
+            detail TEXT
+        );
+        """
+    )
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_s1_bt_task_status ON strategy1_backtest_tasks(status, started_at DESC)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_s1_bt_signal_task ON strategy1_backtest_signals(task_id, code, evaluation_date)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_s1_bt_opp_task ON strategy1_backtest_opportunities(task_id, first_detected_date)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_s1_bt_stock_task ON strategy1_backtest_task_stocks(task_id, status)")
+
+
+def create_strategy1_backtest_task(task_id: str, payload: dict, config_snapshot: str):
+    conn = get_conn()
+    experiment = payload.get("experiment_snapshot")
+    if experiment is None:
+        experiment = payload.get("experiment")
+    experiment_json = (
+        experiment if isinstance(experiment, str)
+        else json.dumps(experiment, ensure_ascii=False) if experiment is not None else None
+    )
+    credibility_status = "EXPERIMENTAL" if _strategy1_experiment_enabled(experiment) else "INCOMPLETE"
+    execution_model = "NEXT_OPEN"
+    if isinstance(experiment, dict):
+        execution_model = experiment.get("execution_model") or experiment.get("executionModel") or execution_model
+
+    conn.execute(
+        """INSERT INTO strategy1_backtest_tasks
+           (id, status, credibility_status, requested_start_date, requested_end_date,
+            scope_type, requested_codes, max_stocks, config_snapshot,
+            experiment_snapshot, baseline_task_id, execution_model,
+            data_revision_version, started_at)
+           VALUES (?, 'running', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        (
+            task_id,
+            credibility_status,
+            payload.get("startDate", ""),
+            payload.get("endDate", ""),
+            "market" if not payload.get("codes") else "single",
+            ",".join(payload.get("codes") or []),
+            payload.get("maxStocks"),
+            config_snapshot,
+            experiment_json,
+            payload.get("baselineTaskId"),
+            execution_model,
+            STRATEGY1_DATA_REVISION_VERSION,
+            datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        ),
+    )
+    conn.commit()
+
+
+def update_strategy1_backtest_task(task_id: str, **kwargs):
+    if not kwargs:
+        return
+    conn = get_conn()
+    sets = ", ".join(f"{key}=?" for key in kwargs)
+    conn.execute(f"UPDATE strategy1_backtest_tasks SET {sets} WHERE id=?", list(kwargs.values()) + [task_id])
+    conn.commit()
+
+
+def get_strategy1_backtest_task(task_id: str) -> dict | None:
+    conn = get_conn()
+    row = conn.execute("SELECT * FROM strategy1_backtest_tasks WHERE id=?", (task_id,)).fetchone()
+    if not row:
+        return None
+    cols = [d[1] for d in conn.execute("PRAGMA table_info(strategy1_backtest_tasks)")]
+    return dict(zip(cols, row))
+
+
+def save_strategy1_backtest_signal(task_id: str, signal):
+    conn = get_conn()
+    snapshot_json = json.dumps(getattr(signal, "evaluation_snapshot", None) or {}, ensure_ascii=False)
+    conn.execute(
+        """INSERT INTO strategy1_backtest_signals
+           (task_id, code, name, evaluation_date, evaluation_index, pattern_kind,
+            score, cup_depth_pct, cup_duration, handle_depth_pct, handle_duration,
+            lip_deviation_pct, is_breakout, is_volume_breakout, breakout_price,
+            current_close, volume_dry_score, price_stable_score, pattern_score_20,
+            verdict_key, risk_percent, rr1, entry_zone_low, entry_zone_high,
+            stop_loss, target_1, target_2, baseline_passed, experiment_passed,
+            experiment_filter_reason, evaluation_snapshot)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+           ON CONFLICT(task_id, code, evaluation_date) DO UPDATE SET
+            score=excluded.score,
+            experiment_passed=excluded.experiment_passed,
+            experiment_filter_reason=excluded.experiment_filter_reason,
+            evaluation_snapshot=excluded.evaluation_snapshot""",
+        (
+            task_id,
+            signal.code,
+            signal.name,
+            signal.evaluation_date,
+            signal.evaluation_index,
+            signal.pattern_kind,
+            signal.score,
+            signal.cup_depth_pct,
+            signal.cup_duration,
+            signal.handle_depth_pct,
+            signal.handle_duration,
+            signal.lip_deviation_pct,
+            1 if signal.is_breakout else 0,
+            1 if signal.is_volume_breakout else 0,
+            signal.breakout_price,
+            signal.current_close,
+            signal.volume_dry_score,
+            signal.price_stable_score,
+            signal.pattern_score_20,
+            signal.verdict_key,
+            signal.risk_percent,
+            signal.rr1,
+            signal.entry_zone_low,
+            signal.entry_zone_high,
+            signal.stop_loss,
+            signal.target_1,
+            signal.target_2,
+            1 if signal.baseline_passed else 0,
+            1 if signal.experiment_passed else 0,
+            signal.experiment_filter_reason,
+            snapshot_json,
+        ),
+    )
+    conn.commit()
+
+
+def replace_strategy1_stock_backtest_result(task_id: str, code: str, name: str, result: dict):
+    conn = get_conn()
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        conn.execute("DELETE FROM strategy1_backtest_opportunities WHERE task_id=? AND code=?", (task_id, code))
+        conn.execute("DELETE FROM strategy1_backtest_signals WHERE task_id=? AND code=?", (task_id, code))
+
+        for signal in result.get("signals") or []:
+            _insert_strategy1_signal(conn, task_id, signal)
+        for opportunity in result.get("opportunities") or []:
+            _insert_strategy1_opportunity(conn, task_id, opportunity)
+
+        stock_values = {
+            "task_id": task_id,
+            "code": code,
+            "name": name,
+            "status": result.get("status", "COMPLETED"),
+            "available_days": result.get("available_days", 0),
+            "required_days": result.get("required_days", 0),
+            "earliest_date": result.get("earliest_date", ""),
+            "latest_date": result.get("latest_date", ""),
+            "actual_start_date": result.get("actual_start_date", result.get("actual_eval_start_date", "")),
+            "actual_end_date": result.get("actual_end_date", result.get("actual_eval_end_date", "")),
+            "raw_signals_count": result.get("raw_signals_count", 0),
+            "opportunities_count": result.get("opportunities_count", 0),
+            "evaluation_days": result.get("evaluation_days", result.get("eval_days", 0)),
+            "filtered_days": result.get("filtered_days", 0),
+            "error_code": result.get("error_code", ""),
+            "error_detail": result.get("error_detail", ""),
+        }
+        columns = list(stock_values)
+        placeholders = ", ".join("?" for _ in columns)
+        updates = ", ".join(f"{column}=excluded.{column}" for column in columns if column not in {"task_id", "code"})
+        conn.execute(
+            f"""INSERT INTO strategy1_backtest_task_stocks ({', '.join(columns)})
+                VALUES ({placeholders})
+                ON CONFLICT(task_id, code) DO UPDATE SET {updates}""",
+            [stock_values[column] for column in columns],
+        )
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+
+
+def build_strategy1_backtest_summary(task_id: str) -> dict:
+    import statistics as _st
+
+    conn = get_conn()
+    cols = [d[1] for d in conn.execute("PRAGMA table_info(strategy1_backtest_opportunities)")]
+    rows = conn.execute(
+        "SELECT * FROM strategy1_backtest_opportunities WHERE task_id=?",
+        (task_id,),
+    ).fetchall()
+    opportunities = [dict(zip(cols, row)) for row in rows]
+    entered = [row for row in opportunities if (row.get("entry_price") or 0) > 0]
+    realized = [row.get("realized_return") or 0 for row in entered]
+    target_count = sum(1 for row in opportunities if row.get("exit_reason") == "TARGET")
+    stop_count = sum(1 for row in opportunities if row.get("exit_reason") == "STOP")
+    raw_signals_count = conn.execute(
+        "SELECT COUNT(*) FROM strategy1_backtest_signals WHERE task_id=?",
+        (task_id,),
+    ).fetchone()[0]
+
+    def _group_by(field: str) -> dict:
+        grouped = {}
+        for row in opportunities:
+            key = row.get(field) or "UNKNOWN"
+            grouped.setdefault(key, []).append(row)
+        return {
+            key: {
+                "count": len(items),
+                "entered": sum(1 for item in items if (item.get("entry_price") or 0) > 0),
+                "target": sum(1 for item in items if item.get("exit_reason") == "TARGET"),
+                "stop": sum(1 for item in items if item.get("exit_reason") == "STOP"),
+            }
+            for key, items in sorted(grouped.items())
+        }
+
+    return {
+        "total_opportunities": len(opportunities),
+        "raw_signals_count": raw_signals_count,
+        "entered_count": len(entered),
+        "target_count": target_count,
+        "stop_count": stop_count,
+        "target_rate": round(target_count / len(entered), 6) if entered else 0.0,
+        "stop_rate": round(stop_count / len(entered), 6) if entered else 0.0,
+        "average_realized_return": round(_st.mean(realized), 6) if realized else 0.0,
+        "median_realized_return": round(_st.median(realized), 6) if realized else 0.0,
+        "by_pattern_kind": _group_by("pattern_kind"),
+    }
+
+
+def compare_strategy1_backtest_tasks(experiment_task_id: str, baseline_task_id: str) -> dict:
+    baseline = get_strategy1_backtest_task(baseline_task_id)
+    experiment = get_strategy1_backtest_task(experiment_task_id)
+    if not baseline or not experiment:
+        return {
+            "comparable": False,
+            "baselineTaskId": baseline_task_id,
+            "experimentTaskId": experiment_task_id,
+            "reasons": ["TASK_NOT_FOUND"],
+        }
+
+    checks = [
+        ("requested_start_date", "DATE_RANGE_MISMATCH"),
+        ("requested_end_date", "DATE_RANGE_MISMATCH"),
+        ("requested_codes", "STOCK_SCOPE_MISMATCH"),
+        ("max_stocks", "STOCK_SCOPE_MISMATCH"),
+        ("execution_model", "EXECUTION_MODEL_MISMATCH"),
+        ("strategy_engine_version", "STRATEGY_VERSION_MISMATCH"),
+        ("data_revision_version", "DATA_REVISION_MISMATCH"),
+        ("data_revision_id", "DATA_REVISION_MISMATCH"),
+    ]
+    reasons = []
+    for field, reason in checks:
+        if (baseline.get(field) or "") != (experiment.get(field) or "") and reason not in reasons:
+            reasons.append(reason)
+    if baseline.get("credibility_status") != "TRUSTED_BASELINE":
+        reasons.append("BASELINE_NOT_TRUSTED")
+    if experiment.get("credibility_status") != "EXPERIMENTAL":
+        reasons.append("EXPERIMENT_NOT_MARKED")
+
+    baseline_summary = _strategy1_summary_for_comparison(baseline_task_id, baseline)
+    experiment_summary = _strategy1_summary_for_comparison(experiment_task_id, experiment)
+    delta = {
+        key: round((experiment_summary.get(key) or 0) - (baseline_summary.get(key) or 0), 6)
+        for key in {"opportunities", "entered", "target", "stop", "targetRate", "stopRate", "averageRealizedReturn"}
+    }
+    return {
+        "comparable": not reasons,
+        "baselineTaskId": baseline_task_id,
+        "experimentTaskId": experiment_task_id,
+        "reasons": reasons,
+        "baseline": baseline_summary,
+        "experiment": experiment_summary,
+        "delta": delta,
+    }
+
+
+def _insert_strategy1_signal(conn: sqlite3.Connection, task_id: str, signal):
+    snapshot_json = json.dumps(getattr(signal, "evaluation_snapshot", None) or {}, ensure_ascii=False)
+    conn.execute(
+        """INSERT INTO strategy1_backtest_signals
+           (task_id, code, name, evaluation_date, evaluation_index, pattern_kind,
+            score, current_close, volume_dry_score, price_stable_score,
+            pattern_score_20, verdict_key, risk_percent, rr1, stop_loss,
+            baseline_passed, experiment_passed, experiment_filter_reason,
+            evaluation_snapshot)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+        (
+            task_id,
+            signal.code,
+            signal.name,
+            signal.evaluation_date,
+            signal.evaluation_index,
+            signal.pattern_kind,
+            signal.score,
+            signal.current_close,
+            signal.volume_dry_score,
+            signal.price_stable_score,
+            signal.pattern_score_20,
+            signal.verdict_key,
+            signal.risk_percent,
+            signal.rr1,
+            signal.stop_loss,
+            1 if signal.baseline_passed else 0,
+            1 if signal.experiment_passed else 0,
+            signal.experiment_filter_reason,
+            snapshot_json,
+        ),
+    )
+
+
+def _insert_strategy1_opportunity(conn: sqlite3.Connection, task_id: str, opportunity):
+    horizons = getattr(opportunity, "horizons", {}) or {}
+
+    def _horizon_json(days: str) -> str:
+        hp = horizons.get(days) or horizons.get(int(days))
+        return json.dumps(hp.to_dict() if hasattr(hp, "to_dict") else {}, ensure_ascii=False)
+
+    conn.execute(
+        """INSERT INTO strategy1_backtest_opportunities
+           (task_id, code, name, first_detected_date, last_detected_date,
+            pattern_kind, first_score, max_score, signal_count, entry_date,
+            entry_price, stop_loss, exit_date, exit_price, exit_reason,
+            realized_return, mark_to_market_end_return, holding_days,
+            available_forward_days, horizon_3, horizon_5, horizon_10,
+            horizon_20, market_context_json, evaluation_snapshot)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+        (
+            task_id,
+            opportunity.code,
+            opportunity.name,
+            opportunity.first_detected_date,
+            opportunity.last_detected_date,
+            opportunity.pattern_kind,
+            opportunity.first_score,
+            opportunity.max_score,
+            opportunity.signal_count,
+            opportunity.entry_date,
+            opportunity.entry_price,
+            opportunity.stop_loss,
+            opportunity.exit_date,
+            opportunity.exit_price,
+            opportunity.exit_reason,
+            opportunity.realized_return,
+            opportunity.mark_to_market_end_return,
+            opportunity.holding_days,
+            opportunity.available_forward_days,
+            _horizon_json("3"),
+            _horizon_json("5"),
+            _horizon_json("10"),
+            _horizon_json("20"),
+            json.dumps(opportunity.market_context or {}, ensure_ascii=False),
+            json.dumps(opportunity.evaluation_snapshot or {}, ensure_ascii=False),
+        ),
+    )
+
+
+def _strategy1_summary_for_comparison(task_id: str, task: dict) -> dict:
+    raw = task.get("summary_json")
+    if raw:
+        try:
+            summary = json.loads(raw)
+            return {
+                "opportunities": summary.get("total_opportunities", summary.get("opportunities", 0)),
+                "entered": summary.get("entered_count", summary.get("entered", 0)),
+                "target": summary.get("target_count", summary.get("target", 0)),
+                "stop": summary.get("stop_count", summary.get("stop", 0)),
+                "targetRate": summary.get("target_rate", summary.get("targetRate", 0)),
+                "stopRate": summary.get("stop_rate", summary.get("stopRate", 0)),
+                "averageRealizedReturn": summary.get(
+                    "average_realized_return",
+                    summary.get("averageRealizedReturn", 0),
+                ),
+            }
+        except Exception:
+            pass
+    summary = build_strategy1_backtest_summary(task_id)
+    return {
+        "opportunities": summary["total_opportunities"],
+        "entered": summary["entered_count"],
+        "target": summary["target_count"],
+        "stop": summary["stop_count"],
+        "targetRate": summary["target_rate"],
+        "stopRate": summary["stop_rate"],
+        "averageRealizedReturn": summary["average_realized_return"],
+    }
+
+
+def _strategy1_experiment_enabled(experiment) -> bool:
+    if isinstance(experiment, str):
+        try:
+            experiment = json.loads(experiment)
+        except Exception:
+            return False
+    return bool(isinstance(experiment, dict) and experiment.get("enabled"))
