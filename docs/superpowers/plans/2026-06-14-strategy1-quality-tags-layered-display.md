@@ -8,6 +8,17 @@
 
 **技术栈：** Python dataclass + SQLite 兼容迁移 + FastAPI 既有 API + Vue 3 + Vitest + pytest。
 
+## 执行状态
+
+- 代码实现：已完成。
+- 计划自检：已完成。
+- 后端专项测试：`40 passed`。
+- 前端测试：`33 passed`。
+- 编译与构建：已通过。
+- 本地提交：`ea91627 feat(strategy1): add quality tags for backtest opportunities`。
+- 推送状态：已尝试 `git push`，远端连接被重置，需在网络恢复后重试。
+- 注意事项：`config.yaml` 存在用户本地改动，未纳入本次提交。
+
 ---
 
 ## 文件结构
