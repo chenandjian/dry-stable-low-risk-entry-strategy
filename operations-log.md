@@ -472,3 +472,35 @@ b262c8b feat(strategy2): add scorer, rejection rules, and risk calculator
   - Time exit improves stop-rate optics but lowers target rate and should remain diagnostic/guidance until a wider sample validates it.
 - Added decision document:
   - `docs/superpowers/specs/2026-06-14-strategy1-backtest-experiment-results-and-optimization-decision.md`.
+
+## 2026-06-14 (Strategy1 500-Day History Optimization Direction)
+
+- User expanded local daily OHLC history to about 500 trading rows for most stocks.
+- Confirmed local DB coverage:
+  - `daily_ohlc` range: `2024-03-18` to `2026-06-12`.
+  - `daily_ohlc` rows: `2444267`.
+  - Stocks with OHLC: `4976`.
+  - Stocks with at least 500 rows: `4804`.
+- Ran a new full-market Strategy1 trusted baseline using local DB only:
+  - Task ID: `s1bt-20260614-500hist-250w-baseline`.
+  - Evaluation range: `2025-09-01` to `2026-05-15`.
+  - Status: `completed`; credibility: `TRUSTED_BASELINE`; integrity check passed.
+  - Processed stocks: `5527`; failed stocks: `0`; insufficient stocks: `635`.
+  - Raw signals: `3282`; opportunities: `1844`; entered: `1823`.
+  - Target rate: `44.4871%`; stop rate: `54.1964%`.
+  - Average realized return: `+0.003190`; median realized return: `-0.022371`.
+- Ran comparable derived experiment tasks. Key findings:
+  - `score>=80` no longer holds up on the wider sample: `283` opportunities, avg return `-0.003158`, stop rate `61.0108%`.
+  - `priceStable>=7`: `205` opportunities, target rate `47.2906%`, stop rate `52.7094%`, avg return `+0.004017`, median `-0.016398`.
+  - `priceStable>=7 + timeExitDays=5`: `205` opportunities, stop rate `44.8276%`, avg return `+0.002256`, median `-0.010695`.
+  - `WATCH_BREAKOUT only`: strong metrics but only `17` opportunities, too sparse for formal filtering.
+  - `rr1>=2.5`: attractive metrics but only `47` opportunities; treat as diagnostic until RR/target model is reviewed.
+- Decision:
+  - No formal Strategy1 hard-filter upgrade in this round.
+  - New optimization direction is quality tiering, not recall reduction:
+    - `PRICE_STABLE_STRONG`: `price_stable_score >= 7`.
+    - `PRICE_STABLE_EXTREME`: `price_stable_score >= 8`.
+    - `BREAKOUT_OBSERVE`: `verdict_key == WATCH_BREAKOUT`.
+    - `SHORT_TERM_RISK_CONTROL`: expose 5-day time-exit diagnostics as guidance.
+- Added document:
+  - `docs/superpowers/specs/2026-06-14-strategy1-500hist-experiment-optimization-direction.md`.
