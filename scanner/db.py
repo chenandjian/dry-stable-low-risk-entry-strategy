@@ -2330,6 +2330,29 @@ def get_strategy1_backtest_task(task_id: str) -> dict | None:
     return dict(zip(cols, row))
 
 
+def get_strategy1_backtest_tasks(
+    page: int = 1,
+    page_size: int = 20,
+    status: str | None = None,
+) -> tuple[list[dict], int]:
+    conn = get_conn()
+    page = max(page, 1)
+    page_size = min(max(page_size, 1), 100)
+    where = ""
+    params = []
+    if status:
+        where = " WHERE LOWER(status)=LOWER(?)"
+        params.append(status)
+    total = conn.execute("SELECT COUNT(*) FROM strategy1_backtest_tasks" + where, params).fetchone()[0]
+    rows = conn.execute(
+        "SELECT * FROM strategy1_backtest_tasks" + where
+        + " ORDER BY started_at DESC LIMIT ? OFFSET ?",
+        params + [page_size, (page - 1) * page_size],
+    ).fetchall()
+    cols = [d[1] for d in conn.execute("PRAGMA table_info(strategy1_backtest_tasks)")]
+    return [dict(zip(cols, row)) for row in rows], total
+
+
 def save_strategy1_backtest_signal(task_id: str, signal):
     conn = get_conn()
     snapshot_json = json.dumps(getattr(signal, "evaluation_snapshot", None) or {}, ensure_ascii=False)
@@ -2428,6 +2451,66 @@ def replace_strategy1_stock_backtest_result(task_id: str, code: str, name: str, 
     except Exception:
         conn.rollback()
         raise
+
+
+def get_strategy1_backtest_opportunities(
+    task_id: str,
+    code: str | None = None,
+    limit: int = 500,
+    offset: int = 0,
+) -> list[dict]:
+    conn = get_conn()
+    params = [task_id]
+    where = "WHERE task_id=?"
+    if code:
+        where += " AND code=?"
+        params.append(code)
+    rows = conn.execute(
+        "SELECT * FROM strategy1_backtest_opportunities "
+        + where
+        + " ORDER BY first_detected_date LIMIT ? OFFSET ?",
+        params + [limit, offset],
+    ).fetchall()
+    cols = [d[1] for d in conn.execute("PRAGMA table_info(strategy1_backtest_opportunities)")]
+    return [dict(zip(cols, row)) for row in rows]
+
+
+def get_strategy1_backtest_signals(
+    task_id: str,
+    code: str | None = None,
+    limit: int = 500,
+    offset: int = 0,
+) -> list[dict]:
+    conn = get_conn()
+    params = [task_id]
+    where = "WHERE task_id=?"
+    if code:
+        where += " AND code=?"
+        params.append(code)
+    rows = conn.execute(
+        "SELECT * FROM strategy1_backtest_signals "
+        + where
+        + " ORDER BY evaluation_index LIMIT ? OFFSET ?",
+        params + [limit, offset],
+    ).fetchall()
+    cols = [d[1] for d in conn.execute("PRAGMA table_info(strategy1_backtest_signals)")]
+    return [dict(zip(cols, row)) for row in rows]
+
+
+def get_strategy1_backtest_task_stocks(task_id: str, status: str | None = None) -> list[dict]:
+    conn = get_conn()
+    if status:
+        rows = conn.execute(
+            "SELECT * FROM strategy1_backtest_task_stocks WHERE task_id=? AND status=? ORDER BY code",
+            (task_id, status),
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            "SELECT * FROM strategy1_backtest_task_stocks WHERE task_id=? ORDER BY code",
+            (task_id,),
+        ).fetchall()
+    cols = [d[1] for d in conn.execute("PRAGMA table_info(strategy1_backtest_task_stocks)")]
+    return [dict(zip(cols, row)) for row in rows]
 
 
 def build_strategy1_backtest_summary(task_id: str) -> dict:

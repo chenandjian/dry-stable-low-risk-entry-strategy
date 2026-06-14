@@ -1,6 +1,9 @@
 import json
 
+from fastapi.testclient import TestClient
+
 import scanner.db as db
+import server as server_mod
 from scanner.strategy1_backtest_models import (
     Strategy1BacktestOpportunity,
     Strategy1BacktestSignal,
@@ -186,3 +189,97 @@ def test_strategy1_comparison_rejects_incompatible_tasks(tmp_path):
 
     assert comparison["comparable"] is False
     assert "DATE_RANGE_MISMATCH" in comparison["reasons"]
+
+
+def test_strategy1_experiment_preview_endpoint_normalizes_payload(monkeypatch, tmp_path):
+    db_path = str(tmp_path / "preview.db")
+    monkeypatch.setattr(server_mod, "load_config", lambda path="config.yaml": {"data": {"database_path": db_path}})
+
+    response = TestClient(server_mod.app).post(
+        "/api/strategy1/backtests/experiments/preview",
+        json={"enabled": True, "minimumTotalScore": 75, "timeExitDays": 5},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["valid"] is True
+    assert body["credibilityStatus"] == "EXPERIMENTAL"
+    assert body["normalizedExperiment"]["minimum_total_score"] == 75
+
+
+def test_strategy1_start_backtest_saves_snapshot_and_launches(monkeypatch, tmp_path):
+    db_path = str(tmp_path / "start-api.db")
+    db.init_db(db_path)
+    db.save_stock_pool([{"code": "600000", "name": "浦发银行", "market": "SH"}])
+    db.save_ohlc("600000", [{"date": "2025-01-01", "open": 10, "high": 10, "low": 10, "close": 10, "volume": 1, "turnover": 10}])
+    config = {"data": {"database_path": db_path, "scan_window_days": 30, "backtest_window_days": 30}, "liquidity": {"min_listing_days": 30}}
+    launched = {}
+    monkeypatch.setattr(server_mod, "load_config", lambda path="config.yaml": config)
+    monkeypatch.setattr(server_mod, "_launch_strategy1_backtest_task", lambda **kwargs: launched.update(kwargs))
+    server_mod._backtest_running.update({"running": False, "task_id": None, "stats": {}, "cancel_event": None, "thread": None})
+    server_mod._running.update({"running": False, "task_id": None, "strategy_type": None, "stats": {}})
+
+    response = TestClient(server_mod.app).post(
+        "/api/strategy1/backtests",
+        json={
+            "startDate": "2025-01-01",
+            "endDate": "2025-03-31",
+            "codes": ["600000"],
+            "baselineTaskId": "baseline-1",
+            "experiment": {"enabled": True, "minimumTotalScore": 75},
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["credibilityStatus"] == "EXPERIMENTAL"
+    assert body["status"] == "running"
+    task = db.get_strategy1_backtest_task(body["task_id"])
+    snapshot = json.loads(task["experiment_snapshot"])
+    assert snapshot["minimum_total_score"] == 75
+    assert task["baseline_task_id"] == "baseline-1"
+    assert launched["target_stocks"] == [{"code": "600000", "name": "浦发银行"}]
+    assert launched["payload_snapshot"]["experiment"]["minimum_total_score"] == 75
+
+
+def test_strategy1_detail_opportunity_signal_and_comparison_endpoints(monkeypatch, tmp_path):
+    db_path = str(tmp_path / "query-api.db")
+    db.init_db(db_path)
+    monkeypatch.setattr(server_mod, "load_config", lambda path="config.yaml": {"data": {"database_path": db_path}})
+    for task_id, credibility in [("base", "TRUSTED_BASELINE"), ("exp", "EXPERIMENTAL")]:
+        db.create_strategy1_backtest_task(
+            task_id,
+            {"startDate": "2025-01-01", "endDate": "2025-03-01", "codes": ["600000"], "maxStocks": 1},
+            "{}",
+        )
+        db.update_strategy1_backtest_task(
+            task_id,
+            status="completed",
+            credibility_status=credibility,
+            data_revision_id="rev-1",
+            data_revision_version=db.STRATEGY1_DATA_REVISION_VERSION,
+            strategy_engine_version="cuphandle-v1",
+            execution_model="NEXT_OPEN",
+            summary_json=json.dumps({"total_opportunities": 1, "entered_count": 1}),
+        )
+        db.replace_strategy1_stock_backtest_result(
+            task_id,
+            "600000",
+            "浦发银行",
+            {"signals": [_signal()], "opportunities": [_opportunity()], "raw_signals_count": 1, "opportunities_count": 1},
+        )
+
+    client = TestClient(server_mod.app)
+    detail = client.get("/api/strategy1/backtests/exp")
+    opps = client.get("/api/strategy1/backtests/exp/opportunities")
+    signals = client.get("/api/strategy1/backtests/exp/signals")
+    comparison = client.get("/api/strategy1/backtests/exp/comparison?baselineTaskId=base")
+
+    assert detail.status_code == 200
+    assert detail.json()["task"]["id"] == "exp"
+    assert opps.status_code == 200
+    assert opps.json()["total"] == 1
+    assert signals.status_code == 200
+    assert signals.json()["signals"][0]["code"] == "600000"
+    assert comparison.status_code == 200
+    assert comparison.json()["comparable"] is True
