@@ -37,10 +37,26 @@ describe('Strategy1Backtest', () => {
         baseline_task_id: 's1bt-base',
         experiment_snapshot: JSON.stringify({ enabled: true, minimum_total_score: 75 }),
       },
-      summary: { total_opportunities: 1, entered_count: 1 },
+      summary: {
+        total_opportunities: 1,
+        entered_count: 1,
+        by_quality_tag: {
+          PRICE_STABLE_STRONG: { count: 1 },
+          BREAKOUT_OBSERVE: { count: 1 },
+        },
+      },
     })
     api.getStrategy1BacktestOpportunities.mockResolvedValue({
-      opportunities: [{ code: '600000', first_detected_date: '2025-01-02', exit_reason: 'TARGET' }],
+      opportunities: [{
+        code: '600000',
+        first_detected_date: '2025-01-02',
+        exit_reason: 'TARGET',
+        quality_tags: ['PRICE_STABLE_STRONG', 'BREAKOUT_OBSERVE'],
+        quality_layer: 'strong',
+        price_stable_score: 7,
+        volume_dry_score: 8,
+        verdict_key: 'WATCH_BREAKOUT',
+      }],
       total: 1,
     })
     api.getStrategy1BacktestSignals.mockResolvedValue({ signals: [], total: 0 })
@@ -85,6 +101,10 @@ describe('Strategy1Backtest', () => {
     expect(wrapper.text()).toContain('EXPERIMENTAL')
     expect(wrapper.text()).toContain('minimum_total_score')
     expect(wrapper.text()).toContain('对比可用')
+    expect(wrapper.text()).toContain('PRICE_STABLE_STRONG')
+    expect(wrapper.text()).toContain('BREAKOUT_OBSERVE')
+    expect(wrapper.text()).toContain('价稳 7')
+    expect(wrapper.text()).toContain('量干 8')
     expect(api.getStrategy1BacktestComparison).toHaveBeenCalledWith('s1bt-exp', 's1bt-base')
   })
 })

@@ -504,3 +504,28 @@ b262c8b feat(strategy2): add scorer, rejection rules, and risk calculator
     - `SHORT_TERM_RISK_CONTROL`: expose 5-day time-exit diagnostics as guidance.
 - Added document:
   - `docs/superpowers/specs/2026-06-14-strategy1-500hist-experiment-optimization-direction.md`.
+
+## 2026-06-14 (Strategy1 Quality Tags and Layered Display)
+
+- Added Strategy1 quality tags as a low-risk optimization layer without changing formal scan admission rules.
+- Added design and implementation plan:
+  - `docs/superpowers/specs/2026-06-14-strategy1-quality-tags-layered-display-design.md`.
+  - `docs/superpowers/plans/2026-06-14-strategy1-quality-tags-layered-display.md`.
+- Backend changes:
+  - Added `scanner/strategy1_quality.py` pure helpers for `PRICE_STABLE_STRONG`, `PRICE_STABLE_EXTREME`, `BREAKOUT_OBSERVE`, and `SHORT_TERM_RISK_CONTROL`.
+  - Strategy1 backtest opportunities now carry `volume_dry_score`, `price_stable_score`, `verdict_key`, `quality_tags`, `quality_layer`, and `short_term_exit_note`.
+  - `strategy1_backtest_opportunities` receives compatible non-destructive columns for those fields.
+  - `build_strategy1_backtest_summary()` now exposes `by_quality_tag`.
+- Frontend changes:
+  - `Strategy1Backtest.vue` shows quality tag summary chips.
+  - Opportunity rows show quality tags, price-stable score, volume-dry score, and verdict key.
+- Safety decision:
+  - No production `config.yaml` strategy parameters were changed by this feature.
+  - The user's local `config.yaml` change (`liquidity.min_listing_days=500`) remains uncommitted.
+- Verification:
+  - TDD red checks were observed for missing quality helper, missing opportunity quality fields, missing DB roundtrip/summary, missing short-term tag, and missing frontend display.
+  - Strategy1 backend targeted tests: `40 passed`.
+  - Frontend Vitest: `33 passed`.
+  - Python compileall: passed.
+  - Frontend production build: passed.
+  - `git diff --check`: passed.

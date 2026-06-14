@@ -24,6 +24,10 @@ from scanner.strategy_engine import (
     select_market_window,
     select_strategy_window,
 )
+from scanner.strategy1_quality import (
+    build_strategy1_quality_layer,
+    build_strategy1_quality_tags,
+)
 
 
 COUNTED_MISS_REASONS = {
@@ -146,6 +150,7 @@ def calculate_strategy1_execution_outcome(
 
     if opportunity.entry_price > 0 and opportunity.exit_price > 0:
         opportunity.realized_return = round(opportunity.exit_price / opportunity.entry_price - 1, 6)
+    _apply_short_term_quality_note(opportunity)
     return opportunity
 
 
@@ -177,6 +182,20 @@ def apply_strategy1_time_exit(
     if opportunity.entry_price > 0 and opportunity.exit_price > 0:
         opportunity.realized_return = round(opportunity.exit_price / opportunity.entry_price - 1, 6)
     return True
+
+
+def _apply_short_term_quality_note(opportunity: Strategy1BacktestOpportunity) -> None:
+    horizon = opportunity.horizons.get("5") or opportunity.horizons.get(5)
+    if not horizon:
+        return
+    if "SHORT_TERM_RISK_CONTROL" not in opportunity.quality_tags:
+        opportunity.quality_tags.append("SHORT_TERM_RISK_CONTROL")
+    opportunity.short_term_exit_note = (
+        f"5D:{horizon.result}"
+        if not getattr(horizon, "end_return", None)
+        else f"5D:{horizon.result}:{horizon.end_return:.2%}"
+    )
+    opportunity.quality_layer = build_strategy1_quality_layer(opportunity.quality_tags)
 
 
 def merge_strategy1_signals(
@@ -281,6 +300,11 @@ def run_strategy1_stock_backtest(
 
 
 def _opportunity_from_signal(signal: Strategy1BacktestSignal) -> Strategy1BacktestOpportunity:
+    tags = build_strategy1_quality_tags(
+        price_stable_score=signal.price_stable_score,
+        verdict_key=signal.verdict_key,
+        has_short_term_diagnostic=False,
+    )
     return Strategy1BacktestOpportunity(
         code=signal.code,
         name=signal.name,
@@ -293,6 +317,11 @@ def _opportunity_from_signal(signal: Strategy1BacktestSignal) -> Strategy1Backte
         stop_loss=signal.stop_loss,
         signal_ids=[],
         evaluation_snapshot=signal.evaluation_snapshot,
+        volume_dry_score=signal.volume_dry_score,
+        price_stable_score=signal.price_stable_score,
+        verdict_key=signal.verdict_key,
+        quality_tags=tags,
+        quality_layer=build_strategy1_quality_layer(tags),
     )
 
 

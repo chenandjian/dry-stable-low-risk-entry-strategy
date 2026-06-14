@@ -2270,6 +2270,12 @@ def _ensure_strategy1_backtest_tables(conn: sqlite3.Connection):
     conn.execute("CREATE INDEX IF NOT EXISTS idx_s1_bt_signal_task ON strategy1_backtest_signals(task_id, code, evaluation_date)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_s1_bt_opp_task ON strategy1_backtest_opportunities(task_id, first_detected_date)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_s1_bt_stock_task ON strategy1_backtest_task_stocks(task_id, status)")
+    _ensure_column(conn, "strategy1_backtest_opportunities", "volume_dry_score", "INTEGER DEFAULT 0")
+    _ensure_column(conn, "strategy1_backtest_opportunities", "price_stable_score", "INTEGER DEFAULT 0")
+    _ensure_column(conn, "strategy1_backtest_opportunities", "verdict_key", "TEXT")
+    _ensure_column(conn, "strategy1_backtest_opportunities", "quality_tags", "TEXT")
+    _ensure_column(conn, "strategy1_backtest_opportunities", "quality_layer", "TEXT")
+    _ensure_column(conn, "strategy1_backtest_opportunities", "short_term_exit_note", "TEXT")
 
 
 def create_strategy1_backtest_task(task_id: str, payload: dict, config_snapshot: str):
@@ -2503,7 +2509,18 @@ def get_strategy1_backtest_opportunities(
         params + [limit, offset],
     ).fetchall()
     cols = [d[1] for d in conn.execute("PRAGMA table_info(strategy1_backtest_opportunities)")]
-    return [dict(zip(cols, row)) for row in rows]
+    result = [dict(zip(cols, row)) for row in rows]
+    for item in result:
+        raw_tags = item.get("quality_tags")
+        if isinstance(raw_tags, str) and raw_tags:
+            try:
+                parsed = json.loads(raw_tags)
+                item["quality_tags"] = parsed if isinstance(parsed, list) else []
+            except Exception:
+                item["quality_tags"] = []
+        elif not raw_tags:
+            item["quality_tags"] = []
+    return result
 
 
 def get_strategy1_backtest_signals(
@@ -2578,6 +2595,33 @@ def build_strategy1_backtest_summary(task_id: str) -> dict:
             for key, items in sorted(grouped.items())
         }
 
+    def _group_by_quality_tag() -> dict:
+        grouped = {}
+        for row in opportunities:
+            raw_tags = row.get("quality_tags")
+            tags = []
+            if isinstance(raw_tags, str) and raw_tags:
+                try:
+                    parsed = json.loads(raw_tags)
+                    tags = parsed if isinstance(parsed, list) else []
+                except Exception:
+                    tags = []
+            elif isinstance(raw_tags, list):
+                tags = raw_tags
+            if not tags:
+                tags = ["UNTAGGED"]
+            for tag in tags:
+                grouped.setdefault(tag, []).append(row)
+        return {
+            key: {
+                "count": len(items),
+                "entered": sum(1 for item in items if (item.get("entry_price") or 0) > 0),
+                "target": sum(1 for item in items if item.get("exit_reason") == "TARGET"),
+                "stop": sum(1 for item in items if item.get("exit_reason") == "STOP"),
+            }
+            for key, items in sorted(grouped.items())
+        }
+
     return {
         "total_opportunities": len(opportunities),
         "raw_signals_count": raw_signals_count,
@@ -2589,6 +2633,7 @@ def build_strategy1_backtest_summary(task_id: str) -> dict:
         "average_realized_return": round(_st.mean(realized), 6) if realized else 0.0,
         "median_realized_return": round(_st.median(realized), 6) if realized else 0.0,
         "by_pattern_kind": _group_by("pattern_kind"),
+        "by_quality_tag": _group_by_quality_tag(),
     }
 
 
@@ -2765,8 +2810,10 @@ def _insert_strategy1_opportunity(conn: sqlite3.Connection, task_id: str, opport
             entry_price, stop_loss, exit_date, exit_price, exit_reason,
             realized_return, mark_to_market_end_return, holding_days,
             available_forward_days, horizon_3, horizon_5, horizon_10,
-            horizon_20, market_context_json, evaluation_snapshot)
-           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            horizon_20, market_context_json, evaluation_snapshot,
+            volume_dry_score, price_stable_score, verdict_key, quality_tags,
+            quality_layer, short_term_exit_note)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
         (
             task_id,
             opportunity.code,
@@ -2793,6 +2840,12 @@ def _insert_strategy1_opportunity(conn: sqlite3.Connection, task_id: str, opport
             _horizon_json("20"),
             json.dumps(opportunity.market_context or {}, ensure_ascii=False),
             json.dumps(opportunity.evaluation_snapshot or {}, ensure_ascii=False),
+            getattr(opportunity, "volume_dry_score", 0),
+            getattr(opportunity, "price_stable_score", 0),
+            getattr(opportunity, "verdict_key", ""),
+            json.dumps(getattr(opportunity, "quality_tags", []) or [], ensure_ascii=False),
+            getattr(opportunity, "quality_layer", "normal"),
+            getattr(opportunity, "short_term_exit_note", ""),
         ),
     )
 

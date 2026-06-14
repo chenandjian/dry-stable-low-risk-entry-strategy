@@ -41,6 +41,37 @@ def test_calculate_strategy1_execution_outcome_next_open_enters_next_day():
     assert opp.available_forward_days == 5
 
 
+def test_calculate_strategy1_execution_outcome_adds_short_term_quality_tag():
+    from scanner.strategy1_backtester import calculate_strategy1_execution_outcome
+
+    data = _ohlc(8)
+    opp = Strategy1BacktestOpportunity(
+        first_detected_date="2025-01-03",
+        stop_loss=9.0,
+        quality_tags=["PRICE_STABLE_STRONG"],
+        quality_layer="strong",
+    )
+    date_to_index = {row["date"]: idx for idx, row in enumerate(data)}
+
+    calculate_strategy1_execution_outcome(opp, data, date_to_index)
+
+    assert "SHORT_TERM_RISK_CONTROL" in opp.quality_tags
+    assert opp.short_term_exit_note
+
+
+def test_strategy1_quality_tags_classify_price_stability_and_breakout():
+    from scanner.strategy1_quality import build_strategy1_quality_layer, build_strategy1_quality_tags
+
+    tags = build_strategy1_quality_tags(
+        price_stable_score=8,
+        verdict_key="WATCH_BREAKOUT",
+        has_short_term_diagnostic=True,
+    )
+
+    assert tags == ["PRICE_STABLE_EXTREME", "BREAKOUT_OBSERVE", "SHORT_TERM_RISK_CONTROL"]
+    assert build_strategy1_quality_layer(tags) == "premium"
+
+
 def test_calculate_strategy1_execution_outcome_blocks_gap_below_stop():
     from scanner.strategy1_backtester import calculate_strategy1_execution_outcome
 
@@ -94,6 +125,31 @@ def test_merge_strategy1_signals_splits_after_ten_counted_misses():
     assert len(opportunities) == 2
     assert opportunities[0].first_detected_date == "2025-01-01"
     assert opportunities[1].first_detected_date == "2025-01-15"
+
+
+def test_merge_strategy1_signals_carries_first_signal_quality_fields():
+    from scanner.strategy1_backtester import merge_strategy1_signals
+
+    signals = [
+        Strategy1BacktestSignal(
+            code="600000",
+            evaluation_date="2025-01-01",
+            evaluation_index=1,
+            score=70,
+            pattern_kind="cup_handle",
+            volume_dry_score=8,
+            price_stable_score=7,
+            verdict_key="WATCH_BREAKOUT",
+        )
+    ]
+
+    opportunities = merge_strategy1_signals(signals, {1: "PASSED"})
+
+    assert opportunities[0].price_stable_score == 7
+    assert opportunities[0].volume_dry_score == 8
+    assert opportunities[0].verdict_key == "WATCH_BREAKOUT"
+    assert "PRICE_STABLE_STRONG" in opportunities[0].quality_tags
+    assert "BREAKOUT_OBSERVE" in opportunities[0].quality_tags
 
 
 def test_merge_strategy1_signals_keeps_close_hits_in_one_opportunity():

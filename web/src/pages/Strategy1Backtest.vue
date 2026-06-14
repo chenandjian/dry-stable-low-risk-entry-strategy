@@ -71,6 +71,12 @@
         <span>原始信号 {{ summary?.raw_signals_count ?? '--' }}</span>
       </div>
 
+      <div v-if="qualityGroups.length" class="quality-groups">
+        <span v-for="group in qualityGroups" :key="group.tag" class="quality-chip">
+          {{ group.tag }} {{ group.count }}
+        </span>
+      </div>
+
       <pre v-if="experimentSnapshotText" class="snapshot">{{ experimentSnapshotText }}</pre>
 
       <div v-if="comparison" class="comparison">
@@ -84,6 +90,12 @@
         <span>{{ opp.code }}</span>
         <span>{{ opp.first_detected_date }}</span>
         <span>{{ opp.exit_reason || '--' }}</span>
+        <span class="quality-tags">
+          <em v-for="tag in normalizeTags(opp.quality_tags)" :key="tag">{{ tag }}</em>
+        </span>
+        <span>价稳 {{ opp.price_stable_score ?? '--' }}</span>
+        <span>量干 {{ opp.volume_dry_score ?? '--' }}</span>
+        <span>{{ opp.verdict_key || '--' }}</span>
       </div>
     </section>
   </div>
@@ -121,6 +133,28 @@ const experimentSnapshotText = computed(() => {
     return raw
   }
 })
+
+const qualityGroups = computed(() => {
+  const groups = summary.value?.by_quality_tag || {}
+  return Object.entries(groups).map(([tag, stats]) => ({
+    tag,
+    count: stats?.count ?? 0,
+  }))
+})
+
+function normalizeTags(tags) {
+  if (Array.isArray(tags)) return tags
+  if (!tags) return []
+  if (typeof tags === 'string') {
+    try {
+      const parsed = JSON.parse(tags)
+      return Array.isArray(parsed) ? parsed : []
+    } catch {
+      return []
+    }
+  }
+  return []
+}
 
 function buildExperimentPayload() {
   return {
@@ -191,6 +225,7 @@ defineExpose({
   startBacktest,
   loadTask,
   previewExperiment,
+  normalizeTags,
 })
 </script>
 
@@ -210,8 +245,12 @@ button { border: 1px solid var(--border); background: var(--bg-main); color: var
 button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
 .badge { display: inline-flex; align-items: center; padding: 3px 8px; border-radius: 999px; background: rgba(212, 175, 55, 0.16); color: var(--accent); font-size: 12px; }
 .badge.running { color: var(--up-red); }
-.task-row { display: grid; grid-template-columns: 1fr auto auto; gap: 12px; padding: 8px 0; border-top: 1px solid var(--border); cursor: pointer; }
+.task-row { display: grid; grid-template-columns: 1fr auto auto auto auto auto auto; gap: 12px; padding: 8px 0; border-top: 1px solid var(--border); cursor: pointer; align-items: center; }
 .snapshot { background: var(--bg-main); padding: 10px; border-radius: 6px; overflow: auto; }
 .comparison, .message { margin-top: 10px; display: flex; gap: 12px; color: var(--text-secondary); }
 .empty { padding: 10px 0; }
+.quality-groups { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+.quality-chip { display: inline-flex; padding: 3px 8px; border-radius: 999px; background: rgba(64, 156, 255, 0.15); color: #7db7ff; font-size: 12px; }
+.quality-tags { display: flex; flex-wrap: wrap; gap: 4px; }
+.quality-tags em { font-style: normal; padding: 2px 6px; border-radius: 999px; background: rgba(212, 175, 55, 0.14); color: var(--accent); font-size: 11px; }
 </style>

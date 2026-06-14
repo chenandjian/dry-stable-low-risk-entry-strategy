@@ -85,6 +85,12 @@ class Strategy1BacktestOpportunity:
     horizons: dict[str, Strategy1HorizonPerformance] = field(default_factory=dict)
     market_context: dict | None = None
     evaluation_snapshot: dict | None = None
+    volume_dry_score: int = 0
+    price_stable_score: int = 0
+    verdict_key: str = ""
+    quality_tags: list[str] = field(default_factory=list)
+    quality_layer: str = "normal"
+    short_term_exit_note: str = ""
 
 
 @dataclass

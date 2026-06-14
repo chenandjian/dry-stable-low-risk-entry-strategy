@@ -152,6 +152,40 @@ def test_strategy1_summary_is_built_from_database_details(tmp_path):
     assert summary["by_pattern_kind"]["cup_handle"]["count"] == 1
 
 
+def test_strategy1_opportunity_quality_fields_roundtrip_and_summary(tmp_path):
+    _init(tmp_path)
+    db.create_strategy1_backtest_task("s1bt-quality", {"startDate": "", "endDate": ""}, "{}")
+    opp = _opportunity()
+    opp.price_stable_score = 7
+    opp.volume_dry_score = 8
+    opp.verdict_key = "WATCH_BREAKOUT"
+    opp.quality_tags = ["PRICE_STABLE_STRONG", "BREAKOUT_OBSERVE"]
+    opp.quality_layer = "strong"
+
+    db.replace_strategy1_stock_backtest_result(
+        "s1bt-quality",
+        "600000",
+        "浦发银行",
+        {
+            "signals": [_signal()],
+            "opportunities": [opp],
+            "raw_signals_count": 1,
+            "opportunities_count": 1,
+        },
+    )
+
+    stored = db.get_strategy1_backtest_opportunities("s1bt-quality")[0]
+    summary = db.build_strategy1_backtest_summary("s1bt-quality")
+
+    assert stored["price_stable_score"] == 7
+    assert stored["volume_dry_score"] == 8
+    assert stored["verdict_key"] == "WATCH_BREAKOUT"
+    assert stored["quality_tags"] == ["PRICE_STABLE_STRONG", "BREAKOUT_OBSERVE"]
+    assert stored["quality_layer"] == "strong"
+    assert summary["by_quality_tag"]["PRICE_STABLE_STRONG"]["count"] == 1
+    assert summary["by_quality_tag"]["BREAKOUT_OBSERVE"]["count"] == 1
+
+
 def test_strategy1_comparison_rejects_incompatible_tasks(tmp_path):
     _init(tmp_path)
     db.create_strategy1_backtest_task(
