@@ -442,3 +442,33 @@ b262c8b feat(strategy2): add scorer, rejection rules, and risk calculator
   - Creating `docs/superpowers/specs/YYYY-MM-DD-strategy1-optimized-strategy-parameters.md`.
 - Residual risk:
   - The current delivery implements the trusted backtest and experiment capability foundation. Formal Strategy1 optimization still requires completed trusted baseline and comparable experiment evidence before changing production scan parameters.
+
+## 2026-06-14 (Strategy1 Trusted Baseline and Experiment Decision)
+
+- Corrected Strategy1 local DB backtest semantics after reviewing the temporary `liquidity.min_listing_days=350` concern:
+  - Strategy1 backtest evaluation now uses `data.backtest_window_days` as the required historical replay window.
+  - `liquidity.min_listing_days` remains scan/listing-day/fetch semantics and no longer blocks historical backtest evaluation dates.
+  - Added regression tests for both the per-date backtest window gate and task-level insufficient-data status.
+- Ran a new full-market trusted Strategy1 baseline using local SQLite only:
+  - Task ID: `s1bt-20260614-250d-baseline`.
+  - Evaluation range: `2026-03-01` to `2026-06-01`; actual signal range `2026-03-02` to `2026-06-01`.
+  - Status: `completed`; credibility: `TRUSTED_BASELINE`; integrity check passed.
+  - Total/processed stocks: `5527 / 5527`.
+  - Failed stocks: `0`; insufficient stocks: `635`.
+  - Raw signals: `819`; opportunities: `521`; entered: `515`.
+  - Target rate: `37.6699%`; stop rate: `62.3301%`.
+  - Average realized return: `-0.008490`; median realized return: `-0.027742`.
+- Ran comparable derived experiment tasks from the trusted baseline:
+  - `s1bt-20260614-exp-score70`: 344 opportunities, avg return `-0.006526`, stop rate `61.5616%`.
+  - `s1bt-20260614-exp-score80`: 66 opportunities, avg return `0.000839`, stop rate `56.0606%`.
+  - `s1bt-20260614-exp-vol9`: 135 opportunities, avg return `-0.003985`, stop rate `60.6061%`.
+  - `s1bt-20260614-exp-price7`: 71 opportunities, avg return `-0.001244`, stop rate `57.7465%`.
+  - `s1bt-20260614-exp-score80_price7`: 13 opportunities, avg return `0.008934`, stop rate `46.1538%`.
+  - `s1bt-20260614-exp-score80_time5`: 66 opportunities, avg return `0.000609`, stop rate `48.4848%`.
+- Decision:
+  - Formal Strategy1 scan parameters were **not** upgraded in this round.
+  - Raising total score to 80 is the clearest improvement direction, but opportunity count falls from 521 to 66 and monthly robustness is not strong enough.
+  - Stronger combinations such as `score80 + price7` are promising but too sparse with only 13 opportunities.
+  - Time exit improves stop-rate optics but lowers target rate and should remain diagnostic/guidance until a wider sample validates it.
+- Added decision document:
+  - `docs/superpowers/specs/2026-06-14-strategy1-backtest-experiment-results-and-optimization-decision.md`.

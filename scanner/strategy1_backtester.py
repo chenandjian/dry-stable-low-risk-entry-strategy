@@ -238,9 +238,6 @@ def run_strategy1_stock_backtest(
         evaluation_date = str(row.get("date") or "")
         if evaluation_date < start_date or evaluation_date > end_date:
             continue
-        if idx + 1 < windows.min_listing_days:
-            eval_results[idx] = "INSUFFICIENT_LISTING_DAYS"
-            continue
         if idx + 1 < windows.backtest_window_days:
             eval_results[idx] = "INSUFFICIENT_BACKTEST_WINDOW"
             continue

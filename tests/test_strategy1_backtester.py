@@ -193,7 +193,7 @@ def test_run_strategy1_stock_backtest_uses_engine_and_disabled_experiment_equiva
     assert calls
 
 
-def test_run_strategy1_stock_backtest_requires_min_listing_days_before_evaluating(monkeypatch):
+def test_run_strategy1_stock_backtest_uses_backtest_window_not_min_listing_days(monkeypatch):
     import scanner.strategy1_backtester as backtester
 
     data = _ohlc(40)
@@ -227,6 +227,5 @@ def test_run_strategy1_stock_backtest_requires_min_listing_days_before_evaluatin
     )
 
     assert result["raw_signals_count"] == 0
-    assert calls == []
-    insufficient = [reason for reason in result["eval_results"].values() if reason == "INSUFFICIENT_LISTING_DAYS"]
-    assert len(insufficient) == 5
+    assert calls == ["2025-01-30", "2025-01-31", "2025-02-01", "2025-02-02", "2025-02-03"]
+    assert "INSUFFICIENT_LISTING_DAYS" not in result["eval_results"].values()

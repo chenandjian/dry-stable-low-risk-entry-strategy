@@ -72,7 +72,7 @@ def run_strategy1_backtest_task(
 
             rows = db.get_ohlc(code, max_rows=0) or []
             windows = resolve_strategy_windows(config_snapshot)
-            required_days = windows.min_listing_days
+            required_days = windows.backtest_window_days
             if len(rows) < required_days:
                 insufficient += 1
                 db.replace_strategy1_stock_backtest_result(
