@@ -179,6 +179,51 @@ npm run build
 - 不提交其他 worktree 目录内容。
 - 如果主工作区已有其他 worktree 显示 dirty，不处理、不回退，除非它直接阻塞策略1开发。
 
+### 3.2 股票数据来源与复制规则
+
+策略1回测实验使用现有已存储股票数据，不重新请求外部行情源。开发开始后，必须从策略2 worktree 的数据目录复制 SQLite 数据快照到策略1独立 worktree。
+
+源数据目录：
+
+```text
+D:\game\claude\dry-stable-low-risk-entry-strategy\.claude\worktrees\strategy2-extreme-dry-stable\data
+```
+
+目标数据目录：
+
+```text
+D:\game\claude\dry-stable-low-risk-entry-strategy\.claude\worktrees\strategy1-backtest-experiment-optimization\data
+```
+
+必须复制的文件：
+
+```text
+cuphandle.db
+cuphandle.db-wal
+cuphandle.db-shm
+```
+
+复制要求：
+
+1. `cuphandle.db`、`cuphandle.db-wal`、`cuphandle.db-shm` 必须作为同一个 SQLite 快照一起复制，不能只复制主库文件。
+2. 复制前优先停止正在写入源数据库的后端、扫描或回测进程，避免复制到不一致的 WAL 状态。
+3. 如果无法确认源库处于静止状态，必须使用 SQLite backup API 或等效一致性备份方式生成快照。
+4. `test_prog_debug.db` 不是全市场策略1回测数据源，除非后续明确要求调试单测，否则不要复制或使用。
+5. 策略1 worktree 的 `config.yaml` 必须指向本地复制后的数据库：`data.database_path: ./data/cuphandle.db`。
+6. 策略1回测、实验、正式参数研究只允许读取目标 worktree 下复制出的本地库。
+7. 禁止在策略1回测实验过程中调用百度、新浪、腾讯、yfinance、AKShare、Tushare 或任何外部行情源补数据。
+8. 数据不足的股票必须进入回测任务的“数据不足/不可观察”明细，并在前端或任务详情中列出，不得静默触发在线拉取。
+9. 策略1回测新增表、实验任务表和汇总表只能写入策略1 worktree 的复制库，禁止写回 `strategy2-extreme-dry-stable\data` 源库。
+
+每个策略1回测任务必须记录数据快照信息：
+
+- 源数据库路径。
+- 快照复制时间。
+- `daily_ohlc` 最大交易日期。
+- 股票池数量。
+- `daily_ohlc` 行数。
+- 可选：`cuphandle.db` 文件大小或 hash。
+
 ---
 
 ## 4. 产品设计方案
@@ -1168,24 +1213,28 @@ docs/superpowers/specs/2026-06-14-strategy1-backtest-experiment-optimization-des
 强制要求：
 1. 先确认当前目录是策略1独立 worktree，分支建议为 codex/strategy1-backtest-experiment-optimization。
 2. 禁止在 strategy2-extreme-dry-stable worktree 中开发策略1。
-3. 先阅读 scanner/strategy_engine.py、scanner/engine.py、scanner/backtester.py、scanner/single_stock_backtest.py、scanner/db.py、server.py、config.yaml 和策略2 Phase 2 文档。
-4. 新增策略1回测模型、回测器、任务服务和实验模块。
-5. 回测必须只读取本地 stock_pool 和 daily_ohlc，禁止请求百度、新浪、腾讯、yfinance、AKShare 或任何外部数据源。
-6. 策略判断必须调用 CupHandleStrategyEngine.evaluate_at()，禁止复制策略判断代码。
-7. 保存 config_snapshot、experiment_snapshot、策略版本、数据版本。
-8. 保存原始信号、合并机会、股票状态、数据不足股票和汇总统计。
-9. 支持 TRUSTED_BASELINE、EXPERIMENTAL、LEGACY_UNTRUSTED、INCOMPLETE。
-10. 支持评分门槛、杯体结构、柄部结构、突破确认、干稳低吸、风险收益、执行模型和时间退出实验。
-11. 实验关闭时必须等同正式基线。
-12. 实验开启时必须标记 EXPERIMENTAL。
-13. 被实验过滤的原始信号必须保存并记录过滤原因。
-14. 默认执行模型使用 NEXT_OPEN。
-15. 核心观察周期为 3/5/10/20 日，不把 60 日作为核心成功口径。
-16. 增加基线对比接口，必须校验数据版本、策略版本、日期范围、股票范围和执行模型一致性。
-17. 前端增加策略1回测实验页面或等效入口，展示实验参数、EXPERIMENTAL 标识、基线对比和分组统计。
-18. 不修改策略2，不重构无关模块。
-19. 使用测试驱动开发，覆盖实验配置、信号保存、机会合并、执行模型、数据库兼容、API 和前端展示。
-20. 最终运行后端全量测试、前端测试和前端构建，并把结果写入 operations-log.md。
+3. 从 D:\game\claude\dry-stable-low-risk-entry-strategy\.claude\worktrees\strategy2-extreme-dry-stable\data 复制 cuphandle.db、cuphandle.db-wal、cuphandle.db-shm 到策略1 worktree 的 data 目录，作为策略1回测实验本地数据快照。
+4. 确认策略1 worktree 的 config.yaml 使用 data.database_path: ./data/cuphandle.db。
+5. 复制数据前优先停止写入源库的进程；无法确认静止时，使用 SQLite backup API 或等效一致性备份方式。
+6. 先阅读 scanner/strategy_engine.py、scanner/engine.py、scanner/backtester.py、scanner/single_stock_backtest.py、scanner/db.py、server.py、config.yaml 和策略2 Phase 2 文档。
+7. 新增策略1回测模型、回测器、任务服务和实验模块。
+8. 回测必须只读取本地 stock_pool 和 daily_ohlc，禁止请求百度、新浪、腾讯、yfinance、AKShare、Tushare 或任何外部数据源。
+9. 数据不足的股票必须写入数据不足明细并在前端或任务详情列出，不得静默联网补数据。
+10. 策略判断必须调用 CupHandleStrategyEngine.evaluate_at()，禁止复制策略判断代码。
+11. 保存 config_snapshot、experiment_snapshot、策略版本、数据版本和数据快照信息。
+12. 保存原始信号、合并机会、股票状态、数据不足股票和汇总统计。
+13. 支持 TRUSTED_BASELINE、EXPERIMENTAL、LEGACY_UNTRUSTED、INCOMPLETE。
+14. 支持评分门槛、杯体结构、柄部结构、突破确认、干稳低吸、风险收益、执行模型和时间退出实验。
+15. 实验关闭时必须等同正式基线。
+16. 实验开启时必须标记 EXPERIMENTAL。
+17. 被实验过滤的原始信号必须保存并记录过滤原因。
+18. 默认执行模型使用 NEXT_OPEN。
+19. 核心观察周期为 3/5/10/20 日，不把 60 日作为核心成功口径。
+20. 增加基线对比接口，必须校验数据版本、策略版本、日期范围、股票范围和执行模型一致性。
+21. 前端增加策略1回测实验页面或等效入口，展示实验参数、EXPERIMENTAL 标识、基线对比和分组统计。
+22. 不修改策略2，不重构无关模块。
+23. 使用测试驱动开发，覆盖实验配置、信号保存、机会合并、执行模型、数据库兼容、API 和前端展示。
+24. 最终运行后端全量测试、前端测试和前端构建，并把结果写入 operations-log.md。
 
 直接开始实施，不需要再次确认本文档已明确的事项。
 ```
@@ -1207,18 +1256,32 @@ docs/superpowers/specs/2026-06-14-strategy1-backtest-experiment-optimization-des
    D:\game\claude\dry-stable-low-risk-entry-strategy\.claude\worktrees\strategy1-backtest-experiment-optimization
 3. 推荐分支：
    codex/strategy1-backtest-experiment-optimization
-4. 进入 worktree 后先运行：
+4. 从策略2 worktree 复制已有股票数据库快照到策略1 worktree：
+   源目录：
+   D:\game\claude\dry-stable-low-risk-entry-strategy\.claude\worktrees\strategy2-extreme-dry-stable\data
+   目标目录：
+   D:\game\claude\dry-stable-low-risk-entry-strategy\.claude\worktrees\strategy1-backtest-experiment-optimization\data
+   必须复制：
+   cuphandle.db
+   cuphandle.db-wal
+   cuphandle.db-shm
+5. 复制前优先停止写入源库的后端、扫描或回测进程；无法确认静止时，使用 SQLite backup API 或等效一致性备份方式。
+6. 不复制 test_prog_debug.db 作为全市场策略1回测数据源。
+7. 确认策略1 worktree 的 config.yaml 使用：
+   data.database_path: ./data/cuphandle.db
+8. 进入 worktree 后先运行：
    python -m pytest tests/test_backtester.py tests/test_cuphandle_strategy_engine.py tests/test_single_stock_backtest.py -q
-5. 如果基线测试失败，先记录并判断是否为既有失败，不要直接开始大规模修改。
+9. 如果基线测试失败，先记录并判断是否为既有失败，不要直接开始大规模修改。
 
 第一阶段：开发策略1可信回测和实验能力
 1. 新增策略1回测模型、回测器、任务服务、实验模块、数据库表和 API。
-2. 回测只读取本地数据库，不访问外部数据源。
+2. 回测只读取策略1 worktree 中复制的本地数据库，不访问外部数据源。
 3. 回测只调用 CupHandleStrategyEngine.evaluate_at()。
-4. 保存任务快照、实验快照、版本、原始信号、机会、股票状态和汇总。
-5. 支持 TRUSTED_BASELINE 和 EXPERIMENTAL。
-6. 支持基线对比。
-7. 前端提供策略1回测实验入口。
+4. 保存任务快照、实验快照、版本、数据快照、原始信号、机会、股票状态和汇总。
+5. 数据不足股票写入明细，并在前端或任务详情列出，不触发在线补数据。
+6. 支持 TRUSTED_BASELINE 和 EXPERIMENTAL。
+7. 支持基线对比。
+8. 前端提供策略1回测实验入口。
 
 第二阶段：运行验证
 1. 运行策略1相关单元测试。
