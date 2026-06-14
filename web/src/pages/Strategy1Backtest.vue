@@ -8,6 +8,10 @@
         </div>
         <span v-if="runningStatus.running" class="badge running">RUNNING</span>
       </div>
+      <div class="feature-banner">
+        <strong>新增：质量标签 + 分层展示</strong>
+        <span>回测完成后会在结果区显示“策略1质量分层看板”，并用中文徽章标出强价稳、突破观察、短线风控等机会特征。</span>
+      </div>
 
       <div class="form-grid">
         <label>开始日期 <input v-model="form.startDate" placeholder="2025-01-01" /></label>
@@ -71,10 +75,26 @@
         <span>原始信号 {{ summary?.raw_signals_count ?? '--' }}</span>
       </div>
 
-      <div v-if="qualityGroups.length" class="quality-groups">
-        <span v-for="group in qualityGroups" :key="group.tag" class="quality-chip">
-          {{ group.tag }} {{ group.count }}
-        </span>
+      <div v-if="qualityGroups.length" class="quality-board">
+        <div class="quality-board-head">
+          <div>
+            <h3>策略1质量分层看板</h3>
+            <p>把回测机会按价稳、突破观察和短线风险控制重新分层，方便优先看高质量样本。</p>
+          </div>
+          <span class="quality-board-badge">新增</span>
+        </div>
+        <div class="quality-groups">
+          <span
+            v-for="group in qualityGroups"
+            :key="group.tag"
+            class="quality-chip"
+            :class="`tag-${group.tag.toLowerCase()}`"
+          >
+            <strong>{{ group.label }}</strong>
+            <b>{{ group.count }}</b>
+            <small>{{ group.tag }}</small>
+          </span>
+        </div>
       </div>
 
       <pre v-if="experimentSnapshotText" class="snapshot">{{ experimentSnapshotText }}</pre>
@@ -86,12 +106,22 @@
       </div>
 
       <h3>机会</h3>
-      <div v-for="opp in opportunities" :key="`${opp.code}-${opp.first_detected_date}`" class="task-row">
+      <div v-for="opp in opportunities" :key="`${opp.code}-${opp.first_detected_date}`" class="task-row opportunity-row">
         <span>{{ opp.code }}</span>
         <span>{{ opp.first_detected_date }}</span>
         <span>{{ opp.exit_reason || '--' }}</span>
+        <span class="layer-badge" :class="`layer-${opp.quality_layer || 'normal'}`">
+          {{ qualityLayerLabel(opp.quality_layer) }}
+        </span>
         <span class="quality-tags">
-          <em v-for="tag in normalizeTags(opp.quality_tags)" :key="tag">{{ tag }}</em>
+          <em
+            v-for="tag in normalizeTags(opp.quality_tags)"
+            :key="tag"
+            :class="`tag-${tag.toLowerCase()}`"
+          >
+            {{ qualityTagLabel(tag) }}
+            <small>{{ tag }}</small>
+          </em>
         </span>
         <span>价稳 {{ opp.price_stable_score ?? '--' }}</span>
         <span>量干 {{ opp.volume_dry_score ?? '--' }}</span>
@@ -138,9 +168,33 @@ const qualityGroups = computed(() => {
   const groups = summary.value?.by_quality_tag || {}
   return Object.entries(groups).map(([tag, stats]) => ({
     tag,
+    label: qualityTagLabel(tag),
     count: stats?.count ?? 0,
   }))
 })
+
+const qualityTagLabels = {
+  PRICE_STABLE_EXTREME: '极致价稳',
+  PRICE_STABLE_STRONG: '强价稳',
+  BREAKOUT_OBSERVE: '突破观察',
+  SHORT_TERM_RISK_CONTROL: '短线风控',
+}
+
+const qualityLayerLabels = {
+  premium: '分层：极品机会',
+  strong: '分层：强势机会',
+  watch: '分层：观察机会',
+  risk_control: '分层：风控机会',
+  normal: '分层：普通机会',
+}
+
+function qualityTagLabel(tag) {
+  return qualityTagLabels[tag] || tag || '--'
+}
+
+function qualityLayerLabel(layer) {
+  return qualityLayerLabels[layer] || qualityLayerLabels.normal
+}
 
 function normalizeTags(tags) {
   if (Array.isArray(tags)) return tags
@@ -245,12 +299,36 @@ button { border: 1px solid var(--border); background: var(--bg-main); color: var
 button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
 .badge { display: inline-flex; align-items: center; padding: 3px 8px; border-radius: 999px; background: rgba(212, 175, 55, 0.16); color: var(--accent); font-size: 12px; }
 .badge.running { color: var(--up-red); }
-.task-row { display: grid; grid-template-columns: 1fr auto auto auto auto auto auto; gap: 12px; padding: 8px 0; border-top: 1px solid var(--border); cursor: pointer; align-items: center; }
+.feature-banner { display: grid; gap: 4px; margin-bottom: 12px; padding: 12px; border-radius: 8px; border: 1px solid rgba(212, 175, 55, 0.36); background: rgba(212, 175, 55, 0.1); }
+.feature-banner strong { color: var(--accent); }
+.feature-banner span { color: var(--text-secondary); font-size: 13px; }
+.task-row { display: grid; grid-template-columns: 1fr auto auto; gap: 12px; padding: 8px 0; border-top: 1px solid var(--border); cursor: pointer; align-items: center; }
+.opportunity-row { grid-template-columns: 1fr auto auto auto minmax(180px, 1.4fr) auto auto auto; }
 .snapshot { background: var(--bg-main); padding: 10px; border-radius: 6px; overflow: auto; }
 .comparison, .message { margin-top: 10px; display: flex; gap: 12px; color: var(--text-secondary); }
 .empty { padding: 10px 0; }
-.quality-groups { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
-.quality-chip { display: inline-flex; padding: 3px 8px; border-radius: 999px; background: rgba(64, 156, 255, 0.15); color: #7db7ff; font-size: 12px; }
+.quality-board {
+  margin-top: 12px;
+  padding: 14px;
+  border: 1px solid rgba(212, 175, 55, 0.48);
+  border-radius: 10px;
+  background: linear-gradient(135deg, rgba(212, 175, 55, 0.14), rgba(64, 156, 255, 0.08));
+  box-shadow: 0 0 0 1px rgba(212, 175, 55, 0.08) inset;
+}
+.quality-board-head { display: flex; justify-content: space-between; gap: 12px; align-items: flex-start; margin-bottom: 12px; }
+.quality-board-head h3 { color: var(--accent); }
+.quality-board-badge { display: inline-flex; align-items: center; padding: 4px 10px; border-radius: 999px; background: var(--accent); color: #111; font-size: 12px; font-weight: 700; }
+.quality-groups { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px; }
+.quality-chip { display: grid; gap: 4px; padding: 10px 12px; border-radius: 10px; background: rgba(64, 156, 255, 0.15); color: #7db7ff; font-size: 12px; border: 1px solid rgba(64, 156, 255, 0.24); }
+.quality-chip strong { color: var(--text-primary); font-size: 15px; }
+.quality-chip b { color: var(--accent); font-size: 24px; line-height: 1; }
+.quality-chip small { color: var(--text-secondary); font-size: 10px; }
 .quality-tags { display: flex; flex-wrap: wrap; gap: 4px; }
-.quality-tags em { font-style: normal; padding: 2px 6px; border-radius: 999px; background: rgba(212, 175, 55, 0.14); color: var(--accent); font-size: 11px; }
+.quality-tags em { display: grid; gap: 1px; font-style: normal; padding: 4px 8px; border-radius: 8px; background: rgba(212, 175, 55, 0.14); color: var(--accent); font-size: 12px; line-height: 1.1; border: 1px solid rgba(212, 175, 55, 0.24); }
+.quality-tags small { color: var(--text-secondary); font-size: 9px; }
+.layer-badge { justify-self: start; padding: 4px 8px; border-radius: 999px; background: rgba(255, 255, 255, 0.08); color: var(--text-secondary); font-size: 12px; white-space: nowrap; }
+.layer-premium, .tag-price_stable_extreme { background: rgba(212, 175, 55, 0.2); color: var(--accent); border-color: rgba(212, 175, 55, 0.38); }
+.layer-strong, .tag-price_stable_strong { background: rgba(64, 156, 255, 0.18); color: #7db7ff; border-color: rgba(64, 156, 255, 0.34); }
+.layer-watch, .tag-breakout_observe { background: rgba(255, 180, 64, 0.18); color: #ffc46b; border-color: rgba(255, 180, 64, 0.34); }
+.layer-risk_control, .tag-short_term_risk_control { background: rgba(255, 94, 94, 0.16); color: #ff8b8b; border-color: rgba(255, 94, 94, 0.32); }
 </style>

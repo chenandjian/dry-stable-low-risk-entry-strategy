@@ -98,9 +98,13 @@ describe('Strategy1Backtest', () => {
     await wrapper.vm.loadTask('s1bt-exp')
     await flushUi()
 
+    expect(wrapper.text()).toContain('新增：质量标签 + 分层展示')
     expect(wrapper.text()).toContain('EXPERIMENTAL')
     expect(wrapper.text()).toContain('minimum_total_score')
     expect(wrapper.text()).toContain('对比可用')
+    expect(wrapper.text()).toContain('策略1质量分层看板')
+    expect(wrapper.text()).toContain('强价稳')
+    expect(wrapper.text()).toContain('突破观察')
     expect(wrapper.text()).toContain('PRICE_STABLE_STRONG')
     expect(wrapper.text()).toContain('BREAKOUT_OBSERVE')
     expect(wrapper.text()).toContain('价稳 7')
