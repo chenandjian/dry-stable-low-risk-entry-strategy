@@ -141,7 +141,13 @@ async def lifespan(app: FastAPI):
         start_scheduler(config)
         logger.info("Scheduler auto-started on server launch")
 
-    # Mark Strategy2 backtests left by a previous process as explicitly resumable.
+    # Mark backtests left by a previous process as explicitly resumable.
+    try:
+        for task_id in db.mark_running_strategy1_backtests_interrupted():
+            logger.info("Marked interrupted Strategy1 backtest task: %s", task_id)
+    except Exception:
+        logger.exception("Failed to mark interrupted Strategy1 backtest tasks")
+
     try:
         for task_id in db.mark_running_strategy2_backtests_interrupted():
             logger.info("Marked interrupted Strategy2 backtest task: %s", task_id)

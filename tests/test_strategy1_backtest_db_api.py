@@ -191,6 +191,26 @@ def test_strategy1_comparison_rejects_incompatible_tasks(tmp_path):
     assert "DATE_RANGE_MISMATCH" in comparison["reasons"]
 
 
+def test_strategy1_running_backtests_mark_interrupted_on_restart(tmp_path):
+    _init(tmp_path)
+    db.create_strategy1_backtest_task("s1bt-running", {"startDate": "", "endDate": ""}, "{}")
+    db.replace_strategy1_stock_backtest_result(
+        "s1bt-running",
+        "600000",
+        "浦发银行",
+        {"status": "RUNNING", "raw_signals_count": 0, "opportunities_count": 0},
+    )
+
+    interrupted = db.mark_running_strategy1_backtests_interrupted()
+
+    assert interrupted == ["s1bt-running"]
+    task = db.get_strategy1_backtest_task("s1bt-running")
+    stocks = db.get_strategy1_backtest_task_stocks("s1bt-running")
+    assert task["status"] == "INTERRUPTED"
+    assert task["credibility_status"] == "INCOMPLETE"
+    assert stocks[0]["status"] == "PENDING"
+
+
 def test_strategy1_experiment_preview_endpoint_normalizes_payload(monkeypatch, tmp_path):
     db_path = str(tmp_path / "preview.db")
     monkeypatch.setattr(server_mod, "load_config", lambda path="config.yaml": {"data": {"database_path": db_path}})

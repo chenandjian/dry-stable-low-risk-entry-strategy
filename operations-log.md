@@ -413,3 +413,32 @@ b262c8b feat(strategy2): add scorer, rejection rules, and risk calculator
   - Python compileall: **passed**.
   - Local full test set excluding external yfinance network tests: **529 passed**.
   - Full `python -m pytest tests -q`: **555 passed, 1 failed**; the only failure was `tests/test_yfinance_hist.py::test_yfinance_daily` due to Yahoo `YFRateLimitError: Too Many Requests`, unrelated to Strategy2 changes.
+
+## 2026-06-14 (Strategy1 Trusted Backtest Experiment Capability)
+
+- Created Strategy1 worktree branch `codex/strategy1-backtest-experiment-optimization` from local `main` and restored the Strategy1 optimization design document that had been removed from the current baseline.
+- Implemented Strategy1 trusted backtest foundation without changing formal Strategy1 scan parameters:
+  - `scanner/strategy1_backtest_models.py` for traceable signals, opportunities, horizons, and insufficient-stock records.
+  - `scanner/strategy1_backtest_experiments.py` for normalized experiment config and post-signal filters.
+  - `scanner/strategy1_backtester.py` for local OHLC replay, `CupHandleStrategyEngine.evaluate_at()` calls, signal merging, `NEXT_OPEN` entry, 3/5/10/20 horizon outcomes, and optional time exit.
+  - `scanner/strategy1_backtest_service.py` for local DB task execution and data revision calculation.
+  - `scanner/db.py` Strategy1 backtest tables, task CRUD, signal/opportunity persistence, stock status, DB-derived summary, comparison, and interrupted-task recovery.
+  - `server.py` `/api/strategy1/backtests*` endpoints for start/status/list/detail/opportunities/signals/stocks/experiment-preview/comparison.
+  - `web/src/pages/Strategy1Backtest.vue` plus API helper, route, navigation, and component tests.
+- Review fix during this session:
+  - Added `mark_running_strategy1_backtests_interrupted()` and startup recovery so Strategy1 backtest tasks left `running` by a previous process become `INTERRUPTED` and only `RUNNING` stocks return to `PENDING`.
+- Verification:
+  - Baseline Strategy1 tests before development: **77 passed**.
+  - Strategy1 experiment + replay + DB/API tests: **29 passed**.
+  - Strategy1 targeted regression set: **105 passed**.
+  - Frontend Vitest: **33 passed**.
+  - Frontend production build: **passed**.
+  - Python compileall for `scanner strategy2 server.py`: **passed**.
+- Not performed in this development step:
+  - Copying the production SQLite market-data snapshot into this worktree.
+  - Running a full-market Strategy1 trusted baseline task.
+  - Running comparable Strategy1 experiment batches.
+  - Enabling optimized formal Strategy1 parameters.
+  - Creating `docs/superpowers/specs/YYYY-MM-DD-strategy1-optimized-strategy-parameters.md`.
+- Residual risk:
+  - The current delivery implements the trusted backtest and experiment capability foundation. Formal Strategy1 optimization still requires completed trusted baseline and comparable experiment evidence before changing production scan parameters.

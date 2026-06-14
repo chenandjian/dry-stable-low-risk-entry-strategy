@@ -2312,6 +2312,37 @@ def create_strategy1_backtest_task(task_id: str, payload: dict, config_snapshot:
     conn.commit()
 
 
+def mark_running_strategy1_backtests_interrupted() -> list[str]:
+    """Mark Strategy1 backtests left running by a previous process interrupted."""
+    conn = get_conn()
+    task_ids = [
+        row[0] for row in conn.execute(
+            "SELECT id FROM strategy1_backtest_tasks WHERE LOWER(status)='running'"
+        ).fetchall()
+    ]
+    if not task_ids:
+        return []
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        for task_id in task_ids:
+            conn.execute(
+                "UPDATE strategy1_backtest_tasks "
+                "SET status='INTERRUPTED', credibility_status='INCOMPLETE', "
+                "error='Interrupted by server restart' WHERE id=?",
+                (task_id,),
+            )
+            conn.execute(
+                "UPDATE strategy1_backtest_task_stocks SET status='PENDING' "
+                "WHERE task_id=? AND status='RUNNING'",
+                (task_id,),
+            )
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    return task_ids
+
+
 def update_strategy1_backtest_task(task_id: str, **kwargs):
     if not kwargs:
         return
