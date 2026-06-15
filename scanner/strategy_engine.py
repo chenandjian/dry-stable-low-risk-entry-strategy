@@ -382,19 +382,25 @@ class CupHandleStrategyEngine:
                 )
             )
 
-        high_drawdown_rule = _high_drawdown_weakness_rule(data_until_date or [], dry_stable)
-        if high_drawdown_rule:
-            failed.append(high_drawdown_rule)
-
         weak_trade_value_rule = _weak_trade_value_rule(dry_stable)
         if weak_trade_value_rule:
             failed.append(weak_trade_value_rule)
 
-        handle_support_rule = _handle_support_breakdown_rule(result, data_until_date or [])
-        if handle_support_rule:
-            failed.append(handle_support_rule)
+        if not _is_vcp_candidate(result, dry_stable):
+            high_drawdown_rule = _high_drawdown_weakness_rule(data_until_date or [], dry_stable)
+            if high_drawdown_rule:
+                failed.append(high_drawdown_rule)
+
+            handle_support_rule = _handle_support_breakdown_rule(result, data_until_date or [])
+            if handle_support_rule:
+                failed.append(handle_support_rule)
 
         return passed, failed
+
+
+def _is_vcp_candidate(result: CupHandleResult, dry_stable: dict | None) -> bool:
+    key_pattern_type = dry_stable.get("pattern_score", {}).get("key_pattern_type") if dry_stable else None
+    return getattr(result, "pattern_kind", "") == "vcp" or key_pattern_type == "vcp"
 
 
 def _handle_support_breakdown_rule(

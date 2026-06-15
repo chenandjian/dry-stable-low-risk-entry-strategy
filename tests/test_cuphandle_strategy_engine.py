@@ -642,6 +642,86 @@ def test_evaluate_at_keeps_single_mild_handle_support_dip(monkeypatch):
     assert all(rule.ruleName != "柄部支撑破位过滤" for rule in evaluation.failed_rules)
 
 
+def test_vcp_candidate_does_not_use_cup_handle_support_or_drawdown_filters(monkeypatch):
+    """VCP-only candidates should be judged by VCP structure, not cup/handle-only filters."""
+    import scanner.strategy_engine as strategy_engine
+
+    data = []
+    for i in range(120):
+        close = 64.0
+        high = 66.0
+        if i == 10:
+            close = 98.0
+            high = 100.0
+        data.append({
+            "date": f"2025-{(i // 20) + 1:02d}-{(i % 20) + 1:02d}",
+            "open": close,
+            "high": high,
+            "low": close * 0.98,
+            "close": close,
+            "volume": 10_000_000,
+            "turnover": close * 10_000_000,
+        })
+
+    engine = CupHandleStrategyEngine(full_config())
+
+    def fake_detect_cup_handle(data, pattern_cfg):
+        result = CupHandleResult(found=False)
+        result.pattern_kind = "vcp"
+        result.handle_low_price = 70.0
+        return result
+
+    def fake_analyze_dry_stable(result, data, market_data=None, config=None):
+        return {
+            "decision": {"verdict": "等回调入场", "verdict_key": "WAIT_ENTRY"},
+            "pattern_score": {"key_pattern_type": "vcp", "score": 14},
+            "price_stable": {"score": 5},
+            "risk_reward": {"rr1": 1.5, "position_advice": "10%-20%"},
+        }
+
+    monkeypatch.setattr(strategy_engine, "detect_cup_handle", fake_detect_cup_handle)
+    monkeypatch.setattr(strategy_engine, "analyze_dry_stable", fake_analyze_dry_stable)
+
+    evaluation = engine.evaluate_at(data, code="600000", name="测试VCP")
+
+    assert evaluation.passed is True
+    failed_names = {rule.ruleName for rule in evaluation.failed_rules}
+    assert "高位深跌弱势过滤" not in failed_names
+    assert "柄部支撑破位过滤" not in failed_names
+
+
+def test_vcp_candidate_keeps_structural_risk_out_of_hard_rejects(monkeypatch):
+    """VCP structural risk is tracked by grouping/display, not hard candidate admission."""
+    import scanner.strategy_engine as strategy_engine
+
+    data = make_ohlc_from_closes([20 + (i % 4) * 0.1 for i in range(118)] + [19.6, 19.3])
+    engine = CupHandleStrategyEngine(full_config())
+
+    def fake_detect_cup_handle(data, pattern_cfg):
+        result = CupHandleResult(found=False)
+        result.pattern_kind = "vcp"
+        return result
+
+    def fake_analyze_dry_stable(result, data, market_data=None, config=None):
+        return {
+            "decision": {"verdict": "等回调入场", "verdict_key": "WAIT_ENTRY"},
+            "pattern_score": {"key_pattern_type": "vcp", "score": 14},
+            "price_stable": {"score": 6},
+            "risk_reward": {"rr1": 1.5, "position_advice": "10%-20%"},
+        }
+
+    monkeypatch.setattr(strategy_engine, "detect_cup_handle", fake_detect_cup_handle)
+    monkeypatch.setattr(strategy_engine, "analyze_dry_stable", fake_analyze_dry_stable)
+
+    evaluation = engine.evaluate_at(data, code="600001", name="测试VCP")
+
+    assert evaluation.passed is True
+    failed_names = {rule.ruleName for rule in evaluation.failed_rules}
+    assert "VCP收缩低点破位过滤" not in failed_names
+    assert "VCP Pivot距离过滤" not in failed_names
+    assert "柄部支撑破位过滤" not in failed_names
+
+
 # ── 扫描与回测一致性 ─────────────────────────────────────────────────
 
 def test_same_data_same_window_produces_consistent_result():
