@@ -1,86 +1,129 @@
 # CupHandleScan
 
-A股杯柄结构（Cup & Handle）自动扫描系统。
+A股扫描与回测系统，当前包含两套独立策略：
 
-## 安装
+- **策略1：杯柄 / VCP / 干稳低吸**，用于寻找杯柄结构、VCP 收缩结构和低风险入场机会。
+- **策略2：极致量干价稳**，用于寻找极端缩量、价格稳定、风险比较低的短线候选。
+
+系统提供后端 API、Vue 前端、SQLite 本地数据存储、扫描任务追踪、失败股票重拉和策略回测能力。
+
+## 快速开始
 
 ```bash
 pip install -r requirements.txt
-```
-
-## 使用
-
-### 全市场扫描
-
-```bash
-python main.py scan
-```
-
-### 分析单只股票
-
-```bash
-python main.py analyze 600036
-```
-
-### 启动 Web 服务
-
-```bash
 python main.py serve --port 8080
 ```
 
-访问 `http://localhost:8080/docs` 查看 API 文档。
-
-### 后台定时扫描
-
-编辑 `config.yaml`，将 `scheduler.enabled` 设为 `true`，然后：
+前端开发：
 
 ```bash
+npm --prefix web install
+npm --prefix web run dev -- --host 127.0.0.1
+```
+
+API 文档：
+
+```text
+http://localhost:8080/docs
+```
+
+## 常用命令
+
+```bash
+# 全市场扫描
+python main.py scan
+
+# 分析单只股票
+python main.py analyze 600036
+
+# 启动 Web 服务
+python main.py serve --port 8080
+
+# 后台定时扫描
 python main.py schedule
 ```
 
-每工作日 15:30（A股收盘后）自动触发全市场扫描。
+## 前端页面
+
+- `/`：扫描控制台，支持策略1/策略2启动、进度、失败列表和重新拉取。
+- `/strategy1/backtest`：策略1回测实验页面，包含质量标签、分层展示和 VCP 独立分组。
+- `/strategy2/results`：策略2扫描结果。
+- `/strategy2/backtest`：策略2本地数据库回测。
+- `/config`：策略配置。
+
+## 策略1：杯柄 / VCP / 干稳低吸
+
+策略1统一入口是 `scanner/strategy_engine.py::CupHandleStrategyEngine.evaluate_at()`。
+
+核心能力：
+
+- 杯柄结构识别。
+- VCP 收缩结构识别，并在前端独立分组展示。
+- 量干、价稳、形态、关键价格、风险收益比和市场环境综合判断。
+- 质量标签与分层展示，用于解释候选质量，不替代核心策略入选规则。
+- 策略1回测实验，用于验证参数和候选质量。
+
+## 策略2：极致量干价稳
+
+策略2统一入口是 `strategy2/engine.py::ExtremeDryStableStrategyEngine.evaluate_at()`。
+
+核心能力：
+
+- 量干 50 分 + 价稳 50 分，总分 100。
+- 趋势过滤、一票否决、支撑位、买入区间、止损和风险比计算。
+- 扫描结果写入独立 `strategy2_candidates` 表，不混入策略1候选。
+- 回测只读本地数据库，不调用外部行情源。
+
+## 数据与缓存
+
+- 股票池：AKShare 获取，失败时可回退本地缓存。
+- 日线行情：默认 `baidu → sina → tencent → yfinance`。
+- 数据存储：SQLite，默认 `data/cuphandle.db`。
+- 日线表：`daily_ohlc`。
+- 扫描任务：`scan_tasks`。
+- 逐股状态：`task_stocks`。
+
+扫描规则：
+
+- 在线数据源全部失败时，不使用旧缓存产出扫描结果，股票进入失败列表。
+- 失败股票可通过失败列表重新拉取。
+- 同一股票当天已经由任一策略成功获取过日线时，后续策略1/策略2扫描会复用本地 `daily_ohlc`，避免重复拉取。
+- 停牌或无新交易导致最新 K 线不是自然日当天，也可以复用当天已获取到的最新 K 线日期。
 
 ## 配置
 
-编辑 `config.yaml` 调整扫描参数：
+编辑 `config.yaml`：
 
-- `market` — 市场范围（沪深主板/创业板/科创板/北交所/ST）
-- `liquidity` — 成交量/成交额过滤阈值
-- `cup` — 杯体参数（周期/深度/杯口偏差/圆滑度）
-- `handle` — 柄部参数（周期/回撤深度）
-- `breakout` — 突破判断（缓冲比例/放量倍数）
-- `scoring` — 评分权重和分级阈值
-- `output` — 输出目录和日志配置
-- `scheduler` — 定时任务配置
+- `market`：市场范围。
+- `data.daily_sources`：日线数据源顺序。
+- `data.scan_window_days`：策略1扫描计算窗口。
+- `data.backtest_window_days`：策略1回测计算窗口。
+- `liquidity.min_listing_days`：日线拉取天数与上市天数检查。
+- `cup` / `handle` / `breakout` / `scoring`：策略1参数。
+- `strategy2`：策略2独立参数。
+- `scheduler`：定时任务配置。
 
-## 干稳低吸策略
+## 验证
 
-扫描器会在形态识别后继续按干稳低吸规则过滤候选：
-
-- 量干评分：评估成交量萎缩和筹码沉淀状态
-- 价稳评分：评估波动收窄、支撑稳定和价格位置
-- 形态评分：支持杯柄结构和 VCP 收缩结构
-- 关键价格：输出低吸区间、Pivot、止损、目标价和盈亏比
-- 市场环境：结合指数状态给出仓位建议
-- 最终结论：可低吸 / 突破确认 / 观察 / 不建议买入
-
-## 输出
-
-扫描结果输出到 `output_data/` 目录：
-
-- `candidates_YYYY-MM-DD.csv` — 候选股票列表
-
-## 数据源
-
-- **股票池：** AKShare → 本地缓存（回退）
-- **日线行情：** 新浪财经 → 腾讯财经 → 本地缓存（三级回退）
-
-## 开发
+后端常规验证：
 
 ```bash
-# 运行所有测试
-python -m pytest tests/ -v
+python -m pytest tests/ -q --ignore=tests/test_akshare_hist.py --ignore=tests/test_tushare_hist.py --ignore=tests/test_yfinance_hist.py
+python -m compileall scanner strategy2 server.py -q
+```
 
-# 运行单个测试文件
-python -m pytest tests/test_data_source.py -v
+前端验证：
+
+```bash
+npm --prefix web install
+npm --prefix web test -- --run
+npm --prefix web run build
+```
+
+真实外部数据源测试仅手工按需运行：
+
+```bash
+python -m pytest tests/test_akshare_hist.py -v
+python -m pytest tests/test_tushare_hist.py -v
+python -m pytest tests/test_yfinance_hist.py -v
 ```
