@@ -198,8 +198,6 @@ def select_fresh_cached_ohlc(
     """Return cached OHLC only when it is fresh enough for a same-day scan."""
     if not cached:
         return None
-    if kline_days and len(cached) < kline_days:
-        return None
 
     target_date = fresh_date or date.today().isoformat()
     latest_date = cached[-1].get("date")

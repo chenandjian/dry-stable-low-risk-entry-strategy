@@ -87,6 +87,9 @@ def scan_strategy2_all(
     def _now() -> str:
         return time.strftime("%Y-%m-%d %H:%M:%S")
 
+    def _today() -> str:
+        return time.strftime("%Y-%m-%d")
+
     def _finish_stock(code, name, status, status_reason=None, error_detail=None,
                       kline_latest_date=None, fetch_result=None):
         """统一终态处理 — DB更新（含数据源诊断）+ 刷新统计 + 发送 processed 进度。"""
@@ -129,6 +132,9 @@ def scan_strategy2_all(
             stock_name = stock.get("name", "")
             fetch_result = None
             try:
+                cache_fresh_date = db.get_today_task_stock_latest_date(
+                    code, _today(), exclude_task_id=task_id,
+                )
                 db.update_task_stock(
                     task_id, code, status="fetching",
                     primary_source=daily_sources[0],
@@ -141,6 +147,7 @@ def scan_strategy2_all(
                     code, daily_sources[0],
                     retry_attempts=retry_attempts, fallback_attempts=fallback_attempts,
                     mgr=mgr, source_chain=daily_sources, kline_days=kline_days,
+                    cache_fresh_date=cache_fresh_date,
                 )
                 data = fetch_result.data
                 if data is None:

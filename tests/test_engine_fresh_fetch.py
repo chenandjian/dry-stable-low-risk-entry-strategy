@@ -451,6 +451,66 @@ def test_fetch_reuses_fresh_cache_without_calling_sources(monkeypatch, tmp_path)
     assert calls == []
 
 
+def test_fetch_reuses_fresh_cache_even_when_rows_are_less_than_kline_days(monkeypatch, tmp_path):
+    """Same-day OHLC should not be pulled again just because min_listing_days increased."""
+    db.init_db(str(tmp_path / "cuphandle.db"))
+    rows = [_row(f"2026-06-{day:02d}", close=10.0 + day) for day in range(1, 6)]
+    db.save_ohlc("600000", rows)
+
+    calls = []
+
+    def fake_fetch(code, days=350):
+        calls.append((code, days))
+        return [_row("2026-06-06", close=99.0)]
+
+    monkeypatch.setattr(engine, "fetch_baidu_daily", fake_fetch, raising=False)
+
+    result = engine._fetch_with_retry(
+        "600000",
+        "baidu",
+        retry_attempts=1,
+        fallback_attempts=1,
+        sleep_fn=lambda _: None,
+        source_chain=["baidu"],
+        kline_days=350,
+        cache_fresh_date="2026-06-05",
+    )
+
+    assert result.data == rows
+    assert result.from_cache is True
+    assert calls == []
+
+
+def test_fetch_reuses_prior_task_trade_date_even_when_not_calendar_today(monkeypatch, tmp_path):
+    """Suspended/no-trade stocks can reuse the latest date recorded by today's fetch."""
+    db.init_db(str(tmp_path / "cuphandle.db"))
+    rows = [_row("2026-06-04", close=10.0)]
+    db.save_ohlc("600000", rows)
+
+    calls = []
+
+    def fake_fetch(code, days=350):
+        calls.append((code, days))
+        return [_row("2026-06-15", close=99.0)]
+
+    monkeypatch.setattr(engine, "fetch_baidu_daily", fake_fetch, raising=False)
+
+    result = engine._fetch_with_retry(
+        "600000",
+        "baidu",
+        retry_attempts=1,
+        fallback_attempts=1,
+        sleep_fn=lambda _: None,
+        source_chain=["baidu"],
+        kline_days=350,
+        cache_fresh_date="2026-06-04",
+    )
+
+    assert result.data == rows
+    assert result.from_cache is True
+    assert calls == []
+
+
 def test_fetch_does_not_reuse_stale_cache_when_sources_fail(monkeypatch, tmp_path):
     """Stale cache is not allowed to produce scan data after online failures."""
     db.init_db(str(tmp_path / "cuphandle.db"))
@@ -902,6 +962,84 @@ def test_scan_all_passes_configured_daily_sources_to_fetch(monkeypatch, tmp_path
     engine.scan_all(config, worker_count=1)
 
     assert seen == [{"ds": "baidu", "source_chain": ["baidu", "sina"]}]
+
+
+def test_scan_all_passes_existing_today_stock_latest_trade_date_to_fetch(monkeypatch, tmp_path):
+    """A second same-day scan should reuse the prior task date for the same stock."""
+    db_path = tmp_path / "cuphandle.db"
+    config = {
+        "data": {
+            "database_path": str(db_path),
+            "daily_sources": ["baidu"],
+            "worker_count": 1,
+        },
+        "liquidity": {"enabled": False, "min_listing_days": 350},
+        "scoring": {"medium_threshold": 70},
+    }
+    db.init_db(str(db_path))
+    db.create_scan_task("prior-task", "2026-06-15 09:30:00", total_stocks=1)
+    db.save_task_stocks("prior-task", [{"code": "600000", "name": "Prior"}])
+    db.update_task_stock(
+        "prior-task",
+        "600000",
+        status="scanned",
+        kline_latest_date="2026-06-04",
+        finished_at="2026-06-15 09:31:00",
+    )
+    db.refresh_scan_task_counts("prior-task")
+    db.create_scan_task("other-prior-task", "2026-06-15 09:40:00", total_stocks=1)
+    db.save_task_stocks("other-prior-task", [{"code": "600001", "name": "Other"}])
+    db.update_task_stock(
+        "other-prior-task",
+        "600001",
+        status="scanned",
+        kline_latest_date="2026-06-05",
+        finished_at="2026-06-15 09:41:00",
+    )
+    db.refresh_scan_task_counts("other-prior-task")
+    db.finish_scan_task("prior-task", "2026-06-15 09:32:00", 0, 2.0, scanned=1, skipped=0)
+    db.finish_scan_task("other-prior-task", "2026-06-15 09:42:00", 0, 2.0, scanned=1, skipped=0)
+
+    seen = []
+
+    def fake_fetch_with_retry(code, ds, *args, cache_fresh_date=None, **kwargs):
+        seen.append(cache_fresh_date)
+        return engine.FetchResult(data=_rows(350), primary_source=ds, fallback_source=ds)
+
+    monkeypatch.setattr(engine, "_fetch_with_retry", fake_fetch_with_retry)
+    monkeypatch.setattr(engine, "DataSourceManager", FakeScanManager)
+    monkeypatch.setattr(engine.threading, "Thread", ImmediateThread)
+    monkeypatch.setattr(stock_pool, "get_a_stock_pool", lambda config: [{"code": "600000", "name": "PF Bank"}])
+    monkeypatch.setattr(engine, "fetch_market_index_daily", lambda symbol=None: [])
+    monkeypatch.setattr(engine, "passes_liquidity_filter", lambda data, cfg: True)
+    original_strftime = engine.time.strftime
+
+    def fake_strftime(fmt, *args):
+        if args:
+            return original_strftime(fmt, *args)
+        if fmt == "%Y%m%d-%H%M%S":
+            return "20260615-100000"
+        if fmt == "%Y-%m-%d %H:%M:%S":
+            return "2026-06-15 10:00:00"
+        if fmt == "%Y-%m-%d":
+            return "2026-06-15"
+        return original_strftime(fmt)
+
+    monkeypatch.setattr(engine.time, "strftime", fake_strftime)
+
+    class FakeStrategyEngine:
+        def __init__(self, config):
+            pass
+
+        def evaluate_at(self, data, code='', name='', market_data=None):
+            result = engine.CupHandleResult(found=False, code=code, name=name)
+            return type('Eval', (), {'result': result, 'dry_stable': None, 'passed': False})()
+
+    monkeypatch.setattr(engine, "CupHandleStrategyEngine", FakeStrategyEngine)
+
+    engine.scan_all(config, worker_count=1)
+
+    assert seen == ["2026-06-04"]
 
 
 

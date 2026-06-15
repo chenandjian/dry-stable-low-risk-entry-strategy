@@ -335,6 +335,30 @@ def get_ohlc_latest_date(code: str) -> str | None:
     return row[0] if row else None
 
 
+def get_today_task_stock_latest_date(code: str, today: str, exclude_task_id: str | None = None) -> str | None:
+    """Return this stock's latest K-line date recorded by a task started today."""
+    conn = get_conn()
+    params: list = [code, f"{today}%"]
+    exclude_clause = ""
+    if exclude_task_id:
+        exclude_clause = "AND ts.task_id != ?"
+        params.append(exclude_task_id)
+    row = conn.execute(
+        f"""SELECT ts.kline_latest_date
+            FROM task_stocks ts
+            JOIN scan_tasks st ON st.id = ts.task_id
+            WHERE ts.code = ?
+              AND st.started_at LIKE ?
+              AND ts.kline_latest_date IS NOT NULL
+              AND ts.status IN ('scanned', 'skipped', 'candidate')
+              {exclude_clause}
+            ORDER BY st.started_at DESC, ts.updated_at DESC
+            LIMIT 1""",
+        params,
+    ).fetchone()
+    return row[0] if row else None
+
+
 # ====== Scan Tasks ======
 
 def create_scan_task(task_id: str, started_at: str, total_stocks: int = 0,
