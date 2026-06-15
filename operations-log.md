@@ -413,3 +413,119 @@ b262c8b feat(strategy2): add scorer, rejection rules, and risk calculator
   - Python compileall: **passed**.
   - Local full test set excluding external yfinance network tests: **529 passed**.
   - Full `python -m pytest tests -q`: **555 passed, 1 failed**; the only failure was `tests/test_yfinance_hist.py::test_yfinance_daily` due to Yahoo `YFRateLimitError: Too Many Requests`, unrelated to Strategy2 changes.
+
+## 2026-06-14 (Strategy1 Trusted Backtest Experiment Capability)
+
+- Created Strategy1 worktree branch `codex/strategy1-backtest-experiment-optimization` from local `main` and restored the Strategy1 optimization design document that had been removed from the current baseline.
+- Implemented Strategy1 trusted backtest foundation without changing formal Strategy1 scan parameters:
+  - `scanner/strategy1_backtest_models.py` for traceable signals, opportunities, horizons, and insufficient-stock records.
+  - `scanner/strategy1_backtest_experiments.py` for normalized experiment config and post-signal filters.
+  - `scanner/strategy1_backtester.py` for local OHLC replay, `CupHandleStrategyEngine.evaluate_at()` calls, signal merging, `NEXT_OPEN` entry, 3/5/10/20 horizon outcomes, and optional time exit.
+  - `scanner/strategy1_backtest_service.py` for local DB task execution and data revision calculation.
+  - `scanner/db.py` Strategy1 backtest tables, task CRUD, signal/opportunity persistence, stock status, DB-derived summary, comparison, and interrupted-task recovery.
+  - `server.py` `/api/strategy1/backtests*` endpoints for start/status/list/detail/opportunities/signals/stocks/experiment-preview/comparison.
+  - `web/src/pages/Strategy1Backtest.vue` plus API helper, route, navigation, and component tests.
+- Review fix during this session:
+  - Added `mark_running_strategy1_backtests_interrupted()` and startup recovery so Strategy1 backtest tasks left `running` by a previous process become `INTERRUPTED` and only `RUNNING` stocks return to `PENDING`.
+- Verification:
+  - Baseline Strategy1 tests before development: **77 passed**.
+  - Strategy1 experiment + replay + DB/API tests: **29 passed**.
+  - Strategy1 targeted regression set: **105 passed**.
+  - Frontend Vitest: **33 passed**.
+  - Frontend production build: **passed**.
+  - Python compileall for `scanner strategy2 server.py`: **passed**.
+- Not performed in this development step:
+  - Copying the production SQLite market-data snapshot into this worktree.
+  - Running a full-market Strategy1 trusted baseline task.
+  - Running comparable Strategy1 experiment batches.
+  - Enabling optimized formal Strategy1 parameters.
+  - Creating `docs/superpowers/specs/YYYY-MM-DD-strategy1-optimized-strategy-parameters.md`.
+- Residual risk:
+  - The current delivery implements the trusted backtest and experiment capability foundation. Formal Strategy1 optimization still requires completed trusted baseline and comparable experiment evidence before changing production scan parameters.
+
+## 2026-06-14 (Strategy1 Trusted Baseline and Experiment Decision)
+
+- Corrected Strategy1 local DB backtest semantics after reviewing the temporary `liquidity.min_listing_days=350` concern:
+  - Strategy1 backtest evaluation now uses `data.backtest_window_days` as the required historical replay window.
+  - `liquidity.min_listing_days` remains scan/listing-day/fetch semantics and no longer blocks historical backtest evaluation dates.
+  - Added regression tests for both the per-date backtest window gate and task-level insufficient-data status.
+- Ran a new full-market trusted Strategy1 baseline using local SQLite only:
+  - Task ID: `s1bt-20260614-250d-baseline`.
+  - Evaluation range: `2026-03-01` to `2026-06-01`; actual signal range `2026-03-02` to `2026-06-01`.
+  - Status: `completed`; credibility: `TRUSTED_BASELINE`; integrity check passed.
+  - Total/processed stocks: `5527 / 5527`.
+  - Failed stocks: `0`; insufficient stocks: `635`.
+  - Raw signals: `819`; opportunities: `521`; entered: `515`.
+  - Target rate: `37.6699%`; stop rate: `62.3301%`.
+  - Average realized return: `-0.008490`; median realized return: `-0.027742`.
+- Ran comparable derived experiment tasks from the trusted baseline:
+  - `s1bt-20260614-exp-score70`: 344 opportunities, avg return `-0.006526`, stop rate `61.5616%`.
+  - `s1bt-20260614-exp-score80`: 66 opportunities, avg return `0.000839`, stop rate `56.0606%`.
+  - `s1bt-20260614-exp-vol9`: 135 opportunities, avg return `-0.003985`, stop rate `60.6061%`.
+  - `s1bt-20260614-exp-price7`: 71 opportunities, avg return `-0.001244`, stop rate `57.7465%`.
+  - `s1bt-20260614-exp-score80_price7`: 13 opportunities, avg return `0.008934`, stop rate `46.1538%`.
+  - `s1bt-20260614-exp-score80_time5`: 66 opportunities, avg return `0.000609`, stop rate `48.4848%`.
+- Decision:
+  - Formal Strategy1 scan parameters were **not** upgraded in this round.
+  - Raising total score to 80 is the clearest improvement direction, but opportunity count falls from 521 to 66 and monthly robustness is not strong enough.
+  - Stronger combinations such as `score80 + price7` are promising but too sparse with only 13 opportunities.
+  - Time exit improves stop-rate optics but lowers target rate and should remain diagnostic/guidance until a wider sample validates it.
+- Added decision document:
+  - `docs/superpowers/specs/2026-06-14-strategy1-backtest-experiment-results-and-optimization-decision.md`.
+
+## 2026-06-14 (Strategy1 500-Day History Optimization Direction)
+
+- User expanded local daily OHLC history to about 500 trading rows for most stocks.
+- Confirmed local DB coverage:
+  - `daily_ohlc` range: `2024-03-18` to `2026-06-12`.
+  - `daily_ohlc` rows: `2444267`.
+  - Stocks with OHLC: `4976`.
+  - Stocks with at least 500 rows: `4804`.
+- Ran a new full-market Strategy1 trusted baseline using local DB only:
+  - Task ID: `s1bt-20260614-500hist-250w-baseline`.
+  - Evaluation range: `2025-09-01` to `2026-05-15`.
+  - Status: `completed`; credibility: `TRUSTED_BASELINE`; integrity check passed.
+  - Processed stocks: `5527`; failed stocks: `0`; insufficient stocks: `635`.
+  - Raw signals: `3282`; opportunities: `1844`; entered: `1823`.
+  - Target rate: `44.4871%`; stop rate: `54.1964%`.
+  - Average realized return: `+0.003190`; median realized return: `-0.022371`.
+- Ran comparable derived experiment tasks. Key findings:
+  - `score>=80` no longer holds up on the wider sample: `283` opportunities, avg return `-0.003158`, stop rate `61.0108%`.
+  - `priceStable>=7`: `205` opportunities, target rate `47.2906%`, stop rate `52.7094%`, avg return `+0.004017`, median `-0.016398`.
+  - `priceStable>=7 + timeExitDays=5`: `205` opportunities, stop rate `44.8276%`, avg return `+0.002256`, median `-0.010695`.
+  - `WATCH_BREAKOUT only`: strong metrics but only `17` opportunities, too sparse for formal filtering.
+  - `rr1>=2.5`: attractive metrics but only `47` opportunities; treat as diagnostic until RR/target model is reviewed.
+- Decision:
+  - No formal Strategy1 hard-filter upgrade in this round.
+  - New optimization direction is quality tiering, not recall reduction:
+    - `PRICE_STABLE_STRONG`: `price_stable_score >= 7`.
+    - `PRICE_STABLE_EXTREME`: `price_stable_score >= 8`.
+    - `BREAKOUT_OBSERVE`: `verdict_key == WATCH_BREAKOUT`.
+    - `SHORT_TERM_RISK_CONTROL`: expose 5-day time-exit diagnostics as guidance.
+- Added document:
+  - `docs/superpowers/specs/2026-06-14-strategy1-500hist-experiment-optimization-direction.md`.
+
+## 2026-06-14 (Strategy1 Quality Tags and Layered Display)
+
+- Added Strategy1 quality tags as a low-risk optimization layer without changing formal scan admission rules.
+- Added design and implementation plan:
+  - `docs/superpowers/specs/2026-06-14-strategy1-quality-tags-layered-display-design.md`.
+  - `docs/superpowers/plans/2026-06-14-strategy1-quality-tags-layered-display.md`.
+- Backend changes:
+  - Added `scanner/strategy1_quality.py` pure helpers for `PRICE_STABLE_STRONG`, `PRICE_STABLE_EXTREME`, `BREAKOUT_OBSERVE`, and `SHORT_TERM_RISK_CONTROL`.
+  - Strategy1 backtest opportunities now carry `volume_dry_score`, `price_stable_score`, `verdict_key`, `quality_tags`, `quality_layer`, and `short_term_exit_note`.
+  - `strategy1_backtest_opportunities` receives compatible non-destructive columns for those fields.
+  - `build_strategy1_backtest_summary()` now exposes `by_quality_tag`.
+- Frontend changes:
+  - `Strategy1Backtest.vue` shows quality tag summary chips.
+  - Opportunity rows show quality tags, price-stable score, volume-dry score, and verdict key.
+- Safety decision:
+  - No production `config.yaml` strategy parameters were changed by this feature.
+  - The user's local `config.yaml` change (`liquidity.min_listing_days=500`) remains uncommitted.
+- Verification:
+  - TDD red checks were observed for missing quality helper, missing opportunity quality fields, missing DB roundtrip/summary, missing short-term tag, and missing frontend display.
+  - Strategy1 backend targeted tests: `40 passed`.
+  - Frontend Vitest: `33 passed`.
+  - Python compileall: passed.
+  - Frontend production build: passed.
+  - `git diff --check`: passed.

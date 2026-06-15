@@ -32,6 +32,7 @@ from scanner.single_stock_backtest import (
     DataCoverageError,
     run_single_stock_cuphandle_backtest,
 )
+from scanner.strategy1_backtest_service import run_strategy1_experiment_from_baseline
 
 logger = logging.getLogger(__name__)
 
@@ -141,7 +142,13 @@ async def lifespan(app: FastAPI):
         start_scheduler(config)
         logger.info("Scheduler auto-started on server launch")
 
-    # Mark Strategy2 backtests left by a previous process as explicitly resumable.
+    # Mark backtests left by a previous process as explicitly resumable.
+    try:
+        for task_id in db.mark_running_strategy1_backtests_interrupted():
+            logger.info("Marked interrupted Strategy1 backtest task: %s", task_id)
+    except Exception:
+        logger.exception("Failed to mark interrupted Strategy1 backtest tasks")
+
     try:
         for task_id in db.mark_running_strategy2_backtests_interrupted():
             logger.info("Marked interrupted Strategy2 backtest task: %s", task_id)
@@ -1382,6 +1389,277 @@ def _launch_strategy2_backtest_task(
     thread = threading.Thread(target=worker, daemon=True)
     _backtest_running["thread"] = thread
     thread.start()
+
+
+def _launch_strategy1_backtest_task(
+    *,
+    task_id: str,
+    target_stocks: list[dict],
+    config_snapshot: dict,
+    payload_snapshot: dict,
+):
+    """启动策略1本地数据库回测执行器。"""
+    from scanner.strategy1_backtest_service import run_strategy1_backtest_task
+
+    _backtest_running.update({
+        "running": True,
+        "task_id": task_id,
+        "started_at": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "cancel_event": None,
+        "stats": {
+            "total_stocks": len(target_stocks),
+            "processed_stocks": 0,
+            "current_code": "--",
+            "current_name": "--",
+            "opportunities_count": 0,
+        },
+    })
+
+    def worker():
+        try:
+            run_strategy1_backtest_task(
+                task_id=task_id,
+                target_stocks=target_stocks,
+                config_snapshot=config_snapshot,
+                payload_snapshot=payload_snapshot,
+                running_state=_backtest_running,
+            )
+        except Exception:
+            logger.exception("Strategy1 backtest task %s failed", task_id)
+        finally:
+            if _backtest_running.get("task_id") == task_id:
+                _backtest_running["running"] = False
+                _backtest_running["task_id"] = None
+                _backtest_running["thread"] = None
+
+    thread = threading.Thread(target=worker, daemon=True)
+    _backtest_running["thread"] = thread
+    thread.start()
+
+
+@app.post("/api/strategy1/backtests/experiments/preview")
+async def strategy1_backtest_experiment_preview(payload: dict):
+    """预览并校验策略1实验配置。"""
+    from scanner.strategy1_backtest_experiments import (
+        is_experiment_enabled,
+        normalize_experiment_config,
+    )
+
+    try:
+        normalized = normalize_experiment_config(payload)
+    except ValueError as exc:
+        return JSONResponse({"valid": False, "error": str(exc)}, status_code=422)
+    return {
+        "valid": True,
+        "normalizedExperiment": normalized,
+        "credibilityStatus": "EXPERIMENTAL" if is_experiment_enabled(normalized) else "INCOMPLETE",
+    }
+
+
+@app.post("/api/strategy1/backtests")
+async def start_strategy1_backtest(payload: dict):
+    """启动策略1本地数据库可信回测。"""
+    import random as _random
+    import string as _string
+
+    from scanner.strategy1_backtest_experiments import (
+        is_experiment_enabled,
+        normalize_experiment_config,
+    )
+    from scanner.strategy1_backtest_service import (
+        STRATEGY1_BACKTEST_ENGINE_VERSION,
+        STRATEGY1_STRATEGY_ENGINE_VERSION,
+        calculate_strategy1_daily_ohlc_revision,
+    )
+
+    config = load_config()
+    db_path = config.get("data", {}).get("database_path", "data/cuphandle.db")
+    db.init_db(db_path)
+
+    conflict = _backtest_conflict_response()
+    if conflict:
+        return conflict
+
+    try:
+        resolve_strategy_windows(config)
+    except ValueError as exc:
+        return JSONResponse({"error": "INVALID_CONFIG", "message": str(exc)}, status_code=400)
+
+    try:
+        experiment = normalize_experiment_config(payload.get("experiment"))
+    except ValueError as exc:
+        return JSONResponse({"error": "INVALID_EXPERIMENT", "message": str(exc)}, status_code=422)
+
+    start_date = payload.get("startDate", "")
+    end_date = payload.get("endDate", "")
+    if start_date and end_date and start_date > end_date:
+        return JSONResponse({"error": "INVALID_PARAM", "message": "startDate must be <= endDate"}, status_code=422)
+
+    conn = db.get_conn()
+    if conn.execute("SELECT COUNT(*) FROM daily_ohlc").fetchone()[0] == 0:
+        return JSONResponse({"error": "NO_LOCAL_DATA", "message": "本地数据库无日线数据"}, status_code=400)
+
+    codes = payload.get("codes") or []
+    max_stocks = payload.get("maxStocks")
+    if codes:
+        pool_by_code = {stock["code"]: stock for stock in db.get_stock_pool()}
+        target_stocks = [
+            {"code": code, "name": pool_by_code.get(code, {}).get("name", "")}
+            for code in codes
+        ]
+    else:
+        pool = db.get_stock_pool()
+        if pool:
+            target_stocks = [{"code": stock["code"], "name": stock.get("name", "")} for stock in pool]
+        else:
+            target_stocks = [
+                {"code": row[0], "name": ""}
+                for row in conn.execute("SELECT DISTINCT code FROM daily_ohlc ORDER BY code").fetchall()
+            ]
+    if max_stocks:
+        target_stocks = target_stocks[: int(max_stocks)]
+    if not target_stocks:
+        return JSONResponse({"error": "NO_STOCKS", "message": "没有可回测股票"}, status_code=400)
+
+    suffix = ''.join(_random.choices(_string.ascii_lowercase + _string.digits, k=6))
+    task_id = datetime.datetime.now().strftime(f"s1bt-%Y%m%d-%H%M%S-{suffix}")
+    payload_snapshot = {**payload, "experiment": experiment, "experiment_snapshot": experiment}
+    db.create_strategy1_backtest_task(task_id, payload_snapshot, json.dumps(config, ensure_ascii=False))
+    db.update_strategy1_backtest_task(
+        task_id,
+        status="running",
+        credibility_status="EXPERIMENTAL" if is_experiment_enabled(experiment) else "RUNNING_UNVERIFIED",
+        total_stocks=len(target_stocks),
+        backtest_engine_version=STRATEGY1_BACKTEST_ENGINE_VERSION,
+        strategy_engine_version=STRATEGY1_STRATEGY_ENGINE_VERSION,
+        execution_model=experiment.get("execution_model", "NEXT_OPEN"),
+    )
+    for stock in target_stocks:
+        db.replace_strategy1_stock_backtest_result(
+            task_id,
+            stock["code"],
+            stock.get("name", ""),
+            {"status": "PENDING"},
+        )
+    data_revision_id = calculate_strategy1_daily_ohlc_revision(task_id)
+    db.update_strategy1_backtest_task(
+        task_id,
+        data_revision_id=data_revision_id,
+        data_revision_version=db.STRATEGY1_DATA_REVISION_VERSION,
+    )
+
+    if is_experiment_enabled(experiment) and payload.get("baselineTaskId"):
+        try:
+            run_strategy1_experiment_from_baseline(
+                experiment_task_id=task_id,
+                baseline_task_id=payload["baselineTaskId"],
+                experiment_snapshot=experiment,
+            )
+        except ValueError as exc:
+            return JSONResponse({"error": "INVALID_BASELINE", "message": str(exc)}, status_code=400)
+        return {
+            "task_id": task_id,
+            "taskId": task_id,
+            "status": "completed",
+            "credibilityStatus": "EXPERIMENTAL",
+        }
+
+    _launch_strategy1_backtest_task(
+        task_id=task_id,
+        target_stocks=target_stocks,
+        config_snapshot=config,
+        payload_snapshot=payload_snapshot,
+    )
+    return {
+        "task_id": task_id,
+        "taskId": task_id,
+        "status": "running",
+        "credibilityStatus": "EXPERIMENTAL" if is_experiment_enabled(experiment) else "RUNNING_UNVERIFIED",
+    }
+
+
+@app.get("/api/strategy1/backtests")
+async def strategy1_backtests(page: int = 1, page_size: int = 20, status: str = None):
+    config = load_config()
+    db.init_db(config.get("data", {}).get("database_path", "data/cuphandle.db"))
+    tasks, total = db.get_strategy1_backtest_tasks(page=page, page_size=page_size, status=status)
+    return {"tasks": tasks, "total": total, "page": page, "pageSize": page_size}
+
+
+@app.get("/api/strategy1/backtests/status")
+async def strategy1_backtest_status():
+    running = bool(_backtest_running.get("running") and str(_backtest_running.get("task_id") or "").startswith("s1bt-"))
+    return {
+        "running": running,
+        "taskId": _backtest_running.get("task_id") if running else None,
+        "stats": _backtest_running.get("stats", {}) if running else {},
+    }
+
+
+@app.get("/api/strategy1/backtests/{task_id}/comparison")
+async def strategy1_backtest_comparison(task_id: str, baselineTaskId: str):
+    config = load_config()
+    db.init_db(config.get("data", {}).get("database_path", "data/cuphandle.db"))
+    result = db.compare_strategy1_backtest_tasks(task_id, baselineTaskId)
+    db.update_strategy1_backtest_task(
+        task_id,
+        comparison_summary_json=json.dumps(result, ensure_ascii=False),
+        baseline_task_id=baselineTaskId,
+    )
+    return result
+
+
+@app.get("/api/strategy1/backtests/{task_id}")
+async def strategy1_backtest_detail(task_id: str):
+    config = load_config()
+    db.init_db(config.get("data", {}).get("database_path", "data/cuphandle.db"))
+    task = db.get_strategy1_backtest_task(task_id)
+    if not task:
+        return JSONResponse({"error": "TASK_NOT_FOUND"}, status_code=404)
+    return {"task": task, "summary": json.loads(task["summary_json"]) if task.get("summary_json") else None}
+
+
+@app.get("/api/strategy1/backtests/{task_id}/opportunities")
+async def strategy1_backtest_opportunities(task_id: str, code: str = None, limit: int = 500, offset: int = 0):
+    config = load_config()
+    db.init_db(config.get("data", {}).get("database_path", "data/cuphandle.db"))
+    total = db.get_conn().execute(
+        "SELECT COUNT(*) FROM strategy1_backtest_opportunities WHERE task_id=?",
+        (task_id,),
+    ).fetchone()[0]
+    return {
+        "opportunities": db.get_strategy1_backtest_opportunities(task_id, code=code, limit=limit, offset=offset),
+        "total": total,
+    }
+
+
+@app.get("/api/strategy1/backtests/{task_id}/signals")
+async def strategy1_backtest_signals(task_id: str, code: str = None, limit: int = 500, offset: int = 0):
+    config = load_config()
+    db.init_db(config.get("data", {}).get("database_path", "data/cuphandle.db"))
+    conn = db.get_conn()
+    if code:
+        total = conn.execute(
+            "SELECT COUNT(*) FROM strategy1_backtest_signals WHERE task_id=? AND code=?",
+            (task_id, code),
+        ).fetchone()[0]
+    else:
+        total = conn.execute(
+            "SELECT COUNT(*) FROM strategy1_backtest_signals WHERE task_id=?",
+            (task_id,),
+        ).fetchone()[0]
+    return {
+        "signals": db.get_strategy1_backtest_signals(task_id, code=code, limit=limit, offset=offset),
+        "total": total,
+    }
+
+
+@app.get("/api/strategy1/backtests/{task_id}/stocks")
+async def strategy1_backtest_stocks(task_id: str, status: str = None):
+    config = load_config()
+    db.init_db(config.get("data", {}).get("database_path", "data/cuphandle.db"))
+    stocks = db.get_strategy1_backtest_task_stocks(task_id, status=status)
+    return {"stocks": stocks, "total": len(stocks)}
 
 
 @app.post("/api/strategy2/backtests")

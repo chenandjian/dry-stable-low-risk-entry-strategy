@@ -56,6 +56,7 @@ python -m pytest tests/test_yfinance_hist.py -v
 ```text
 入口: main.py / server.py / scheduler/scheduler.py
 策略1: scanner/engine.py + scanner/strategy_engine.py
+策略1回测: scanner/strategy1_backtester.py + scanner/strategy1_backtest_service.py + scanner/strategy1_backtest_models.py
 策略2: strategy2/scanner.py + strategy2/engine.py
 共享数据: scanner/db.py + scanner/daily_data_service.py + scanner/data_source.py
 策略2回测: strategy2/backtester.py + strategy2/backtest_models.py + server.py 回测任务编排
@@ -69,6 +70,18 @@ python -m pytest tests/test_yfinance_hist.py -v
 - `scan_tasks.strategy_type` 区分 `STRATEGY_1_CUP_HANDLE` 与 `STRATEGY_2_EXTREME_DRY_STABLE`。
 - 策略2候选写入 `strategy2_candidates`，不得写入策略1的 `candidates`。
 - 策略2 API、任务、候选、回测结果必须与策略1隔离，跨策略 task_id 应返回 `TASK_STRATEGY_MISMATCH`。
+
+## Strategy1 回测与质量标签规则
+
+- 策略1回测页面为 `/strategy1/backtest`，前端文件为 `web/src/pages/Strategy1Backtest.vue`。
+- 策略1回测 API 和数据模型使用 `scanner/strategy1_backtest_*` 模块；不得复用策略2回测表或策略2机会合并逻辑。
+- 策略1回测必须继续通过 `CupHandleStrategyEngine.evaluate_at()` 作为唯一策略判断入口，禁止在回测服务里重复实现候选规则。
+- 策略1新增质量标签与分层展示用于解释候选质量，不得替代核心策略入选规则。
+- VCP 必须作为独立分组展示；不得混入杯柄候选分组，也不得删除 `pattern_kind` 维度。
+- 回测中未来收益、止损、持有期等结果只用于实验分析，不得反向污染扫描实时候选判断。
+- 策略1历史数据天数可按实验需要提高；若修改 `liquidity.min_listing_days` 或窗口参数，必须同步验证扫描、回测和前端配置显示。
+- 失败拉取股票必须进入 `task_stocks.status='failed'`，供失败列表和 `retry-failed` 重新拉取；不得把全源失败股票当作本地缓存命中。
+- 同一股票当天已由任一策略扫描成功获取过日线时，可复用 `task_stocks.kline_latest_date` 对应的本地 `daily_ohlc`，避免策略1/策略2重复拉取；停牌导致最新 K 线不是自然日当天也可复用。
 
 ## Strategy2 数据与回测规则
 
