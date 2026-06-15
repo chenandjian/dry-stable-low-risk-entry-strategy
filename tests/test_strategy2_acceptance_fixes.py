@@ -194,6 +194,74 @@ class TestRealtimeAPIIsolation:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 class TestAllSourcesFailedNoCache:
+    def test_fetch_reuses_fresh_cache_without_calling_sources(self, monkeypatch, tmp_path):
+        """Fresh local OHLC for the target date should skip online sources."""
+        import scanner.db as db
+        from scanner.daily_data_service import fetch_with_retry
+
+        db_path = str(tmp_path / "fresh_cache.db")
+        db.init_db(db_path)
+        rows = [
+            {"date": f"2026-06-{day:02d}", "open": 10, "high": 10, "low": 10,
+             "close": 10, "volume": 1_000_000, "turnover": 10_000_000}
+            for day in range(1, 11)
+        ]
+        db.save_ohlc("000001", rows)
+
+        calls = []
+
+        def mock_try_fetch(*args, **kwargs):
+            calls.append(args)
+            return None, 1, "should not be called"
+
+        monkeypatch.setattr("scanner.daily_data_service._try_fetch_source", mock_try_fetch)
+
+        result = fetch_with_retry(
+            "000001",
+            "baidu",
+            source_chain=["baidu", "sina"],
+            kline_days=5,
+            cache_fresh_date="2026-06-10",
+        )
+
+        assert result.data == rows[-5:]
+        assert result.from_cache is True
+        assert result.primary_source == "cache"
+        assert result.fallback_source == "cache"
+        assert calls == []
+
+    def test_fetch_does_not_reuse_fresh_cache_when_rows_insufficient(self, monkeypatch, tmp_path):
+        """Fresh cache still must satisfy kline_days before skipping online sources."""
+        import scanner.db as db
+        from scanner.daily_data_service import fetch_with_retry
+
+        db_path = str(tmp_path / "fresh_cache_short.db")
+        db.init_db(db_path)
+        db.save_ohlc("000001", [
+            {"date": "2026-06-10", "open": 10, "high": 10, "low": 10,
+             "close": 10, "volume": 1_000_000, "turnover": 10_000_000}
+        ])
+
+        calls = []
+
+        def mock_try_fetch(*args, **kwargs):
+            calls.append(args)
+            return None, 1, "connection refused"
+
+        monkeypatch.setattr("scanner.daily_data_service._try_fetch_source", mock_try_fetch)
+
+        result = fetch_with_retry(
+            "000001",
+            "baidu",
+            source_chain=["baidu"],
+            kline_days=5,
+            cache_fresh_date="2026-06-10",
+        )
+
+        assert result.data is None
+        assert result.from_cache is False
+        assert len(calls) == 1
+
     def test_fetch_returns_none_when_all_sources_fail_and_cache_exists(self, monkeypatch, tmp_path):
         """ACCEPT-S2-003: cache exists + all online fail → data is None, from_cache False."""
         import scanner.db as db

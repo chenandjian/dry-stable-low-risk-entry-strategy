@@ -15,6 +15,7 @@ from scanner.tencent_source import fetch_tencent_daily
 from scanner.yfinance_source import fetch_yfinance_daily
 from scanner.index_source import fetch_market_index_daily
 from scanner.liquidity_filter import passes_liquidity_filter
+from scanner.daily_data_service import select_fresh_cached_ohlc
 from scanner.pattern_detector import CupHandleResult
 from analyzer.dry_stable import analyze_dry_stable
 from scanner.strategy_engine import (
@@ -588,6 +589,7 @@ def _fetch_with_retry(
     mgr: DataSourceManager | None = None,
     source_chain: list[str] | None = None,
     kline_days: int = 250,
+    cache_fresh_date: str | None = None,
 ) -> FetchResult:
     """Fetch K-line by trying sources in config order.
 
@@ -604,6 +606,15 @@ def _fetch_with_retry(
     """
     chain = _normalize_source_chain(source_chain, primary_ds)
     cached = db.get_ohlc(code)
+    fresh_cached = select_fresh_cached_ohlc(cached, kline_days, cache_fresh_date)
+    if fresh_cached is not None:
+        return FetchResult(
+            data=fresh_cached,
+            primary_source="cache",
+            fallback_source="cache",
+            from_cache=True,
+        )
+
     saw_busy = False
     source_errors: dict[str, str] = {}
     failed_sources: set[str] = set()
