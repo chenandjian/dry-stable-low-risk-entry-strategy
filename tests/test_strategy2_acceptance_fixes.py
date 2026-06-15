@@ -230,17 +230,18 @@ class TestAllSourcesFailedNoCache:
         assert result.fallback_source == "cache"
         assert calls == []
 
-    def test_fetch_does_not_reuse_fresh_cache_when_rows_insufficient(self, monkeypatch, tmp_path):
-        """Fresh cache still must satisfy kline_days before skipping online sources."""
+    def test_fetch_reuses_fresh_cache_even_when_rows_are_less_than_kline_days(self, monkeypatch, tmp_path):
+        """Same-day local OHLC should skip online sources even if history is short."""
         import scanner.db as db
         from scanner.daily_data_service import fetch_with_retry
 
         db_path = str(tmp_path / "fresh_cache_short.db")
         db.init_db(db_path)
-        db.save_ohlc("000001", [
+        rows = [
             {"date": "2026-06-10", "open": 10, "high": 10, "low": 10,
              "close": 10, "volume": 1_000_000, "turnover": 10_000_000}
-        ])
+        ]
+        db.save_ohlc("000001", rows)
 
         calls = []
 
@@ -258,9 +259,67 @@ class TestAllSourcesFailedNoCache:
             cache_fresh_date="2026-06-10",
         )
 
-        assert result.data is None
-        assert result.from_cache is False
-        assert len(calls) == 1
+        assert result.data == rows
+        assert result.from_cache is True
+        assert calls == []
+
+    def test_strategy2_scan_passes_existing_today_stock_latest_trade_date_to_fetch(self, monkeypatch, tmp_path):
+        """Strategy2 should reuse a same-stock latest date recorded by today's prior scan."""
+        from strategy2 import scanner as s2_scanner
+        from scanner.daily_data_service import FetchResult
+        import scanner.db as db
+
+        db_path = str(tmp_path / "s2_same_day_reuse.db")
+        db.init_db(db_path)
+        db.create_scan_task("prior-s1", "2026-06-15 09:30:00", total_stocks=1,
+                            strategy_type="STRATEGY_1_CUP_HANDLE")
+        db.save_task_stocks("prior-s1", [{"code": "000001", "name": "Prior"}])
+        db.update_task_stock(
+            "prior-s1",
+            "000001",
+            status="scanned",
+            kline_latest_date="2026-06-04",
+            finished_at="2026-06-15 09:31:00",
+        )
+        db.refresh_scan_task_counts("prior-s1")
+        db.finish_scan_task("prior-s1", "2026-06-15 09:32:00", 0, 2.0, scanned=1, skipped=0)
+
+        seen = []
+
+        def mock_fetch(*args, cache_fresh_date=None, **kwargs):
+            seen.append(cache_fresh_date)
+            return FetchResult(data=None, primary_source="baidu", fallback_source="baidu")
+
+        original_strftime = s2_scanner.time.strftime
+
+        def fake_strftime(fmt, *args):
+            if args:
+                return original_strftime(fmt, *args)
+            if fmt == "%Y%m%d-%H%M%S":
+                return "20260615-100000"
+            if fmt == "%Y-%m-%d %H:%M:%S":
+                return "2026-06-15 10:00:00"
+            if fmt == "%Y-%m-%d":
+                return "2026-06-15"
+            return original_strftime(fmt)
+
+        monkeypatch.setattr(s2_scanner, "fetch_with_retry", mock_fetch)
+        monkeypatch.setattr(s2_scanner.time, "strftime", fake_strftime)
+
+        stocks = [{"code": "000001", "name": "test", "market": ""}]
+        cfg = {"strategy2": {"strategy_window_days": 120, "minimum_required_days": 60,
+                             "candidate_min_score": 70, "max_risk_ratio": 0.05,
+                             "support_lookback_days": 10, "buy_zone_max_premium": 0.03,
+                             "stop_loss_buffer": 0.03},
+               "liquidity": {"enabled": False, "min_listing_days": 350},
+               "data": {"database_path": db_path, "daily_sources": ["baidu"], "worker_count": 1}}
+        db.create_scan_task("current-s2", "2026-06-15 10:00:00", total_stocks=1,
+                            strategy_type="STRATEGY_2_EXTREME_DRY_STABLE")
+        db.save_task_stocks("current-s2", stocks)
+
+        s2_scanner.scan_strategy2_all(cfg, task_id="current-s2", stocks=stocks, worker_count=1)
+
+        assert seen == ["2026-06-04"]
 
     def test_fetch_returns_none_when_all_sources_fail_and_cache_exists(self, monkeypatch, tmp_path):
         """ACCEPT-S2-003: cache exists + all online fail → data is None, from_cache False."""

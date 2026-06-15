@@ -131,6 +131,9 @@ def scan_all(
     def _now() -> str:
         return time.strftime("%Y-%m-%d %H:%M:%S")
 
+    def _today() -> str:
+        return time.strftime("%Y-%m-%d")
+
     def worker(thread_name: str):
         while not stock_queue.empty():
             try:
@@ -140,6 +143,9 @@ def scan_all(
 
             code = stock["code"]
             try:
+                cache_fresh_date = db.get_today_task_stock_latest_date(
+                    code, _today(), exclude_task_id=task_id,
+                )
                 db.update_task_stock(
                     task_id,
                     code,
@@ -156,6 +162,7 @@ def scan_all(
                     mgr=mgr,
                     source_chain=daily_sources,
                     kline_days=kline_days,
+                    cache_fresh_date=cache_fresh_date,
                 )
                 data = fetch_result.data
                 if data is None:
