@@ -8,6 +8,7 @@
 import json
 import logging
 import time
+from datetime import date
 from dataclasses import dataclass
 from typing import Callable
 
@@ -73,6 +74,7 @@ def fetch_with_retry(
     mgr: DataSourceManager | None = None,
     source_chain: list[str] | None = None,
     kline_days: int = 250,
+    cache_fresh_date: str | None = None,
 ) -> FetchResult:
     """从数据源链逐级拉取K线数据。
 
@@ -81,6 +83,15 @@ def fetch_with_retry(
     """
     chain = _normalize_source_chain(source_chain, primary_ds)
     cached = db.get_ohlc(code)
+    fresh_cached = select_fresh_cached_ohlc(cached, kline_days, cache_fresh_date)
+    if fresh_cached is not None:
+        return FetchResult(
+            data=fresh_cached,
+            primary_source="cache",
+            fallback_source="cache",
+            from_cache=True,
+        )
+
     saw_busy = False
     source_errors: dict[str, str] = {}
     failed_sources: set[str] = set()
@@ -177,6 +188,27 @@ def is_transient_source_busy(fetch_result: FetchResult) -> bool:
 def merge_data(cached: list[dict], fresh: list[dict], max_rows: int = 0) -> list[dict]:
     """合并缓存和新数据，去重按日期排序。"""
     return _merge_data(cached, fresh, max_rows)
+
+
+def select_fresh_cached_ohlc(
+    cached: list[dict] | None,
+    kline_days: int = 250,
+    fresh_date: str | None = None,
+) -> list[dict] | None:
+    """Return cached OHLC only when it is fresh enough for a same-day scan."""
+    if not cached:
+        return None
+    if kline_days and len(cached) < kline_days:
+        return None
+
+    target_date = fresh_date or date.today().isoformat()
+    latest_date = cached[-1].get("date")
+    if latest_date != target_date:
+        return None
+
+    if kline_days:
+        return cached[-kline_days:]
+    return cached
 
 
 def encode_source_errors(source_errors: dict | None) -> str | None:

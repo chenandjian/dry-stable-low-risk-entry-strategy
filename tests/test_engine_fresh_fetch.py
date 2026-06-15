@@ -418,6 +418,61 @@ def test_fetch_merges_and_saves(monkeypatch, tmp_path):
     assert db.get_ohlc("600000")[-1]["date"] == "2026-06-04"
 
 
+def test_fetch_reuses_fresh_cache_without_calling_sources(monkeypatch, tmp_path):
+    """Strategy1 fetch should reuse same-day OHLC written by another strategy."""
+    db.init_db(str(tmp_path / "cuphandle.db"))
+    rows = [_row(f"2026-06-{day:02d}", close=10.0 + day) for day in range(1, 11)]
+    db.save_ohlc("600000", rows)
+
+    calls = []
+
+    def fake_fetch(code, days=250):
+        calls.append((code, days))
+        return [_row("2026-06-11", close=99.0)]
+
+    monkeypatch.setattr(engine, "fetch_baidu_daily", fake_fetch, raising=False)
+    monkeypatch.setattr(engine, "fetch_sina_daily", fake_fetch)
+
+    result = engine._fetch_with_retry(
+        "600000",
+        "baidu",
+        retry_attempts=1,
+        fallback_attempts=1,
+        sleep_fn=lambda _: None,
+        source_chain=["baidu", "sina"],
+        kline_days=5,
+        cache_fresh_date="2026-06-10",
+    )
+
+    assert result.data == rows[-5:]
+    assert result.from_cache is True
+    assert result.primary_source == "cache"
+    assert result.fallback_source == "cache"
+    assert calls == []
+
+
+def test_fetch_does_not_reuse_stale_cache_when_sources_fail(monkeypatch, tmp_path):
+    """Stale cache is not allowed to produce scan data after online failures."""
+    db.init_db(str(tmp_path / "cuphandle.db"))
+    db.save_ohlc("600000", [_row("2026-06-09", close=9.0)])
+
+    monkeypatch.setattr(engine, "fetch_baidu_daily", lambda code, days=250: None, raising=False)
+
+    result = engine._fetch_with_retry(
+        "600000",
+        "baidu",
+        retry_attempts=1,
+        fallback_attempts=1,
+        sleep_fn=lambda _: None,
+        source_chain=["baidu"],
+        kline_days=1,
+        cache_fresh_date="2026-06-10",
+    )
+
+    assert result.data is None
+    assert result.from_cache is False
+
+
 def test_fetch_all_sources_fail_returns_none(monkeypatch, tmp_path):
     db.init_db(str(tmp_path / "cuphandle.db"))
 
