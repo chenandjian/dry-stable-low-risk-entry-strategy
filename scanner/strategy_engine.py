@@ -72,6 +72,9 @@ def resolve_strategy_windows(config: dict) -> StrategyWindows:
 # Single source of truth for which verdict_keys qualify as candidates
 CANDIDATE_KEYS = frozenset({"BUY_LOW", "WATCH_BREAKOUT", "WAIT_ENTRY"})
 REJECT_KEYS = frozenset({"REJECT", "不建议买入"})
+HIGH_DRAWDOWN_LOOKBACK_DAYS = 120
+HIGH_DRAWDOWN_HARD_REJECT_PCT = 35.0
+HIGH_DRAWDOWN_WEAK_REJECT_PCT = 30.0
 
 
 @dataclass
@@ -170,7 +173,7 @@ class CupHandleStrategyEngine:
         if result.found:
             result.score = score_cup_handle_advanced(result, data_until_date, self.scoring_cfg)
             dry_stable = analyze_dry_stable(result, data_until_date, market_data=market_data, config=self.config)
-            passed_rules, failed_rules = self._candidate_rules(result, dry_stable)
+            passed_rules, failed_rules = self._candidate_rules(result, dry_stable, data_until_date)
             return StrategyEvaluation(
                 not failed_rules, result, dry_stable,
                 self.strategy_version, self.config_hash,
@@ -184,7 +187,7 @@ class CupHandleStrategyEngine:
         key_type = dry_stable.get("pattern_score", {}).get("key_pattern_type", "")
         if key_type == "vcp" and pat20 >= 13:
             result.score = min(100, pat20 * 5)
-            passed_rules, failed_rules = self._candidate_rules(result, dry_stable)
+            passed_rules, failed_rules = self._candidate_rules(result, dry_stable, data_until_date)
             return StrategyEvaluation(
                 not failed_rules, result, dry_stable,
                 self.strategy_version, self.config_hash,
@@ -272,6 +275,7 @@ class CupHandleStrategyEngine:
         self,
         result: CupHandleResult,
         dry_stable: dict | None,
+        data_until_date: list[dict] | None = None,
     ) -> tuple[list[RuleDiagnostic], list[RuleDiagnostic]]:
         passed: list[RuleDiagnostic] = []
         failed: list[RuleDiagnostic] = []
@@ -378,7 +382,97 @@ class CupHandleStrategyEngine:
                 )
             )
 
+        high_drawdown_rule = _high_drawdown_weakness_rule(data_until_date or [], dry_stable)
+        if high_drawdown_rule:
+            failed.append(high_drawdown_rule)
+
         return passed, failed
+
+
+def _high_drawdown_weakness_rule(
+    data_until_date: list[dict],
+    dry_stable: dict | None,
+) -> RuleDiagnostic | None:
+    if not data_until_date or len(data_until_date) < HIGH_DRAWDOWN_LOOKBACK_DAYS:
+        return None
+
+    window = data_until_date[-HIGH_DRAWDOWN_LOOKBACK_DAYS:]
+    highs = [float(row.get("high") or 0) for row in window]
+    recent_high = max(highs) if highs else 0
+    latest_close = float(window[-1].get("close") or 0)
+    if recent_high <= 0 or latest_close <= 0:
+        return None
+
+    drawdown_pct = (recent_high - latest_close) / recent_high * 100
+    weakness_reasons = _high_drawdown_weakness_reasons(dry_stable)
+
+    if drawdown_pct >= HIGH_DRAWDOWN_HARD_REJECT_PCT:
+        reason = "近120日高点回撤过深，容易把深跌后的局部修复误判为高质量杯柄。"
+    elif drawdown_pct >= HIGH_DRAWDOWN_WEAK_REJECT_PCT and weakness_reasons:
+        reason = "近120日高点回撤较深，且当前量价/风报状态出现弱势共振。"
+    else:
+        return None
+
+    if weakness_reasons:
+        reason = f"{reason} 弱势特征: {', '.join(weakness_reasons)}。"
+
+    return RuleDiagnostic(
+        "高位深跌弱势过滤",
+        (
+            f"120日高点回撤 < {HIGH_DRAWDOWN_HARD_REJECT_PCT:.0f}%，"
+            f"或 < {HIGH_DRAWDOWN_WEAK_REJECT_PCT:.0f}% 且无弱势共振"
+        ),
+        f"120日高点回撤 {drawdown_pct:.1f}% (high={recent_high:.2f}, close={latest_close:.2f})",
+        "high",
+        reason,
+    )
+
+
+def _high_drawdown_weakness_reasons(dry_stable: dict | None) -> list[str]:
+    if not dry_stable:
+        return []
+
+    reasons: list[str] = []
+    price_stable_score = _number_from_path(dry_stable, "price_stable", "score")
+    if price_stable_score is not None and price_stable_score <= 5:
+        reasons.append(f"价稳评分{price_stable_score:g}<=5")
+
+    rr1 = _number_from_path(dry_stable, "risk_reward", "rr1")
+    if rr1 is not None and rr1 < 1:
+        reasons.append(f"RR1={rr1:g}<1")
+
+    position_advice = str((dry_stable.get("risk_reward") or {}).get("position_advice") or "")
+    if position_advice == "0%":
+        reasons.append("仓位建议0%")
+
+    warnings = _collect_dry_stable_warnings(dry_stable)
+    if any(("弱势阴跌" in warning or "缩量位置偏低" in warning) for warning in warnings):
+        reasons.append("存在弱势阴跌/缩量位置偏低警告")
+
+    return reasons
+
+
+def _number_from_path(source: dict, section: str, key: str) -> float | None:
+    value = (source.get(section) or {}).get(key)
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _collect_dry_stable_warnings(dry_stable: dict) -> list[str]:
+    warnings: list[str] = []
+    for section in ("decision", "risk_reward", "volume_dry", "price_stable"):
+        section_value = dry_stable.get(section) or {}
+        raw = section_value.get("warnings")
+        if isinstance(raw, list):
+            warnings.extend(str(item) for item in raw)
+    raw_top = dry_stable.get("warnings")
+    if isinstance(raw_top, list):
+        warnings.extend(str(item) for item in raw_top)
+    return warnings
 
 
 def select_strategy_window(

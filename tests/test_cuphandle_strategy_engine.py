@@ -373,6 +373,127 @@ def test_evaluate_at_passes_non_breakout_pattern(monkeypatch):
     assert "突破状态排除" in passed_names
 
 
+def test_evaluate_at_rejects_high_drawdown_with_weakness(monkeypatch):
+    """High quality filter: deep 120d drawdown + weak risk state should not be a candidate."""
+    import scanner.strategy_engine as strategy_engine
+
+    data = []
+    for i in range(120):
+        close = 65.0
+        high = 67.0
+        if i == 20:
+            high = 100.0
+            close = 96.0
+        data.append({
+            "date": f"2025-{(i // 20) + 1:02d}-{(i % 20) + 1:02d}",
+            "open": close,
+            "high": high,
+            "low": close * 0.98,
+            "close": close,
+            "volume": 10_000_000,
+            "turnover": close * 10_000_000,
+        })
+
+    engine = CupHandleStrategyEngine(full_config())
+
+    def fake_detect_cup_handle(data, pattern_cfg):
+        return CupHandleResult(
+            found=True,
+            left_high_idx=10,
+            cup_low_idx=50,
+            right_high_idx=100,
+            handle_low_idx=115,
+            left_high_date=data[10]["date"],
+            cup_low_date=data[50]["date"],
+            right_high_date=data[100]["date"],
+            handle_low_date=data[115]["date"],
+            left_high_price=72.0,
+            cup_low_price=58.0,
+            right_high_price=70.0,
+            handle_low_price=63.0,
+            cup_duration=90,
+            cup_depth_pct=18.0,
+            handle_duration=19,
+            handle_depth_pct=10.0,
+            lip_deviation_pct=3.0,
+            is_breakout=False,
+            score=72,
+        )
+
+    def fake_score_cup_handle_advanced(result, data, scoring_cfg):
+        return 72
+
+    def fake_analyze_dry_stable(result, data, market_data=None, config=None):
+        return {
+            "decision": {
+                "verdict": "等回调入场",
+                "verdict_key": "WAIT_ENTRY",
+                "warnings": ["缩量但价格重心下移，疑似弱势阴跌"],
+            },
+            "pattern_score": {"key_pattern_type": "cup_handle"},
+            "price_stable": {"score": 5},
+            "risk_reward": {"rr1": 0.3, "position_advice": "0%"},
+        }
+
+    monkeypatch.setattr(strategy_engine, "detect_cup_handle", fake_detect_cup_handle)
+    monkeypatch.setattr(strategy_engine, "score_cup_handle_advanced", fake_score_cup_handle_advanced)
+    monkeypatch.setattr(strategy_engine, "analyze_dry_stable", fake_analyze_dry_stable)
+
+    evaluation = engine.evaluate_at(data, code="301310", name="测试")
+
+    assert evaluation.passed is False
+    high_drawdown_rule = next(rule for rule in evaluation.failed_rules if rule.ruleName == "高位深跌弱势过滤")
+    assert high_drawdown_rule.severity == "high"
+    assert "120日高点回撤" in high_drawdown_rule.actualValue
+
+
+def test_evaluate_at_keeps_wait_entry_when_drawdown_is_not_deep(monkeypatch):
+    """The quality filter should not overfit by rejecting ordinary pullbacks."""
+    import scanner.strategy_engine as strategy_engine
+
+    data = []
+    for i in range(120):
+        close = 72.0
+        high = 74.0
+        if i == 20:
+            high = 100.0
+            close = 96.0
+        data.append({
+            "date": f"2025-{(i // 20) + 1:02d}-{(i % 20) + 1:02d}",
+            "open": close,
+            "high": high,
+            "low": close * 0.98,
+            "close": close,
+            "volume": 10_000_000,
+            "turnover": close * 10_000_000,
+        })
+
+    engine = CupHandleStrategyEngine(full_config())
+
+    def fake_detect_cup_handle(data, pattern_cfg):
+        return CupHandleResult(found=True, is_breakout=False, score=72)
+
+    def fake_score_cup_handle_advanced(result, data, scoring_cfg):
+        return 72
+
+    def fake_analyze_dry_stable(result, data, market_data=None, config=None):
+        return {
+            "decision": {"verdict": "等回调入场", "verdict_key": "WAIT_ENTRY"},
+            "pattern_score": {"key_pattern_type": "cup_handle"},
+            "price_stable": {"score": 5},
+            "risk_reward": {"rr1": 0.3, "position_advice": "0%"},
+        }
+
+    monkeypatch.setattr(strategy_engine, "detect_cup_handle", fake_detect_cup_handle)
+    monkeypatch.setattr(strategy_engine, "score_cup_handle_advanced", fake_score_cup_handle_advanced)
+    monkeypatch.setattr(strategy_engine, "analyze_dry_stable", fake_analyze_dry_stable)
+
+    evaluation = engine.evaluate_at(data, code="600000", name="测试")
+
+    assert evaluation.passed is True
+    assert all(rule.ruleName != "高位深跌弱势过滤" for rule in evaluation.failed_rules)
+
+
 # ── 扫描与回测一致性 ─────────────────────────────────────────────────
 
 def test_same_data_same_window_produces_consistent_result():
