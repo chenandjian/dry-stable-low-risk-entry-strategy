@@ -386,7 +386,81 @@ class CupHandleStrategyEngine:
         if high_drawdown_rule:
             failed.append(high_drawdown_rule)
 
+        weak_trade_value_rule = _weak_trade_value_rule(dry_stable)
+        if weak_trade_value_rule:
+            failed.append(weak_trade_value_rule)
+
+        handle_support_rule = _handle_support_breakdown_rule(result, data_until_date or [])
+        if handle_support_rule:
+            failed.append(handle_support_rule)
+
         return passed, failed
+
+
+def _handle_support_breakdown_rule(
+    result: CupHandleResult,
+    data_until_date: list[dict],
+) -> RuleDiagnostic | None:
+    handle_support = float(getattr(result, "handle_low_price", 0) or 0)
+    if handle_support <= 0 or len(data_until_date) < 2:
+        return None
+
+    closes = [float(row.get("close") or 0) for row in data_until_date]
+    latest_close = closes[-1]
+    if latest_close <= 0:
+        return None
+
+    break_pct = (handle_support - latest_close) / handle_support * 100
+    consecutive_break = closes[-1] < handle_support and closes[-2] < handle_support
+    hard_break = latest_close < handle_support * 0.98
+
+    if not hard_break and not consecutive_break:
+        return None
+
+    reason = (
+        "当前收盘价跌破柄部支撑超过2%，柄部结构已失效。"
+        if hard_break
+        else "连续两日收盘跌破柄部支撑，柄部支撑确认失效。"
+    )
+    return RuleDiagnostic(
+        "柄部支撑破位过滤",
+        "当前收盘不低于柄部支撑2%以上，且未连续两日收盘跌破柄部支撑",
+        f"handle_support={handle_support:.2f}, latest_close={latest_close:.2f}, break={break_pct:.1f}%",
+        "high",
+        reason,
+    )
+
+
+def _weak_trade_value_rule(dry_stable: dict | None) -> RuleDiagnostic | None:
+    if not dry_stable:
+        return None
+
+    rr1 = _number_from_path(dry_stable, "risk_reward", "rr1")
+    position_advice = str((dry_stable.get("risk_reward") or {}).get("position_advice") or "")
+    reject_reasons = _collect_dry_stable_reject_reasons(dry_stable)
+
+    reasons: list[str] = []
+    if position_advice == "0%" and rr1 is not None and rr1 < 1:
+        reasons.append(f"仓位建议0%且RR1={rr1:g}<1")
+    if any("跌破关键支撑" in reason for reason in reject_reasons):
+        reasons.append("已跌破关键支撑")
+
+    if not reasons:
+        return None
+
+    actual_parts = []
+    actual_parts.append(f"RR1={rr1:g}" if rr1 is not None else "RR1=缺失")
+    actual_parts.append(f"仓位建议{position_advice or '缺失'}")
+    if reject_reasons:
+        actual_parts.append(f"拒绝原因: {'; '.join(reject_reasons)}")
+
+    return RuleDiagnostic(
+        "弱交易价值过滤",
+        "RR1>=1 且仓位建议非0%，且未跌破关键支撑",
+        "；".join(actual_parts),
+        "high",
+        f"候选虽为观察状态，但当前交易价值过低: {', '.join(reasons)}。",
+    )
 
 
 def _high_drawdown_weakness_rule(
@@ -473,6 +547,19 @@ def _collect_dry_stable_warnings(dry_stable: dict) -> list[str]:
     if isinstance(raw_top, list):
         warnings.extend(str(item) for item in raw_top)
     return warnings
+
+
+def _collect_dry_stable_reject_reasons(dry_stable: dict) -> list[str]:
+    reasons: list[str] = []
+    for section in ("decision", "risk_reward", "volume_dry", "price_stable"):
+        section_value = dry_stable.get(section) or {}
+        raw = section_value.get("reject_reasons")
+        if isinstance(raw, list):
+            reasons.extend(str(item) for item in raw)
+    raw_top = dry_stable.get("reject_reasons")
+    if isinstance(raw_top, list):
+        reasons.extend(str(item) for item in raw_top)
+    return reasons
 
 
 def select_strategy_window(

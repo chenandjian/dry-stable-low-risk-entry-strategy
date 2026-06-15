@@ -481,7 +481,7 @@ def test_evaluate_at_keeps_wait_entry_when_drawdown_is_not_deep(monkeypatch):
             "decision": {"verdict": "等回调入场", "verdict_key": "WAIT_ENTRY"},
             "pattern_score": {"key_pattern_type": "cup_handle"},
             "price_stable": {"score": 5},
-            "risk_reward": {"rr1": 0.3, "position_advice": "0%"},
+            "risk_reward": {"rr1": 1.5, "position_advice": "10%-20%"},
         }
 
     monkeypatch.setattr(strategy_engine, "detect_cup_handle", fake_detect_cup_handle)
@@ -492,6 +492,154 @@ def test_evaluate_at_keeps_wait_entry_when_drawdown_is_not_deep(monkeypatch):
 
     assert evaluation.passed is True
     assert all(rule.ruleName != "高位深跌弱势过滤" for rule in evaluation.failed_rules)
+
+
+def test_evaluate_at_rejects_weak_trade_value_candidate(monkeypatch):
+    """WAIT_ENTRY with 0% position and RR1<1 has no practical trade value."""
+    import scanner.strategy_engine as strategy_engine
+
+    data = make_ohlc_from_closes([20 + (i % 5) * 0.1 for i in range(120)])
+    engine = CupHandleStrategyEngine(full_config())
+
+    def fake_detect_cup_handle(data, pattern_cfg):
+        return CupHandleResult(found=True, is_breakout=False, score=76)
+
+    def fake_score_cup_handle_advanced(result, data, scoring_cfg):
+        return 76
+
+    def fake_analyze_dry_stable(result, data, market_data=None, config=None):
+        return {
+            "decision": {
+                "verdict": "等回调入场",
+                "verdict_key": "WAIT_ENTRY",
+                "reject_reasons": ["跌破关键支撑，价格尚未稳定"],
+            },
+            "pattern_score": {"key_pattern_type": "cup_handle"},
+            "price_stable": {
+                "score": 5,
+                "reject_reasons": ["跌破关键支撑，价格尚未稳定"],
+            },
+            "risk_reward": {"rr1": 0.4, "position_advice": "0%"},
+        }
+
+    monkeypatch.setattr(strategy_engine, "detect_cup_handle", fake_detect_cup_handle)
+    monkeypatch.setattr(strategy_engine, "score_cup_handle_advanced", fake_score_cup_handle_advanced)
+    monkeypatch.setattr(strategy_engine, "analyze_dry_stable", fake_analyze_dry_stable)
+
+    evaluation = engine.evaluate_at(data, code="002888", name="惠威科技")
+
+    assert evaluation.passed is False
+    weak_value_rule = next(rule for rule in evaluation.failed_rules if rule.ruleName == "弱交易价值过滤")
+    assert weak_value_rule.severity == "high"
+    assert "RR1=0.4" in weak_value_rule.actualValue
+    assert "仓位建议0%" in weak_value_rule.actualValue
+
+
+def test_evaluate_at_keeps_wait_entry_when_trade_value_is_acceptable(monkeypatch):
+    """WAIT_ENTRY remains a candidate when risk/reward and position are still usable."""
+    import scanner.strategy_engine as strategy_engine
+
+    data = make_ohlc_from_closes([20 + (i % 5) * 0.1 for i in range(120)])
+    engine = CupHandleStrategyEngine(full_config())
+
+    def fake_detect_cup_handle(data, pattern_cfg):
+        return CupHandleResult(found=True, is_breakout=False, score=76)
+
+    def fake_score_cup_handle_advanced(result, data, scoring_cfg):
+        return 76
+
+    def fake_analyze_dry_stable(result, data, market_data=None, config=None):
+        return {
+            "decision": {"verdict": "等回调入场", "verdict_key": "WAIT_ENTRY"},
+            "pattern_score": {"key_pattern_type": "cup_handle"},
+            "price_stable": {"score": 6},
+            "risk_reward": {"rr1": 1.5, "position_advice": "10%-20%"},
+        }
+
+    monkeypatch.setattr(strategy_engine, "detect_cup_handle", fake_detect_cup_handle)
+    monkeypatch.setattr(strategy_engine, "score_cup_handle_advanced", fake_score_cup_handle_advanced)
+    monkeypatch.setattr(strategy_engine, "analyze_dry_stable", fake_analyze_dry_stable)
+
+    evaluation = engine.evaluate_at(data, code="600000", name="测试")
+
+    assert evaluation.passed is True
+    assert all(rule.ruleName != "弱交易价值过滤" for rule in evaluation.failed_rules)
+
+
+def test_evaluate_at_rejects_handle_support_breakdown(monkeypatch):
+    """Close below handle support by more than 2% should invalidate the handle candidate."""
+    import scanner.strategy_engine as strategy_engine
+
+    data = make_ohlc_from_closes([20 + (i % 5) * 0.1 for i in range(118)] + [19.8, 19.5])
+    engine = CupHandleStrategyEngine(full_config())
+
+    def fake_detect_cup_handle(data, pattern_cfg):
+        return CupHandleResult(
+            found=True,
+            is_breakout=False,
+            score=76,
+            right_high_idx=100,
+            handle_low_price=20.0,
+        )
+
+    def fake_score_cup_handle_advanced(result, data, scoring_cfg):
+        return 76
+
+    def fake_analyze_dry_stable(result, data, market_data=None, config=None):
+        return {
+            "decision": {"verdict": "等回调入场", "verdict_key": "WAIT_ENTRY"},
+            "pattern_score": {"key_pattern_type": "cup_handle"},
+            "price_stable": {"score": 6},
+            "risk_reward": {"rr1": 1.5, "position_advice": "10%-20%"},
+        }
+
+    monkeypatch.setattr(strategy_engine, "detect_cup_handle", fake_detect_cup_handle)
+    monkeypatch.setattr(strategy_engine, "score_cup_handle_advanced", fake_score_cup_handle_advanced)
+    monkeypatch.setattr(strategy_engine, "analyze_dry_stable", fake_analyze_dry_stable)
+
+    evaluation = engine.evaluate_at(data, code="600000", name="测试")
+
+    assert evaluation.passed is False
+    support_rule = next(rule for rule in evaluation.failed_rules if rule.ruleName == "柄部支撑破位过滤")
+    assert support_rule.severity == "high"
+    assert "handle_support=20.00" in support_rule.actualValue
+
+
+def test_evaluate_at_keeps_single_mild_handle_support_dip(monkeypatch):
+    """A single close slightly below handle support is only a warning, not a hard reject."""
+    import scanner.strategy_engine as strategy_engine
+
+    data = make_ohlc_from_closes([20 + (i % 5) * 0.1 for i in range(119)] + [19.8])
+    engine = CupHandleStrategyEngine(full_config())
+
+    def fake_detect_cup_handle(data, pattern_cfg):
+        return CupHandleResult(
+            found=True,
+            is_breakout=False,
+            score=76,
+            right_high_idx=100,
+            handle_low_price=20.0,
+        )
+
+    def fake_score_cup_handle_advanced(result, data, scoring_cfg):
+        return 76
+
+    def fake_analyze_dry_stable(result, data, market_data=None, config=None):
+        return {
+            "decision": {"verdict": "等回调入场", "verdict_key": "WAIT_ENTRY"},
+            "pattern_score": {"key_pattern_type": "cup_handle"},
+            "price_stable": {"score": 6},
+            "risk_reward": {"rr1": 1.5, "position_advice": "10%-20%"},
+        }
+
+    monkeypatch.setattr(strategy_engine, "detect_cup_handle", fake_detect_cup_handle)
+    monkeypatch.setattr(strategy_engine, "score_cup_handle_advanced", fake_score_cup_handle_advanced)
+    monkeypatch.setattr(strategy_engine, "analyze_dry_stable", fake_analyze_dry_stable)
+
+    evaluation = engine.evaluate_at(data, code="600000", name="测试")
+
+    assert evaluation.passed is True
+    assert all(rule.ruleName != "柄部支撑破位过滤" for rule in evaluation.failed_rules)
 
 
 # ── 扫描与回测一致性 ─────────────────────────────────────────────────
