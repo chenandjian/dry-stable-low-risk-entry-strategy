@@ -99,6 +99,10 @@ scheduler:
   skip_if_running: true
   on_complete: log
   webhook_url: null
+  serial_dual_scan:
+    enabled: true
+    cron: 15 15 * * 1-5
+    strategy1_failed_retry_rounds: 3
 strategy2:
   enabled: true
   strategy_window_days: 350
