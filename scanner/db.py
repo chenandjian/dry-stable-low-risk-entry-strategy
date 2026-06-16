@@ -210,6 +210,8 @@ def _ensure_task_stocks_table(conn: sqlite3.Connection):
             kline_latest_date TEXT,
             quote_status TEXT DEFAULT 'not_requested',
             quote_error TEXT,
+            kline_fetched_at TEXT,
+            kline_target_trade_date TEXT,
             started_at TEXT,
             finished_at TEXT,
             updated_at TEXT DEFAULT (datetime('now')),
@@ -233,6 +235,8 @@ def _ensure_task_stocks_table(conn: sqlite3.Connection):
         "kline_latest_date": "TEXT",
         "quote_status": "TEXT DEFAULT 'not_requested'",
         "quote_error": "TEXT",
+        "kline_fetched_at": "TEXT",
+        "kline_target_trade_date": "TEXT",
         "started_at": "TEXT",
         "finished_at": "TEXT",
         "updated_at": "TEXT",
@@ -334,6 +338,58 @@ def get_ohlc_latest_date(code: str) -> str | None:
         "SELECT MAX(date) FROM daily_ohlc WHERE code = ?", (code,)
     ).fetchone()
     return row[0] if row else None
+
+
+def get_reusable_task_stock_kline_context(
+    code: str,
+    target_trade_date: str,
+    min_fetch_time: str | None,
+    exclude_task_id: str | None = None,
+) -> dict | None:
+    """Return prior task K-line freshness metadata reusable for a new scan.
+
+    Freshness is tied to the latest completed trade date, not calendar today.
+    Suspended/no-trade rows may have latest K-line before target_trade_date,
+    but only when a prior scan fetched after the target close time.
+    """
+    conn = get_conn()
+    params: list = [code, target_trade_date]
+    min_fetch_clause = ""
+    if min_fetch_time:
+        min_fetch_clause = "AND ts.kline_fetched_at >= ?"
+        params.append(min_fetch_time)
+    params.append(target_trade_date)
+    exclude_clause = ""
+    if exclude_task_id:
+        exclude_clause = "AND ts.task_id != ?"
+        params.append(exclude_task_id)
+    row = conn.execute(
+        f"""SELECT ts.kline_latest_date, ts.kline_fetched_at,
+                  ts.kline_target_trade_date, ts.quote_status
+            FROM task_stocks ts
+            WHERE ts.code = ?
+              AND ts.kline_target_trade_date = ?
+              AND ts.kline_fetched_at IS NOT NULL
+              {min_fetch_clause}
+              AND ts.kline_latest_date IS NOT NULL
+              AND ts.status IN ('scanned', 'skipped', 'candidate')
+              AND (
+                    ts.kline_latest_date >= ?
+                    OR ts.quote_status IN ('suspended', 'no_trade')
+                  )
+              {exclude_clause}
+            ORDER BY ts.kline_fetched_at DESC, ts.updated_at DESC
+            LIMIT 1""",
+        params,
+    ).fetchone()
+    if not row:
+        return None
+    return {
+        "kline_latest_date": row[0],
+        "kline_fetched_at": row[1],
+        "kline_target_trade_date": row[2],
+        "quote_status": row[3] or "not_requested",
+    }
 
 
 def get_today_task_stock_latest_date(code: str, today: str, exclude_task_id: str | None = None) -> str | None:
@@ -492,7 +548,7 @@ def update_task_stock(task_id: str, code: str, **fields):
         "status", "status_reason", "error_detail", "primary_source", "fallback_source",
         "primary_attempts", "fallback_attempts", "primary_error", "fallback_error",
         "kline_latest_date", "quote_status", "quote_error", "started_at", "finished_at",
-        "source_errors",
+        "source_errors", "kline_fetched_at", "kline_target_trade_date",
     }
     updates = {k: v for k, v in fields.items() if k in allowed}
     if not updates:

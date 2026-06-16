@@ -8,7 +8,7 @@
 import json
 import logging
 import time
-from datetime import date
+from datetime import date, datetime, timedelta
 from dataclasses import dataclass
 from typing import Callable
 
@@ -22,6 +22,18 @@ from scanner.yfinance_source import fetch_yfinance_daily
 logger = logging.getLogger(__name__)
 
 DEFAULT_DAILY_SOURCES = ["baidu", "sina", "tencent", "yfinance"]
+MARKET_CLOSE_TIME = "15:00:00"
+MARKET_CLOSE_CONFIRM_TIME = "15:10:00"
+
+
+@dataclass
+class CacheFreshnessContext:
+    """Cache freshness requirement for the latest completed trading day."""
+    target_trade_date: str
+    min_fetch_time: str | None = None
+    fetched_at: str | None = None
+    allow_previous_trade_date: bool = False
+    quote_status: str | None = None
 
 
 @dataclass
@@ -36,6 +48,9 @@ class FetchResult:
     fallback_error: str | None = None
     source_errors: dict = None
     from_cache: bool = False
+    kline_fetched_at: str | None = None
+    kline_target_trade_date: str | None = None
+    quote_status: str = "not_requested"
 
     def __post_init__(self):
         if self.source_errors is None:
@@ -75,6 +90,7 @@ def fetch_with_retry(
     source_chain: list[str] | None = None,
     kline_days: int = 250,
     cache_fresh_date: str | None = None,
+    freshness_context: CacheFreshnessContext | None = None,
 ) -> FetchResult:
     """从数据源链逐级拉取K线数据。
 
@@ -83,13 +99,20 @@ def fetch_with_retry(
     """
     chain = _normalize_source_chain(source_chain, primary_ds)
     cached = db.get_ohlc(code)
-    fresh_cached = select_fresh_cached_ohlc(cached, kline_days, cache_fresh_date)
+    if freshness_context is None and cache_fresh_date:
+        freshness_context = CacheFreshnessContext(target_trade_date=cache_fresh_date)
+    fresh_cached = select_fresh_cached_ohlc(
+        cached, kline_days, cache_fresh_date, freshness_context=freshness_context,
+    )
     if fresh_cached is not None:
         return FetchResult(
             data=fresh_cached,
             primary_source="cache",
             fallback_source="cache",
             from_cache=True,
+            kline_fetched_at=freshness_context.fetched_at if freshness_context else None,
+            kline_target_trade_date=freshness_context.target_trade_date if freshness_context else cache_fresh_date,
+            quote_status=freshness_context.quote_status if freshness_context else "not_requested",
         )
 
     saw_busy = False
@@ -129,6 +152,8 @@ def fetch_with_retry(
         if data:
             merged = _merge_data(cached or [], data, max_rows=kline_days)
             db.save_ohlc(code, merged)
+            fetched_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            quote_status = _classify_quote_status_after_fetch(merged, freshness_context)
 
             recent = data[-1]
             prev = data[-2] if len(data) >= 2 else None
@@ -143,6 +168,11 @@ def fetch_with_retry(
                 primary_source=chain[0],
                 fallback_source=ds_name if ds_name != chain[0] else chain[0],
                 source_errors=source_errors,
+                kline_fetched_at=fetched_at,
+                kline_target_trade_date=(
+                    freshness_context.target_trade_date if freshness_context else None
+                ),
+                quote_status=quote_status,
             )
             return _apply_source_compatibility_fields(
                 result, chain, source_errors,
@@ -194,19 +224,68 @@ def select_fresh_cached_ohlc(
     cached: list[dict] | None,
     kline_days: int = 250,
     fresh_date: str | None = None,
+    *,
+    freshness_context: CacheFreshnessContext | None = None,
 ) -> list[dict] | None:
-    """Return cached OHLC only when it is fresh enough for a same-day scan."""
+    """Return cached OHLC only when it covers the latest completed trade date."""
     if not cached:
         return None
 
-    target_date = fresh_date or date.today().isoformat()
+    if freshness_context is None:
+        target_date = fresh_date or date.today().isoformat()
+        freshness_context = CacheFreshnessContext(target_trade_date=target_date)
+    target_date = freshness_context.target_trade_date
     latest_date = cached[-1].get("date")
-    if latest_date != target_date:
+    if latest_date == target_date:
+        if not _fetch_time_is_fresh(freshness_context):
+            return None
+    elif not (
+        freshness_context.allow_previous_trade_date
+        and freshness_context.quote_status in {"suspended", "no_trade"}
+        and latest_date < target_date
+        and _fetch_time_is_fresh(freshness_context)
+    ):
         return None
 
     if kline_days:
         return cached[-kline_days:]
     return cached
+
+
+def compute_target_trade_date(
+    now: datetime | None = None,
+    *,
+    close_confirm_time: str = MARKET_CLOSE_CONFIRM_TIME,
+) -> str:
+    """Compute latest completed trading date using weekday-only A-share calendar."""
+    current = now or datetime.now()
+    if _is_weekday_trade_date(current.date()):
+        confirm = datetime.strptime(close_confirm_time, "%H:%M:%S").time()
+        if current.time() >= confirm:
+            return current.date().isoformat()
+        return _previous_weekday(current.date()).isoformat()
+    return _previous_weekday(current.date()).isoformat()
+
+
+def build_cache_freshness_context(
+    *,
+    now: datetime | None = None,
+    fetched_at: str | None = None,
+    allow_previous_trade_date: bool = False,
+    quote_status: str | None = None,
+    market_close_time: str = MARKET_CLOSE_TIME,
+    close_confirm_time: str = MARKET_CLOSE_CONFIRM_TIME,
+) -> CacheFreshnessContext:
+    """Build cache requirement for the current scan moment."""
+    current = now or datetime.now()
+    target = compute_target_trade_date(current, close_confirm_time=close_confirm_time)
+    return CacheFreshnessContext(
+        target_trade_date=target,
+        min_fetch_time=f"{target} {market_close_time}",
+        fetched_at=fetched_at,
+        allow_previous_trade_date=allow_previous_trade_date,
+        quote_status=quote_status,
+    )
 
 
 def encode_source_errors(source_errors: dict | None) -> str | None:
@@ -226,6 +305,41 @@ def _merge_data(cached: list[dict], fresh: list[dict], max_rows: int = 0) -> lis
     if max_rows and len(merged) > max_rows:
         merged = merged[-max_rows:]
     return merged
+
+
+def _fetch_time_is_fresh(context: CacheFreshnessContext) -> bool:
+    if not context.min_fetch_time:
+        return True
+    if not context.fetched_at:
+        return False
+    return context.fetched_at >= context.min_fetch_time
+
+
+def _classify_quote_status_after_fetch(
+    data: list[dict],
+    context: CacheFreshnessContext | None,
+) -> str:
+    if not data or context is None:
+        return "not_requested"
+    latest_date = data[-1].get("date")
+    if (
+        latest_date
+        and latest_date < context.target_trade_date
+        and context.min_fetch_time
+    ):
+        return "suspended"
+    return "not_requested"
+
+
+def _is_weekday_trade_date(day: date) -> bool:
+    return day.weekday() < 5
+
+
+def _previous_weekday(day: date) -> date:
+    candidate = day - timedelta(days=1)
+    while not _is_weekday_trade_date(candidate):
+        candidate -= timedelta(days=1)
+    return candidate
 
 
 def _call_fetch_fn(fetch_fn, code: str, days: int) -> list[dict] | None:

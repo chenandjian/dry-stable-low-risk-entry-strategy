@@ -7,12 +7,14 @@ import json
 import logging
 import threading
 import time
+from datetime import datetime
 from queue import Queue
 
 import scanner.db as db
 from scanner.data_source import DataSourceManager
 from scanner.liquidity_filter import passes_liquidity_filter
 from scanner.daily_data_service import (
+    build_cache_freshness_context,
     fetch_with_retry,
     is_transient_source_busy,
     encode_source_errors,
@@ -90,6 +92,21 @@ def scan_strategy2_all(
     def _today() -> str:
         return time.strftime("%Y-%m-%d")
 
+    def _cache_freshness_context(code: str):
+        now = datetime.strptime(_now(), "%Y-%m-%d %H:%M:%S")
+        context = build_cache_freshness_context(now=now)
+        prior = db.get_reusable_task_stock_kline_context(
+            code,
+            context.target_trade_date,
+            context.min_fetch_time,
+            exclude_task_id=task_id,
+        )
+        if prior:
+            context.fetched_at = prior.get("kline_fetched_at")
+            context.quote_status = prior.get("quote_status")
+            context.allow_previous_trade_date = context.quote_status in {"suspended", "no_trade"}
+        return context
+
     def _finish_stock(code, name, status, status_reason=None, error_detail=None,
                       kline_latest_date=None, fetch_result=None):
         """统一终态处理 — DB更新（含数据源诊断）+ 刷新统计 + 发送 processed 进度。"""
@@ -103,6 +120,9 @@ def scan_strategy2_all(
                 "primary_error": fetch_result.primary_error,
                 "fallback_error": fetch_result.fallback_error,
                 "source_errors": encode_source_errors(fetch_result.source_errors),
+                "kline_fetched_at": fetch_result.kline_fetched_at,
+                "kline_target_trade_date": fetch_result.kline_target_trade_date,
+                "quote_status": fetch_result.quote_status,
             }
         db.update_task_stock(
             task_id, code, status=status,
@@ -132,9 +152,7 @@ def scan_strategy2_all(
             stock_name = stock.get("name", "")
             fetch_result = None
             try:
-                cache_fresh_date = db.get_today_task_stock_latest_date(
-                    code, _today(), exclude_task_id=task_id,
-                )
+                freshness_context = _cache_freshness_context(code)
                 db.update_task_stock(
                     task_id, code, status="fetching",
                     primary_source=daily_sources[0],
@@ -147,7 +165,7 @@ def scan_strategy2_all(
                     code, daily_sources[0],
                     retry_attempts=retry_attempts, fallback_attempts=fallback_attempts,
                     mgr=mgr, source_chain=daily_sources, kline_days=kline_days,
-                    cache_fresh_date=cache_fresh_date,
+                    freshness_context=freshness_context,
                 )
                 data = fetch_result.data
                 if data is None:
@@ -179,11 +197,20 @@ def scan_strategy2_all(
                     continue
 
                 latest_trade_date = data[-1].get("date") if data else None
+                if not fetch_result.kline_fetched_at:
+                    fetch_result.kline_fetched_at = _now()
+                if not fetch_result.kline_target_trade_date:
+                    fetch_result.kline_target_trade_date = freshness_context.target_trade_date
+                suspended_reason = (
+                    "SUSPENDED_OR_NO_TRADE_ON_TARGET_DATE"
+                    if fetch_result.quote_status == "suspended"
+                    else None
+                )
 
                 # 全局流动性过滤
                 if not passes_liquidity_filter(data, liquidity_cfg):
                     _finish_stock(code, stock_name, "skipped",
-                                  status_reason="LIQUIDITY_FILTER_REJECTED",
+                                  status_reason=suspended_reason or "LIQUIDITY_FILTER_REJECTED",
                                   kline_latest_date=latest_trade_date,
                                   fetch_result=fetch_result)
                     with stats_lock:
@@ -220,6 +247,7 @@ def scan_strategy2_all(
                         candidate_by_code[code] = evaluation
 
                     _finish_stock(code, stock_name, "candidate",
+                                  status_reason=suspended_reason,
                                   kline_latest_date=latest_trade_date,
                                   fetch_result=fetch_result)
 
@@ -261,7 +289,7 @@ def scan_strategy2_all(
                             evaluation.trend.ma20_slope, evaluation.trend.return_20,
                         )
                     _finish_stock(code, stock_name, "scanned",
-                                  status_reason=evaluation.status_reason,
+                                  status_reason=suspended_reason or evaluation.status_reason,
                                   error_detail=error_detail,
                                   kline_latest_date=latest_trade_date,
                                   fetch_result=fetch_result)

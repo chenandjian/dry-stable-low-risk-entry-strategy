@@ -278,16 +278,22 @@ class TestAllSourcesFailedNoCache:
             "prior-s1",
             "000001",
             status="scanned",
-            kline_latest_date="2026-06-04",
-            finished_at="2026-06-15 09:31:00",
+            kline_latest_date="2026-06-15",
+            kline_fetched_at="2026-06-15 15:12:00",
+            kline_target_trade_date="2026-06-15",
+            finished_at="2026-06-15 15:12:00",
         )
         db.refresh_scan_task_counts("prior-s1")
         db.finish_scan_task("prior-s1", "2026-06-15 09:32:00", 0, 2.0, scanned=1, skipped=0)
 
         seen = []
 
-        def mock_fetch(*args, cache_fresh_date=None, **kwargs):
-            seen.append(cache_fresh_date)
+        def mock_fetch(*args, freshness_context=None, **kwargs):
+            seen.append({
+                "target": freshness_context.target_trade_date if freshness_context else None,
+                "min_fetch_time": freshness_context.min_fetch_time if freshness_context else None,
+                "fetched_at": freshness_context.fetched_at if freshness_context else None,
+            })
             return FetchResult(data=None, primary_source="baidu", fallback_source="baidu")
 
         original_strftime = s2_scanner.time.strftime
@@ -298,7 +304,7 @@ class TestAllSourcesFailedNoCache:
             if fmt == "%Y%m%d-%H%M%S":
                 return "20260615-100000"
             if fmt == "%Y-%m-%d %H:%M:%S":
-                return "2026-06-15 10:00:00"
+                return "2026-06-15 15:15:00"
             if fmt == "%Y-%m-%d":
                 return "2026-06-15"
             return original_strftime(fmt)
@@ -319,7 +325,11 @@ class TestAllSourcesFailedNoCache:
 
         s2_scanner.scan_strategy2_all(cfg, task_id="current-s2", stocks=stocks, worker_count=1)
 
-        assert seen == ["2026-06-04"]
+        assert seen == [{
+            "target": "2026-06-15",
+            "min_fetch_time": "2026-06-15 15:00:00",
+            "fetched_at": "2026-06-15 15:12:00",
+        }]
 
     def test_fetch_returns_none_when_all_sources_fail_and_cache_exists(self, monkeypatch, tmp_path):
         """ACCEPT-S2-003: cache exists + all online fail → data is None, from_cache False."""

@@ -983,8 +983,10 @@ def test_scan_all_passes_existing_today_stock_latest_trade_date_to_fetch(monkeyp
         "prior-task",
         "600000",
         status="scanned",
-        kline_latest_date="2026-06-04",
-        finished_at="2026-06-15 09:31:00",
+        kline_latest_date="2026-06-15",
+        kline_fetched_at="2026-06-15 15:12:00",
+        kline_target_trade_date="2026-06-15",
+        finished_at="2026-06-15 15:12:00",
     )
     db.refresh_scan_task_counts("prior-task")
     db.create_scan_task("other-prior-task", "2026-06-15 09:40:00", total_stocks=1)
@@ -1002,12 +1004,23 @@ def test_scan_all_passes_existing_today_stock_latest_trade_date_to_fetch(monkeyp
 
     seen = []
 
-    def fake_fetch_with_retry(code, ds, *args, cache_fresh_date=None, **kwargs):
-        seen.append(cache_fresh_date)
+    def fake_fetch_with_retry(code, ds, *args, freshness_context=None, **kwargs):
+        seen.append({
+            "target": freshness_context.target_trade_date if freshness_context else None,
+            "min_fetch_time": freshness_context.min_fetch_time if freshness_context else None,
+            "fetched_at": freshness_context.fetched_at if freshness_context else None,
+        })
         return engine.FetchResult(data=_rows(350), primary_source=ds, fallback_source=ds)
 
     monkeypatch.setattr(engine, "_fetch_with_retry", fake_fetch_with_retry)
-    monkeypatch.setattr(engine, "DataSourceManager", FakeScanManager)
+    class AlwaysAvailableManager:
+        def acquire(self, ds_name):
+            return True
+
+        def release(self, ds_name):
+            pass
+
+    monkeypatch.setattr(engine, "DataSourceManager", AlwaysAvailableManager)
     monkeypatch.setattr(engine.threading, "Thread", ImmediateThread)
     monkeypatch.setattr(stock_pool, "get_a_stock_pool", lambda config: [{"code": "600000", "name": "PF Bank"}])
     monkeypatch.setattr(engine, "fetch_market_index_daily", lambda symbol=None: [])
@@ -1020,7 +1033,7 @@ def test_scan_all_passes_existing_today_stock_latest_trade_date_to_fetch(monkeyp
         if fmt == "%Y%m%d-%H%M%S":
             return "20260615-100000"
         if fmt == "%Y-%m-%d %H:%M:%S":
-            return "2026-06-15 10:00:00"
+            return "2026-06-15 15:15:00"
         if fmt == "%Y-%m-%d":
             return "2026-06-15"
         return original_strftime(fmt)
@@ -1039,7 +1052,87 @@ def test_scan_all_passes_existing_today_stock_latest_trade_date_to_fetch(monkeyp
 
     engine.scan_all(config, worker_count=1)
 
-    assert seen == ["2026-06-04"]
+    assert seen == [{
+        "target": "2026-06-15",
+        "min_fetch_time": "2026-06-15 15:00:00",
+        "fetched_at": "2026-06-15 15:12:00",
+    }]
+
+
+def test_scan_all_marks_successful_no_trade_fetch_as_suspended_not_failed(monkeypatch, tmp_path):
+    db_path = tmp_path / "cuphandle.db"
+    config = {
+        "data": {
+            "database_path": str(db_path),
+            "daily_sources": ["baidu"],
+            "worker_count": 1,
+            "scan_window_days": 30,
+            "backtest_window_days": 30,
+        },
+        "liquidity": {"enabled": False, "min_listing_days": 30},
+        "scoring": {"medium_threshold": 70},
+    }
+    stocks = [{"code": "600000", "name": "PF Bank"}]
+
+    db.init_db(str(db_path))
+    db.create_scan_task("task-1", "2026-06-15 15:15:00", total_stocks=1)
+    db.save_task_stocks("task-1", stocks)
+    rows = (
+        [_row(f"2026-05-{day:02d}") for day in range(1, 32)]
+        + [_row(f"2026-06-{day:02d}") for day in range(1, 13)]
+    )
+
+    class AlwaysAvailableManager:
+        def acquire(self, ds_name):
+            return True
+
+        def release(self, ds_name):
+            pass
+
+    monkeypatch.setattr(engine, "DataSourceManager", AlwaysAvailableManager)
+    monkeypatch.setattr(engine.threading, "Thread", ImmediateThread)
+    monkeypatch.setattr(engine, "fetch_market_index_daily", lambda symbol=None: [])
+    monkeypatch.setattr(engine, "passes_liquidity_filter", lambda data, cfg: True)
+    monkeypatch.setattr(
+        engine,
+        "_try_fetch_source",
+        lambda *args, **kwargs: (rows, 1, None),
+    )
+    original_strftime = engine.time.strftime
+
+    def fake_strftime(fmt, *args):
+        if args:
+            return original_strftime(fmt, *args)
+        if fmt == "%Y%m%d-%H%M%S":
+            return "20260615-151500"
+        if fmt == "%Y-%m-%d %H:%M:%S":
+            return "2026-06-15 15:15:00"
+        if fmt == "%Y-%m-%d":
+            return "2026-06-15"
+        return original_strftime(fmt)
+
+    monkeypatch.setattr(engine.time, "strftime", fake_strftime)
+
+    class FakeStrategyEngine:
+        def __init__(self, config):
+            pass
+
+        def evaluate_at(self, data, code='', name='', market_data=None):
+            result = engine.CupHandleResult(found=False, code=code, name=name)
+            return type('Eval', (), {'result': result, 'dry_stable': None, 'passed': False})()
+
+    monkeypatch.setattr(engine, "CupHandleStrategyEngine", FakeStrategyEngine)
+
+    result = engine.scan_all(config, task_id="task-1", stocks=stocks, worker_count=1)
+    task_stock = db.get_task_stocks("task-1")[0]
+
+    assert result["stats"]["failed"] == 0
+    assert task_stock["status"] == "scanned"
+    assert task_stock["quote_status"] == "suspended"
+    assert task_stock["status_reason"] == "SUSPENDED_OR_NO_TRADE_ON_TARGET_DATE"
+    assert task_stock["kline_latest_date"] == "2026-06-12"
+    assert task_stock["kline_target_trade_date"] == "2026-06-15"
+    assert task_stock["kline_fetched_at"] is not None
 
 
 

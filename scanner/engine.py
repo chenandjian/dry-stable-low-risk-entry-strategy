@@ -4,6 +4,7 @@ import logging
 import threading
 import time
 from dataclasses import dataclass
+from datetime import datetime
 from queue import Queue
 from typing import Callable
 
@@ -15,7 +16,11 @@ from scanner.tencent_source import fetch_tencent_daily
 from scanner.yfinance_source import fetch_yfinance_daily
 from scanner.index_source import fetch_market_index_daily
 from scanner.liquidity_filter import passes_liquidity_filter
-from scanner.daily_data_service import select_fresh_cached_ohlc
+from scanner.daily_data_service import (
+    CacheFreshnessContext,
+    build_cache_freshness_context,
+    select_fresh_cached_ohlc,
+)
 from scanner.pattern_detector import CupHandleResult
 from analyzer.dry_stable import analyze_dry_stable
 from scanner.strategy_engine import (
@@ -39,6 +44,9 @@ class FetchResult:
     fallback_error: str | None = None
     source_errors: dict = None  # ds_name -> error string for ALL attempted sources
     from_cache: bool = False
+    kline_fetched_at: str | None = None
+    kline_target_trade_date: str | None = None
+    quote_status: str = "not_requested"
 
     def __post_init__(self):
         if self.source_errors is None:
@@ -134,6 +142,21 @@ def scan_all(
     def _today() -> str:
         return time.strftime("%Y-%m-%d")
 
+    def _cache_freshness_context(code: str) -> CacheFreshnessContext:
+        now = datetime.strptime(_now(), "%Y-%m-%d %H:%M:%S")
+        context = build_cache_freshness_context(now=now)
+        prior = db.get_reusable_task_stock_kline_context(
+            code,
+            context.target_trade_date,
+            context.min_fetch_time,
+            exclude_task_id=task_id,
+        )
+        if prior:
+            context.fetched_at = prior.get("kline_fetched_at")
+            context.quote_status = prior.get("quote_status")
+            context.allow_previous_trade_date = context.quote_status in {"suspended", "no_trade"}
+        return context
+
     def worker(thread_name: str):
         while not stock_queue.empty():
             try:
@@ -143,9 +166,7 @@ def scan_all(
 
             code = stock["code"]
             try:
-                cache_fresh_date = db.get_today_task_stock_latest_date(
-                    code, _today(), exclude_task_id=task_id,
-                )
+                freshness_context = _cache_freshness_context(code)
                 db.update_task_stock(
                     task_id,
                     code,
@@ -162,7 +183,7 @@ def scan_all(
                     mgr=mgr,
                     source_chain=daily_sources,
                     kline_days=kline_days,
-                    cache_fresh_date=cache_fresh_date,
+                    freshness_context=freshness_context,
                 )
                 data = fetch_result.data
                 if data is None:
@@ -221,13 +242,25 @@ def scan_all(
                     continue
 
                 latest_trade_date = data[-1].get("date") if data else None
+                kline_fetched_at = fetch_result.kline_fetched_at or _now()
+                kline_target_trade_date = (
+                    fetch_result.kline_target_trade_date
+                    or freshness_context.target_trade_date
+                )
+                quote_status = fetch_result.quote_status or "not_requested"
+                status_reason_suffix = None
+                if quote_status == "suspended":
+                    status_reason_suffix = "SUSPENDED_OR_NO_TRADE_ON_TARGET_DATE"
                 if len(data) < kline_days:
                     db.update_task_stock(
                         task_id,
                         code,
                         status="skipped",
-                        status_reason="上市天数不足",
+                        status_reason=status_reason_suffix or "上市天数不足",
                         kline_latest_date=latest_trade_date,
+                        kline_fetched_at=kline_fetched_at,
+                        kline_target_trade_date=kline_target_trade_date,
+                        quote_status=quote_status,
                         source_errors=_encode_source_errors(fetch_result.source_errors),
                         finished_at=_now(),
                     )
@@ -250,6 +283,9 @@ def scan_all(
                         status="skipped",
                         status_reason="流动性过滤未通过",
                         kline_latest_date=latest_trade_date,
+                        kline_fetched_at=kline_fetched_at,
+                        kline_target_trade_date=kline_target_trade_date,
+                        quote_status=quote_status,
                         source_errors=_encode_source_errors(fetch_result.source_errors),
                         finished_at=_now(),
                     )
@@ -271,6 +307,9 @@ def scan_all(
                         status="skipped",
                         status_reason=f"策略计算数据不足：需要 {scan_window_days} 日，实际 {len(data)} 日",
                         kline_latest_date=latest_trade_date,
+                        kline_fetched_at=kline_fetched_at,
+                        kline_target_trade_date=kline_target_trade_date,
+                        quote_status=quote_status,
                         source_errors=_encode_source_errors(fetch_result.source_errors),
                         finished_at=_now(),
                     )
@@ -307,7 +346,10 @@ def scan_all(
                         code,
                         status="candidate",
                         kline_latest_date=latest_trade_date,
-                        quote_status="not_requested",
+                        kline_fetched_at=kline_fetched_at,
+                        kline_target_trade_date=kline_target_trade_date,
+                        quote_status=quote_status,
+                        status_reason=status_reason_suffix,
                         source_errors=_encode_source_errors(fetch_result.source_errors),
                         finished_at=_now(),
                     )
@@ -355,7 +397,10 @@ def scan_all(
                         code,
                         status="scanned",
                         kline_latest_date=latest_trade_date,
-                        quote_status="not_requested",
+                        kline_fetched_at=kline_fetched_at,
+                        kline_target_trade_date=kline_target_trade_date,
+                        quote_status=quote_status,
+                        status_reason=status_reason_suffix,
                         source_errors=_encode_source_errors(fetch_result.source_errors),
                         finished_at=_now(),
                     )
@@ -597,6 +642,7 @@ def _fetch_with_retry(
     source_chain: list[str] | None = None,
     kline_days: int = 250,
     cache_fresh_date: str | None = None,
+    freshness_context: CacheFreshnessContext | None = None,
 ) -> FetchResult:
     """Fetch K-line by trying sources in config order.
 
@@ -613,13 +659,20 @@ def _fetch_with_retry(
     """
     chain = _normalize_source_chain(source_chain, primary_ds)
     cached = db.get_ohlc(code)
-    fresh_cached = select_fresh_cached_ohlc(cached, kline_days, cache_fresh_date)
+    if freshness_context is None and cache_fresh_date:
+        freshness_context = CacheFreshnessContext(target_trade_date=cache_fresh_date)
+    fresh_cached = select_fresh_cached_ohlc(
+        cached, kline_days, cache_fresh_date, freshness_context=freshness_context,
+    )
     if fresh_cached is not None:
         return FetchResult(
             data=fresh_cached,
             primary_source="cache",
             fallback_source="cache",
             from_cache=True,
+            kline_fetched_at=freshness_context.fetched_at if freshness_context else None,
+            kline_target_trade_date=freshness_context.target_trade_date if freshness_context else cache_fresh_date,
+            quote_status=freshness_context.quote_status if freshness_context else "not_requested",
         )
 
     saw_busy = False
@@ -660,6 +713,14 @@ def _fetch_with_retry(
         if data:
             merged = _merge_data(cached or [], data, max_rows=kline_days)
             db.save_ohlc(code, merged)
+            fetched_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            quote_status = "not_requested"
+            if (
+                freshness_context is not None
+                and merged
+                and merged[-1].get("date") < freshness_context.target_trade_date
+            ):
+                quote_status = "suspended"
 
             recent = data[-1]
             prev = data[-2] if len(data) >= 2 else None
@@ -674,6 +735,11 @@ def _fetch_with_retry(
                 primary_source=chain[0],
                 fallback_source=ds_name if ds_name != chain[0] else chain[0],
                 source_errors=source_errors,
+                kline_fetched_at=fetched_at,
+                kline_target_trade_date=(
+                    freshness_context.target_trade_date if freshness_context else None
+                ),
+                quote_status=quote_status,
             )
             return _apply_source_compatibility_fields(
                 result, chain, source_errors,

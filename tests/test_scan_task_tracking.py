@@ -21,6 +21,8 @@ def test_init_db_creates_task_stocks_and_scan_task_columns(tmp_path):
     assert "primary_attempts" in stock_columns
     assert "fallback_error" in stock_columns
     assert "quote_status" in stock_columns
+    assert "kline_fetched_at" in stock_columns
+    assert "kline_target_trade_date" in stock_columns
     assert "idx_candidates_task_code" in indexes
 
 
@@ -76,6 +78,8 @@ def test_init_db_migrates_legacy_task_stocks_table(tmp_path):
             "kline_latest_date": None,
             "quote_status": "not_requested",
             "quote_error": None,
+            "kline_fetched_at": None,
+            "kline_target_trade_date": None,
             "started_at": None,
             "finished_at": None,
             "updated_at": None,
@@ -299,6 +303,8 @@ def test_save_and_update_task_stocks(tmp_path):
         primary_error="timeout",
         fallback_error="empty response",
         kline_latest_date=None,
+        kline_fetched_at="2026-06-15 15:11:00",
+        kline_target_trade_date="2026-06-15",
         quote_status="not_requested",
     )
 
@@ -310,9 +316,43 @@ def test_save_and_update_task_stocks(tmp_path):
     assert len(failed_rows) == 1
     assert failed_rows[0]["status_reason"] == "数据源全部失败，未使用旧缓存扫描"
     assert failed_rows[0]["primary_attempts"] == 2
+    assert failed_rows[0]["kline_fetched_at"] == "2026-06-15 15:11:00"
+    assert failed_rows[0]["kline_target_trade_date"] == "2026-06-15"
     assert stats["total_stocks"] == 2
     assert stats["failed"] == 1
     assert stats["pending"] == 1
+
+
+def test_reusable_kline_context_requires_fetch_after_target_close(tmp_path):
+    db.init_db(str(tmp_path / "cuphandle.db"))
+    db.create_scan_task("task-old", "2026-06-15 14:55:00", total_stocks=0)
+    db.save_task_stocks("task-old", [{"code": "600000", "name": "浦发银行"}])
+    db.update_task_stock(
+        "task-old",
+        "600000",
+        status="scanned",
+        kline_latest_date="2026-06-15",
+        kline_fetched_at="2026-06-15 14:59:00",
+        kline_target_trade_date="2026-06-15",
+    )
+    db.create_scan_task("task-fresh", "2026-06-15 15:11:00", total_stocks=0)
+    db.save_task_stocks("task-fresh", [{"code": "600000", "name": "浦发银行"}])
+    db.update_task_stock(
+        "task-fresh",
+        "600000",
+        status="scanned",
+        kline_latest_date="2026-06-15",
+        kline_fetched_at="2026-06-15 15:11:00",
+        kline_target_trade_date="2026-06-15",
+    )
+
+    reusable = db.get_reusable_task_stock_kline_context(
+        "600000",
+        target_trade_date="2026-06-15",
+        min_fetch_time="2026-06-15 15:00:00",
+    )
+
+    assert reusable["kline_fetched_at"] == "2026-06-15 15:11:00"
 
 
 def test_update_scan_task_from_task_stock_summary(tmp_path):
