@@ -183,6 +183,60 @@ def test_scheduler_logs_endpoint_returns_recent_events(monkeypatch, tmp_path):
     assert body["events"][0]["message"] == "策略1开始"
 
 
+def test_scan_status_db_running_task_returns_scheduler_progress(monkeypatch, tmp_path):
+    db_path = tmp_path / "cuphandle.db"
+    db.init_db(str(db_path))
+    db.create_scan_task(
+        "sched-s1-running",
+        "2026-06-16 16:12:14",
+        total_stocks=3,
+        strategy_type="STRATEGY_1_CUP_HANDLE",
+    )
+    db.save_task_stocks("sched-s1-running", [
+        {"code": "600001", "name": "一号", "market": "SH"},
+        {"code": "600002", "name": "二号", "market": "SH"},
+        {"code": "600003", "name": "三号", "market": "SH"},
+    ])
+    db.update_task_stock("sched-s1-running", "600001", status="candidate", kline_latest_date="2026-06-16")
+    db.update_task_stock("sched-s1-running", "600002", status="fetching")
+    db.upsert_candidate("sched-s1-running", {
+        "code": "600001",
+        "name": "一号",
+        "score": 88,
+        "latest_close": 10.0,
+        "dry_stable_verdict": "可低吸",
+        "dry_stable_summary": "ok",
+        "volume_dry_score": 9,
+        "price_stable_score": 8,
+        "pattern_score_20": 18,
+        "pattern_type": "VCP",
+        "key_pattern_type": "vcp",
+    })
+    server._running["running"] = False
+    server._running["task_id"] = None
+    server._running["stats"] = {}
+    monkeypatch.setattr(server, "load_config", lambda path="config.yaml": {"data": {"database_path": str(db_path)}})
+
+    client = TestClient(server.app)
+    res = client.get("/api/scan/status")
+
+    assert res.status_code == 200
+    body = res.json()
+    assert body["running"] is True
+    assert body["task_id"] == "sched-s1-running"
+    assert body["mode"] == "scheduled"
+    assert body["strategyType"] == "STRATEGY_1_CUP_HANDLE"
+    stats = body["stats"]
+    assert stats["total_stocks"] == 3
+    assert stats["processed"] == 1
+    assert stats["candidates_found"] == 1
+    assert stats["current_code"] == "600002"
+    assert stats["current_name"] == "二号"
+    assert stats["latest_trade_date"] == "2026-06-16"
+    assert stats["discoveries"][0]["code"] == "600001"
+    assert stats["discoveries"][0]["score"] == 88
+
+
 # ── COMPLETION-003: entry-level API regression tests ────────────────
 
 def _safe_config():

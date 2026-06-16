@@ -279,6 +279,117 @@ def _require_task_strategy(task_id: str, expected: str):
     return actual, None
 
 
+def _scan_mode_for_task(task_id: str) -> str:
+    if str(task_id or "").startswith("sched-"):
+        return "scheduled"
+    return "db"
+
+
+def _first_current_task_stock(task_id: str) -> dict | None:
+    """Return the best current stock hint for a DB-backed running scan."""
+    for status in ("fetching", "pending"):
+        rows = db.get_task_stocks(task_id, status=status, limit=1, offset=0)
+        if rows:
+            return rows[0]
+    return None
+
+
+def _strategy1_discovery_from_candidate(candidate: dict) -> dict:
+    return {
+        "code": candidate.get("code", ""),
+        "name": candidate.get("name", ""),
+        "score": candidate.get("score") or 0,
+        "rating": candidate.get("rating")
+        or (
+            "强候选"
+            if (candidate.get("score") or 0) >= 80
+            else "中等候选"
+            if (candidate.get("score") or 0) >= 70
+            else "弱候选"
+        ),
+        "dry_stable_verdict": candidate.get("dry_stable_verdict", ""),
+        "dry_stable_summary": candidate.get("dry_stable_summary", ""),
+        "volume_dry_score": candidate.get("volume_dry_score", 0),
+        "price_stable_score": candidate.get("price_stable_score", 0),
+        "pattern_score_20": candidate.get("pattern_score_20", 0),
+        "pattern_type": candidate.get("pattern_type", ""),
+        "key_pattern_type": candidate.get("key_pattern_type", ""),
+        "risk_percent": candidate.get("risk_percent", 0),
+        "rr1": candidate.get("rr1", 0),
+        "position_advice": candidate.get("position_advice", ""),
+        "entry_zone_low": candidate.get("entry_zone_low", 0),
+        "entry_zone_high": candidate.get("entry_zone_high", 0),
+        "pivot": candidate.get("pivot", 0),
+        "stop_loss": candidate.get("stop_loss", 0),
+        "target_1": candidate.get("target_1", 0),
+        "target_2": candidate.get("target_2", 0),
+        "market_status": candidate.get("market_status", ""),
+        "market_position_advice": candidate.get("market_position_advice", ""),
+        "is_breakout": bool(candidate.get("is_breakout", 0)),
+        "is_volume_breakout": bool(candidate.get("is_volume_breakout", 0)),
+        "cup_depth_pct": candidate.get("cup_depth_pct", 0),
+        "cup_duration": candidate.get("cup_duration", 0),
+        "handle_depth_pct": candidate.get("handle_depth_pct", 0),
+        "vol_multiplier": candidate.get("vol_multiplier", 0),
+        "breakout_price": candidate.get("breakout_price", 0),
+        "latest_close": candidate.get("latest_close", 0),
+        "verdict_key": candidate.get("verdict_key", ""),
+    }
+
+
+def _strategy2_discovery_from_candidate(candidate: dict) -> dict:
+    return {
+        "code": candidate.get("code", ""),
+        "name": candidate.get("name", ""),
+        "evaluation_date": candidate.get("evaluation_date", ""),
+        "total_score": candidate.get("total_score") or 0,
+        "level": candidate.get("level", ""),
+        "volume_dry_score": candidate.get("volume_dry_score", 0),
+        "price_stable_score": candidate.get("price_stable_score", 0),
+        "current_close": candidate.get("current_close", 0),
+        "risk_ratio": candidate.get("risk_ratio", 0),
+        "risk_level": candidate.get("risk_level", ""),
+        "key_support": candidate.get("key_support", 0),
+        "buy_zone_low": candidate.get("buy_zone_low", 0),
+        "buy_zone_high": candidate.get("buy_zone_high", 0),
+        "stop_loss": candidate.get("stop_loss", 0),
+    }
+
+
+def _db_running_scan_status(running_task: dict) -> dict:
+    """Build live scan status from persisted DB rows for scheduler-owned scans."""
+    task_id = running_task["id"]
+    strategy_type = running_task.get("strategy_type") or "STRATEGY_1_CUP_HANDLE"
+    summary = db.refresh_scan_task_counts(task_id)
+    current = _first_current_task_stock(task_id) or {}
+
+    if strategy_type == "STRATEGY_2_EXTREME_DRY_STABLE":
+        discoveries = [
+            _strategy2_discovery_from_candidate(c)
+            for c in db.get_strategy2_candidates(task_id=task_id)[:20]
+        ]
+    else:
+        discoveries = [
+            _strategy1_discovery_from_candidate(c)
+            for c in db.get_candidates(task_id=task_id)[:20]
+        ]
+
+    stats = {
+        **summary,
+        "candidates_found": summary.get("candidates_count", 0),
+        "current_code": current.get("code") or "--",
+        "current_name": current.get("name") or "--",
+        "discoveries": discoveries,
+    }
+    return {
+        "running": True,
+        "task_id": task_id,
+        "mode": _scan_mode_for_task(task_id),
+        "strategyType": strategy_type,
+        "stats": stats,
+    }
+
+
 def load_config(path: str = "config.yaml") -> dict:
     with open(path, "r", encoding="utf-8") as f:
         return yaml.safe_load(f)
@@ -490,8 +601,7 @@ async def scan_status():
         }
     running_task = db.get_running_task()
     if running_task:
-        return {"running": True, "task_id": running_task["id"], "mode": "unknown",
-                "strategyType": running_task.get("strategy_type", "STRATEGY_1_CUP_HANDLE"), "stats": {}}
+        return _db_running_scan_status(running_task)
     return {"running": False, "task_id": None, "strategyType": None, "stats": {}}
 
 
