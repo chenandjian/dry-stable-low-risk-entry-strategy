@@ -20,6 +20,7 @@ from scanner.daily_data_service import (
     CacheFreshnessContext,
     build_cache_freshness_context,
     select_fresh_cached_ohlc,
+    trim_ohlc_to_target,
 )
 from scanner.pattern_detector import CupHandleResult
 from analyzer.dry_stable import analyze_dry_stable
@@ -678,6 +679,7 @@ def _fetch_with_retry(
     saw_busy = False
     source_errors: dict[str, str] = {}
     failed_sources: set[str] = set()
+    stale_success: tuple[list[dict], str, int] | None = None
 
     for i, ds_name in enumerate(chain):
         if ds_name in failed_sources:
@@ -711,7 +713,24 @@ def _fetch_with_retry(
             continue
 
         if data:
-            merged = _merge_data(cached or [], data, max_rows=kline_days)
+            target_date = freshness_context.target_trade_date if freshness_context else None
+            effective_cached = trim_ohlc_to_target(cached or [], target_date)
+            effective_data = trim_ohlc_to_target(data, target_date)
+            if not effective_data:
+                source_errors[ds_name] = f"attempts={used_attempts} error=missing target trade date"
+                failed_sources.add(ds_name)
+                continue
+            latest_date = effective_data[-1].get("date")
+            if target_date and latest_date < target_date:
+                source_errors[ds_name] = (
+                    f"attempts={used_attempts} error=missing target trade date {target_date}"
+                )
+                if stale_success is None or latest_date > stale_success[0][-1].get("date"):
+                    stale_success = (effective_data, ds_name, used_attempts)
+                failed_sources.add(ds_name)
+                continue
+
+            merged = _merge_data(effective_cached, effective_data, max_rows=kline_days)
             db.save_ohlc(code, merged)
             fetched_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             quote_status = "not_requested"
@@ -745,6 +764,27 @@ def _fetch_with_retry(
                 result, chain, source_errors,
                 selected_source=ds_name, selected_attempts=used_attempts,
             )
+
+    if stale_success is not None:
+        stale_data, stale_source, stale_attempts = stale_success
+        target_date = freshness_context.target_trade_date if freshness_context else None
+        stale_latest_date = stale_data[-1].get("date")
+        effective_cached = trim_ohlc_to_target(cached or [], stale_latest_date)
+        merged = _merge_data(effective_cached, stale_data, max_rows=kline_days)
+        db.save_ohlc(code, merged)
+        result = FetchResult(
+            data=merged,
+            primary_source=chain[0],
+            fallback_source=stale_source if stale_source != chain[0] else chain[0],
+            source_errors=source_errors,
+            kline_fetched_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            kline_target_trade_date=target_date,
+            quote_status="suspended",
+        )
+        return _apply_source_compatibility_fields(
+            result, chain, source_errors,
+            selected_source=stale_source, selected_attempts=stale_attempts,
+        )
 
     return _build_all_failed_result(chain, source_errors)
 

@@ -533,6 +533,42 @@ def test_fetch_does_not_reuse_stale_cache_when_sources_fail(monkeypatch, tmp_pat
     assert result.from_cache is False
 
 
+def test_engine_fetch_after_close_skips_sina_missing_target_and_uses_fallback(monkeypatch, tmp_path):
+    db.init_db(str(tmp_path / "cuphandle.db"))
+    calls = []
+
+    def fake_sina(code, days=250):
+        calls.append("sina")
+        return [_row("2026-06-15", close=10.0)]
+
+    def fake_tencent(code, days=250):
+        calls.append("tencent")
+        return [_row("2026-06-16", close=11.0)]
+
+    monkeypatch.setattr(engine, "fetch_sina_daily", fake_sina)
+    monkeypatch.setattr(engine, "fetch_tencent_daily", fake_tencent)
+
+    context = engine.CacheFreshnessContext(
+        target_trade_date="2026-06-16",
+        min_fetch_time="2026-06-16 15:00:00",
+    )
+
+    result = engine._fetch_with_retry(
+        "000831",
+        "sina",
+        retry_attempts=1,
+        fallback_attempts=1,
+        sleep_fn=lambda _: None,
+        source_chain=["sina", "tencent"],
+        kline_days=250,
+        freshness_context=context,
+    )
+
+    assert calls == ["sina", "tencent"]
+    assert result.data[-1]["date"] == "2026-06-16"
+    assert result.fallback_source == "tencent"
+
+
 def test_fetch_all_sources_fail_returns_none(monkeypatch, tmp_path):
     db.init_db(str(tmp_path / "cuphandle.db"))
 
