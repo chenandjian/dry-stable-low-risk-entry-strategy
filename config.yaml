@@ -10,11 +10,11 @@ data:
   cache_dir: ./cache/daily
   database_path: ./data/cuphandle.db
   daily_sources:
-  - baidu
-  - sina
-  - tencent
-  - yfinance
-  start_date: '2025-01-01'
+    - baidu
+    - sina
+    - tencent
+    - yfinance
+  start_date: "2025-01-01"
   end_date: null
   use_fq: true
   scan_window_days: 250
@@ -94,7 +94,7 @@ server:
   host: 127.0.0.1
   port: 8080
 scheduler:
-  enabled: false
+  enabled: true
   cron: 30 15 * * 1-5
   skip_if_running: true
   on_complete: log
