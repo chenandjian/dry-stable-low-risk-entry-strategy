@@ -62,6 +62,33 @@
       </div>
     </section>
 
+    <!-- 定时任务 -->
+    <section class="section scheduler-section">
+      <h3 class="section-title">定时任务</h3>
+      <p class="section-hint">
+        串行任务会在工作日按设定时间先执行策略1，完成后再执行策略2。保存后需要重启后端服务，已启动的调度器不会自动热加载新配置。
+      </p>
+      <div class="toggle-grid" style="margin-bottom:16px">
+        <label class="toggle-item">
+          <span class="toggle-label">启用定时任务</span>
+          <button data-test="scheduler-enabled" class="toggle" :class="{ active: config.scheduler?.enabled === true }"
+            @click="toggleScheduler('enabled')">{{ config.scheduler?.enabled === true ? '开' : '关' }}</button>
+        </label>
+        <label class="toggle-item">
+          <span class="toggle-label">启用串行双策略扫描</span>
+          <button data-test="serial-dual-scan-enabled" class="toggle" :class="{ active: config.scheduler?.serial_dual_scan?.enabled !== false }"
+            @click="toggleSerialDualScan">{{ config.scheduler?.serial_dual_scan?.enabled !== false ? '开' : '关' }}</button>
+        </label>
+      </div>
+      <div class="param-grid">
+        <div class="param">
+          <label title="仅支持周一至周五固定时间执行">执行时间 <span class="unit">周一至周五</span></label>
+          <input data-test="scheduler-time" type="time" v-model="serialDualScanTime" @input="markDirty" />
+          <span class="default">当前 cron: {{ config.scheduler?.serial_dual_scan?.cron || '--' }}</span>
+        </div>
+      </div>
+    </section>
+
     <!-- 高级参数 -->
     <section class="section">
       <h3 class="section-title" style="cursor:pointer" @click="showAdvanced = !showAdvanced">
@@ -340,6 +367,14 @@ const config = reactive({
   volume_dry: { bad_shrink_max_score: 7, low_position_max_score: 7, volume_stall_max_score: 7, big_bear_max_score: 6 },
   price_stable: { close_tightness_strong_pct: 3, support_break_max_score: 5 },
   risk_reward: { atr_stop_multiplier: 1.2 },
+  scheduler: {
+    enabled: false,
+    serial_dual_scan: {
+      enabled: true,
+      cron: '15 15 * * 1-5',
+      strategy1_failed_retry_rounds: 3,
+    },
+  },
   strategy2: {
     enabled: true, strategy_window_days: 120, minimum_required_days: 60,
     candidate_min_score: 70, minimum_volume_dry_score: 40, short_term_time_exit_days: 5,
@@ -405,6 +440,70 @@ const stopLossBufferPct = computed({
   get: () => Math.round((config.strategy2?.stop_loss_buffer ?? 0.03) * 100),
   set: (v) => { config.strategy2.stop_loss_buffer = v / 100 },
 })
+
+const serialDualScanTime = computed({
+  get: () => cronToTime(config.scheduler?.serial_dual_scan?.cron ?? '15 15 * * 1-5'),
+  set: (v) => {
+    ensureSchedulerConfig()
+    config.scheduler.serial_dual_scan.cron = timeToWeekdayCron(v)
+  },
+})
+
+function ensureSchedulerConfig() {
+  if (!config.scheduler) {
+    config.scheduler = {}
+  }
+  if (!config.scheduler.serial_dual_scan) {
+    config.scheduler.serial_dual_scan = {}
+  }
+  if (typeof config.scheduler.enabled !== 'boolean') {
+    config.scheduler.enabled = false
+  }
+  if (typeof config.scheduler.serial_dual_scan.enabled !== 'boolean') {
+    config.scheduler.serial_dual_scan.enabled = true
+  }
+  if (!config.scheduler.serial_dual_scan.cron) {
+    config.scheduler.serial_dual_scan.cron = '15 15 * * 1-5'
+  }
+  if (config.scheduler.serial_dual_scan.strategy1_failed_retry_rounds === undefined) {
+    config.scheduler.serial_dual_scan.strategy1_failed_retry_rounds = 3
+  }
+}
+
+function cronToTime(cron) {
+  const parts = String(cron || '').trim().split(/\s+/)
+  if (parts.length !== 5) return ''
+  const minute = Number(parts[0])
+  const hour = Number(parts[1])
+  if (!Number.isInteger(minute) || !Number.isInteger(hour)) return ''
+  if (minute < 0 || minute > 59 || hour < 0 || hour > 23) return ''
+  return `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`
+}
+
+function timeToWeekdayCron(time) {
+  const match = /^(\d{2}):(\d{2})$/.exec(String(time || ''))
+  if (!match) return ''
+  const hour = Number(match[1])
+  const minute = Number(match[2])
+  if (hour < 0 || hour > 23 || minute < 0 || minute > 59) return ''
+  return `${minute} ${hour} * * 1-5`
+}
+
+function schedulerTimeIsValid() {
+  return /^([01]\d|2[0-3]):[0-5]\d$/.test(serialDualScanTime.value)
+}
+
+function toggleScheduler(key) {
+  ensureSchedulerConfig()
+  config.scheduler[key] = !config.scheduler[key]
+  markDirty()
+}
+
+function toggleSerialDualScan() {
+  ensureSchedulerConfig()
+  config.scheduler.serial_dual_scan.enabled = !config.scheduler.serial_dual_scan.enabled
+  markDirty()
+}
 
 function toggleStrategy2(key) {
   config.strategy2[key] = !config.strategy2[key]
@@ -476,6 +575,7 @@ function validate() {
   if (dataCfg.backtest_window_days < 30) errors.push('回测分析天数最低 30天')
   if (dataCfg.scan_window_days > liq.min_listing_days) errors.push('扫描分析天数不能超过日线拉取天数')
   if (!dataCfg.daily_sources || dataCfg.daily_sources.length === 0) errors.push('至少选择一个日线数据源')
+  if (!schedulerTimeIsValid()) errors.push('定时任务执行时间格式不正确')
 
   // Strategy2 validation
   const s2 = config.strategy2 || {}
@@ -528,6 +628,10 @@ async function saveConfig() {
       volume_dry: { ...config.volume_dry },
       price_stable: { ...config.price_stable },
       risk_reward: { ...config.risk_reward },
+      scheduler: {
+        enabled: config.scheduler?.enabled === true,
+        serial_dual_scan: { ...config.scheduler?.serial_dual_scan },
+      },
       strategy2: { ...config.strategy2 },
     }
     const res = await updateConfig(payload)
@@ -550,6 +654,7 @@ async function resetAll() {
     const data = await getConfig()
     if (data.config) {
       Object.assign(config, data.config)
+      ensureSchedulerConfig()
     }
     dirty.value = false
     saved.value = false
@@ -564,6 +669,7 @@ onMounted(async () => {
     const data = await getConfig()
     if (data.config) {
       Object.assign(config, data.config)
+      ensureSchedulerConfig()
     }
   } catch (e) {
     // use defaults

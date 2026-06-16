@@ -1002,6 +1002,39 @@ async def get_config():
     return {"config": config}
 
 
+def _validate_scheduler_config(config: dict):
+    sched_cfg = config.get("scheduler", {})
+    if not isinstance(sched_cfg, dict):
+        raise ValueError("scheduler must be object")
+    enabled = sched_cfg.get("enabled", False)
+    if not isinstance(enabled, bool):
+        raise ValueError("scheduler.enabled must be boolean")
+
+    serial_cfg = sched_cfg.get("serial_dual_scan", {})
+    if not isinstance(serial_cfg, dict):
+        raise ValueError("scheduler.serial_dual_scan must be object")
+    serial_enabled = serial_cfg.get("enabled", True)
+    if not isinstance(serial_enabled, bool):
+        raise ValueError("scheduler.serial_dual_scan.enabled must be boolean")
+
+    cron = str(serial_cfg.get("cron", "15 15 * * 1-5")).strip()
+    parts = cron.split()
+    if len(parts) != 5:
+        raise ValueError("scheduler.serial_dual_scan.cron must be 'minute hour * * 1-5'")
+    minute, hour, day, month, weekday = parts
+    if day != "*" or month != "*" or weekday != "1-5":
+        raise ValueError("scheduler.serial_dual_scan.cron only supports weekdays: minute hour * * 1-5")
+    try:
+        minute_num = int(minute)
+        hour_num = int(hour)
+    except ValueError as exc:
+        raise ValueError("scheduler.serial_dual_scan.cron minute/hour must be integers") from exc
+    if minute_num < 0 or minute_num > 59:
+        raise ValueError("scheduler.serial_dual_scan.cron minute must be 0-59")
+    if hour_num < 0 or hour_num > 23:
+        raise ValueError("scheduler.serial_dual_scan.cron hour must be 0-23")
+
+
 @app.put("/api/config")
 async def update_config(data: dict):
     """Update configuration and write to config.yaml.
@@ -1012,6 +1045,14 @@ async def update_config(data: dict):
 
     # Deep merge: only update provided keys
     _deep_merge(config, data)
+
+    try:
+        _validate_scheduler_config(config)
+    except ValueError as e:
+        return JSONResponse(
+            {"status": "error", "message": f"Invalid scheduler config: {e}"},
+            status_code=400,
+        )
 
     # Validate strategy windows before saving (BUG-004)
     try:
