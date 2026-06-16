@@ -340,6 +340,83 @@ def get_ohlc_latest_date(code: str) -> str | None:
     return row[0] if row else None
 
 
+def get_ohlc_history_page(
+    code: str,
+    start_date: str | None = None,
+    end_date: str | None = None,
+    page: int = 1,
+    page_size: int = 50,
+) -> dict:
+    """Return a paginated slice of cached OHLC history, newest rows first."""
+    page = max(1, int(page or 1))
+    page_size = min(200, max(1, int(page_size or 50)))
+    offset = (page - 1) * page_size
+
+    clauses = ["code = ?"]
+    params: list = [code]
+    if start_date:
+        clauses.append("date >= ?")
+        params.append(start_date)
+    if end_date:
+        clauses.append("date <= ?")
+        params.append(end_date)
+    where = " AND ".join(clauses)
+
+    conn = get_conn()
+    total = conn.execute(
+        f"SELECT COUNT(*) FROM daily_ohlc WHERE {where}",
+        params,
+    ).fetchone()[0]
+    rows = conn.execute(
+        f"""SELECT date, open, high, low, close, volume, turnover
+            FROM daily_ohlc
+            WHERE {where}
+            ORDER BY date DESC
+            LIMIT ? OFFSET ?""",
+        [*params, page_size, offset],
+    ).fetchall()
+    return {
+        "rows": [
+            {
+                "date": r[0],
+                "open": r[1],
+                "high": r[2],
+                "low": r[3],
+                "close": r[4],
+                "volume": r[5],
+                "turnover": r[6],
+            }
+            for r in rows
+        ],
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+    }
+
+
+def get_latest_task_stock_kline_metadata(code: str) -> dict | None:
+    """Return the newest scan task K-line metadata for one stock."""
+    conn = get_conn()
+    row = conn.execute(
+        """SELECT kline_latest_date, kline_fetched_at,
+                  kline_target_trade_date, quote_status
+           FROM task_stocks
+           WHERE code = ?
+             AND (kline_latest_date IS NOT NULL OR kline_fetched_at IS NOT NULL)
+           ORDER BY kline_fetched_at DESC, updated_at DESC
+           LIMIT 1""",
+        (code,),
+    ).fetchone()
+    if not row:
+        return None
+    return {
+        "kline_latest_date": row[0],
+        "kline_fetched_at": row[1],
+        "kline_target_trade_date": row[2],
+        "quote_status": row[3] or "not_requested",
+    }
+
+
 def get_reusable_task_stock_kline_context(
     code: str,
     target_trade_date: str,

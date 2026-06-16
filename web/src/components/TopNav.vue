@@ -10,6 +10,7 @@
       <router-link to="/strategy1/backtest" class="topnav-tab" :class="{ active: isActive('/strategy1/backtest') }">策略1回测</router-link>
       <router-link to="/strategy2/backtest" class="topnav-tab" :class="{ active: isActive('/strategy2/backtest') }">策略2回测</router-link>
       <router-link to="/backtest/cup-handle" class="topnav-tab" :class="{ active: isActive('/backtest/cup-handle') }">单股回测</router-link>
+      <router-link to="/data/kline-history" class="topnav-tab" :class="{ active: isActive('/data/kline-history') }">K线数据</router-link>
       <router-link to="/tasks" class="topnav-tab" :class="{ active: isActive('/tasks') }">任务中心</router-link>
       <router-link to="/config" class="topnav-tab" :class="{ active: isActive('/config') }">策略配置</router-link>
     </div>

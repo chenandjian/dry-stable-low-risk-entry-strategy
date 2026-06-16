@@ -33,8 +33,13 @@ from scanner.single_stock_backtest import (
     run_single_stock_cuphandle_backtest,
 )
 from scanner.strategy1_backtest_service import run_strategy1_experiment_from_baseline
+from scanner.daily_data_service import build_cache_freshness_context
 
 logger = logging.getLogger(__name__)
+
+
+def _now() -> datetime.datetime:
+    return datetime.datetime.now()
 
 
 @asynccontextmanager
@@ -785,6 +790,83 @@ async def get_stock_ohlc(code: str):
     if not data:
         return JSONResponse({"error": "No data"}, status_code=404)
     return {"code": code, "data": data}
+
+
+def _build_kline_history_summary(code: str, meta: dict, context) -> dict:
+    latest_kline_date = db.get_ohlc_latest_date(code)
+    latest_fetch_time = meta.get("kline_fetched_at")
+    quote_status = meta.get("quote_status") or "not_requested"
+    fetched_after_close = bool(
+        context.min_fetch_time
+        and latest_fetch_time
+        and latest_fetch_time >= context.min_fetch_time
+    )
+    covers_target = bool(
+        latest_kline_date
+        and latest_kline_date >= context.target_trade_date
+        and fetched_after_close
+    )
+    suspended_or_no_trade = quote_status in {"suspended", "no_trade"}
+    acceptable_no_trade = bool(
+        latest_kline_date
+        and suspended_or_no_trade
+        and fetched_after_close
+    )
+    is_fresh = covers_target or acceptable_no_trade
+    if is_fresh and acceptable_no_trade and not covers_target:
+        reason = "股票停牌或无交易，已在目标交易日收盘后确认"
+    elif is_fresh:
+        reason = "数据已覆盖目标完整交易日"
+    elif not latest_kline_date:
+        reason = "本地没有K线数据，需要重新拉取"
+    elif not latest_fetch_time:
+        reason = "缺少最近拉取时间，需要重新拉取确认"
+    elif not fetched_after_close:
+        reason = "最近拉取时间早于目标交易日收盘时间，需要重新拉取"
+    else:
+        reason = "K线未覆盖目标完整交易日，需要重新拉取"
+    return {
+        "latest_kline_date": latest_kline_date,
+        "latest_fetch_time": latest_fetch_time,
+        "target_trade_date": context.target_trade_date,
+        "min_fetch_time": context.min_fetch_time,
+        "quote_status": quote_status,
+        "is_fresh": is_fresh,
+        "needs_refetch": not is_fresh,
+        "reason": reason,
+    }
+
+
+@app.get("/api/stock/{code}/kline-history")
+async def get_stock_kline_history(
+    code: str,
+    start_date: str = None,
+    end_date: str = None,
+    page: int = 1,
+    page_size: int = 50,
+):
+    """Return paginated local OHLC history and cache freshness diagnostics."""
+    if start_date and end_date and start_date > end_date:
+        return JSONResponse(
+            {"error": "Invalid date range", "message": "start_date must be <= end_date"},
+            status_code=400,
+        )
+    page_data = db.get_ohlc_history_page(
+        code,
+        start_date=start_date,
+        end_date=end_date,
+        page=page,
+        page_size=page_size,
+    )
+    meta = db.get_latest_task_stock_kline_metadata(code) or {}
+    context = build_cache_freshness_context(
+        now=_now(),
+        fetched_at=meta.get("kline_fetched_at"),
+        allow_previous_trade_date=True,
+        quote_status=meta.get("quote_status"),
+    )
+    summary = _build_kline_history_summary(code, meta, context)
+    return {"code": code, **page_data, "summary": summary}
 
 
 @app.get("/api/candidate/{code}")
