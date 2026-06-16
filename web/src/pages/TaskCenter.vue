@@ -7,12 +7,16 @@
       <div class="panel-header scheduler-header">
         <span>定时任务日志</span>
         <span class="scheduler-status" :class="{ enabled: schedulerConfig.enabled }">
-          {{ schedulerConfig.enabled ? '已启用' : '未启用' }}
+          {{ schedulerConfig.enabled ? '配置已启用' : '配置未启用' }}
         </span>
       </div>
       <div class="scheduler-meta">
+        <span :class="{ 'runtime-running': schedulerRuntime.running, 'runtime-stopped': !schedulerRuntime.running }">
+          实际{{ schedulerRuntime.running ? '运行中' : '未运行' }}
+        </span>
         <span>串行双策略：{{ serialScheduler.enabled === false ? '关闭' : '开启' }}</span>
         <span>Cron {{ serialScheduler.cron || '--' }}</span>
+        <span>下次 {{ nextSchedulerRun || '--' }}</span>
         <span>失败重试 {{ serialScheduler.strategy1_failed_retry_rounds ?? '--' }} 轮</span>
       </div>
       <div v-if="schedulerEvents.length === 0" class="scheduler-empty">
@@ -93,6 +97,7 @@ const tasks = ref([])
 const reEvaluating = ref(new Set())
 const preCounts = ref({})   // taskId → previous candidate count
 const schedulerConfig = ref({ enabled: false, serial_dual_scan: {} })
+const schedulerRuntime = ref({ running: false, jobs: [] })
 const schedulerEvents = ref([])
 let pollTimer = null
 
@@ -123,6 +128,11 @@ function candidateDelta(t) {
 }
 function isStrategy2(t) { return t.strategyType === 'STRATEGY_2_EXTREME_DRY_STABLE' || t.strategy_type === 'STRATEGY_2_EXTREME_DRY_STABLE' }
 const serialScheduler = computed(() => schedulerConfig.value.serial_dual_scan || {})
+const nextSchedulerRun = computed(() => {
+  const jobs = schedulerRuntime.value.jobs || []
+  const serialJob = jobs.find(job => job.id === 'serial_dual_strategy_scan') || jobs[0]
+  return serialJob?.next_run_time || ''
+})
 function viewResults(id, t) { router.push(isStrategy2(t) ? `/strategy2/results?task_id=${id}` : `/results?task_id=${id}`) }
 function viewFailures(id) { router.push(`/?task=${id}&status=failed`) }
 function exportResults(id, t) { window.open(isStrategy2(t) ? `/api/strategy2/candidates?task_id=${id}` : '/api/candidates', '_blank') }
@@ -192,6 +202,7 @@ async function loadSchedulerLogs() {
   try {
     const data = await getSchedulerLogs(100)
     schedulerConfig.value = data.scheduler || { enabled: false, serial_dual_scan: {} }
+    schedulerRuntime.value = data.runtime || { running: false, jobs: [] }
     schedulerEvents.value = data.events || []
   } catch (e) {
     console.error('Failed to load scheduler logs:', e)
@@ -218,6 +229,8 @@ onUnmounted(() => { if (pollTimer) clearInterval(pollTimer) })
 .scheduler-header { text-transform: none; letter-spacing: 0; }
 .scheduler-status { font-size: 11px; color: var(--text-muted); }
 .scheduler-status.enabled { color: var(--down-green); }
+.runtime-running { color: var(--down-green); }
+.runtime-stopped { color: var(--up-red); }
 .scheduler-meta {
   display: flex; gap: 16px; padding: 10px 16px; border-bottom: 1px solid var(--border);
   font-size: 12px; color: var(--text-muted);

@@ -66,7 +66,7 @@
     <section class="section scheduler-section">
       <h3 class="section-title">定时任务</h3>
       <p class="section-hint">
-        串行任务会在工作日按设定时间先执行策略1，完成后再执行策略2。保存后需要重启后端服务，已启动的调度器不会自动热加载新配置。
+        串行任务会在工作日按设定时间先执行策略1，完成后再执行策略2。保存后会立即重载后端定时任务。
       </p>
       <div class="toggle-grid" style="margin-bottom:16px">
         <label class="toggle-item">

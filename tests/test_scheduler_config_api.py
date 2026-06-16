@@ -92,3 +92,61 @@ def test_update_config_accepts_weekday_serial_scan_time(monkeypatch, tmp_path):
     assert written["scheduler"]["enabled"] is True
     assert written["scheduler"]["serial_dual_scan"]["cron"] == "30 14 * * 1-5"
     assert yaml.safe_load(config_path.read_text(encoding="utf-8"))["scheduler"]["serial_dual_scan"]["cron"] == "30 14 * * 1-5"
+
+
+def test_update_config_reloads_scheduler_when_scheduler_changes(monkeypatch, tmp_path):
+    cfg = _valid_config()
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(yaml.dump(cfg, allow_unicode=True), encoding="utf-8")
+    reloaded = []
+    monkeypatch.setattr(server, "load_config", lambda path="config.yaml": cfg.copy())
+    monkeypatch.setattr(server, "_reload_scheduler_from_config", lambda config: reloaded.append(config.copy()))
+    original_open = builtins.open
+
+    def fake_open(file, *args, **kwargs):
+        if file == "config.yaml":
+            return original_open(config_path, *args, **kwargs)
+        return original_open(file, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "open", fake_open)
+
+    res = TestClient(server.app).put(
+        "/api/config",
+        json={"scheduler": {"enabled": True, "serial_dual_scan": {"enabled": True, "cron": "50 15 * * 1-5"}}},
+    )
+
+    assert res.status_code == 200
+    assert res.json()["status"] == "ok"
+    assert len(reloaded) == 1
+    assert reloaded[0]["scheduler"]["enabled"] is True
+    assert reloaded[0]["scheduler"]["serial_dual_scan"]["cron"] == "50 15 * * 1-5"
+
+
+def test_scheduler_logs_include_runtime_state(monkeypatch):
+    cfg = _valid_config()
+    cfg["scheduler"]["enabled"] = True
+    monkeypatch.setattr(server, "load_config", lambda path="config.yaml": cfg.copy())
+
+    from scheduler import scheduler as sched_mod
+
+    monkeypatch.setattr(
+        sched_mod,
+        "get_scheduler_status",
+        lambda: {
+            "running": True,
+            "jobs": [
+                {
+                    "id": "serial_dual_strategy_scan",
+                    "next_run_time": "2026-06-17 15:50:00",
+                }
+            ],
+        },
+    )
+
+    res = TestClient(server.app).get("/api/scheduler/logs?limit=5")
+
+    assert res.status_code == 200
+    body = res.json()
+    assert body["scheduler"]["enabled"] is True
+    assert body["runtime"]["running"] is True
+    assert body["runtime"]["jobs"][0]["id"] == "serial_dual_strategy_scan"

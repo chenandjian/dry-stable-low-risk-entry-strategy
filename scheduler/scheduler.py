@@ -65,6 +65,42 @@ def _parse_cron_parts(cron: str) -> dict:
     }
 
 
+def _to_apscheduler_day_of_week(day_of_week: str) -> str:
+    # APScheduler uses Monday=0 for numeric weekdays. Keep config as cron-style
+    # 1-5, but register explicit weekday names to mean Monday-Friday.
+    if day_of_week == "1-5":
+        return "mon-fri"
+    return day_of_week
+
+
+def _format_next_run_time(value) -> str:
+    if not value:
+        return ""
+    if hasattr(value, "strftime"):
+        return value.strftime("%Y-%m-%d %H:%M:%S")
+    return str(value)
+
+
+def get_scheduler_status() -> dict:
+    """Return actual in-process scheduler runtime state."""
+    if not _scheduler:
+        return {"running": False, "jobs": []}
+    jobs = []
+    try:
+        for job in _scheduler.get_jobs():
+            jobs.append({
+                "id": getattr(job, "id", ""),
+                "next_run_time": _format_next_run_time(getattr(job, "next_run_time", None)),
+                "trigger": str(getattr(job, "trigger", "")),
+            })
+    except Exception:
+        logger.exception("Failed to inspect scheduler jobs")
+    return {
+        "running": bool(getattr(_scheduler, "running", False)),
+        "jobs": jobs,
+    }
+
+
 def _make_scan_task_id(prefix: str) -> str:
     return f"{prefix}-{time.strftime('%Y%m%d-%H%M%S')}"
 
@@ -376,6 +412,11 @@ def start_scheduler(config: dict):
 
     if not sched_cfg.get("enabled", False):
         logger.info("Scheduler disabled in config")
+        record_scheduler_event(
+            "info",
+            "scheduler_disabled",
+            "定时任务调度器未启动：配置关闭",
+        )
         return
 
     _scheduler = BackgroundScheduler()
@@ -391,11 +432,17 @@ def start_scheduler(config: dict):
             "cron",
             minute=cron_parts["minute"],
             hour=cron_parts["hour"],
-            day_of_week=cron_parts["day_of_week"],
+            day_of_week=_to_apscheduler_day_of_week(cron_parts["day_of_week"]),
             id="serial_dual_strategy_scan",
         )
         _scheduler.start()
         logger.info("Serial dual strategy scheduler started: %s", cron)
+        record_scheduler_event(
+            "info",
+            "scheduler_started",
+            "串行双策略定时任务已启动",
+            details={"cron": cron, "runtime": get_scheduler_status()},
+        )
         return
 
     cron = sched_cfg.get("cron", "30 15 * * 1-5")
@@ -434,16 +481,40 @@ def start_scheduler(config: dict):
     _scheduler.add_job(job, "cron",
                        minute=cron_parts["minute"],
                        hour=cron_parts["hour"],
-                       day_of_week=cron_parts["day_of_week"],
+                       day_of_week=_to_apscheduler_day_of_week(cron_parts["day_of_week"]),
                        id="daily_scan")
 
     _scheduler.start()
     logger.info(f"Scheduler started: {cron}")
+    record_scheduler_event(
+        "info",
+        "scheduler_started",
+        "旧版每日扫描定时任务已启动",
+        details={"cron": cron, "runtime": get_scheduler_status()},
+    )
 
 
-def stop_scheduler():
+def stop_scheduler(wait: bool = True):
     """停止调度器。"""
     global _scheduler
     if _scheduler and _scheduler.running:
-        _scheduler.shutdown(wait=True)
+        _scheduler.shutdown(wait=wait)
         logger.info("Scheduler stopped")
+        record_scheduler_event(
+            "info",
+            "scheduler_stopped",
+            "定时任务调度器已停止",
+        )
+    _scheduler = None
+
+
+def reload_scheduler(config: dict):
+    """Reload scheduler jobs from the latest config."""
+    stop_scheduler(wait=False)
+    start_scheduler(config)
+    record_scheduler_event(
+        "info",
+        "scheduler_reloaded",
+        "定时任务配置已重新加载",
+        details={"runtime": get_scheduler_status()},
+    )

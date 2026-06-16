@@ -497,7 +497,7 @@ async def scan_status():
 
 @app.get("/api/scheduler/logs")
 async def scheduler_logs(limit: int = 100):
-    from scheduler.scheduler import get_scheduler_events
+    from scheduler.scheduler import get_scheduler_events, get_scheduler_status
 
     config = load_config()
     sched_cfg = config.get("scheduler", {})
@@ -506,6 +506,7 @@ async def scheduler_logs(limit: int = 100):
             "enabled": bool(sched_cfg.get("enabled", False)),
             "serial_dual_scan": sched_cfg.get("serial_dual_scan", {}),
         },
+        "runtime": get_scheduler_status(),
         "events": get_scheduler_events(limit),
     }
 
@@ -1035,6 +1036,12 @@ def _validate_scheduler_config(config: dict):
         raise ValueError("scheduler.serial_dual_scan.cron hour must be 0-23")
 
 
+def _reload_scheduler_from_config(config: dict):
+    from scheduler.scheduler import reload_scheduler
+
+    reload_scheduler(config)
+
+
 @app.put("/api/config")
 async def update_config(data: dict):
     """Update configuration and write to config.yaml.
@@ -1077,8 +1084,23 @@ async def update_config(data: dict):
     with open("config.yaml", "w", encoding="utf-8") as f:
         yaml.dump(config, f, allow_unicode=True, default_flow_style=False, sort_keys=False)
 
+    scheduler_reloaded = False
+    if "scheduler" in data:
+        try:
+            _reload_scheduler_from_config(config)
+            scheduler_reloaded = True
+        except Exception as e:
+            logger.exception("Failed to reload scheduler after config update")
+            return JSONResponse(
+                {
+                    "status": "error",
+                    "message": f"配置已保存，但定时任务重载失败: {e}",
+                },
+                status_code=500,
+            )
+
     logger.info("Configuration updated")
-    return {"status": "ok", "message": "配置已保存"}
+    return {"status": "ok", "message": "配置已保存", "schedulerReloaded": scheduler_reloaded}
 
 
 @app.websocket("/ws/scan")

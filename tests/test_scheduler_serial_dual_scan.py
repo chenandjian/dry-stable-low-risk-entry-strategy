@@ -33,7 +33,95 @@ def test_start_scheduler_registers_serial_dual_scan_job(monkeypatch):
     assert job["id"] == "serial_dual_strategy_scan"
     assert job["minute"] == "15"
     assert job["hour"] == "15"
-    assert job["day_of_week"] == "1-5"
+    assert job["day_of_week"] == "mon-fri"
+
+
+def test_reload_scheduler_replaces_existing_job(monkeypatch):
+    from scheduler import scheduler as sched_mod
+
+    started_jobs = []
+    shutdowns = []
+
+    class FakeScheduler:
+        running = False
+
+        def __init__(self):
+            self.jobs = []
+
+        def add_job(self, func, trigger, **kwargs):
+            self.jobs.append({"func": func, "trigger": trigger, **kwargs})
+
+        def get_jobs(self):
+            return [type("Job", (), {"id": j["id"], "next_run_time": None, "trigger": j["trigger"]})() for j in self.jobs]
+
+        def start(self):
+            self.running = True
+            started_jobs.append(self.jobs[0]["hour"])
+
+        def shutdown(self, wait=True):
+            shutdowns.append(wait)
+            self.running = False
+
+    monkeypatch.setattr(sched_mod, "BackgroundScheduler", FakeScheduler)
+
+    sched_mod.reload_scheduler({
+        "scheduler": {
+            "enabled": True,
+            "serial_dual_scan": {"enabled": True, "cron": "15 15 * * 1-5"},
+        }
+    })
+    sched_mod.reload_scheduler({
+        "scheduler": {
+            "enabled": True,
+            "serial_dual_scan": {"enabled": True, "cron": "50 16 * * 1-5"},
+        }
+    })
+
+    assert started_jobs == ["15", "16"]
+    assert shutdowns == [False]
+
+
+def test_get_scheduler_status_reports_registered_jobs(monkeypatch):
+    from scheduler import scheduler as sched_mod
+
+    class FakeScheduler:
+        running = False
+
+        def __init__(self):
+            self.jobs = []
+
+        def add_job(self, func, trigger, **kwargs):
+            self.jobs.append({"func": func, "trigger": trigger, **kwargs})
+
+        def get_jobs(self):
+            return [
+                type("Job", (), {
+                    "id": j["id"],
+                    "next_run_time": "2026-06-17 15:50:00",
+                    "trigger": j["trigger"],
+                })()
+                for j in self.jobs
+            ]
+
+        def start(self):
+            self.running = True
+
+        def shutdown(self, wait=True):
+            self.running = False
+
+    monkeypatch.setattr(sched_mod, "BackgroundScheduler", FakeScheduler)
+    sched_mod.reload_scheduler({
+        "scheduler": {
+            "enabled": True,
+            "serial_dual_scan": {"enabled": True, "cron": "50 15 * * 1-5"},
+        }
+    })
+
+    status = sched_mod.get_scheduler_status()
+
+    assert status["running"] is True
+    assert status["jobs"][0]["id"] == "serial_dual_strategy_scan"
+    assert status["jobs"][0]["next_run_time"] == "2026-06-17 15:50:00"
 
 
 def test_serial_scan_runs_strategy1_retries_failed_then_strategy2(monkeypatch, tmp_path):

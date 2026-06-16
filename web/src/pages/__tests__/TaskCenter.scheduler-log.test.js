@@ -33,9 +33,18 @@ describe('TaskCenter scheduler logs', () => {
         enabled: true,
         serial_dual_scan: {
           enabled: true,
-          cron: '15 15 * * 1-5',
+          cron: '50 15 * * 1-5',
           strategy1_failed_retry_rounds: 3,
         },
+      },
+      runtime: {
+        running: true,
+        jobs: [
+          {
+            id: 'serial_dual_strategy_scan',
+            next_run_time: '2026-06-17 15:50:00',
+          },
+        ],
       },
       events: [
         {
@@ -64,7 +73,10 @@ describe('TaskCenter scheduler logs', () => {
 
     expect(api.getSchedulerLogs).toHaveBeenCalled()
     expect(wrapper.text()).toContain('定时任务日志')
-    expect(wrapper.text()).toContain('15 15 * * 1-5')
+    expect(wrapper.text()).toContain('配置已启用')
+    expect(wrapper.text()).toContain('实际运行中')
+    expect(wrapper.text()).toContain('50 15 * * 1-5')
+    expect(wrapper.text()).toContain('下次 2026-06-17 15:50:00')
     expect(wrapper.text()).toContain('重试 3 轮')
     expect(wrapper.text()).toContain('策略1全量扫描开始')
     expect(wrapper.text()).toContain('策略1重试后仍有失败股票')

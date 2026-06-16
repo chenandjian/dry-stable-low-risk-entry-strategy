@@ -22,15 +22,15 @@ scheduler:
 2. 可设置 `scheduler.serial_dual_scan.enabled` 串行双策略开关。
 3. 可设置每日执行时间，使用 `HH:mm` 输入，例如 `15:15`。
 4. 保存时将时间转换为 cron：`mm HH * * 1-5`。
-5. 页面提示：保存后需重启后端服务，已启动的调度器不会自动热加载新配置。
+5. 保存后后端立即重载定时任务配置，无需重启服务。
+6. 任务中心显示配置状态、进程内实际运行状态、已注册 job 和下次触发时间。
 
 ## 3. 非目标
 
-1. 不做调度器热重载。
-2. 不做“立即执行”按钮。
-3. 不做节假日配置。
-4. 不做任意 cron 编辑器。
-5. 不改变当前串行扫描执行流程。
+1. 不做“立即执行”按钮。
+2. 不做节假日配置。
+3. 不做任意 cron 编辑器。
+4. 不改变当前串行扫描执行流程。
 
 ## 4. 前端设计
 
@@ -48,7 +48,7 @@ scheduler:
 - `15:15` -> `15 15 * * 1-5`
 - `09:05` -> `5 9 * * 1-5`
 
-只支持周一至周五，保持后端当前 cron 语义。
+只支持周一至周五。配置文件继续保存为 `1-5`，注册 APScheduler job 时转换为 `mon-fri`，避免 APScheduler 将数字 `1-5` 解释为周二至周六。
 
 ## 5. 后端设计
 
@@ -62,12 +62,21 @@ scheduler:
 
 非法配置返回 HTTP 400，不写入 `config.yaml`。
 
+保存合法 scheduler 配置后：
+
+1. 调用 `reload_scheduler(config)` 停止旧 scheduler。
+2. 按最新配置重新注册 job。
+3. `/api/scheduler/logs` 返回 `runtime.running`、`runtime.jobs[].id`、`runtime.jobs[].next_run_time`。
+
 ## 6. 测试策略
 
 后端：
 
 - 有效 cron 可保存。
 - 非法 cron 返回 400。
+- 保存 scheduler 配置后触发 scheduler reload。
+- runtime 状态能从日志接口读取。
+- `1-5` 注册 APScheduler 时转换为 `mon-fri`。
 
 前端：
 
@@ -81,4 +90,6 @@ scheduler:
 2. `/config` 页面可以修改串行双策略扫描时间。
 3. 保存后 `config.yaml` 中 `scheduler.enabled` 与 `scheduler.serial_dual_scan.cron` 正确更新。
 4. 非法 cron 不会写入配置。
-5. 测试和构建通过。
+5. 保存后不重启后端也能按最新配置重新注册定时任务。
+6. 任务中心能区分“配置已启用”和“实际运行中/未运行”。
+7. 测试和构建通过。
