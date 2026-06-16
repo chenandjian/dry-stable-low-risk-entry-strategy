@@ -145,6 +145,44 @@ def test_retry_failed_returns_zero_when_no_failures(monkeypatch, tmp_path):
     assert res.json()["status"] == "no_failed_stocks"
 
 
+def test_scheduler_logs_endpoint_returns_recent_events(monkeypatch, tmp_path):
+    from scheduler import scheduler as sched_mod
+
+    db_path = tmp_path / "cuphandle.db"
+    cfg = {
+        "data": {"database_path": str(db_path)},
+        "scheduler": {
+            "enabled": True,
+            "serial_dual_scan": {
+                "enabled": True,
+                "cron": "15 15 * * 1-5",
+                "strategy1_failed_retry_rounds": 3,
+            },
+        },
+    }
+    monkeypatch.setattr(server, "load_config", lambda path="config.yaml": cfg)
+    sched_mod.clear_scheduler_events()
+    sched_mod.record_scheduler_event(
+        "info",
+        "strategy1_full",
+        "策略1开始",
+        task_id="sched-s1-test",
+        details={"stocks": 2},
+    )
+
+    client = TestClient(server.app)
+    res = client.get("/api/scheduler/logs")
+
+    assert res.status_code == 200
+    body = res.json()
+    assert body["scheduler"]["enabled"] is True
+    assert body["scheduler"]["serial_dual_scan"]["cron"] == "15 15 * * 1-5"
+    assert len(body["events"]) == 1
+    assert body["events"][0]["stage"] == "strategy1_full"
+    assert body["events"][0]["task_id"] == "sched-s1-test"
+    assert body["events"][0]["message"] == "策略1开始"
+
+
 # ── COMPLETION-003: entry-level API regression tests ────────────────
 
 def _safe_config():

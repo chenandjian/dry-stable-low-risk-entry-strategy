@@ -321,6 +321,32 @@ def test_serial_scan_final_candidate_count_includes_retry_discoveries(monkeypatc
     assert row[0] == 2
 
 
+def test_scheduler_events_are_recorded_and_limited():
+    from scheduler import scheduler as sched_mod
+
+    sched_mod.clear_scheduler_events()
+
+    for i in range(205):
+        sched_mod.record_scheduler_event(
+            "info",
+            "stage-test",
+            f"message-{i}",
+            task_id=f"task-{i}",
+            details={"idx": i},
+        )
+
+    events = sched_mod.get_scheduler_events()
+
+    assert len(events) == 200
+    assert events[0]["message"] == "message-5"
+    assert events[-1]["message"] == "message-204"
+    assert events[-1]["level"] == "info"
+    assert events[-1]["stage"] == "stage-test"
+    assert events[-1]["task_id"] == "task-204"
+    assert events[-1]["details"] == {"idx": 204}
+    assert "time" in events[-1]
+
+
 def test_start_scheduler_serial_enabled_does_not_register_legacy_daily_scan(monkeypatch):
     from scheduler import scheduler as sched_mod
 

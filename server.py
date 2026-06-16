@@ -490,6 +490,21 @@ async def scan_status():
     return {"running": False, "task_id": None, "strategyType": None, "stats": {}}
 
 
+@app.get("/api/scheduler/logs")
+async def scheduler_logs(limit: int = 100):
+    from scheduler.scheduler import get_scheduler_events
+
+    config = load_config()
+    sched_cfg = config.get("scheduler", {})
+    return {
+        "scheduler": {
+            "enabled": bool(sched_cfg.get("enabled", False)),
+            "serial_dual_scan": sched_cfg.get("serial_dual_scan", {}),
+        },
+        "events": get_scheduler_events(limit),
+    }
+
+
 @app.get("/api/scan/tasks")
 async def list_tasks():
     """FINAL-S2-005: Strategy1 task list — only S1 running + S1 DB tasks."""

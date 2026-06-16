@@ -1,6 +1,7 @@
 import logging
 import threading
 import time
+from collections import deque
 
 from apscheduler.schedulers.background import BackgroundScheduler
 
@@ -14,6 +15,41 @@ logger = logging.getLogger(__name__)
 
 _scheduler: BackgroundScheduler | None = None
 _serial_scan_lock = threading.Lock()
+_scheduler_events = deque(maxlen=200)
+_scheduler_events_lock = threading.Lock()
+
+
+def record_scheduler_event(
+    level: str,
+    stage: str,
+    message: str,
+    *,
+    task_id: str | None = None,
+    details: dict | None = None,
+) -> dict:
+    event = {
+        "time": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "level": level,
+        "stage": stage,
+        "message": message,
+        "task_id": task_id or "",
+        "details": details or {},
+    }
+    with _scheduler_events_lock:
+        _scheduler_events.append(event)
+    return event
+
+
+def get_scheduler_events(limit: int = 200) -> list[dict]:
+    limit = max(1, min(int(limit or 200), 200))
+    with _scheduler_events_lock:
+        events = list(_scheduler_events)
+    return events[-limit:]
+
+
+def clear_scheduler_events():
+    with _scheduler_events_lock:
+        _scheduler_events.clear()
 
 
 def _parse_cron_parts(cron: str) -> dict:
@@ -84,6 +120,11 @@ def run_serial_dual_strategy_scan(config: dict) -> dict:
     """Run Strategy1, retry its failed stocks, then run Strategy2 serially."""
     if not _serial_scan_lock.acquire(blocking=False):
         logger.warning("Serial dual strategy scan skipped: previous run is still active")
+        record_scheduler_event(
+            "warning",
+            "skip",
+            "串行定时扫描跳过：上一轮仍在执行",
+        )
         return {"status": "skipped", "reason": "already_running_in_process"}
 
     s1_task_id = None
@@ -100,6 +141,13 @@ def run_serial_dual_strategy_scan(config: dict) -> dict:
                 running.get("id"),
                 running.get("strategy_type"),
             )
+            record_scheduler_event(
+                "info",
+                "skip",
+                "串行定时扫描跳过：已有扫描任务运行中",
+                task_id=running.get("id"),
+                details={"strategy_type": running.get("strategy_type")},
+            )
             return {
                 "status": "skipped",
                 "reason": "already_running_in_db",
@@ -113,6 +161,11 @@ def run_serial_dual_strategy_scan(config: dict) -> dict:
         stocks = stock_pool.get_a_stock_pool(config)
         if not stocks:
             logger.error("Serial dual strategy scan aborted: stock pool is empty")
+            record_scheduler_event(
+                "error",
+                "stock_pool",
+                "串行定时扫描终止：股票池为空",
+            )
             return {"status": "failed", "error": "No stock pool available"}
 
         s1_task_id = _make_scan_task_id("sched-s1")
@@ -120,6 +173,13 @@ def run_serial_dual_strategy_scan(config: dict) -> dict:
             "Serial scan stage=strategy1_full task=%s stocks=%d started",
             s1_task_id,
             len(stocks),
+        )
+        record_scheduler_event(
+            "info",
+            "strategy1_full",
+            "策略1全量扫描开始",
+            task_id=s1_task_id,
+            details={"stocks": len(stocks)},
         )
         db.create_scan_task(
             s1_task_id,
@@ -142,12 +202,26 @@ def run_serial_dual_strategy_scan(config: dict) -> dict:
             s1_task_id,
             s1_summary,
         )
+        record_scheduler_event(
+            "info",
+            "strategy1_full",
+            "策略1全量扫描完成",
+            task_id=s1_task_id,
+            details=s1_summary,
+        )
 
         retry_history = []
         for round_no in range(1, retry_rounds + 1):
             failed_stocks = _get_failed_stocks(s1_task_id)
             if not failed_stocks:
                 logger.info("Serial scan strategy1 retry stopped: no failed stocks")
+                record_scheduler_event(
+                    "info",
+                    "strategy1_retry",
+                    "策略1失败重试停止：无失败股票",
+                    task_id=s1_task_id,
+                    details={"round": round_no},
+                )
                 break
             logger.info(
                 "Serial scan stage=strategy1_retry round=%d/%d task=%s failed=%d started",
@@ -155,6 +229,13 @@ def run_serial_dual_strategy_scan(config: dict) -> dict:
                 retry_rounds,
                 s1_task_id,
                 len(failed_stocks),
+            )
+            record_scheduler_event(
+                "info",
+                "strategy1_retry",
+                f"策略1失败股票重试开始：第 {round_no}/{retry_rounds} 轮",
+                task_id=s1_task_id,
+                details={"round": round_no, "failed_before": len(failed_stocks)},
             )
             scan_all(
                 config,
@@ -176,6 +257,13 @@ def run_serial_dual_strategy_scan(config: dict) -> dict:
                 s1_task_id,
                 s1_summary,
             )
+            record_scheduler_event(
+                "info",
+                "strategy1_retry",
+                f"策略1失败股票重试完成：第 {round_no}/{retry_rounds} 轮",
+                task_id=s1_task_id,
+                details=retry_history[-1],
+            )
 
         remaining_failed = len(_get_failed_stocks(s1_task_id))
         if remaining_failed:
@@ -184,6 +272,13 @@ def run_serial_dual_strategy_scan(config: dict) -> dict:
                 s1_task_id,
                 remaining_failed,
                 retry_rounds,
+            )
+            record_scheduler_event(
+                "warning",
+                "strategy1_remaining_failed",
+                "策略1重试后仍有失败股票",
+                task_id=s1_task_id,
+                details={"remaining_failed": remaining_failed, "retry_rounds": retry_rounds},
             )
         s1_summary = _finish_scan_task_from_summary(
             s1_task_id,
@@ -194,6 +289,13 @@ def run_serial_dual_strategy_scan(config: dict) -> dict:
             s1_task_id,
             s1_summary,
         )
+        record_scheduler_event(
+            "info",
+            "strategy1_all_done",
+            "策略1流程完整结束，准备启动策略2",
+            task_id=s1_task_id,
+            details=s1_summary,
+        )
 
         s2_task_id = _make_scan_task_id("sched-s2")
         logger.info(
@@ -202,6 +304,13 @@ def run_serial_dual_strategy_scan(config: dict) -> dict:
             s2_task_id,
             len(stocks),
             s1_task_id,
+        )
+        record_scheduler_event(
+            "info",
+            "strategy2_full",
+            "策略2扫描开始，将复用策略1当天已写入的日线数据",
+            task_id=s2_task_id,
+            details={"stocks": len(stocks), "strategy1_task_id": s1_task_id},
         )
         db.create_scan_task(
             s2_task_id,
@@ -221,6 +330,13 @@ def run_serial_dual_strategy_scan(config: dict) -> dict:
             s2_task_id,
             s2_summary,
         )
+        record_scheduler_event(
+            "info",
+            "strategy2_full",
+            "策略2扫描完成",
+            task_id=s2_task_id,
+            details=s2_summary,
+        )
 
         return {
             "status": "completed",
@@ -232,6 +348,13 @@ def run_serial_dual_strategy_scan(config: dict) -> dict:
         }
     except Exception as exc:
         logger.exception("Serial dual strategy scan failed")
+        record_scheduler_event(
+            "error",
+            "failed",
+            f"串行定时扫描失败：{exc}",
+            task_id=s2_task_id or s1_task_id,
+            details={"strategy1_task_id": s1_task_id, "strategy2_task_id": s2_task_id},
+        )
         if s2_task_id:
             _mark_scan_task_failed(s2_task_id, str(exc))
         elif s1_task_id:

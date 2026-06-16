@@ -30,6 +30,11 @@ export function useApi() {
     return res.json()
   }
 
+  async function getSchedulerLogs(limit = 100) {
+    const res = await fetch(`${API_BASE}/scheduler/logs?limit=${encodeURIComponent(limit)}`)
+    return res.json().catch(() => ({ scheduler: {}, events: [] }))
+  }
+
   async function getTaskStocks(taskId, params = {}) {
     const qs = new URLSearchParams(params).toString()
     const url = `${API_BASE}/scan/tasks/${taskId}/stocks${qs ? '?' + qs : ''}`
@@ -236,6 +241,7 @@ export function useApi() {
 
   return {
     startScan, getScanStatus, getCandidates, getCandidate, getScanTasks,
+    getSchedulerLogs,
     getTaskStocks, retryFailedStocks, reEvaluateTask, getConfig, updateConfig,
     runCupHandleBacktest,
     startStrategy2Scan, getStrategy2ScanStatus, getStrategy2Tasks,

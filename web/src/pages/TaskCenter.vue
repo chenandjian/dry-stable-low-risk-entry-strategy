@@ -3,6 +3,32 @@
     <h2 class="page-title">扫描任务</h2>
     <p class="page-sub">历史扫描记录</p>
 
+    <div class="panel scheduler-panel">
+      <div class="panel-header scheduler-header">
+        <span>定时任务日志</span>
+        <span class="scheduler-status" :class="{ enabled: schedulerConfig.enabled }">
+          {{ schedulerConfig.enabled ? '已启用' : '未启用' }}
+        </span>
+      </div>
+      <div class="scheduler-meta">
+        <span>串行双策略：{{ serialScheduler.enabled === false ? '关闭' : '开启' }}</span>
+        <span>Cron {{ serialScheduler.cron || '--' }}</span>
+        <span>失败重试 {{ serialScheduler.strategy1_failed_retry_rounds ?? '--' }} 轮</span>
+      </div>
+      <div v-if="schedulerEvents.length === 0" class="scheduler-empty">
+        暂无定时任务日志
+      </div>
+      <div v-else class="scheduler-log-lines">
+        <div v-for="event in schedulerEvents" :key="event.time + event.stage + event.message" class="scheduler-log-line">
+          <span class="log-time">{{ event.time }}</span>
+          <span class="log-level" :class="event.level">{{ event.level }}</span>
+          <span class="log-stage">{{ event.stage }}</span>
+          <span class="log-task">{{ event.task_id || '--' }}</span>
+          <span class="log-message">{{ event.message }}</span>
+        </div>
+      </div>
+    </div>
+
     <div class="panel">
       <div class="task-header">
         <span style="width:20px"></span>
@@ -57,15 +83,17 @@
 </template>
 
 <script setup>
-import { ref, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useApi } from '../composables/useApi.js'
 
 const router = useRouter()
-const { getScanTasks, reEvaluateTask, getStrategy2Tasks, reEvaluateStrategy2Task } = useApi()
+const { getScanTasks, reEvaluateTask, getStrategy2Tasks, reEvaluateStrategy2Task, getSchedulerLogs } = useApi()
 const tasks = ref([])
 const reEvaluating = ref(new Set())
 const preCounts = ref({})   // taskId → previous candidate count
+const schedulerConfig = ref({ enabled: false, serial_dual_scan: {} })
+const schedulerEvents = ref([])
 let pollTimer = null
 
 function isReEvaluating(t) { return reEvaluating.value.has(t.id) || t.status === 're_evaluating' }
@@ -94,6 +122,7 @@ function candidateDelta(t) {
   return ''
 }
 function isStrategy2(t) { return t.strategyType === 'STRATEGY_2_EXTREME_DRY_STABLE' || t.strategy_type === 'STRATEGY_2_EXTREME_DRY_STABLE' }
+const serialScheduler = computed(() => schedulerConfig.value.serial_dual_scan || {})
 function viewResults(id, t) { router.push(isStrategy2(t) ? `/strategy2/results?task_id=${id}` : `/results?task_id=${id}`) }
 function viewFailures(id) { router.push(`/?task=${id}&status=failed`) }
 function exportResults(id, t) { window.open(isStrategy2(t) ? `/api/strategy2/candidates?task_id=${id}` : '/api/candidates', '_blank') }
@@ -159,9 +188,23 @@ async function loadTasks() {
   }
 }
 
+async function loadSchedulerLogs() {
+  try {
+    const data = await getSchedulerLogs(100)
+    schedulerConfig.value = data.scheduler || { enabled: false, serial_dual_scan: {} }
+    schedulerEvents.value = data.events || []
+  } catch (e) {
+    console.error('Failed to load scheduler logs:', e)
+  }
+}
+
 onMounted(() => {
   loadTasks()
-  pollTimer = setInterval(loadTasks, 2000)
+  loadSchedulerLogs()
+  pollTimer = setInterval(() => {
+    loadTasks()
+    loadSchedulerLogs()
+  }, 2000)
 })
 onUnmounted(() => { if (pollTimer) clearInterval(pollTimer) })
 </script>
@@ -171,6 +214,26 @@ onUnmounted(() => { if (pollTimer) clearInterval(pollTimer) })
 .page-title { font-size: 24px; font-weight: 700; color: var(--text-primary); }
 .page-sub { font-size: 13px; color: var(--text-muted); margin-bottom: 20px; }
 .panel { background: var(--bg-panel); border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
+.scheduler-panel { margin-bottom: 16px; }
+.scheduler-header { text-transform: none; letter-spacing: 0; }
+.scheduler-status { font-size: 11px; color: var(--text-muted); }
+.scheduler-status.enabled { color: var(--down-green); }
+.scheduler-meta {
+  display: flex; gap: 16px; padding: 10px 16px; border-bottom: 1px solid var(--border);
+  font-size: 12px; color: var(--text-muted);
+}
+.scheduler-empty { padding: 14px 16px; color: var(--text-muted); font-size: 12px; }
+.scheduler-log-lines { max-height: 180px; overflow-y: auto; padding: 6px 0; }
+.scheduler-log-line {
+  display: grid; grid-template-columns: 150px 60px 150px 130px 1fr; gap: 8px;
+  padding: 4px 16px; font-family: var(--font-mono); font-size: 11px; color: var(--text-muted);
+}
+.log-level.info { color: var(--accent); }
+.log-level.warning { color: var(--warn-orange); }
+.log-level.error { color: var(--up-red); }
+.log-stage { color: var(--gold); }
+.log-task { color: var(--text-secondary); }
+.log-message { color: var(--text-primary); }
 .task-header {
   display: grid; grid-template-columns: 20px 140px 150px 80px 70px 60px 60px 80px 90px 180px;
   align-items: center; padding: 10px 16px; border-bottom: 2px solid var(--border-light);
