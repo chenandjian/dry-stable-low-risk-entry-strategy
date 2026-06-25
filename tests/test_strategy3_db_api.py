@@ -1,4 +1,6 @@
 import scanner.db as db
+import server as server_mod
+from fastapi.testclient import TestClient
 from strategy3.models import Strategy3Evaluation, Strategy3Indicators, Strategy3Risk
 from strategy3.scanner import _build_strategy3_discovery, re_evaluate_strategy3_task
 from tests.test_strategy3_engine import make_strategy3_candidate_bars
@@ -164,3 +166,62 @@ def test_re_evaluate_strategy3_task_uses_cached_ohlc(tmp_path):
     assert result["candidates_found"] == 1
     rows = db.get_strategy3_candidates(task_id="s3-task")
     assert rows[0]["code"] == "000001"
+
+
+def test_strategy3_candidates_api_rejects_strategy1_task(tmp_path, monkeypatch):
+    db_path = str(tmp_path / "test.db")
+    db.init_db(db_path)
+    monkeypatch.setattr(
+        server_mod,
+        "load_config",
+        lambda: {"data": {"database_path": db_path}, "liquidity": {"min_listing_days": 350}},
+    )
+    db.create_scan_task("s1-task", "2026-06-25 09:00:00", strategy_type="STRATEGY_1_CUP_HANDLE")
+
+    res = TestClient(server_mod.app).get("/api/strategy3/candidates?task_id=s1-task")
+
+    assert res.status_code == 400
+    assert res.json()["error"] == "TASK_STRATEGY_MISMATCH"
+
+
+def test_strategy3_tasks_api_returns_only_strategy3(tmp_path, monkeypatch):
+    db_path = str(tmp_path / "test.db")
+    db.init_db(db_path)
+    monkeypatch.setattr(
+        server_mod,
+        "load_config",
+        lambda: {"data": {"database_path": db_path}, "liquidity": {"min_listing_days": 350}},
+    )
+    server_mod._running.update({"running": False, "task_id": None, "strategy_type": None, "stats": {}})
+    db.create_scan_task("s3-task", "2026-06-25 09:00:00", strategy_type="STRATEGY_3_STRONG_PULLBACK_SECOND_BREAKOUT")
+    db.create_scan_task("s2-task", "2026-06-25 09:10:00", strategy_type="STRATEGY_2_EXTREME_DRY_STABLE")
+
+    res = TestClient(server_mod.app).get("/api/strategy3/tasks")
+
+    assert res.status_code == 200
+    ids = [task["id"] for task in res.json()["tasks"]]
+    assert "s3-task" in ids
+    assert "s2-task" not in ids
+
+
+def test_strategy3_candidate_detail_api(tmp_path, monkeypatch):
+    db_path = str(tmp_path / "test.db")
+    db.init_db(db_path)
+    monkeypatch.setattr(
+        server_mod,
+        "load_config",
+        lambda: {"data": {"database_path": db_path}, "liquidity": {"min_listing_days": 350}},
+    )
+    db.create_scan_task("s3-task", "2026-06-25 09:00:00", strategy_type="STRATEGY_3_STRONG_PULLBACK_SECOND_BREAKOUT")
+    db.upsert_strategy3_candidate("s3-task", {
+        "code": "000001",
+        "name": "平安银行",
+        "evaluation_date": "2026-06-25",
+        "total_score": 80,
+        "level": "观察候选",
+    })
+
+    res = TestClient(server_mod.app).get("/api/strategy3/candidates/000001?task_id=s3-task")
+
+    assert res.status_code == 200
+    assert res.json()["code"] == "000001"

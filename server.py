@@ -20,6 +20,8 @@ import scanner.db as db
 from scanner.engine import scan_all, re_evaluate_task
 from strategy2.scanner import scan_strategy2_all
 from strategy2.validation import resolve_strategy2_config
+from strategy3.scanner import STRATEGY3_TYPE, scan_strategy3_all
+from strategy3.validation import resolve_strategy3_config
 from scanner.strategy_engine import (
     CupHandleStrategyEngine,
     resolve_strategy_windows,
@@ -63,7 +65,43 @@ async def lifespan(app: FastAPI):
             "current_name": "恢复扫描中",
         }
 
-        if s_type == "STRATEGY_2_EXTREME_DRY_STABLE":
+        if s_type == STRATEGY3_TYPE:
+            def resume_s3():
+                try:
+                    pending = db.get_pending_stocks(interrupted["id"])
+                    def on_progress(stage, current, total, detail, discovery=None):
+                        stats = _running.get("stats", {})
+                        if stage == "discovery" and discovery:
+                            found = stats.get("candidates_found", 0) + 1
+                            discoveries = list(stats.get("discoveries") or [])
+                            discoveries.insert(0, {
+                                "code": discovery["code"], "name": discovery["name"],
+                                "total_score": discovery["total_score"],
+                                "level": discovery["level"],
+                                "pullback_pct": discovery["pullback_pct"],
+                                "risk_ratio": discovery["risk_ratio"],
+                                "rr1": discovery["rr1"],
+                            })
+                            _running["stats"] = {**stats, "discoveries": discoveries[:20], "candidates_found": found}
+                        else:
+                            code = detail.split()[0] if detail else ""
+                            _running["stats"] = {**stats, "scanned": current, "processed": current, "total_stocks": total, "current_code": code, "current_name": detail[len(code):].strip() if len(detail) > len(code) else detail}
+                    result = scan_strategy3_all(config, progress_callback=on_progress, task_id=interrupted["id"], stocks=pending)
+                    _running["stats"] = result["stats"]
+                    s = result["stats"]
+                    db.finish_scan_task(interrupted["id"], finished_at=datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"), candidates_count=s.get("candidates_found", 0), elapsed_seconds=s.get("elapsed_seconds", 0), scanned=s.get("scanned", 0), skipped=s.get("skipped", 0))
+                    db.refresh_scan_task_counts(interrupted["id"])
+                except Exception as e:
+                    import traceback
+                    logger.error(f"Strategy3 resume failed: {e}\n{traceback.format_exc()}")
+                    _running["stats"] = {"error": str(e)}
+                    conn = db.get_conn()
+                    conn.execute("UPDATE scan_tasks SET status='failed', error=? WHERE id=?", (str(e), interrupted["id"]))
+                    conn.commit()
+                finally:
+                    _clear_running()
+            t = threading.Thread(target=resume_s3, daemon=True)
+        elif s_type == "STRATEGY_2_EXTREME_DRY_STABLE":
             # BUG-S2-001: 策略2恢复
             def resume_s2():
                 try:
@@ -1564,6 +1602,320 @@ async def strategy2_candidate_detail(code: str, task_id: str = None):
             )
 
     c = db.get_strategy2_candidate(code, task_id=task_id)
+    if not c:
+        return JSONResponse({"error": "Not found"}, status_code=404)
+    return c
+
+
+# ====== Strategy3 API ======
+
+@app.post("/api/strategy3/scans")
+async def start_strategy3_scan():
+    """启动策略3全市场扫描。"""
+    import datetime
+    from scanner.stock_pool import get_a_stock_pool_result
+
+    config = load_config()
+    db_path = config.get("data", {}).get("database_path", "data/cuphandle.db")
+    db.init_db(db_path)
+
+    strategy3_cfg = config.get("strategy3", {})
+    if not strategy3_cfg.get("enabled", True):
+        return JSONResponse(
+            {"error": "STRATEGY3_DISABLED", "message": "策略3未启用"},
+            status_code=400,
+        )
+
+    try:
+        resolve_strategy3_config(config)
+    except ValueError as e:
+        return JSONResponse(
+            {"error": "INVALID_CONFIG", "message": f"策略3配置无效: {e}"},
+            status_code=400,
+        )
+
+    conflict = _scan_conflict_response()
+    if conflict:
+        return conflict
+
+    task_id = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+    started_at = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    db.create_scan_task(task_id, started_at, total_stocks=0, retry_mode="full", strategy_type=STRATEGY3_TYPE)
+    _set_running(task_id, "full", strategy_type=STRATEGY3_TYPE)
+    _running["started_at"] = started_at
+    _running["stats"] = {"total_stocks": 0, "current_code": "--", "current_name": "获取股票池中…"}
+
+    def run():
+        pool_result = get_a_stock_pool_result(config)
+        stocks = pool_result["stocks"]
+        if not stocks:
+            _running["stats"] = {"error": "No stock pool available"}
+            conn = db.get_conn()
+            conn.execute("UPDATE scan_tasks SET status='failed', error=? WHERE id=?", ("No stock pool", task_id))
+            conn.commit()
+            _clear_running()
+            return
+        db.update_scan_task_total(task_id, len(stocks), pool_result["source"])
+        db.save_task_stocks(task_id, stocks)
+        _running["stats"] = {
+            "total_stocks": len(stocks),
+            "stock_pool_source": pool_result["source"],
+            "current_code": "--",
+            "current_name": "初始化中",
+        }
+        try:
+            def on_progress(stage, current, total, detail, discovery=None):
+                stats = _running.get("stats", {})
+                if stage == "discovery" and discovery:
+                    found = stats.get("candidates_found", 0) + 1
+                    discoveries = list(stats.get("discoveries") or [])
+                    discoveries.insert(0, {
+                        "code": discovery["code"],
+                        "name": discovery["name"],
+                        "total_score": discovery["total_score"],
+                        "level": discovery["level"],
+                        "pullback_pct": discovery["pullback_pct"],
+                        "risk_ratio": discovery["risk_ratio"],
+                        "rr1": discovery["rr1"],
+                    })
+                    _running["stats"] = {**stats, "discoveries": discoveries[:20], "candidates_found": found}
+                else:
+                    code = detail.split()[0] if detail else ""
+                    s = stats.copy()
+                    s.update({
+                        "scanned": current,
+                        "processed": current,
+                        "total_stocks": total,
+                        "current_code": code,
+                        "current_name": detail[len(code):].strip() if len(detail) > len(code) else detail,
+                    })
+                    s.setdefault("candidates_found", 0)
+                    s.setdefault("skipped", 0)
+                    s.setdefault("failed", 0)
+                    _running["stats"] = s
+                db.update_scan_progress(
+                    task_id,
+                    scanned=_running["stats"].get("scanned", 0),
+                    skipped=_running["stats"].get("skipped", 0),
+                    candidates_count=_running["stats"].get("candidates_found", 0),
+                )
+
+            result = scan_strategy3_all(config, progress_callback=on_progress, task_id=task_id, stocks=stocks)
+            s = result["stats"]
+            _running["stats"] = s
+            db.finish_scan_task(
+                task_id,
+                finished_at=datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                candidates_count=s.get("candidates_found", 0),
+                elapsed_seconds=s.get("elapsed_seconds", 0),
+                scanned=s.get("scanned", 0),
+                skipped=s.get("skipped", 0),
+            )
+            db.refresh_scan_task_counts(task_id)
+        except Exception as e:
+            import traceback
+            logger.error(f"Strategy3 scan failed: {e}\n{traceback.format_exc()}")
+            _running["stats"] = {"error": str(e)}
+            conn = db.get_conn()
+            conn.execute("UPDATE scan_tasks SET status='failed', error=? WHERE id=?", (str(e), task_id))
+            conn.commit()
+        finally:
+            _clear_running()
+
+    threading.Thread(target=run, daemon=True).start()
+    return {"taskId": task_id, "strategyType": STRATEGY3_TYPE, "status": "running"}
+
+
+@app.get("/api/strategy3/scans/status")
+async def strategy3_scan_status():
+    """查询策略3扫描状态。"""
+    if _running["running"] and _running.get("strategy_type") == STRATEGY3_TYPE:
+        summary = db.refresh_scan_task_counts(_running["task_id"]) if _running.get("task_id") else {}
+        return {
+            "running": True,
+            "taskId": _running["task_id"],
+            "strategyType": STRATEGY3_TYPE,
+            "stats": {**_running.get("stats", {}), **summary},
+        }
+    conn = db.get_conn()
+    row = conn.execute(
+        "SELECT id FROM scan_tasks WHERE status='running' AND strategy_type=? ORDER BY started_at DESC LIMIT 1",
+        (STRATEGY3_TYPE,),
+    ).fetchone()
+    if row:
+        return {"running": True, "taskId": row[0], "strategyType": STRATEGY3_TYPE, "stats": {}}
+    return {"running": False, "taskId": None, "strategyType": STRATEGY3_TYPE, "stats": {}}
+
+
+@app.get("/api/strategy3/tasks")
+async def strategy3_tasks():
+    """查询策略3任务列表。"""
+    config = load_config()
+    db.init_db(config.get("data", {}).get("database_path", "data/cuphandle.db"))
+    tasks = []
+    if _running["running"] and _running.get("strategy_type") == STRATEGY3_TYPE:
+        s = _running.get("stats", {})
+        tasks.append({
+            "id": _running.get("task_id", "current"),
+            "date": _running.get("started_at", ""),
+            "scope": f"全市场 · {s.get('total_stocks', '--')}只",
+            "running": True,
+            "status": "running",
+            "candidates": s.get("candidates_found", 0),
+            "total": s.get("total_stocks", 0),
+            "scanned": s.get("scanned", 0),
+            "skipped": s.get("skipped", 0),
+            "failed": s.get("failed", 0),
+            "strategy_type": STRATEGY3_TYPE,
+        })
+
+    running_id = _running.get("task_id") if _running["running"] else None
+    conn = db.get_conn()
+    rows = conn.execute(
+        "SELECT id, started_at, finished_at, status, total_stocks, scanned, skipped, "
+        "candidates_count, elapsed_seconds, failed_count, stock_pool_source, latest_trade_date, strategy_type "
+        "FROM scan_tasks WHERE strategy_type=? ORDER BY started_at DESC",
+        (STRATEGY3_TYPE,),
+    ).fetchall()
+    for r in rows:
+        if r[0] == running_id:
+            continue
+        tasks.append({
+            "id": r[0], "date": r[1] or "", "finished_at": r[2],
+            "running": r[3] == "running", "status": r[3],
+            "total_stocks": r[4], "scanned": r[5], "total": r[4],
+            "skipped": r[6], "candidates": r[7], "elapsed_seconds": r[8],
+            "duration": f"{r[8]:.0f}s" if r[8] is not None else None,
+            "failed": r[9], "stock_pool_source": r[10], "latest_trade_date": r[11],
+            "strategy_type": r[12] or STRATEGY3_TYPE,
+        })
+    return {"tasks": tasks}
+
+
+@app.post("/api/strategy3/tasks/{task_id}/retry-failed")
+async def strategy3_retry_failed_stocks(task_id: str):
+    """重试策略3任务中失败的股票。"""
+    config = load_config()
+    db.init_db(config.get("data", {}).get("database_path", "data/cuphandle.db"))
+
+    _, type_err = _require_task_strategy(task_id, STRATEGY3_TYPE)
+    if type_err is not None:
+        return type_err
+
+    conflict = _scan_conflict_response()
+    if conflict:
+        return conflict
+
+    failed = db.get_failed_task_stocks(task_id)
+    if not failed:
+        return {"task_id": task_id, "status": "no_failed_stocks", "retry_count": 0}
+
+    db.reset_failed_task_stocks(task_id)
+    conn = db.get_conn()
+    conn.execute("UPDATE scan_tasks SET status='running', retry_mode='failed_only' WHERE id=?", (task_id,))
+    conn.commit()
+    _set_running(task_id, "failed_only", strategy_type=STRATEGY3_TYPE)
+    stocks = [{"code": s["code"], "name": s["name"], "market": s.get("market", "")} for s in failed]
+
+    def run_retry():
+        import datetime
+        try:
+            result = scan_strategy3_all(config, task_id=task_id, stocks=stocks, retry_policy="failed_only")
+            s = result["stats"]
+            db.finish_scan_task(
+                task_id,
+                finished_at=datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                candidates_count=s.get("candidates_found", 0),
+                elapsed_seconds=s.get("elapsed_seconds", 0),
+                scanned=s.get("scanned", 0),
+                skipped=s.get("skipped", 0),
+            )
+            db.refresh_scan_task_counts(task_id)
+        except Exception as e:
+            import traceback
+            logger.error(f"Strategy3 retry failed stocks failed: {e}\n{traceback.format_exc()}")
+            conn = db.get_conn()
+            conn.execute("UPDATE scan_tasks SET status='failed', error=? WHERE id=?", (str(e), task_id))
+            conn.commit()
+        finally:
+            _clear_running()
+
+    threading.Thread(target=run_retry, daemon=True).start()
+    return {"task_id": task_id, "status": "retry_started", "retry_count": len(stocks)}
+
+
+@app.post("/api/strategy3/tasks/{task_id}/re-evaluate")
+async def strategy3_re_evaluate(task_id: str):
+    """用已缓存日线数据重跑策略3评估，不重新拉取数据。"""
+    config = load_config()
+    db.init_db(config.get("data", {}).get("database_path", "data/cuphandle.db"))
+
+    _, type_err = _require_task_strategy(task_id, STRATEGY3_TYPE)
+    if type_err is not None:
+        return type_err
+
+    conn = db.get_conn()
+    task = conn.execute("SELECT id FROM scan_tasks WHERE id=?", (task_id,)).fetchone()
+    if not task:
+        return JSONResponse({"error": "Task not found"}, status_code=404)
+
+    conn.execute("UPDATE scan_tasks SET status='re_evaluating' WHERE id=?", (task_id,))
+    conn.commit()
+
+    def run_re_eval():
+        import datetime
+        try:
+            from strategy3.scanner import re_evaluate_strategy3_task
+            result = re_evaluate_strategy3_task(config, task_id)
+            now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            conn2 = db.get_conn()
+            conn2.execute(
+                "UPDATE scan_tasks SET status='completed', candidates_count=?, finished_at=? WHERE id=?",
+                (result["candidates_found"], now, task_id),
+            )
+            conn2.commit()
+        except Exception as e:
+            import traceback
+            logger.error(f"Strategy3 re-evaluate {task_id} failed: {e}\n{traceback.format_exc()}")
+            conn2 = db.get_conn()
+            conn2.execute("UPDATE scan_tasks SET status='completed', error=? WHERE id=?", (str(e), task_id))
+            conn2.commit()
+
+    threading.Thread(target=run_re_eval, daemon=True).start()
+    return {"task_id": task_id, "status": "re_evaluating"}
+
+
+@app.get("/api/strategy3/candidates")
+async def strategy3_candidates(task_id: str = None):
+    """查询策略3候选列表。"""
+    config = load_config()
+    db.init_db(config.get("data", {}).get("database_path", "data/cuphandle.db"))
+
+    if task_id:
+        _, type_err = _require_task_strategy(task_id, STRATEGY3_TYPE)
+        if type_err is not None:
+            return type_err
+
+    if _running["running"] and _running.get("strategy_type") == STRATEGY3_TYPE and not task_id:
+        ds = _running.get("stats", {}).get("discoveries") or []
+        return {"candidates": ds, "total": len(ds)}
+
+    cands = db.get_strategy3_candidates(task_id=task_id)
+    return {"candidates": cands, "total": len(cands)}
+
+
+@app.get("/api/strategy3/candidates/{code}")
+async def strategy3_candidate_detail(code: str, task_id: str = None):
+    """查询策略3候选详情。"""
+    config = load_config()
+    db.init_db(config.get("data", {}).get("database_path", "data/cuphandle.db"))
+
+    if task_id:
+        _, type_err = _require_task_strategy(task_id, STRATEGY3_TYPE)
+        if type_err is not None:
+            return type_err
+
+    c = db.get_strategy3_candidate(code, task_id=task_id)
     if not c:
         return JSONResponse({"error": "Not found"}, status_code=404)
     return c
