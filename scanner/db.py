@@ -119,6 +119,7 @@ def init_db(path: str = "data/cuphandle.db"):
         _dedupe_candidates_before_unique_index(conn)
         conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_candidates_task_code ON candidates(task_id, code)")
         _ensure_strategy2_candidates_table(conn)
+        _ensure_strategy3_candidates_table(conn)
         _ensure_strategy2_backtest_tables(conn)
         _ensure_strategy1_backtest_tables(conn)
         conn.commit()
@@ -1128,6 +1129,57 @@ def _ensure_strategy2_candidates_table(conn: sqlite3.Connection):
     _ensure_column(conn, "strategy2_candidates", "short_term_time_exit_days", "INTEGER DEFAULT 0")
 
 
+def _ensure_strategy3_candidates_table(conn: sqlite3.Connection):
+    """Create strategy3_candidates table if not exists (compatible migration)."""
+    conn.execute('''
+        CREATE TABLE IF NOT EXISTS strategy3_candidates (
+            id                         INTEGER PRIMARY KEY AUTOINCREMENT,
+            task_id                    TEXT NOT NULL,
+            code                       TEXT NOT NULL,
+            name                       TEXT NOT NULL,
+            evaluation_date            TEXT NOT NULL,
+            total_score                INTEGER NOT NULL,
+            level                      TEXT NOT NULL,
+            trend_score                INTEGER DEFAULT 0,
+            pullback_score             INTEGER DEFAULT 0,
+            volume_stability_score     INTEGER DEFAULT 0,
+            second_breakout_score      INTEGER DEFAULT 0,
+            risk_reward_score          INTEGER DEFAULT 0,
+            current_close              REAL DEFAULT 0,
+            ma5                        REAL,
+            ma10                       REAL,
+            ma20                       REAL,
+            ma60                       REAL,
+            ma120                      REAL,
+            recent_high                REAL,
+            pullback_pct               REAL,
+            relative_strength_60       REAL,
+            volume_ratio_5_20          REAL,
+            range_5                    REAL,
+            close_range_5              REAL,
+            support_price              REAL,
+            stop_loss                  REAL,
+            target_1                   REAL,
+            risk_ratio                 REAL,
+            rr1                        REAL,
+            score_reasons              TEXT,
+            reject_reasons             TEXT,
+            data_source                TEXT,
+            created_at                 TEXT DEFAULT (datetime('now')),
+            FOREIGN KEY (task_id) REFERENCES scan_tasks(id),
+            UNIQUE (task_id, code)
+        )
+    ''')
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_strategy3_candidates_task_score "
+        "ON strategy3_candidates(task_id, total_score DESC)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_strategy3_candidates_task_risk "
+        "ON strategy3_candidates(task_id, risk_ratio ASC)"
+    )
+
+
 def _ensure_column(conn: sqlite3.Connection, table: str, column: str, col_type: str):
     """Compatible add-column-if-not-exists helper."""
     existing = [d[1] for d in conn.execute(f"PRAGMA table_info({table})").fetchall()]
@@ -1254,6 +1306,121 @@ def _deserialize_strategy2_candidate(row: dict) -> dict:
         if isinstance(value, str) and value:
             try:
                 import json
+                row[field] = json.loads(value)
+            except (json.JSONDecodeError, TypeError):
+                row[field] = []
+        elif not value:
+            row[field] = []
+    return row
+
+
+def upsert_strategy3_candidate(task_id: str, d: dict):
+    """Insert or update a single strategy3 candidate."""
+    conn = get_conn()
+    columns = [
+        "task_id", "code", "name", "evaluation_date", "total_score", "level",
+        "trend_score", "pullback_score", "volume_stability_score",
+        "second_breakout_score", "risk_reward_score", "current_close",
+        "ma5", "ma10", "ma20", "ma60", "ma120", "recent_high",
+        "pullback_pct", "relative_strength_60", "volume_ratio_5_20",
+        "range_5", "close_range_5", "support_price", "stop_loss",
+        "target_1", "risk_ratio", "rr1", "score_reasons", "reject_reasons",
+        "data_source",
+    ]
+    values = (
+        task_id,
+        d["code"],
+        d.get("name", ""),
+        d.get("evaluation_date", ""),
+        d.get("total_score", 0),
+        d.get("level", ""),
+        d.get("trend_score", 0),
+        d.get("pullback_score", 0),
+        d.get("volume_stability_score", 0),
+        d.get("second_breakout_score", 0),
+        d.get("risk_reward_score", 0),
+        d.get("current_close", 0.0),
+        d.get("ma5"),
+        d.get("ma10"),
+        d.get("ma20"),
+        d.get("ma60"),
+        d.get("ma120"),
+        d.get("recent_high"),
+        d.get("pullback_pct"),
+        d.get("relative_strength_60"),
+        d.get("volume_ratio_5_20"),
+        d.get("range_5"),
+        d.get("close_range_5"),
+        d.get("support_price"),
+        d.get("stop_loss"),
+        d.get("target_1"),
+        d.get("risk_ratio"),
+        d.get("rr1"),
+        _json_dumps(d.get("score_reasons")),
+        _json_dumps(d.get("reject_reasons")),
+        d.get("data_source", ""),
+    )
+    marks = ", ".join("?" for _ in columns)
+    updates = ", ".join(f"{c}=excluded.{c}" for c in columns if c not in ("task_id", "code"))
+    conn.execute(
+        f"""INSERT INTO strategy3_candidates ({', '.join(columns)}) VALUES ({marks})
+            ON CONFLICT(task_id, code) DO UPDATE SET {updates}""",
+        values,
+    )
+    conn.commit()
+
+
+def get_strategy3_candidates(task_id: str = None) -> list[dict]:
+    """Get strategy3 candidates, optionally filtered by task_id."""
+    conn = get_conn()
+    if task_id:
+        rows = conn.execute(
+            "SELECT * FROM strategy3_candidates WHERE task_id=? "
+            "ORDER BY total_score DESC, risk_ratio ASC, code ASC",
+            (task_id,),
+        ).fetchall()
+    else:
+        latest = conn.execute(
+            "SELECT id FROM scan_tasks WHERE status='completed' "
+            "AND strategy_type='STRATEGY_3_STRONG_PULLBACK_SECOND_BREAKOUT' "
+            "ORDER BY started_at DESC LIMIT 1"
+        ).fetchone()
+        if not latest:
+            return []
+        rows = conn.execute(
+            "SELECT * FROM strategy3_candidates WHERE task_id=? "
+            "ORDER BY total_score DESC, risk_ratio ASC, code ASC",
+            (latest[0],),
+        ).fetchall()
+    cols = [d[1] for d in conn.execute("PRAGMA table_info(strategy3_candidates)").fetchall()]
+    return [_deserialize_strategy3_candidate(dict(zip(cols, row))) for row in rows]
+
+
+def get_strategy3_candidate(code: str, task_id: str = None) -> dict | None:
+    """Get single strategy3 candidate detail."""
+    conn = get_conn()
+    if task_id:
+        row = conn.execute(
+            "SELECT * FROM strategy3_candidates WHERE code=? AND task_id=?",
+            (code, task_id),
+        ).fetchone()
+    else:
+        row = conn.execute(
+            "SELECT * FROM strategy3_candidates WHERE code=? ORDER BY id DESC LIMIT 1",
+            (code,),
+        ).fetchone()
+    if not row:
+        return None
+    cols = [d[1] for d in conn.execute("PRAGMA table_info(strategy3_candidates)").fetchall()]
+    return _deserialize_strategy3_candidate(dict(zip(cols, row)))
+
+
+def _deserialize_strategy3_candidate(row: dict) -> dict:
+    """Convert strategy3 JSON string fields to Python lists."""
+    for field in ("score_reasons", "reject_reasons"):
+        value = row.get(field)
+        if isinstance(value, str) and value:
+            try:
                 row[field] = json.loads(value)
             except (json.JSONDecodeError, TypeError):
                 row[field] = []
