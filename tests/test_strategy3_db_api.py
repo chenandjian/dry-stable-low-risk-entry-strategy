@@ -1,5 +1,6 @@
 import scanner.db as db
 import server as server_mod
+import threading
 from fastapi.testclient import TestClient
 from strategy3.models import Strategy3Evaluation, Strategy3Indicators, Strategy3Risk
 from strategy3.scanner import _build_strategy3_discovery, re_evaluate_strategy3_task
@@ -166,6 +167,10 @@ def test_re_evaluate_strategy3_task_uses_cached_ohlc(tmp_path):
     assert result["candidates_found"] == 1
     rows = db.get_strategy3_candidates(task_id="s3-task")
     assert rows[0]["code"] == "000001"
+    task_stock = db.get_task_stocks("s3-task", limit=1)[0]
+    assert task_stock["status"] == "candidate"
+    summary = db.refresh_scan_task_counts("s3-task")
+    assert summary["candidates_count"] == 1
 
 
 def test_strategy3_candidates_api_rejects_strategy1_task(tmp_path, monkeypatch):
@@ -225,3 +230,66 @@ def test_strategy3_candidate_detail_api(tmp_path, monkeypatch):
 
     assert res.status_code == 200
     assert res.json()["code"] == "000001"
+
+
+def test_strategy3_running_status_includes_live_failed_counts(tmp_path, monkeypatch):
+    db_path = str(tmp_path / "test.db")
+    db.init_db(db_path)
+    monkeypatch.setattr(
+        server_mod,
+        "load_config",
+        lambda: {
+            "data": {"database_path": db_path},
+            "liquidity": {"min_listing_days": 350},
+            "strategy3": {"strategy_window_days": 250, "minimum_required_days": 180},
+        },
+    )
+    monkeypatch.setattr(
+        "scanner.stock_pool.get_a_stock_pool_result",
+        lambda config: {"stocks": [{"code": "000001", "name": "平安银行", "market": "SZ"}], "source": "mock"},
+    )
+    server_mod._running.update({"running": False, "task_id": None, "strategy_type": None, "stats": {}})
+
+    entered = threading.Event()
+    release = threading.Event()
+
+    def fake_scan_strategy3_all(config, progress_callback=None, task_id=None, stocks=None, **kwargs):
+        db.update_task_stock(
+            task_id,
+            "000001",
+            status="failed",
+            status_reason="ALL_DATA_SOURCES_FAILED",
+            finished_at="2026-06-25 15:30:00",
+        )
+        if progress_callback:
+            progress_callback("scanning", 1, 1, "000001 平安银行")
+        entered.set()
+        release.wait(timeout=2)
+        return {
+            "stats": {
+                "total": 1,
+                "total_stocks": 1,
+                "scanned": 1,
+                "processed": 1,
+                "skipped": 0,
+                "failed": 1,
+                "candidates_found": 0,
+                "elapsed_seconds": 0.1,
+            },
+        }
+
+    monkeypatch.setattr(server_mod, "scan_strategy3_all", fake_scan_strategy3_all)
+
+    client = TestClient(server_mod.app)
+    try:
+        res = client.post("/api/strategy3/scans")
+        assert res.status_code == 200
+        assert entered.wait(timeout=2)
+
+        status = client.get("/api/strategy3/scans/status").json()
+
+        assert status["running"] is True
+        assert status["stats"]["processed"] == 1
+        assert status["stats"]["failed"] == 1
+    finally:
+        release.set()

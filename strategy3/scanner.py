@@ -302,19 +302,65 @@ def re_evaluate_strategy3_task(config: dict, task_id: str, progress_callback=Non
         name = stock.get("name", "")
         data = db.get_ohlc(code, max_rows=kline_days)
         if not data:
+            db.update_task_stock(
+                task_id,
+                code,
+                status="failed",
+                status_reason="MISSING_LOCAL_OHLC",
+                error_detail="No local OHLC data for strategy3 re-evaluation",
+                finished_at=time.strftime("%Y-%m-%d %H:%M:%S"),
+            )
             continue
+        latest_trade_date = data[-1].get("date") if data else None
         try:
             if not passes_liquidity_filter(data, liquidity_cfg):
+                db.update_task_stock(
+                    task_id,
+                    code,
+                    status="skipped",
+                    status_reason="LIQUIDITY_FILTER_REJECTED",
+                    error_detail=None,
+                    kline_latest_date=latest_trade_date,
+                    finished_at=time.strftime("%Y-%m-%d %H:%M:%S"),
+                )
                 continue
             evaluation = engine.evaluate_at(data, code=code, name=name)
             if evaluation.passed:
                 discovery = _build_strategy3_discovery(evaluation)
                 db.upsert_strategy3_candidate(task_id, discovery)
+                db.update_task_stock(
+                    task_id,
+                    code,
+                    status="candidate",
+                    status_reason=None,
+                    error_detail=None,
+                    kline_latest_date=latest_trade_date,
+                    finished_at=time.strftime("%Y-%m-%d %H:%M:%S"),
+                )
                 new_codes.add(code)
                 if progress_callback:
                     progress_callback("discovery", len(new_codes), total, f"{code} {name}", discovery)
+            else:
+                db.update_task_stock(
+                    task_id,
+                    code,
+                    status="scanned",
+                    status_reason=evaluation.status_reason,
+                    error_detail=_evaluation_debug_json(evaluation),
+                    kline_latest_date=latest_trade_date,
+                    finished_at=time.strftime("%Y-%m-%d %H:%M:%S"),
+                )
         except Exception as exc:
             logger.error("Strategy3 re-evaluate error %s: %s", code, exc)
+            db.update_task_stock(
+                task_id,
+                code,
+                status="failed",
+                status_reason="STRATEGY3_EVALUATION_ERROR",
+                error_detail=str(exc),
+                kline_latest_date=latest_trade_date,
+                finished_at=time.strftime("%Y-%m-%d %H:%M:%S"),
+            )
 
         if progress_callback and (i + 1) % 100 == 0:
             progress_callback("scanning", i + 1, total, f"{code} {name}")
@@ -352,4 +398,3 @@ def _evaluation_debug_json(evaluation) -> str:
         "riskRatio": evaluation.risk.risk_ratio,
         "rr1": evaluation.risk.rr1,
     }, ensure_ascii=False)
-
