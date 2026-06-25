@@ -22,9 +22,10 @@ const mockRouter = { push: vi.fn(), replace: vi.fn() }
 vi.mock('vue-router', () => ({ useRoute: () => mockRoute, useRouter: () => mockRouter }))
 
 const mockApi = {
-  startScan: vi.fn(), startStrategy2Scan: vi.fn(), getScanStatus: vi.fn(),
+  startScan: vi.fn(), startStrategy2Scan: vi.fn(), startStrategy3Scan: vi.fn(), getScanStatus: vi.fn(),
   getCandidates: vi.fn(), getTaskStocks: vi.fn(), retryFailedStocks: vi.fn(),
-  getStrategy2Candidates: vi.fn(), getScanTasks: vi.fn(),
+  retryStrategy2FailedStocks: vi.fn(), retryStrategy3FailedStocks: vi.fn(),
+  getStrategy2Candidates: vi.fn(), getStrategy3Candidates: vi.fn(), getScanTasks: vi.fn(),
 }
 vi.mock('../../composables/useApi.js', () => ({ useApi: () => mockApi }))
 
@@ -63,11 +64,11 @@ describe('ScannerConsole history task context', () => {
     wrapper = mountPage(); await flushUi()
     expect(mockApi.getCandidates).toHaveBeenCalledWith({ task_id: 's1-historical' })
   })
-  it('[3] historical S2 hides retry button', async () => {
+  it('[3] historical S2 failed task shows retry button', async () => {
     mockRoute.query = { task: 's2-done' }
     mockApi.getTaskStocks.mockResolvedValue({ ok: true, total: 1, strategy_type: 'STRATEGY_2_EXTREME_DRY_STABLE', stocks: [{ code: '000002', name: 'fail', status: 'failed' }], summary: { total_stocks: 1, processed: 1, failed: 1 } })
     wrapper = mountPage(); await flushUi()
-    expect(wrapper.text()).not.toContain('重新拉取')
+    expect(wrapper.text()).toContain('重新拉取')
   })
   it('[4] unknown task shows 任务不存在', async () => {
     mockRoute.query = { task: 'not-found' }
@@ -135,7 +136,7 @@ describe('ScannerConsole history task context', () => {
     taskADeferred.resolve({ ok: true, total: 1, strategy_type: 'STRATEGY_1_CUP_HANDLE', stocks: [{ code: '111111', name: 'A-fail', status: 'failed' }], summary: { total_stocks: 10, processed: 10 } })
     await flushUi()
     expect(wrapper.text()).toContain('B-fail'); expect(wrapper.text()).not.toContain('A-fail')
-    expect(wrapper.text()).not.toContain('重新拉取')
+    expect(wrapper.text()).toContain('重新拉取')
   })
   it('[11] late B detail → live does not overwrite', async () => {
     const detailDeferred = deferred(); let detailCalled = false

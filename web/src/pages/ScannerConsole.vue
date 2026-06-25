@@ -70,6 +70,7 @@
         :logLines="logLines"
         @start="handleStartScan"
         @start-strategy2="handleStartStrategy2Scan"
+        @start-strategy3="handleStartStrategy3Scan"
       />
     </div>
 
@@ -78,7 +79,7 @@
         <span>失败股票 · {{ failuresTotal }} <span v-if="failuresTotal > failures.length" class="page-hint">当前显示 {{ failures.length }} 只</span></span>
         <div class="failure-header-actions">
           <button v-if="failuresTotal > failures.length" class="load-more-btn" @click="loadMoreFailures">加载更多</button>
-          <button v-if="activeStrategyType === 'STRATEGY_1_CUP_HANDLE'" class="retry-btn" :disabled="scanning" @click="handleRetryFailed">重新拉取</button>
+          <button v-if="canRetryFailed" class="retry-btn" :disabled="scanning" @click="handleRetryFailed">重新拉取</button>
         </div>
       </div>
       <template v-for="f in failures" :key="f.code">
@@ -110,7 +111,19 @@ import ScanEngine from '../components/ScanEngine.vue'
 
 const router = useRouter()
 const route = useRoute()
-const { startScan, startStrategy2Scan, getScanStatus, getCandidates, getTaskStocks, retryFailedStocks, getStrategy2Candidates } = useApi()
+const {
+  startScan,
+  startStrategy2Scan,
+  startStrategy3Scan,
+  getScanStatus,
+  getCandidates,
+  getTaskStocks,
+  retryFailedStocks,
+  retryStrategy2FailedStocks,
+  retryStrategy3FailedStocks,
+  getStrategy2Candidates,
+  getStrategy3Candidates,
+} = useApi()
 
 // Stage 3: 两种互斥模式
 const routeTaskId = computed(() => String(route.query.task || ''))
@@ -177,6 +190,8 @@ const FAILURE_REASON_LABELS = {
   ALL_DATA_SOURCES_FAILED: '所有数据源拉取失败，未使用本地缓存',
   STRATEGY2_EVALUATION_ERROR: '策略计算失败',
   STRATEGY2_CANDIDATE_PERSIST_FAILED: '候选结果保存失败',
+  STRATEGY3_EVALUATION_ERROR: '策略3计算失败',
+  STRATEGY3_CANDIDATE_PERSIST_FAILED: '策略3候选结果保存失败',
   LIQUIDITY_FILTER_REJECTED: '流动性过滤未通过',
 }
 function reasonLabel(code) {
@@ -198,6 +213,11 @@ const topScoreSub = computed(() => {
   const top = discoveries.value.reduce((max, d) => d.score > max.score ? d : max, { score: 0, name: '--' })
   return top.name
 })
+const canRetryFailed = computed(() => [
+  'STRATEGY_1_CUP_HANDLE',
+  'STRATEGY_2_EXTREME_DRY_STABLE',
+  'STRATEGY_3_STRONG_PULLBACK_SECOND_BREAKOUT',
+].includes(activeStrategyType.value))
 
 let pollTimer = null
 let clockTimer = null
@@ -312,6 +332,36 @@ async function handleStartStrategy2Scan() {
   }
 }
 
+async function handleStartStrategy3Scan() {
+  if (routeTaskId.value) { await router.replace({ path: '/', query: {} }) }
+  scanError.value = ''
+  try {
+    const res = await startStrategy3Scan()
+    if (!res.ok || res.error) {
+      if (res.statusCode === 409) {
+        scanError.value = `策略3扫描冲突：${res.message || res.runningTaskId || '--'}`
+      } else {
+        scanError.value = res.message || res.error || '策略3启动扫描失败'
+      }
+      return
+    }
+    scanProgress.taskId = res.taskId
+    scanProgress.total = 0
+    scanProgress.stockPoolSource = ''
+    failures.value = []
+    logLines.value = []
+    lastLogScanned = 0
+    scanning.value = true
+    activeStrategyType.value = 'STRATEGY_3_STRONG_PULLBACK_SECOND_BREAKOUT'
+    addLog('info', `策略3扫描启动 · taskId ${res.taskId}`)
+    if (pollTimer) clearInterval(pollTimer)
+    pollTimer = setInterval(pollStatus, 1000)
+  } catch (e) {
+    scanError.value = '无法连接到后端服务'
+    console.error('Strategy3 start scan failed:', e)
+  }
+}
+
 function applyStats(status, { applyTaskId = true } = {}) {
   const stats = status.stats || {}
   if (applyTaskId && status.task_id) {
@@ -342,12 +392,21 @@ function applyTaskSummary(summary = {}) {
 // ROUND7: fetch candidates without writing shared state
 async function fetchMappedResults(taskId, strategyType) {
   const isS2 = strategyType === 'STRATEGY_2_EXTREME_DRY_STABLE'
+  const isS3 = strategyType === 'STRATEGY_3_STRONG_PULLBACK_SECOND_BREAKOUT'
   if (isS2) {
     const res = await getStrategy2Candidates(taskId)
     return (res.candidates || []).map(c => ({
       code: c.code, name: c.name, score: c.total_score || 0,
       rating: c.level || '', status: c.level || '',
       detail: `量干${c.volume_dry_score || 0} 价稳${c.price_stable_score || 0} 风险${((c.risk_ratio || 0) * 100).toFixed(1)}%`,
+    }))
+  }
+  if (isS3) {
+    const res = await getStrategy3Candidates(taskId)
+    return (res.candidates || []).map(c => ({
+      code: c.code, name: c.name, score: c.total_score || 0,
+      rating: c.level || '', status: c.level || '',
+      detail: `回踩${((c.pullback_pct || 0) * 100).toFixed(1)}% 风险${((c.risk_ratio || 0) * 100).toFixed(1)}% RR${Number(c.rr1 || 0).toFixed(1)}`,
     }))
   }
   const params = taskId ? { task_id: taskId } : {}
@@ -514,9 +573,21 @@ async function pollStatus() {
 
     if (status.stats?.discoveries) {
       const isS2 = activeStrategyType.value === 'STRATEGY_2_EXTREME_DRY_STABLE'
+      const isS3 = activeStrategyType.value === 'STRATEGY_3_STRONG_PULLBACK_SECOND_BREAKOUT'
       status.stats.discoveries.forEach(d => {
         if (!discoveries.value.find(e => e.code === d.code)) {
-          const item = { code: d.code, name: d.name, score: isS2 ? (d.total_score || 0) : (d.score || 0), rating: '', status: isS2 ? (d.level || '') : statusFor(d), detail: isS2 ? `量干${d.volume_dry_score || 0} 价稳${d.price_stable_score || 0} 风险${((d.risk_ratio || 0) * 100).toFixed(1)}%` : formatDetail(d) }
+          const item = {
+            code: d.code,
+            name: d.name,
+            score: (isS2 || isS3) ? (d.total_score || 0) : (d.score || 0),
+            rating: '',
+            status: (isS2 || isS3) ? (d.level || '') : statusFor(d),
+            detail: isS2
+              ? `量干${d.volume_dry_score || 0} 价稳${d.price_stable_score || 0} 风险${((d.risk_ratio || 0) * 100).toFixed(1)}%`
+              : isS3
+                ? `回踩${((d.pullback_pct || 0) * 100).toFixed(1)}% 风险${((d.risk_ratio || 0) * 100).toFixed(1)}% RR${Number(d.rr1 || 0).toFixed(1)}`
+                : formatDetail(d),
+          }
           item.rating = item.score >= 80 ? 'strong' : item.score >= 70 ? 'medium' : 'weak'
           discoveries.value.unshift(item)
         }
@@ -570,7 +641,14 @@ async function handleRetryFailed() {
   const context = captureCurrentViewContext()
   const taskId = scanProgress.taskId
   if (!taskId) return
-  const res = await retryFailedStocks(taskId)
+  let res
+  if (activeStrategyType.value === 'STRATEGY_2_EXTREME_DRY_STABLE') {
+    res = await retryStrategy2FailedStocks(taskId)
+  } else if (activeStrategyType.value === 'STRATEGY_3_STRONG_PULLBACK_SECOND_BREAKOUT') {
+    res = await retryStrategy3FailedStocks(taskId)
+  } else {
+    res = await retryFailedStocks(taskId)
+  }
   if (!isCurrentViewContext(context) || scanProgress.taskId !== taskId) return
   if (!res.ok || res.error) { scanError.value = res.statusCode === 409 ? `扫描已在运行中：${res.running_task_id || '--'}` : (res.error || '重拉失败股票失败'); return }
   if (res.retry_count === 0) { scanError.value = '没有需要重拉的失败股票'; return }

@@ -114,4 +114,20 @@ describe('StrategyConfig scheduler controls', () => {
     expect(payload.scheduler.serial_dual_scan.enabled).toBe(false)
     expect(payload.scheduler.serial_dual_scan.cron).toBe('15 15 * * 1-5')
   })
+
+  it('saves strategy3 defaults when loading an older config without strategy3 section', async () => {
+    const wrapper = mount(StrategyConfig)
+    await flushUi()
+
+    await wrapper.find('.btn-save').trigger('click')
+    await flushUi()
+
+    const payload = api.updateConfig.mock.calls[0][0]
+    expect(payload.strategy3.enabled).toBe(true)
+    expect(payload.strategy3.strategy_window_days).toBe(250)
+    expect(payload.strategy3.minimum_required_days).toBe(180)
+    expect(payload.strategy3.candidate_min_score).toBe(75)
+    expect(payload.strategy3.core_min_score).toBe(85)
+    expect(payload.strategy3.max_risk_ratio).toBe(0.08)
+  })
 })

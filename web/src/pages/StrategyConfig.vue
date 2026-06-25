@@ -336,6 +336,84 @@
       </div>
     </section>
 
+    <!-- 策略3：强势回踩二次启动 -->
+    <section class="section strategy3-section">
+      <h3 class="section-title strategy3-title">策略3 · 强势回踩二次启动</h3>
+      <p class="section-hint">
+        策略3不是杯柄/VCP策略，也不是极致量干价稳策略。它寻找已证明强势的股票，在健康回踩、缩量企稳后二次转强的机会。
+      </p>
+
+      <div class="toggle-grid" style="margin-bottom:16px">
+        <label class="toggle-item">
+          <span class="toggle-label">启用策略3</span>
+          <button class="toggle" :class="{ active: config.strategy3?.enabled !== false }"
+            @click="toggleStrategy3('enabled')">{{ config.strategy3?.enabled !== false ? '开' : '关' }}</button>
+        </label>
+      </div>
+
+      <div class="param-grid">
+        <div class="param">
+          <label title="策略3计算仅使用最近 N 个有效交易日的数据">策略窗口天数 <span class="unit">交易日</span></label>
+          <input type="number" v-model.number="config.strategy3.strategy_window_days" @input="markDirty" step="10" min="120" />
+          <span class="default">默认 250 · 须 ≥ 最低有效数据天数</span>
+        </div>
+        <div class="param">
+          <label title="有效数据不足此天数时跳过该股票">最低有效数据天数 <span class="unit">交易日</span></label>
+          <input type="number" v-model.number="config.strategy3.minimum_required_days" @input="markDirty" step="10" min="120" />
+          <span class="default">默认 180 · ≥ 120</span>
+        </div>
+        <div class="param">
+          <label title="总分达到此值且无硬过滤才进入观察候选">候选最低分</label>
+          <input type="number" v-model.number="config.strategy3.candidate_min_score" @input="markDirty" min="0" max="100" />
+          <span class="default">默认 75 · 0-100</span>
+        </div>
+        <div class="param">
+          <label title="总分达到此值标记为核心候选">核心候选最低分</label>
+          <input type="number" v-model.number="config.strategy3.core_min_score" @input="markDirty" min="0" max="100" />
+          <span class="default">默认 85 · ≥ 候选最低分</span>
+        </div>
+        <div class="param">
+          <label title="风险比超过此值强制排除">最大风险比 <span class="unit">%</span></label>
+          <input type="range" min="1" max="15" step="0.5" v-model.number="strategy3MaxRiskPct" @input="markDirty" />
+          <div class="range-val">{{ strategy3MaxRiskPct }}%</div>
+        </div>
+        <div class="param">
+          <label title="强势股回踩不足此幅度时视为偏追高">最小回踩幅度 <span class="unit">%</span></label>
+          <input type="range" min="1" max="20" step="0.5" v-model.number="strategy3MinPullbackPct" @input="markDirty" />
+          <div class="range-val">{{ strategy3MinPullbackPct }}%</div>
+        </div>
+        <div class="param">
+          <label title="强势股回踩超过此幅度时视为趋势损坏风险">最大回踩幅度 <span class="unit">%</span></label>
+          <input type="range" min="10" max="50" step="0.5" v-model.number="strategy3MaxPullbackPct" @input="markDirty" />
+          <div class="range-val">{{ strategy3MaxPullbackPct }}%</div>
+        </div>
+        <div class="param">
+          <label title="最近5日最大振幅超过此值强制排除">最大5日振幅 <span class="unit">%</span></label>
+          <input type="range" min="3" max="25" step="0.5" v-model.number="strategy3MaxRange5Pct" @input="markDirty" />
+          <div class="range-val">{{ strategy3MaxRange5Pct }}%</div>
+        </div>
+        <div class="param">
+          <label title="最近3日涨幅超过此值视为短线过热">最大3日涨幅 <span class="unit">%</span></label>
+          <input type="range" min="3" max="20" step="0.5" v-model.number="strategy3MaxSurge3Pct" @input="markDirty" />
+          <div class="range-val">{{ strategy3MaxSurge3Pct }}%</div>
+        </div>
+        <div class="param">
+          <label title="60日相对强度低于此值时排除">最低60日相对强度 <span class="unit">%</span></label>
+          <input type="range" min="-10" max="30" step="0.5" v-model.number="strategy3MinRSPct" @input="markDirty" />
+          <div class="range-val">{{ strategy3MinRSPct }}%</div>
+        </div>
+        <div class="param">
+          <label title="V5/V20低于此值视为缩量企稳加分">缩量比例 V5/V20</label>
+          <input type="range" min="0.3" max="1.5" step="0.05" v-model.number="config.strategy3.volume_shrink_ratio" @input="markDirty" />
+          <div class="range-val">{{ config.strategy3.volume_shrink_ratio }}</div>
+        </div>
+      </div>
+
+      <div class="info-msg strategy3-info">
+        ⓘ 日线拉取天数使用全局配置 ({{ config.liquidity?.min_listing_days || '--' }} 天) · 低优先级观察只进入审计/诊断，不进入正式候选列表
+      </div>
+    </section>
+
     <!-- Actions -->
     <div class="actions-bar">
       <div v-if="saved" class="saved-msg">✓ 配置已保存</div>
@@ -355,6 +433,23 @@ import { ref, reactive, computed, onMounted, watch } from 'vue'
 import { useApi } from '../composables/useApi.js'
 
 const { getConfig, updateConfig } = useApi()
+
+const defaultStrategy3Config = {
+  enabled: true,
+  strategy_window_days: 250,
+  minimum_required_days: 180,
+  pullback_lookback_days: 60,
+  support_lookback_days: 20,
+  candidate_min_score: 75,
+  core_min_score: 85,
+  max_risk_ratio: 0.08,
+  max_pullback_from_high: 0.30,
+  min_pullback_from_high: 0.08,
+  max_recent_range_5: 0.12,
+  max_recent_surge_3: 0.10,
+  min_relative_strength_60: 0.05,
+  volume_shrink_ratio: 0.85,
+}
 
 const config = reactive({
   market: {},
@@ -381,6 +476,7 @@ const config = reactive({
     max_risk_ratio: 0.05, support_lookback_days: 10,
     buy_zone_max_premium: 0.03, stop_loss_buffer: 0.03,
   },
+  strategy3: { ...defaultStrategy3Config },
 })
 
 const dirty = ref(false)
@@ -441,6 +537,32 @@ const stopLossBufferPct = computed({
   set: (v) => { config.strategy2.stop_loss_buffer = v / 100 },
 })
 
+// Strategy3 computed: percentage sliders
+const strategy3MaxRiskPct = computed({
+  get: () => Number(((config.strategy3?.max_risk_ratio ?? 0.08) * 100).toFixed(1)),
+  set: (v) => { ensureStrategy3Config(); config.strategy3.max_risk_ratio = v / 100 },
+})
+const strategy3MinPullbackPct = computed({
+  get: () => Number(((config.strategy3?.min_pullback_from_high ?? 0.08) * 100).toFixed(1)),
+  set: (v) => { ensureStrategy3Config(); config.strategy3.min_pullback_from_high = v / 100 },
+})
+const strategy3MaxPullbackPct = computed({
+  get: () => Number(((config.strategy3?.max_pullback_from_high ?? 0.30) * 100).toFixed(1)),
+  set: (v) => { ensureStrategy3Config(); config.strategy3.max_pullback_from_high = v / 100 },
+})
+const strategy3MaxRange5Pct = computed({
+  get: () => Number(((config.strategy3?.max_recent_range_5 ?? 0.12) * 100).toFixed(1)),
+  set: (v) => { ensureStrategy3Config(); config.strategy3.max_recent_range_5 = v / 100 },
+})
+const strategy3MaxSurge3Pct = computed({
+  get: () => Number(((config.strategy3?.max_recent_surge_3 ?? 0.10) * 100).toFixed(1)),
+  set: (v) => { ensureStrategy3Config(); config.strategy3.max_recent_surge_3 = v / 100 },
+})
+const strategy3MinRSPct = computed({
+  get: () => Number(((config.strategy3?.min_relative_strength_60 ?? 0.05) * 100).toFixed(1)),
+  set: (v) => { ensureStrategy3Config(); config.strategy3.min_relative_strength_60 = v / 100 },
+})
+
 const serialDualScanTime = computed({
   get: () => cronToTime(config.scheduler?.serial_dual_scan?.cron ?? '15 15 * * 1-5'),
   set: (v) => {
@@ -468,6 +590,10 @@ function ensureSchedulerConfig() {
   if (config.scheduler.serial_dual_scan.strategy1_failed_retry_rounds === undefined) {
     config.scheduler.serial_dual_scan.strategy1_failed_retry_rounds = 3
   }
+}
+
+function ensureStrategy3Config() {
+  config.strategy3 = { ...defaultStrategy3Config, ...(config.strategy3 || {}) }
 }
 
 function cronToTime(cron) {
@@ -507,6 +633,12 @@ function toggleSerialDualScan() {
 
 function toggleStrategy2(key) {
   config.strategy2[key] = !config.strategy2[key]
+  markDirty()
+}
+
+function toggleStrategy3(key) {
+  ensureStrategy3Config()
+  config.strategy3[key] = !config.strategy3[key]
   markDirty()
 }
 
@@ -590,6 +722,25 @@ function validate() {
   if (s2.buy_zone_max_premium <= 0 || s2.buy_zone_max_premium > 0.2) errors.push('策略2: 买入溢价需在 (0, 20%] 之间')
   if (s2.stop_loss_buffer <= 0 || s2.stop_loss_buffer > 0.2) errors.push('策略2: 止损缓冲需在 (0, 20%] 之间')
 
+  // Strategy3 validation
+  ensureStrategy3Config()
+  const s3 = config.strategy3 || {}
+  if (s3.minimum_required_days < 120) errors.push('策略3: 最低有效数据天数 ≥ 120')
+  if (s3.strategy_window_days < s3.minimum_required_days) errors.push('策略3: 计算天数不能小于最低有效数据天数')
+  if (s3.strategy_window_days > (liq.min_listing_days || 250)) errors.push('策略3: 计算天数不能超过日线拉取天数')
+  if (s3.pullback_lookback_days < 40 || s3.pullback_lookback_days > 120) errors.push('策略3: 回踩回看天数需在 40-120')
+  if (s3.support_lookback_days < 10 || s3.support_lookback_days > 40) errors.push('策略3: 支撑回看天数需在 10-40')
+  if (s3.candidate_min_score < 0 || s3.candidate_min_score > 100) errors.push('策略3: 候选最低分需在 0-100')
+  if (s3.core_min_score < s3.candidate_min_score) errors.push('策略3: 核心候选最低分不能低于候选最低分')
+  if (s3.core_min_score < 0 || s3.core_min_score > 100) errors.push('策略3: 核心候选最低分需在 0-100')
+  if (s3.max_risk_ratio <= 0 || s3.max_risk_ratio > 0.5) errors.push('策略3: 最大风险比需在 (0, 50%] 之间')
+  if (s3.min_pullback_from_high < 0 || s3.min_pullback_from_high > 0.5) errors.push('策略3: 最小回踩幅度需在 0-50%')
+  if (s3.max_pullback_from_high < s3.min_pullback_from_high || s3.max_pullback_from_high > 0.8) errors.push('策略3: 最大回踩幅度需大于最小回踩且不超过 80%')
+  if (s3.max_recent_range_5 <= 0 || s3.max_recent_range_5 > 0.5) errors.push('策略3: 最大5日振幅需在 (0, 50%] 之间')
+  if (s3.max_recent_surge_3 <= 0 || s3.max_recent_surge_3 > 0.5) errors.push('策略3: 最大3日涨幅需在 (0, 50%] 之间')
+  if (s3.min_relative_strength_60 < -0.5 || s3.min_relative_strength_60 > 0.5) errors.push('策略3: 最低60日相对强度需在 -50%-50%')
+  if (s3.volume_shrink_ratio <= 0 || s3.volume_shrink_ratio > 2) errors.push('策略3: 缩量比例需在 (0, 2] 之间')
+
   return errors
 }
 
@@ -633,6 +784,7 @@ async function saveConfig() {
         serial_dual_scan: { ...config.scheduler?.serial_dual_scan },
       },
       strategy2: { ...config.strategy2 },
+      strategy3: { ...config.strategy3 },
     }
     const res = await updateConfig(payload)
     if (res.status === 'ok') {
@@ -655,6 +807,7 @@ async function resetAll() {
     if (data.config) {
       Object.assign(config, data.config)
       ensureSchedulerConfig()
+      ensureStrategy3Config()
     }
     dirty.value = false
     saved.value = false
@@ -670,6 +823,7 @@ onMounted(async () => {
     if (data.config) {
       Object.assign(config, data.config)
       ensureSchedulerConfig()
+      ensureStrategy3Config()
     }
   } catch (e) {
     // use defaults
