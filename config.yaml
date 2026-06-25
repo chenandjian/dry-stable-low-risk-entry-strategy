@@ -114,3 +114,18 @@ strategy2:
   support_lookback_days: 10
   buy_zone_max_premium: 0.03
   stop_loss_buffer: 0.03
+strategy3:
+  enabled: true
+  strategy_window_days: 250
+  minimum_required_days: 180
+  pullback_lookback_days: 60
+  support_lookback_days: 20
+  candidate_min_score: 75
+  core_min_score: 85
+  max_risk_ratio: 0.08
+  max_pullback_from_high: 0.30
+  min_pullback_from_high: 0.08
+  max_recent_range_5: 0.12
+  max_recent_surge_3: 0.10
+  min_relative_strength_60: 0.05
+  volume_shrink_ratio: 0.85
