@@ -130,13 +130,19 @@ def _normalize_row(index, row) -> dict | None:
 
 
 def _is_valid_ohlc(row: dict) -> bool:
-    """检查 OHLC 字段均为有限正数。"""
+    """检查 OHLC 字段均为有限正数，且 high/low 包含 open/close。"""
     import math
 
     for key in ("open", "high", "low", "close"):
         val = row.get(key)
         if val is None or not math.isfinite(val) or val <= 0:
             return False
+    open_ = float(row["open"])
+    high = float(row["high"])
+    low = float(row["low"])
+    close = float(row["close"])
+    if high < max(open_, close, low) or low > min(open_, close, high):
+        return False
     vol = row.get("volume")
     if vol is None or not math.isfinite(vol) or vol < 0:
         return False

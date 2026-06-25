@@ -51,6 +51,15 @@ class Strategy3Risk:
     target_1: float = 0.0
     risk_ratio: float = 0.0
     rr1: float = 0.0
+    structural_support: float = 0.0
+    structural_stop_loss: float = 0.0
+    structural_risk_ratio: float = 0.0
+    structural_rr1: float = 0.0
+    tactical_support: float = 0.0
+    tactical_stop_loss: float = 0.0
+    tactical_risk_ratio: float = 0.0
+    tactical_rr1: float = 0.0
+    support_quality: str = ""
 
 
 @dataclass
@@ -73,4 +82,3 @@ class Strategy3Evaluation:
     score_reasons: list[str] = field(default_factory=list)
     reject_reasons: list[str] = field(default_factory=list)
     status_reason: str | None = None
-

@@ -51,6 +51,14 @@ describe('Strategy3Results', () => {
         rr1: 2.1,
         support_price: 9.5,
         stop_loss: 9.31,
+        tactical_support: 9.5,
+        tactical_stop_loss: 9.31,
+        tactical_risk_ratio: 0.05,
+        tactical_rr1: 2.1,
+        structural_support: 8.8,
+        structural_stop_loss: 8.62,
+        structural_risk_ratio: 0.138,
+        support_quality: 'ma20',
         target_1: 12,
         evaluation_date: '2026-06-25',
       }],
@@ -68,7 +76,8 @@ describe('Strategy3Results', () => {
     expect(wrapper.text()).toContain('核心候选')
     expect(wrapper.text()).toContain('趋势')
     expect(wrapper.text()).toContain('回踩幅度')
-    expect(wrapper.text()).toContain('风险比')
+    expect(wrapper.text()).toContain('战术风险比')
+    expect(wrapper.text()).toContain('结构风险比')
     expect(wrapper.text()).toContain('RR1')
     expect(wrapper.text()).toContain('2026-06-25')
   })

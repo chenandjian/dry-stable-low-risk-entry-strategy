@@ -22,6 +22,30 @@ def _row(day: str, close: float = 10.0) -> dict:
     }
 
 
+def _invalid_high_row(day: str) -> dict:
+    return {
+        "date": day,
+        "open": 10.0,
+        "high": 9.8,
+        "low": 9.5,
+        "close": 9.9,
+        "volume": 1_000_000,
+        "turnover": 9_900_000,
+    }
+
+
+def _nan_open_row(day: str) -> dict:
+    row = _row(day)
+    row["open"] = float("nan")
+    return row
+
+
+def _infinite_turnover_row(day: str) -> dict:
+    row = _row(day)
+    row["turnover"] = float("inf")
+    return row
+
+
 def test_target_trade_date_before_close_confirm_uses_previous_weekday():
     now = datetime(2026, 6, 15, 14, 0, 0)  # Monday
 
@@ -162,3 +186,119 @@ def test_fetch_after_close_does_not_return_stale_intraday_cached_target_when_all
     assert result.quote_status == "suspended"
     assert result.data[-1]["date"] == "2026-06-15"
     assert db.get_ohlc("000831")[-1]["date"] == "2026-06-15"
+
+
+def test_fetch_rejects_invalid_ohlc_source_and_uses_fallback(monkeypatch, tmp_path):
+    db.init_db(str(tmp_path / "cuphandle.db"))
+    calls = []
+
+    def fake_try_fetch(code, ds_name, attempts, sleep_fn, kline_days):
+        calls.append(ds_name)
+        if ds_name == "sina":
+            return [_invalid_high_row("2026-06-16")], 1, None
+        if ds_name == "tencent":
+            return [_row("2026-06-16", close=11.0)], 1, None
+        return None, 1, "empty response"
+
+    monkeypatch.setattr("scanner.daily_data_service._try_fetch_source", fake_try_fetch)
+    context = CacheFreshnessContext(
+        target_trade_date="2026-06-16",
+        min_fetch_time="2026-06-16 15:00:00",
+    )
+
+    result = fetch_with_retry(
+        "000831",
+        "sina",
+        retry_attempts=1,
+        fallback_attempts=1,
+        sleep_fn=lambda _: None,
+        source_chain=["sina", "tencent"],
+        kline_days=250,
+        freshness_context=context,
+    )
+
+    assert calls == ["sina", "tencent"]
+    assert result.data[-1]["close"] == 11.0
+    assert result.fallback_source == "tencent"
+    assert "invalid OHLC" in result.source_errors["sina"]
+    assert db.get_ohlc("000831")[-1]["close"] == 11.0
+
+
+def test_fetch_returns_failed_result_when_all_sources_have_invalid_ohlc(monkeypatch, tmp_path):
+    db.init_db(str(tmp_path / "cuphandle.db"))
+
+    def fake_try_fetch(code, ds_name, attempts, sleep_fn, kline_days):
+        return [_invalid_high_row("2026-06-16")], 1, None
+
+    monkeypatch.setattr("scanner.daily_data_service._try_fetch_source", fake_try_fetch)
+    context = CacheFreshnessContext(
+        target_trade_date="2026-06-16",
+        min_fetch_time="2026-06-16 15:00:00",
+    )
+
+    result = fetch_with_retry(
+        "000831",
+        "sina",
+        retry_attempts=1,
+        fallback_attempts=1,
+        sleep_fn=lambda _: None,
+        source_chain=["sina", "tencent"],
+        kline_days=250,
+        freshness_context=context,
+    )
+
+    assert result.data is None
+    assert result.primary_error == "invalid OHLC relationship"
+    assert result.fallback_error == "invalid OHLC relationship"
+    assert not db.get_ohlc("000831")
+
+
+def test_fetch_rejects_non_finite_ohlc_values(monkeypatch, tmp_path):
+    db.init_db(str(tmp_path / "cuphandle.db"))
+
+    def fake_try_fetch(code, ds_name, attempts, sleep_fn, kline_days):
+        return [_nan_open_row("2026-06-16")], 1, None
+
+    monkeypatch.setattr("scanner.daily_data_service._try_fetch_source", fake_try_fetch)
+    context = CacheFreshnessContext(
+        target_trade_date="2026-06-16",
+        min_fetch_time="2026-06-16 15:00:00",
+    )
+
+    result = fetch_with_retry(
+        "000831",
+        "sina",
+        retry_attempts=1,
+        fallback_attempts=1,
+        sleep_fn=lambda _: None,
+        source_chain=["sina"],
+        kline_days=250,
+        freshness_context=context,
+    )
+
+    assert result.data is None
+    assert result.primary_error == "invalid OHLC values"
+    assert not db.get_ohlc("000831")
+
+
+def test_fetch_rejects_non_finite_turnover_when_present(monkeypatch, tmp_path):
+    db.init_db(str(tmp_path / "cuphandle.db"))
+
+    def fake_try_fetch(code, ds_name, attempts, sleep_fn, kline_days):
+        return [_infinite_turnover_row("2026-06-16")], 1, None
+
+    monkeypatch.setattr("scanner.daily_data_service._try_fetch_source", fake_try_fetch)
+    result = fetch_with_retry(
+        "000831",
+        "sina",
+        retry_attempts=1,
+        fallback_attempts=1,
+        sleep_fn=lambda _: None,
+        source_chain=["sina"],
+        kline_days=250,
+        freshness_context=CacheFreshnessContext(target_trade_date="2026-06-16"),
+    )
+
+    assert result.data is None
+    assert result.primary_error == "invalid OHLC values"
+    assert not db.get_ohlc("000831")

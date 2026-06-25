@@ -1,6 +1,9 @@
 from datetime import date, timedelta
 
 from strategy3.engine import StrongPullbackSecondBreakoutEngine
+from strategy3.indicators import compute_indicators
+from strategy3.models import Strategy3Indicators
+from strategy3.risk import compute_strategy3_risk
 
 
 def make_strategy3_candidate_bars(days=220):
@@ -79,3 +82,75 @@ def test_engine_rejects_insufficient_strategy_data():
 
     assert result.passed is False
     assert result.status_reason == "INSUFFICIENT_STRATEGY_DATA"
+
+
+def test_relative_strength_60_subtracts_market_index_return():
+    stock = make_strategy3_candidate_bars()
+    market = []
+    for row in stock:
+        market.append({
+            **row,
+            "close": 20.0,
+            "open": 20.0,
+            "high": 20.2,
+            "low": 19.8,
+        })
+    market[-61]["close"] = 10.0
+    market[-1]["close"] = 11.0
+
+    ind = compute_indicators(
+        stock,
+        {"pullback_lookback_days": 60},
+        market_data=market,
+    )
+
+    assert abs(ind.relative_strength_60 - (ind.return_60 - 0.10)) < 1e-9
+
+
+def test_risk_model_uses_tactical_support_but_keeps_structural_risk_visible():
+    start = date(2026, 1, 1)
+    data = []
+    for i in range(80):
+        row = {
+            "date": (start + timedelta(days=i)).strftime("%Y-%m-%d"),
+            "open": 95.0,
+            "high": 100.0,
+            "low": 92.0,
+            "close": 95.0,
+            "volume": 1_000_000,
+            "turnover": 95_000_000,
+        }
+        if i == 65:
+            row.update({"open": 109.0, "high": 112.0, "low": 108.0, "close": 110.0})
+        if i == 70:
+            row.update({"open": 89.0, "high": 90.0, "low": 80.0, "close": 88.0})
+        if i == 79:
+            row.update({"open": 99.0, "high": 101.0, "low": 99.0, "close": 100.0})
+        data.append(row)
+    ind = Strategy3Indicators(
+        current_close=100.0,
+        ma20=96.0,
+        ma60=90.0,
+        recent_high=112.0,
+    )
+
+    risk, rejects, score, reasons = compute_strategy3_risk(
+        data,
+        ind,
+        {
+            "support_lookback_days": 20,
+            "pullback_lookback_days": 60,
+            "max_risk_ratio": 0.08,
+        },
+    )
+
+    assert risk.structural_support == 80.0
+    assert risk.structural_risk_ratio > 0.20
+    assert risk.tactical_support == 96.0
+    assert risk.support_price == risk.tactical_support
+    assert risk.stop_loss == risk.tactical_stop_loss
+    assert risk.risk_ratio == risk.tactical_risk_ratio
+    assert risk.risk_ratio < 0.08
+    assert "RISK_RATIO_TOO_HIGH" not in rejects
+    assert score > 0
+    assert "tactical_support:ma20" in reasons

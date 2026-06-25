@@ -7,6 +7,7 @@
 """
 import json
 import logging
+import math
 import time
 from datetime import date, datetime, timedelta
 from dataclasses import dataclass
@@ -151,6 +152,12 @@ def fetch_with_retry(
             continue
 
         if data:
+            invalid_error = _validate_ohlc_data(data)
+            if invalid_error:
+                logger.warning("%s  %s  %s", code, ds_name, invalid_error)
+                source_errors[ds_name] = f"attempts={used_attempts} error={invalid_error}"
+                failed_sources.add(ds_name)
+                continue
             target_date = freshness_context.target_trade_date if freshness_context else None
             effective_cached = trim_ohlc_to_target(cached or [], target_date)
             effective_data = trim_ohlc_to_target(data, target_date)
@@ -235,6 +242,9 @@ def _try_fetch_source(
             fetch_fn = _daily_fetch_fn(ds_name)
             data = _call_fetch_fn(fetch_fn, code, kline_days)
             if data:
+                invalid_error = _validate_ohlc_data(data)
+                if invalid_error:
+                    return None, attempt, invalid_error
                 return data, attempt, None
             last_error = "empty response"
         except ValueError as exc:
@@ -358,6 +368,34 @@ def _merge_data(cached: list[dict], fresh: list[dict], max_rows: int = 0) -> lis
     if max_rows and len(merged) > max_rows:
         merged = merged[-max_rows:]
     return merged
+
+
+def _validate_ohlc_data(data: list[dict]) -> str | None:
+    """Return a stable error string when fetched OHLC rows are not trustworthy."""
+    for row in data:
+        try:
+            open_ = float(row["open"])
+            high = float(row["high"])
+            low = float(row["low"])
+            close = float(row["close"])
+            volume = float(row["volume"])
+        except (TypeError, ValueError, KeyError):
+            return "invalid OHLC structure"
+        if not all(math.isfinite(v) for v in (open_, high, low, close, volume)):
+            return "invalid OHLC values"
+        if min(open_, high, low, close) <= 0 or volume < 0:
+            return "invalid OHLC values"
+        turnover = row.get("turnover")
+        if turnover is not None:
+            try:
+                turnover_value = float(turnover)
+            except (TypeError, ValueError):
+                return "invalid OHLC values"
+            if not math.isfinite(turnover_value) or turnover_value < 0:
+                return "invalid OHLC values"
+        if high < max(open_, close, low) or low > min(open_, close, high):
+            return "invalid OHLC relationship"
+    return None
 
 
 def _fetch_time_is_fresh(context: CacheFreshnessContext) -> bool:

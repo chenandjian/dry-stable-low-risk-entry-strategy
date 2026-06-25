@@ -1162,6 +1162,15 @@ def _ensure_strategy3_candidates_table(conn: sqlite3.Connection):
             target_1                   REAL,
             risk_ratio                 REAL,
             rr1                        REAL,
+            structural_support         REAL,
+            structural_stop_loss       REAL,
+            structural_risk_ratio      REAL,
+            structural_rr1             REAL,
+            tactical_support           REAL,
+            tactical_stop_loss         REAL,
+            tactical_risk_ratio        REAL,
+            tactical_rr1               REAL,
+            support_quality            TEXT,
             score_reasons              TEXT,
             reject_reasons             TEXT,
             data_source                TEXT,
@@ -1178,6 +1187,15 @@ def _ensure_strategy3_candidates_table(conn: sqlite3.Connection):
         "CREATE INDEX IF NOT EXISTS idx_strategy3_candidates_task_risk "
         "ON strategy3_candidates(task_id, risk_ratio ASC)"
     )
+    _ensure_column(conn, "strategy3_candidates", "structural_support", "REAL")
+    _ensure_column(conn, "strategy3_candidates", "structural_stop_loss", "REAL")
+    _ensure_column(conn, "strategy3_candidates", "structural_risk_ratio", "REAL")
+    _ensure_column(conn, "strategy3_candidates", "structural_rr1", "REAL")
+    _ensure_column(conn, "strategy3_candidates", "tactical_support", "REAL")
+    _ensure_column(conn, "strategy3_candidates", "tactical_stop_loss", "REAL")
+    _ensure_column(conn, "strategy3_candidates", "tactical_risk_ratio", "REAL")
+    _ensure_column(conn, "strategy3_candidates", "tactical_rr1", "REAL")
+    _ensure_column(conn, "strategy3_candidates", "support_quality", "TEXT")
 
 
 def _ensure_column(conn: sqlite3.Connection, table: str, column: str, col_type: str):
@@ -1324,8 +1342,11 @@ def upsert_strategy3_candidate(task_id: str, d: dict):
         "ma5", "ma10", "ma20", "ma60", "ma120", "recent_high",
         "pullback_pct", "relative_strength_60", "volume_ratio_5_20",
         "range_5", "close_range_5", "support_price", "stop_loss",
-        "target_1", "risk_ratio", "rr1", "score_reasons", "reject_reasons",
-        "data_source",
+        "target_1", "risk_ratio", "rr1",
+        "structural_support", "structural_stop_loss", "structural_risk_ratio",
+        "structural_rr1", "tactical_support", "tactical_stop_loss",
+        "tactical_risk_ratio", "tactical_rr1", "support_quality",
+        "score_reasons", "reject_reasons", "data_source",
     ]
     values = (
         task_id,
@@ -1356,6 +1377,15 @@ def upsert_strategy3_candidate(task_id: str, d: dict):
         d.get("target_1"),
         d.get("risk_ratio"),
         d.get("rr1"),
+        d.get("structural_support"),
+        d.get("structural_stop_loss"),
+        d.get("structural_risk_ratio"),
+        d.get("structural_rr1"),
+        d.get("tactical_support"),
+        d.get("tactical_stop_loss"),
+        d.get("tactical_risk_ratio"),
+        d.get("tactical_rr1"),
+        d.get("support_quality", ""),
         _json_dumps(d.get("score_reasons")),
         _json_dumps(d.get("reject_reasons")),
         d.get("data_source", ""),

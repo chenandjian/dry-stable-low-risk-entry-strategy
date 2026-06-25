@@ -42,9 +42,10 @@
           <th>二次转强</th>
           <th>风险收益</th>
           <th>回踩幅度</th>
-          <th>风险比</th>
+          <th>战术风险比</th>
+          <th>结构风险比</th>
           <th>RR1</th>
-          <th>支撑/止损/目标</th>
+          <th>战术支撑/止损/目标</th>
           <th>评估日</th>
         </tr>
       </thead>
@@ -60,13 +61,14 @@
             <td>{{ c.second_breakout_score ?? 0 }}</td>
             <td>{{ c.risk_reward_score ?? 0 }}</td>
             <td>{{ formatPct(c.pullback_pct) }}</td>
-            <td>{{ formatPct(c.risk_ratio) }}</td>
+            <td>{{ formatPct(c.tactical_risk_ratio ?? c.risk_ratio) }}</td>
+            <td>{{ formatPct(c.structural_risk_ratio) }}</td>
             <td>{{ fmtNum(c.rr1, 2) }}</td>
-            <td>{{ fmtPrice(c.support_price) }} / {{ fmtPrice(c.stop_loss) }} / {{ fmtPrice(c.target_1) }}</td>
+            <td>{{ fmtPrice(c.tactical_support ?? c.support_price) }} / {{ fmtPrice(c.tactical_stop_loss ?? c.stop_loss) }} / {{ fmtPrice(c.target_1) }}</td>
             <td>{{ c.evaluation_date || '--' }}</td>
           </tr>
           <tr v-if="expandedCode === c.code" class="detail-row">
-            <td colspan="13">
+            <td colspan="14">
               <div class="detail-panel">
                 <div class="detail-grid">
                   <div>
@@ -78,8 +80,10 @@
                   <div>
                     <h4>量能与风险</h4>
                     <div>V5/V20：{{ fmtNum(c.volume_ratio_5_20, 3) }}</div>
-                    <div>支撑：{{ fmtPrice(c.support_price) }} · 止损：{{ fmtPrice(c.stop_loss) }} · 第一目标：{{ fmtPrice(c.target_1) }}</div>
-                    <div>风险比：{{ formatPct(c.risk_ratio) }} · RR1：{{ fmtNum(c.rr1, 2) }}</div>
+                    <div>战术支撑：{{ fmtPrice(c.tactical_support ?? c.support_price) }} · 战术止损：{{ fmtPrice(c.tactical_stop_loss ?? c.stop_loss) }} · 第一目标：{{ fmtPrice(c.target_1) }}</div>
+                    <div>战术风险比：{{ formatPct(c.tactical_risk_ratio ?? c.risk_ratio) }} · 战术RR1：{{ fmtNum(c.tactical_rr1 ?? c.rr1, 2) }}</div>
+                    <div>结构支撑：{{ fmtPrice(c.structural_support) }} · 结构止损：{{ fmtPrice(c.structural_stop_loss) }} · 结构风险比：{{ formatPct(c.structural_risk_ratio) }}</div>
+                    <div>支撑口径：{{ c.support_quality || '--' }}</div>
                   </div>
                   <div>
                     <h4>评分原因</h4>

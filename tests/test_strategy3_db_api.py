@@ -2,8 +2,9 @@ import scanner.db as db
 import server as server_mod
 import threading
 from fastapi.testclient import TestClient
+from scanner.daily_data_service import FetchResult
 from strategy3.models import Strategy3Evaluation, Strategy3Indicators, Strategy3Risk
-from strategy3.scanner import _build_strategy3_discovery, re_evaluate_strategy3_task
+from strategy3.scanner import _build_strategy3_discovery, re_evaluate_strategy3_task, scan_strategy3_all
 from tests.test_strategy3_engine import make_strategy3_candidate_bars
 
 
@@ -126,6 +127,14 @@ def test_build_strategy3_discovery_contains_frontend_fields():
             target_1=12.0,
             risk_ratio=0.069,
             rr1=2.9,
+            structural_support=8.8,
+            structural_stop_loss=8.62,
+            structural_risk_ratio=0.138,
+            tactical_support=9.5,
+            tactical_stop_loss=9.31,
+            tactical_risk_ratio=0.069,
+            tactical_rr1=2.9,
+            support_quality="ma20",
         ),
         score_reasons=["强趋势"],
     )
@@ -137,11 +146,54 @@ def test_build_strategy3_discovery_contains_frontend_fields():
     assert d["risk_ratio"] == 0.069
     assert d["rr1"] == 2.9
     assert d["trend_score"] == 25
+    assert d["structural_support"] == 8.8
+    assert d["tactical_support"] == 9.5
+    assert d["tactical_risk_ratio"] == 0.069
+    assert d["support_quality"] == "ma20"
 
 
-def test_re_evaluate_strategy3_task_uses_cached_ohlc(tmp_path):
+def test_strategy3_candidate_table_roundtrip_tactical_and_structural_risk(tmp_path):
+    db.init_db(str(tmp_path / "test.db"))
+    db.create_scan_task(
+        "s3-task",
+        "2026-06-25 15:30:00",
+        strategy_type="STRATEGY_3_STRONG_PULLBACK_SECOND_BREAKOUT",
+    )
+
+    db.upsert_strategy3_candidate("s3-task", {
+        "code": "000001",
+        "name": "平安银行",
+        "evaluation_date": "2026-06-25",
+        "total_score": 86,
+        "level": "核心候选",
+        "support_price": 9.5,
+        "stop_loss": 9.31,
+        "target_1": 12.0,
+        "risk_ratio": 0.069,
+        "rr1": 2.9,
+        "structural_support": 8.8,
+        "structural_stop_loss": 8.62,
+        "structural_risk_ratio": 0.138,
+        "tactical_support": 9.5,
+        "tactical_stop_loss": 9.31,
+        "tactical_risk_ratio": 0.069,
+        "tactical_rr1": 2.9,
+        "support_quality": "ma20",
+    })
+
+    row = db.get_strategy3_candidates(task_id="s3-task")[0]
+
+    assert row["structural_support"] == 8.8
+    assert row["structural_risk_ratio"] == 0.138
+    assert row["tactical_support"] == 9.5
+    assert row["tactical_risk_ratio"] == 0.069
+    assert row["support_quality"] == "ma20"
+
+
+def test_re_evaluate_strategy3_task_uses_cached_ohlc(tmp_path, monkeypatch):
     db_path = str(tmp_path / "test.db")
     db.init_db(db_path)
+    monkeypatch.setattr("strategy3.scanner.fetch_market_index_daily", lambda symbol=None: [])
     db.create_scan_task(
         "s3-task",
         "2026-06-25 15:30:00",
@@ -171,6 +223,138 @@ def test_re_evaluate_strategy3_task_uses_cached_ohlc(tmp_path):
     assert task_stock["status"] == "candidate"
     summary = db.refresh_scan_task_counts("s3-task")
     assert summary["candidates_count"] == 1
+
+
+def test_scan_strategy3_all_passes_truncated_market_data(monkeypatch, tmp_path):
+    import strategy3.scanner as s3_scanner
+
+    db_path = str(tmp_path / "test.db")
+    db.init_db(db_path)
+    db.create_scan_task(
+        "s3-task",
+        "2026-06-25 15:30:00",
+        strategy_type="STRATEGY_3_STRONG_PULLBACK_SECOND_BREAKOUT",
+    )
+    stocks = [{"code": "000001", "name": "平安银行", "market": "SZ"}]
+    db.save_task_stocks("s3-task", stocks)
+    data = make_strategy3_candidate_bars()
+    data[-1]["date"] = "2026-06-25"
+    market_full = [
+        {"date": "2026-06-24", "open": 10, "high": 10, "low": 10, "close": 10, "volume": 1},
+        {"date": "2026-06-25", "open": 10, "high": 10, "low": 10, "close": 11, "volume": 1},
+        {"date": "2026-06-26", "open": 10, "high": 10, "low": 10, "close": 99, "volume": 1},
+    ]
+    calls = []
+
+    monkeypatch.setattr(
+        s3_scanner,
+        "fetch_with_retry",
+        lambda *args, **kwargs: FetchResult(
+            data=data,
+            primary_source="cache",
+            fallback_source="cache",
+            from_cache=True,
+        ),
+    )
+    monkeypatch.setattr(s3_scanner, "fetch_market_index_daily", lambda symbol=None: list(market_full), raising=False)
+
+    class FakeEngine:
+        def __init__(self, config):
+            pass
+
+        def evaluate_at(self, rows, *, code="", name="", market_data=None):
+            calls.append([row["date"] for row in (market_data or [])])
+            return Strategy3Evaluation(
+                False,
+                code=code,
+                name=name,
+                evaluation_date=rows[-1]["date"],
+                status_reason="SCORE_BELOW_THRESHOLD",
+            )
+
+    monkeypatch.setattr(s3_scanner, "StrongPullbackSecondBreakoutEngine", FakeEngine)
+
+    scan_strategy3_all(
+        {
+            "data": {"database_path": db_path, "daily_sources": ["cache"], "worker_count": 1},
+            "liquidity": {"enabled": False, "min_listing_days": 350},
+            "market_environment": {"index_symbol": "sh000001"},
+            "strategy3": {"strategy_window_days": 250, "minimum_required_days": 180},
+        },
+        task_id="s3-task",
+        stocks=stocks,
+        worker_count=1,
+    )
+
+    assert calls == [["2026-06-24", "2026-06-25"]]
+
+
+def test_scan_strategy3_all_marks_fallback_when_market_data_misses_evaluation_date(monkeypatch, tmp_path):
+    import json
+    import strategy3.scanner as s3_scanner
+
+    db_path = str(tmp_path / "test.db")
+    db.init_db(db_path)
+    db.create_scan_task(
+        "s3-task",
+        "2026-06-25 15:30:00",
+        strategy_type="STRATEGY_3_STRONG_PULLBACK_SECOND_BREAKOUT",
+    )
+    stocks = [{"code": "000001", "name": "平安银行", "market": "SZ"}]
+    db.save_task_stocks("s3-task", stocks)
+    data = make_strategy3_candidate_bars()
+    data[-1]["date"] = "2026-06-25"
+
+    monkeypatch.setattr(
+        s3_scanner,
+        "fetch_with_retry",
+        lambda *args, **kwargs: FetchResult(
+            data=data,
+            primary_source="cache",
+            fallback_source="cache",
+            from_cache=True,
+        ),
+    )
+    monkeypatch.setattr(
+        s3_scanner,
+        "fetch_market_index_daily",
+        lambda symbol=None: [
+            {"date": "2026-06-24", "open": 10, "high": 10, "low": 10, "close": 10, "volume": 1},
+        ],
+        raising=False,
+    )
+
+    class FakeEngine:
+        def __init__(self, config):
+            pass
+
+        def evaluate_at(self, rows, *, code="", name="", market_data=None):
+            assert market_data == []
+            return Strategy3Evaluation(
+                False,
+                code=code,
+                name=name,
+                evaluation_date=rows[-1]["date"],
+                status_reason="SCORE_BELOW_THRESHOLD",
+            )
+
+    monkeypatch.setattr(s3_scanner, "StrongPullbackSecondBreakoutEngine", FakeEngine)
+
+    scan_strategy3_all(
+        {
+            "data": {"database_path": db_path, "daily_sources": ["cache"], "worker_count": 1},
+            "liquidity": {"enabled": False, "min_listing_days": 350},
+            "market_environment": {"index_symbol": "sh000001"},
+            "strategy3": {"strategy_window_days": 250, "minimum_required_days": 180},
+        },
+        task_id="s3-task",
+        stocks=stocks,
+        worker_count=1,
+    )
+
+    task_stock = db.get_task_stocks("s3-task", limit=1)[0]
+    debug = json.loads(task_stock["error_detail"])
+    assert "NO_MARKET_DATA_RELATIVE_STRENGTH_FALLBACK" in debug["scoreReasons"]
 
 
 def test_strategy3_candidates_api_rejects_strategy1_task(tmp_path, monkeypatch):

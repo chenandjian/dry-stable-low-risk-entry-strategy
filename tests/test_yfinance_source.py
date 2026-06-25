@@ -103,6 +103,16 @@ def test_infinite_turnover_filtered():
     assert _is_valid_ohlc(row) is False
 
 
+def test_high_below_price_components_filtered():
+    row = {"open": 10.0, "high": 9.8, "low": 9.5, "close": 9.9, "volume": 1_000_000, "turnover": 9_900_000}
+    assert _is_valid_ohlc(row) is False
+
+
+def test_low_above_price_components_filtered():
+    row = {"open": 10.0, "high": 10.8, "low": 10.2, "close": 10.5, "volume": 1_000_000, "turnover": 10_500_000}
+    assert _is_valid_ohlc(row) is False
+
+
 # ── _normalize_history ───────────────────────────────────────────────
 
 def test_normalize_history_sorts_by_date():

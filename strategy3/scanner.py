@@ -17,6 +17,7 @@ from scanner.daily_data_service import (
     is_transient_source_busy,
 )
 from scanner.data_source import DataSourceManager
+from scanner.index_source import fetch_market_index_daily
 from scanner.liquidity_filter import passes_liquidity_filter
 from strategy3.engine import StrongPullbackSecondBreakoutEngine
 
@@ -60,6 +61,7 @@ def scan_strategy3_all(
 
     mgr = DataSourceManager()
     engine = StrongPullbackSecondBreakoutEngine(config)
+    market_data_full, market_fallback_reason = _load_market_data(config)
     candidate_by_code = {}
     candidate_lock = threading.Lock()
     busy_retries_by_code: dict[str, int] = {}
@@ -175,7 +177,9 @@ def scan_strategy3_all(
                                   fetch_result=fetch_result)
                     continue
 
-                evaluation = engine.evaluate_at(data, code=code, name=name)
+                market_window = _select_market_window(market_data_full, latest_trade_date)
+                evaluation = engine.evaluate_at(data, code=code, name=name, market_data=market_window)
+                _mark_market_fallback(evaluation, market_fallback_reason, market_window)
                 if evaluation.passed:
                     discovery = _build_strategy3_discovery(evaluation, fetch_result)
                     try:
@@ -275,6 +279,15 @@ def _build_strategy3_discovery(evaluation, fetch_result=None) -> dict:
         "target_1": risk.target_1,
         "risk_ratio": risk.risk_ratio,
         "rr1": risk.rr1,
+        "structural_support": risk.structural_support,
+        "structural_stop_loss": risk.structural_stop_loss,
+        "structural_risk_ratio": risk.structural_risk_ratio,
+        "structural_rr1": risk.structural_rr1,
+        "tactical_support": risk.tactical_support,
+        "tactical_stop_loss": risk.tactical_stop_loss,
+        "tactical_risk_ratio": risk.tactical_risk_ratio,
+        "tactical_rr1": risk.tactical_rr1,
+        "support_quality": risk.support_quality,
         "score_reasons": evaluation.score_reasons,
         "reject_reasons": evaluation.reject_reasons,
         "data_source": fetch_result.primary_source if fetch_result else "",
@@ -293,6 +306,7 @@ def re_evaluate_strategy3_task(config: dict, task_id: str, progress_callback=Non
     liquidity_cfg = config.get("liquidity", {})
     kline_days = liquidity_cfg.get("min_listing_days", 350)
     engine = StrongPullbackSecondBreakoutEngine(config)
+    market_data_full, market_fallback_reason = _load_market_data(config)
     old_candidates = {c["code"] for c in db.get_strategy3_candidates(task_id=task_id)}
     total = len(stocks)
     new_codes = set()
@@ -324,7 +338,9 @@ def re_evaluate_strategy3_task(config: dict, task_id: str, progress_callback=Non
                     finished_at=time.strftime("%Y-%m-%d %H:%M:%S"),
                 )
                 continue
-            evaluation = engine.evaluate_at(data, code=code, name=name)
+            market_window = _select_market_window(market_data_full, latest_trade_date)
+            evaluation = engine.evaluate_at(data, code=code, name=name, market_data=market_window)
+            _mark_market_fallback(evaluation, market_fallback_reason, market_window)
             if evaluation.passed:
                 discovery = _build_strategy3_discovery(evaluation)
                 db.upsert_strategy3_candidate(task_id, discovery)
@@ -398,3 +414,36 @@ def _evaluation_debug_json(evaluation) -> str:
         "riskRatio": evaluation.risk.risk_ratio,
         "rr1": evaluation.risk.rr1,
     }, ensure_ascii=False)
+
+
+def _load_market_data(config: dict) -> tuple[list[dict], str | None]:
+    market_cfg = config.get("market_environment", {}) or {}
+    symbol = market_cfg.get("index_symbol")
+    try:
+        market_data = fetch_market_index_daily(symbol) or []
+    except Exception as exc:
+        logger.warning("Strategy3 market index fetch failed: %s", exc)
+        return [], "NO_MARKET_DATA_RELATIVE_STRENGTH_FALLBACK"
+    if not market_data:
+        logger.warning("Strategy3 market index unavailable, relative strength falls back to stock return")
+        return [], "NO_MARKET_DATA_RELATIVE_STRENGTH_FALLBACK"
+    return market_data, None
+
+
+def _select_market_window(market_data: list[dict], decision_date: str | None) -> list[dict]:
+    if not market_data or not decision_date:
+        return []
+    window = [
+        row for row in market_data
+        if isinstance(row, dict) and row.get("date") and row.get("date") <= decision_date
+    ]
+    if not window or window[-1].get("date") != decision_date:
+        return []
+    return window
+
+
+def _mark_market_fallback(evaluation, fallback_reason: str | None, market_window: list[dict]) -> None:
+    if not market_window:
+        fallback_reason = fallback_reason or "NO_MARKET_DATA_RELATIVE_STRENGTH_FALLBACK"
+    if fallback_reason and not market_window and fallback_reason not in evaluation.score_reasons:
+        evaluation.score_reasons.append(fallback_reason)
