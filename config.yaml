@@ -10,11 +10,11 @@ data:
   cache_dir: ./cache/daily
   database_path: ./data/cuphandle.db
   daily_sources:
-    - baidu
-    - sina
-    - tencent
-    - yfinance
-  start_date: "2025-01-01"
+  - baidu
+  - sina
+  - tencent
+  - yfinance
+  start_date: '2025-01-01'
   end_date: null
   use_fq: true
   scan_window_days: 250
@@ -26,7 +26,7 @@ liquidity:
   min_avg_turnover: 100000000
   min_avg_volume: 5000000
   min_latest_turnover: 80000000
-  min_stock_price: 10
+  min_stock_price: 5
   min_listing_days: 500
 cup:
   min_duration: 35
