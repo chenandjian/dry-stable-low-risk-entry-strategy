@@ -12,6 +12,12 @@
         </option>
       </select>
       <span class="task-status" v-if="selectedTaskId">状态: {{ selectedTask?.status || '--' }}</span>
+      <button
+        data-test="export-candidates"
+        class="export-btn"
+        :disabled="!candidates.length"
+        @click="exportCandidates"
+      >一键导出列表</button>
     </div>
 
     <!-- Summary -->
@@ -124,6 +130,7 @@
 
 <script>
 import { useApi } from '../composables/useApi.js'
+import { downloadCsv } from '../utils/csvExport.js'
 
 export default {
   name: 'Strategy2Results',
@@ -216,6 +223,29 @@ export default {
     toggleDetail(c) {
       this.expandedCode = this.expandedCode === c.code ? null : c.code
     },
+    exportCandidates() {
+      downloadCsv({
+        filename: `strategy2-candidates-${this.selectedTaskId || 'latest'}.csv`,
+        columns: [
+          { header: '代码', value: c => c.code },
+          { header: '名称', value: c => c.name },
+          { header: '总分', value: c => c.total_score },
+          { header: '等级', value: c => c.level || '' },
+          { header: '量干', value: c => c.volume_dry_score ?? '' },
+          { header: '价稳', value: c => c.price_stable_score ?? '' },
+          { header: '走势趋势', value: c => this.trendLabel(c.trend_type) },
+          { header: '风险比', value: c => this.formatPct(c.risk_ratio) },
+          { header: '风险等级', value: c => c.risk_level || '' },
+          { header: '短线建议', value: c => c.short_term_time_exit_days ? `${c.short_term_time_exit_days}日观察` : '' },
+          { header: '支撑', value: c => this.fmtPrice(c.key_support) },
+          { header: '买入区间低', value: c => this.fmtPrice(c.buy_zone_low) },
+          { header: '买入区间高', value: c => this.fmtPrice(c.buy_zone_high) },
+          { header: '止损', value: c => this.fmtPrice(c.stop_loss) },
+          { header: '评估日', value: c => c.evaluation_date || '' },
+        ],
+        rows: this.candidates,
+      })
+    },
   },
 }
 </script>
@@ -227,6 +257,9 @@ h1 { font-size: 1.5rem; margin-bottom: 4px; color: #ffd700; }
 .task-bar { display: flex; gap: 12px; align-items: center; margin-bottom: 16px; }
 .task-bar select { background: #2a2a2a; color: #e0e0e0; border: 1px solid #444; padding: 6px 12px; border-radius: 4px; }
 .task-status { color: #aaa; font-size: 0.85rem; }
+.export-btn { background: transparent; color: #ddd; border: 1px solid #555; padding: 6px 12px; border-radius: 4px; cursor: pointer; }
+.export-btn:hover:not(:disabled) { border-color: #ffd700; color: #ffd700; }
+.export-btn:disabled { opacity: 0.45; cursor: not-allowed; }
 .summary-bar { display: flex; gap: 16px; margin-bottom: 16px; flex-wrap: wrap; }
 .level-chip { font-size: 0.8rem; padding: 2px 8px; border-radius: 3px; }
 .level-ultimate { background: #4a0000; color: #ff4444; }

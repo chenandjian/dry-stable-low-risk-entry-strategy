@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { nextTick } from 'vue'
 
@@ -25,6 +25,21 @@ function mountPage(query = {}) {
       stubs: { RouterLink: true },
     },
   })
+}
+
+function installDownloadMocks() {
+  const originalUrl = globalThis.URL
+  const createObjectURL = vi.fn(() => 'blob:strategy3')
+  const revokeObjectURL = vi.fn()
+  const click = vi.fn()
+  vi.stubGlobal('URL', { ...originalUrl, createObjectURL, revokeObjectURL })
+  const originalCreateElement = document.createElement.bind(document)
+  vi.spyOn(document, 'createElement').mockImplementation(tag => {
+    const el = originalCreateElement(tag)
+    if (tag === 'a') vi.spyOn(el, 'click').mockImplementation(click)
+    return el
+  })
+  return { createObjectURL, click }
 }
 
 describe('Strategy3Results', () => {
@@ -94,6 +109,11 @@ describe('Strategy3Results', () => {
     api.getTaskStocks.mockResolvedValue({ ok: true, total: 0, stocks: [] })
   })
 
+  afterEach(() => {
+    vi.restoreAllMocks()
+    vi.unstubAllGlobals()
+  })
+
   it('renders strategy3 candidate fields from route task', async () => {
     const wrapper = mountPage({ task: 's3-task' })
     await flushUi()
@@ -135,5 +155,23 @@ describe('Strategy3Results', () => {
 
     expect(wrapper.text()).toContain('策略3候选加载失败')
     expect(wrapper.text()).toContain('000001')
+  })
+
+  it('exports the current strategy3 candidate list as csv', async () => {
+    const wrapper = mountPage({ task: 's3-task' })
+    await flushUi()
+    const mocks = installDownloadMocks()
+
+    const button = wrapper.find('[data-test="export-candidates"]')
+    expect(button.exists()).toBe(true)
+    expect(button.text()).toContain('一键导出列表')
+    await button.trigger('click')
+
+    expect(mocks.click).toHaveBeenCalled()
+    const blob = mocks.createObjectURL.mock.calls[0][0]
+    const csv = await blob.text()
+    expect(csv).toContain('代码,名称,总分,等级')
+    expect(csv).toContain('000001,平安银行,88,核心候选')
+    expect(csv).toContain('9.50,9.70,9.31,12.00')
   })
 })

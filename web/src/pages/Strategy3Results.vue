@@ -11,6 +11,12 @@
         </option>
       </select>
       <span class="task-status" v-if="selectedTaskId">状态: {{ selectedTask?.status || '--' }}</span>
+      <button
+        data-test="export-candidates"
+        class="export-btn"
+        :disabled="!candidates.length"
+        @click="exportCandidates"
+      >一键导出列表</button>
     </div>
 
     <div v-if="error" class="error">{{ error }}</div>
@@ -124,6 +130,7 @@
 
 <script>
 import { useApi } from '../composables/useApi.js'
+import { downloadCsv } from '../utils/csvExport.js'
 
 export default {
   name: 'Strategy3Results',
@@ -218,6 +225,32 @@ export default {
     toggleDetail(c) {
       this.expandedCode = this.expandedCode === c.code ? null : c.code
     },
+    exportCandidates() {
+      downloadCsv({
+        filename: `strategy3-candidates-${this.selectedTaskId || 'latest'}.csv`,
+        columns: [
+          { header: '代码', value: c => c.code },
+          { header: '名称', value: c => c.name },
+          { header: '总分', value: c => c.total_score },
+          { header: '等级', value: c => c.level || '' },
+          { header: '趋势', value: c => c.trend_score ?? '' },
+          { header: '回踩', value: c => c.pullback_score ?? '' },
+          { header: '缩量企稳', value: c => c.volume_stability_score ?? '' },
+          { header: '二次转强', value: c => c.second_breakout_score ?? '' },
+          { header: '风险收益', value: c => c.risk_reward_score ?? '' },
+          { header: '回踩幅度', value: c => this.formatPct(c.pullback_pct) },
+          { header: '战术风险比', value: c => this.formatPct(c.tactical_risk_ratio ?? c.risk_ratio) },
+          { header: '结构风险比', value: c => this.formatPct(c.structural_risk_ratio) },
+          { header: 'RR1', value: c => this.fmtNum(c.rr1, 2) },
+          { header: '战术支撑', value: c => this.fmtPrice(c.tactical_support ?? c.support_price) },
+          { header: 'Key支撑', value: c => this.fmtPrice(c.key_support) },
+          { header: '止损', value: c => this.fmtPrice(c.tactical_stop_loss ?? c.stop_loss) },
+          { header: '目标', value: c => this.fmtPrice(c.target_1) },
+          { header: '评估日', value: c => c.evaluation_date || '' },
+        ],
+        rows: this.sortedCandidates,
+      })
+    },
   },
 }
 </script>
@@ -229,6 +262,9 @@ h1 { font-size: 1.5rem; margin-bottom: 4px; color: #d6b35a; }
 .task-bar { display: flex; gap: 12px; align-items: center; margin-bottom: 16px; }
 .task-bar select { background: #2a2a2a; color: #e0e0e0; border: 1px solid #444; padding: 6px 12px; border-radius: 4px; }
 .task-status { color: #aaa; font-size: 0.85rem; }
+.export-btn { background: transparent; color: #ddd; border: 1px solid #555; padding: 6px 12px; border-radius: 4px; cursor: pointer; }
+.export-btn:hover:not(:disabled) { border-color: #d6b35a; color: #d6b35a; }
+.export-btn:disabled { opacity: 0.45; cursor: not-allowed; }
 .summary-bar { display: flex; gap: 16px; margin-bottom: 16px; flex-wrap: wrap; }
 .level-chip, .level-badge { font-size: 0.8rem; padding: 2px 8px; border-radius: 3px; }
 .level-core, .core { background: rgba(214, 179, 90, 0.14); color: #d6b35a; }
