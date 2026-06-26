@@ -454,7 +454,7 @@ const defaultStrategy3Config = {
 const config = reactive({
   market: {},
   liquidity: {},
-  data: { scan_window_days: 250, backtest_window_days: 250, daily_sources: ['baidu', 'sina', 'tencent', 'yfinance'] },
+  data: { scan_window_days: 250, backtest_window_days: 250, daily_sources: ['baidu', 'sina', 'tencent'] },
   cup: {},
   handle: {},
   breakout: {},
@@ -646,8 +646,8 @@ const availableSources = [
   { key: 'baidu', label: '百度', tip: '百度股票API，国内数据源，稳定可靠' },
   { key: 'sina', label: '新浪', tip: '新浪财经API，数据覆盖全' },
   { key: 'tencent', label: '腾讯', tip: '腾讯财经API，实时性好' },
-  { key: 'yfinance', label: 'Yahoo Finance', tip: 'Yahoo Finance 国际数据源，需稳定外网连接' },
 ]
+const availableSourceKeys = new Set(availableSources.map(s => s.key))
 
 const markets = [
   { key: 'include_sh', label: '沪市主板', tip: '上证主板股票，代码 60xxxx' },
@@ -664,6 +664,7 @@ function toggle(section, key) {
 }
 
 function toggleSource(key) {
+  sanitizeDailySources()
   if (!config.data.daily_sources) {
     config.data.daily_sources = availableSources.map(s => s.key)
   }
@@ -677,6 +678,15 @@ function toggleSource(key) {
   markDirty()
 }
 
+function sanitizeDailySources() {
+  if (!config.data) config.data = {}
+  const current = Array.isArray(config.data.daily_sources)
+    ? config.data.daily_sources
+    : availableSources.map(s => s.key)
+  const filtered = current.filter(src => availableSourceKeys.has(src))
+  config.data.daily_sources = filtered.length ? filtered : availableSources.map(s => s.key)
+}
+
 function markDirty() {
   dirty.value = true
   saved.value = false
@@ -684,6 +694,7 @@ function markDirty() {
 
 function validate() {
   const errors = []
+  sanitizeDailySources()
   const cup = config.cup
   const handle = config.handle
 
@@ -757,7 +768,7 @@ async function saveConfig() {
     const payload = {
       market: { ...config.market },
       liquidity: { ...config.liquidity },
-      data: { ...config.data },
+      data: { ...config.data, daily_sources: [...config.data.daily_sources] },
       cup: {
         min_duration: config.cup.min_duration,
         max_duration: config.cup.max_duration,
@@ -808,6 +819,7 @@ async function resetAll() {
       Object.assign(config, data.config)
       ensureSchedulerConfig()
       ensureStrategy3Config()
+      sanitizeDailySources()
     }
     dirty.value = false
     saved.value = false
@@ -824,6 +836,7 @@ onMounted(async () => {
       Object.assign(config, data.config)
       ensureSchedulerConfig()
       ensureStrategy3Config()
+      sanitizeDailySources()
     }
   } catch (e) {
     // use defaults
