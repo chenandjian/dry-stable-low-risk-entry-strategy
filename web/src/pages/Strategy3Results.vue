@@ -45,7 +45,7 @@
           <th>战术风险比</th>
           <th>结构风险比</th>
           <th>RR1</th>
-          <th>战术支撑/止损/目标</th>
+          <th>战术支撑/Key支撑/止损/目标</th>
           <th>评估日</th>
         </tr>
       </thead>
@@ -64,7 +64,7 @@
             <td>{{ formatPct(c.tactical_risk_ratio ?? c.risk_ratio) }}</td>
             <td>{{ formatPct(c.structural_risk_ratio) }}</td>
             <td>{{ fmtNum(c.rr1, 2) }}</td>
-            <td>{{ fmtPrice(c.tactical_support ?? c.support_price) }} / {{ fmtPrice(c.tactical_stop_loss ?? c.stop_loss) }} / {{ fmtPrice(c.target_1) }}</td>
+            <td>{{ fmtPrice(c.tactical_support ?? c.support_price) }} / {{ fmtPrice(c.key_support) }} / {{ fmtPrice(c.tactical_stop_loss ?? c.stop_loss) }} / {{ fmtPrice(c.target_1) }}</td>
             <td>{{ c.evaluation_date || '--' }}</td>
           </tr>
           <tr v-if="expandedCode === c.code" class="detail-row">

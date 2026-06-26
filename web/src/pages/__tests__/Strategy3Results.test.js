@@ -107,6 +107,8 @@ describe('Strategy3Results', () => {
     expect(wrapper.text()).toContain('战术风险比')
     expect(wrapper.text()).toContain('结构风险比')
     expect(wrapper.text()).toContain('RR1')
+    expect(wrapper.text()).toContain('战术支撑/Key支撑/止损/目标')
+    expect(wrapper.text()).toContain('9.50 / 9.70 / 9.31 / 12.00')
     expect(wrapper.text()).toContain('2026-06-25')
 
     await wrapper.find('tbody tr').trigger('click')
