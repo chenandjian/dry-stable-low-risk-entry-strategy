@@ -325,10 +325,21 @@ def _scan_mode_for_task(task_id: str) -> str:
 
 def _first_current_task_stock(task_id: str) -> dict | None:
     """Return the best current stock hint for a DB-backed running scan."""
-    for status in ("fetching", "pending"):
-        rows = db.get_task_stocks(task_id, status=status, limit=1, offset=0)
-        if rows:
-            return rows[0]
+    conn = db.get_conn()
+    columns = [d[1] for d in conn.execute("PRAGMA table_info(task_stocks)").fetchall()]
+    row = conn.execute(
+        """SELECT * FROM task_stocks
+           WHERE task_id=? AND status='fetching'
+           ORDER BY COALESCE(updated_at, started_at, '') DESC, idx DESC
+           LIMIT 1""",
+        (task_id,),
+    ).fetchone()
+    if row:
+        return dict(zip(columns, row))
+
+    rows = db.get_task_stocks(task_id, status="pending", limit=1, offset=0)
+    if rows:
+        return rows[0]
     return None
 
 

@@ -621,3 +621,54 @@ def test_scan_status_db_running_strategy3_returns_strategy3_discoveries(tmp_path
     assert stats["discoveries"][0]["code"] == "000001"
     assert stats["discoveries"][0]["total_score"] == 88
     assert stats["discoveries"][0]["level"] == "核心候选"
+
+
+def test_scan_status_db_running_uses_recent_fetching_stock_as_current(tmp_path, monkeypatch):
+    db_path = str(tmp_path / "test.db")
+    db.init_db(db_path)
+    monkeypatch.setattr(
+        server_mod,
+        "load_config",
+        lambda: {"data": {"database_path": db_path}, "liquidity": {"min_listing_days": 350}},
+    )
+    server_mod._running.update({"running": False, "task_id": None, "strategy_type": None, "stats": {}})
+    db.create_scan_task(
+        "sched-s3-running",
+        "2026-06-25 15:30:00",
+        total_stocks=3,
+        strategy_type="STRATEGY_3_STRONG_PULLBACK_SECOND_BREAKOUT",
+    )
+    db.save_task_stocks("sched-s3-running", [
+        {"code": "000001", "name": "平安银行", "market": "SZ"},
+        {"code": "000002", "name": "万科A", "market": "SZ"},
+        {"code": "000003", "name": "国农科技", "market": "SZ"},
+    ])
+    db.update_task_stock(
+        "sched-s3-running",
+        "000001",
+        status="fetching",
+        started_at="2026-06-25 15:30:01",
+    )
+    db.update_task_stock(
+        "sched-s3-running",
+        "000002",
+        status="fetching",
+        started_at="2026-06-25 15:31:10",
+    )
+    conn = db.get_conn()
+    conn.execute(
+        "UPDATE task_stocks SET updated_at=? WHERE task_id=? AND code=?",
+        ("2026-06-25 15:30:01", "sched-s3-running", "000001"),
+    )
+    conn.execute(
+        "UPDATE task_stocks SET updated_at=? WHERE task_id=? AND code=?",
+        ("2026-06-25 15:31:10", "sched-s3-running", "000002"),
+    )
+    conn.commit()
+
+    res = TestClient(server_mod.app).get("/api/scan/status")
+
+    assert res.status_code == 200
+    stats = res.json()["stats"]
+    assert stats["current_code"] == "000002"
+    assert stats["current_name"] == "万科A"
