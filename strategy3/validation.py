@@ -20,6 +20,23 @@ DEFAULT_STRATEGY3_CONFIG = {
     "max_recent_surge_3": 0.10,
     "min_relative_strength_60": 0.05,
     "volume_shrink_ratio": 0.85,
+    "dry_volume_ratio": 0.60,
+    "dry_extreme_volume_ratio": 0.50,
+    "dry_return_5_floor": -0.03,
+    "dry_return_5_reject": -0.05,
+    "dry_support_lookback_days": 10,
+    "dry_support_min_test_count": 2,
+    "dry_support_test_tolerance": 0.02,
+    "dry_support_break_tolerance": 0.98,
+    "dry_lower_shadow_threshold": 0.40,
+    "dry_lower_shadow_min_count": 2,
+    "dry_down_volume_ratio_max": 0.60,
+    "dry_big_down_return": -0.04,
+    "dry_big_down_volume_ratio": 1.30,
+    "dry_atr_contract_ratio": 0.75,
+    "dry_atr_extreme_contract_ratio": 0.60,
+    "dry_atr_expand_reject_ratio": 1.20,
+    "dry_no_new_low_tolerance": 0.995,
 }
 
 REQUIRED_OHLC_FIELDS = {"date", "open", "high", "low", "close", "volume"}
@@ -59,6 +76,27 @@ def resolve_strategy3_config(config: dict | None) -> dict:
     _validate_number_range(raw, "max_recent_surge_3", 0.01, 0.5)
     _validate_number_range(raw, "min_relative_strength_60", -0.5, 0.5)
     _validate_number_range(raw, "volume_shrink_ratio", 0.1, 2.0)
+    _validate_number_range(raw, "dry_volume_ratio", 0.1, 1.5)
+    _validate_number_range(raw, "dry_extreme_volume_ratio", 0.1, 1.5)
+    if raw["dry_extreme_volume_ratio"] > raw["dry_volume_ratio"]:
+        raise ValueError("dry_extreme_volume_ratio must be <= dry_volume_ratio")
+    _validate_number_range(raw, "dry_return_5_floor", -0.5, 0.2)
+    _validate_number_range(raw, "dry_return_5_reject", -0.5, 0.0)
+    _validate_int_range(raw, "dry_support_lookback_days", 5, 40)
+    _validate_int_range(raw, "dry_support_min_test_count", 0, 10)
+    _validate_number_range(raw, "dry_support_test_tolerance", 0.0, 0.2)
+    _validate_number_range(raw, "dry_support_break_tolerance", 0.8, 1.0)
+    _validate_number_range(raw, "dry_lower_shadow_threshold", 0.0, 1.0)
+    _validate_int_range(raw, "dry_lower_shadow_min_count", 0, 5)
+    _validate_number_range(raw, "dry_down_volume_ratio_max", 0.0, 1.0)
+    _validate_number_range(raw, "dry_big_down_return", -0.2, 0.0)
+    _validate_number_range(raw, "dry_big_down_volume_ratio", 0.5, 5.0)
+    _validate_number_range(raw, "dry_atr_contract_ratio", 0.1, 2.0)
+    _validate_number_range(raw, "dry_atr_extreme_contract_ratio", 0.1, 2.0)
+    if raw["dry_atr_extreme_contract_ratio"] > raw["dry_atr_contract_ratio"]:
+        raise ValueError("dry_atr_extreme_contract_ratio must be <= dry_atr_contract_ratio")
+    _validate_number_range(raw, "dry_atr_expand_reject_ratio", 0.5, 5.0)
+    _validate_number_range(raw, "dry_no_new_low_tolerance", 0.9, 1.05)
     return raw
 
 

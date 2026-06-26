@@ -86,6 +86,14 @@
                     <div>支撑口径：{{ c.support_quality || '--' }}</div>
                   </div>
                   <div>
+                    <h4>量干跌不动质量</h4>
+                    <div>V3/5/10/20：{{ fmtNum(c.v3) }} / {{ fmtNum(c.v5) }} / {{ fmtNum(c.v10) }} / {{ fmtNum(c.v20) }}</div>
+                    <div>V5/V20：{{ fmtNum(c.volume_ratio_5_20, 3) }} · 5日涨跌：{{ formatPct(c.return_5) }} · 不创新低：{{ fmtBool(c.no_new_low) }}</div>
+                    <div>支撑价：{{ fmtPrice(c.support_price_10) }} · 支撑测试：{{ c.support_test_count ?? 0 }} 次 · 支撑有效：{{ fmtBool(c.support_valid) }}</div>
+                    <div>阴线实体收缩：{{ fmtBool(c.bear_body_shrink) }} · 下影线：{{ c.lower_shadow_count ?? 0 }} 根 · 阴线量占比：{{ formatPct(c.down_volume_ratio_5) }}</div>
+                    <div>ATR5/20：{{ fmtNum(c.atr_ratio_5_20, 3) }} · 放量下跌：{{ fmtBool(c.has_big_down_volume) }}</div>
+                  </div>
+                  <div>
                     <h4>评分原因</h4>
                     <div v-for="(r, i) in (c.score_reasons || [])" :key="'sr'+i" class="reason-line">✓ {{ r }}</div>
                     <div v-if="!c.score_reasons?.length" class="muted">无评分原因</div>
@@ -184,6 +192,11 @@ export default {
     fmtNum(v, digits = 0) {
       if (v == null) return '--'
       return Number(v).toFixed(digits)
+    },
+    fmtBool(v) {
+      if (v === true || v === 1) return '是'
+      if (v === false || v === 0) return '否'
+      return '--'
     },
     toggleDetail(c) {
       this.expandedCode = this.expandedCode === c.code ? null : c.code

@@ -46,6 +46,21 @@ describe('Strategy3Results', () => {
         volume_stability_score: 18,
         second_breakout_score: 12,
         risk_reward_score: 13,
+        v3: 500000,
+        v5: 600000,
+        v10: 800000,
+        v20: 1000000,
+        volume_ratio_5_20: 0.6,
+        return_5: 0.02,
+        no_new_low: 1,
+        support_price_10: 9.7,
+        support_test_count: 3,
+        support_valid: 1,
+        bear_body_shrink: 1,
+        lower_shadow_count: 2,
+        down_volume_ratio_5: 0.42,
+        atr_ratio_5_20: 0.68,
+        has_big_down_volume: 0,
         pullback_pct: 0.15,
         risk_ratio: 0.05,
         rr1: 2.1,
@@ -80,6 +95,14 @@ describe('Strategy3Results', () => {
     expect(wrapper.text()).toContain('结构风险比')
     expect(wrapper.text()).toContain('RR1')
     expect(wrapper.text()).toContain('2026-06-25')
+
+    await wrapper.find('tbody tr').trigger('click')
+    await flushUi()
+
+    expect(wrapper.text()).toContain('量干跌不动质量')
+    expect(wrapper.text()).toContain('5日涨跌')
+    expect(wrapper.text()).toContain('支撑测试')
+    expect(wrapper.text()).toContain('ATR5/20')
   })
 
   it('keeps existing candidates when refresh fails', async () => {

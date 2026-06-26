@@ -1196,6 +1196,22 @@ def _ensure_strategy3_candidates_table(conn: sqlite3.Connection):
     _ensure_column(conn, "strategy3_candidates", "tactical_risk_ratio", "REAL")
     _ensure_column(conn, "strategy3_candidates", "tactical_rr1", "REAL")
     _ensure_column(conn, "strategy3_candidates", "support_quality", "TEXT")
+    _ensure_column(conn, "strategy3_candidates", "v3", "REAL")
+    _ensure_column(conn, "strategy3_candidates", "v5", "REAL")
+    _ensure_column(conn, "strategy3_candidates", "v10", "REAL")
+    _ensure_column(conn, "strategy3_candidates", "v20", "REAL")
+    _ensure_column(conn, "strategy3_candidates", "return_5", "REAL")
+    _ensure_column(conn, "strategy3_candidates", "min_close_5", "REAL")
+    _ensure_column(conn, "strategy3_candidates", "min_close_10", "REAL")
+    _ensure_column(conn, "strategy3_candidates", "no_new_low", "INTEGER DEFAULT 0")
+    _ensure_column(conn, "strategy3_candidates", "support_price_10", "REAL")
+    _ensure_column(conn, "strategy3_candidates", "support_test_count", "INTEGER DEFAULT 0")
+    _ensure_column(conn, "strategy3_candidates", "support_valid", "INTEGER DEFAULT 0")
+    _ensure_column(conn, "strategy3_candidates", "bear_body_shrink", "INTEGER DEFAULT 0")
+    _ensure_column(conn, "strategy3_candidates", "lower_shadow_count", "INTEGER DEFAULT 0")
+    _ensure_column(conn, "strategy3_candidates", "down_volume_ratio_5", "REAL")
+    _ensure_column(conn, "strategy3_candidates", "atr_ratio_5_20", "REAL")
+    _ensure_column(conn, "strategy3_candidates", "has_big_down_volume", "INTEGER DEFAULT 0")
 
 
 def _ensure_column(conn: sqlite3.Connection, table: str, column: str, col_type: str):
@@ -1341,6 +1357,10 @@ def upsert_strategy3_candidate(task_id: str, d: dict):
         "second_breakout_score", "risk_reward_score", "current_close",
         "ma5", "ma10", "ma20", "ma60", "ma120", "recent_high",
         "pullback_pct", "relative_strength_60", "volume_ratio_5_20",
+        "v3", "v5", "v10", "v20", "return_5", "min_close_5", "min_close_10",
+        "no_new_low", "support_price_10", "support_test_count", "support_valid",
+        "bear_body_shrink", "lower_shadow_count", "down_volume_ratio_5",
+        "atr_ratio_5_20", "has_big_down_volume",
         "range_5", "close_range_5", "support_price", "stop_loss",
         "target_1", "risk_ratio", "rr1",
         "structural_support", "structural_stop_loss", "structural_risk_ratio",
@@ -1370,6 +1390,22 @@ def upsert_strategy3_candidate(task_id: str, d: dict):
         d.get("pullback_pct"),
         d.get("relative_strength_60"),
         d.get("volume_ratio_5_20"),
+        d.get("v3"),
+        d.get("v5"),
+        d.get("v10"),
+        d.get("v20"),
+        d.get("return_5"),
+        d.get("min_close_5"),
+        d.get("min_close_10"),
+        int(bool(d.get("no_new_low"))),
+        d.get("support_price_10"),
+        d.get("support_test_count", 0),
+        int(bool(d.get("support_valid"))),
+        int(bool(d.get("bear_body_shrink"))),
+        d.get("lower_shadow_count", 0),
+        d.get("down_volume_ratio_5"),
+        d.get("atr_ratio_5_20"),
+        int(bool(d.get("has_big_down_volume"))),
         d.get("range_5"),
         d.get("close_range_5"),
         d.get("support_price"),

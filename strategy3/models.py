@@ -23,10 +23,24 @@ class Strategy3Indicators:
     range_5: float = 0.0
     close_range_5: float = 0.0
     volume_ratio_5_20: float = 0.0
+    v3: float = 0.0
     v5: float = 0.0
     v10: float = 0.0
     v20: float = 0.0
     down_day_volume_ratio: float = 0.0
+    return_5: float = 0.0
+    min_close_5: float = 0.0
+    min_close_10: float = 0.0
+    previous_min_close_5: float = 0.0
+    no_new_low: bool = False
+    support_price_10: float = 0.0
+    support_test_count: int = 0
+    support_valid: bool = False
+    bear_body_shrink: bool = False
+    lower_shadow_count: int = 0
+    down_volume_ratio_5: float = 0.0
+    atr_ratio_5_20: float = 0.0
+    has_big_down_volume: bool = False
     current_close: float = 0.0
 
 

@@ -35,6 +35,68 @@ def make_strategy3_candidate_bars(days=220):
     return rows
 
 
+def make_dry_cannot_fall_bars(days=220, scenario="healthy"):
+    rows = make_strategy3_candidate_bars(days)
+    base_closes = [
+        22.90, 22.72, 22.60, 22.48, 22.35,
+        22.25, 22.18, 22.12, 22.05, 22.02,
+        22.10, 22.00, 22.12, 22.05, 22.08,
+        22.06, 22.08, 22.09, 22.12, 22.15,
+    ]
+    base_volumes = [
+        1_250_000, 1_220_000, 1_210_000, 1_190_000, 1_180_000,
+        1_160_000, 1_140_000, 1_130_000, 1_120_000, 1_100_000,
+        700_000, 690_000, 680_000, 670_000, 660_000,
+        450_000, 420_000, 380_000, 360_000, 340_000,
+    ]
+    opens = [
+        23.05, 22.88, 22.75, 22.65, 22.50,
+        22.45, 22.36, 22.28, 22.21, 22.16,
+        22.25, 22.18, 22.10, 22.16, 22.06,
+        22.07, 22.05, 22.11, 22.10, 22.16,
+    ]
+
+    if scenario == "bear_drift":
+        base_closes[-5:] = [21.80, 21.55, 21.30, 21.05, 20.75]
+        opens[-5:] = [21.95, 21.70, 21.45, 21.20, 20.92]
+    elif scenario == "support_failed":
+        base_closes[-1] = 21.05
+        opens[-1] = 21.22
+    elif scenario == "support_failed_recent":
+        base_closes[-3] = 21.35
+        opens[-3] = 21.52
+    elif scenario == "atr_expanding":
+        base_closes[-5:] = [22.02, 21.90, 21.82, 21.74, 21.68]
+        opens[-5:] = [22.14, 22.02, 21.94, 21.84, 21.76]
+    elif scenario == "big_down_volume":
+        base_closes[-2] = 21.02
+        opens[-2] = 22.10
+        base_volumes[-2] = 1_600_000
+
+    for offset, close in enumerate(base_closes, start=days - 20):
+        idx = offset
+        open_ = opens[offset - (days - 20)]
+        volume = base_volumes[offset - (days - 20)]
+        if scenario == "atr_expanding" and idx >= days - 5:
+            high = max(open_, close) + 1.20
+            low = min(open_, close) - 1.05
+        elif idx >= days - 5:
+            high = max(open_, close) + 0.12
+            low = min(open_, close) - 0.10
+        else:
+            high = max(open_, close) + 0.45
+            low = min(open_, close) - 0.45
+        rows[idx].update({
+            "open": round(open_, 2),
+            "high": round(high, 2),
+            "low": round(low, 2),
+            "close": round(close, 2),
+            "volume": volume,
+            "turnover": round(close * volume, 2),
+        })
+    return rows
+
+
 def test_engine_passes_healthy_strong_pullback():
     engine = StrongPullbackSecondBreakoutEngine({"liquidity": {"min_listing_days": 350}})
     result = engine.evaluate_at(make_strategy3_candidate_bars(), code="000001", name="样本")
@@ -46,6 +108,81 @@ def test_engine_passes_healthy_strong_pullback():
     assert result.risk.stop_loss > 0
     assert result.risk.rr1 >= 1.5
     assert 0.08 <= result.indicators.pullback_pct <= 0.30
+
+
+def test_strategy3_indicators_include_dry_cannot_fall_quality_fields():
+    engine = StrongPullbackSecondBreakoutEngine({"liquidity": {"min_listing_days": 350}})
+    ind = compute_indicators(make_dry_cannot_fall_bars(), engine.config)
+
+    assert ind.v3 > 0
+    assert ind.return_5 > -0.03
+    assert ind.no_new_low is True
+    assert ind.support_test_count >= 2
+    assert ind.support_valid is True
+    assert ind.bear_body_shrink is True
+    assert ind.lower_shadow_count >= 2
+    assert ind.down_volume_ratio_5 <= 0.60
+    assert 0 < ind.atr_ratio_5_20 <= 0.75
+
+
+def test_volume_stability_v2_rewards_dry_cannot_fall_quality():
+    engine = StrongPullbackSecondBreakoutEngine({"liquidity": {"min_listing_days": 350}})
+    result = engine.evaluate_at(make_dry_cannot_fall_bars(), code="000010")
+
+    assert result.volume_stability_score >= 17
+    assert "volume:no_new_low" in result.score_reasons
+    assert "volume:support_test_count>=2" in result.score_reasons
+    assert "volume:atr_contracted" in result.score_reasons
+
+
+def test_volume_stability_rejects_shrinking_bear_drift():
+    result = StrongPullbackSecondBreakoutEngine({"liquidity": {"min_listing_days": 350}}).evaluate_at(
+        make_dry_cannot_fall_bars(scenario="bear_drift"),
+        code="000011",
+    )
+
+    assert result.passed is False
+    assert "SHRINKING_BEAR_DRIFT" in result.reject_reasons
+
+
+def test_volume_stability_rejects_support_failure():
+    result = StrongPullbackSecondBreakoutEngine({"liquidity": {"min_listing_days": 350}}).evaluate_at(
+        make_dry_cannot_fall_bars(scenario="support_failed"),
+        code="000012",
+    )
+
+    assert result.passed is False
+    assert "SUPPORT_TEST_FAILED" in result.reject_reasons
+
+
+def test_volume_stability_rejects_recent_support_failure_even_if_current_recovers():
+    result = StrongPullbackSecondBreakoutEngine({"liquidity": {"min_listing_days": 350}}).evaluate_at(
+        make_dry_cannot_fall_bars(scenario="support_failed_recent"),
+        code="000015",
+    )
+
+    assert result.passed is False
+    assert "SUPPORT_TEST_FAILED" in result.reject_reasons
+
+
+def test_volume_stability_rejects_downside_volatility_expansion():
+    result = StrongPullbackSecondBreakoutEngine({"liquidity": {"min_listing_days": 350}}).evaluate_at(
+        make_dry_cannot_fall_bars(scenario="atr_expanding"),
+        code="000013",
+    )
+
+    assert result.passed is False
+    assert "DOWNSIDE_VOLATILITY_EXPANDING" in result.reject_reasons
+
+
+def test_volume_stability_rejects_big_down_volume():
+    result = StrongPullbackSecondBreakoutEngine({"liquidity": {"min_listing_days": 350}}).evaluate_at(
+        make_dry_cannot_fall_bars(scenario="big_down_volume"),
+        code="000014",
+    )
+
+    assert result.passed is False
+    assert "DRY_HEAVY_DOWNSIDE_VOLUME" in result.reject_reasons
 
 
 def test_engine_rejects_deep_drawdown():

@@ -37,6 +37,22 @@ def test_strategy3_candidate_table_roundtrip(tmp_path):
         "pullback_pct": 0.13,
         "relative_strength_60": 0.10,
         "volume_ratio_5_20": 0.70,
+        "v3": 500_000,
+        "v5": 600_000,
+        "v10": 800_000,
+        "v20": 1_000_000,
+        "return_5": 0.02,
+        "min_close_5": 9.8,
+        "min_close_10": 9.7,
+        "no_new_low": True,
+        "support_price_10": 9.7,
+        "support_test_count": 3,
+        "support_valid": True,
+        "bear_body_shrink": True,
+        "lower_shadow_count": 2,
+        "down_volume_ratio_5": 0.42,
+        "atr_ratio_5_20": 0.68,
+        "has_big_down_volume": False,
         "range_5": 0.04,
         "close_range_5": 0.03,
         "support_price": 9.5,
@@ -53,6 +69,11 @@ def test_strategy3_candidate_table_roundtrip(tmp_path):
     assert rows[0]["code"] == "000001"
     assert rows[0]["score_reasons"] == ["强趋势"]
     assert rows[0]["reject_reasons"] == []
+    assert rows[0]["return_5"] == 0.02
+    assert rows[0]["no_new_low"] == 1
+    assert rows[0]["support_test_count"] == 3
+    assert rows[0]["support_valid"] == 1
+    assert rows[0]["atr_ratio_5_20"] == 0.68
 
 
 def test_strategy3_candidates_do_not_leak_into_strategy1_or_strategy2_tables(tmp_path):
@@ -118,6 +139,22 @@ def test_build_strategy3_discovery_contains_frontend_fields():
             pullback_pct=0.15,
             relative_strength_60=0.12,
             volume_ratio_5_20=0.7,
+            v3=500_000,
+            v5=600_000,
+            v10=800_000,
+            v20=1_000_000,
+            return_5=0.02,
+            min_close_5=9.8,
+            min_close_10=9.7,
+            no_new_low=True,
+            support_price_10=9.7,
+            support_test_count=3,
+            support_valid=True,
+            bear_body_shrink=True,
+            lower_shadow_count=2,
+            down_volume_ratio_5=0.42,
+            atr_ratio_5_20=0.68,
+            has_big_down_volume=False,
             range_5=0.04,
             close_range_5=0.03,
         ),
@@ -146,6 +183,10 @@ def test_build_strategy3_discovery_contains_frontend_fields():
     assert d["risk_ratio"] == 0.069
     assert d["rr1"] == 2.9
     assert d["trend_score"] == 25
+    assert d["return_5"] == 0.02
+    assert d["support_test_count"] == 3
+    assert d["support_valid"] is True
+    assert d["atr_ratio_5_20"] == 0.68
     assert d["structural_support"] == 8.8
     assert d["tactical_support"] == 9.5
     assert d["tactical_risk_ratio"] == 0.069
