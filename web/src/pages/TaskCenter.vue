@@ -14,7 +14,7 @@
         <span :class="{ 'runtime-running': schedulerRuntime.running, 'runtime-stopped': !schedulerRuntime.running }">
           实际{{ schedulerRuntime.running ? '运行中' : '未运行' }}
         </span>
-        <span>串行双策略：{{ serialScheduler.enabled === false ? '关闭' : '开启' }}</span>
+        <span>串行三策略：{{ serialScheduler.enabled === false ? '关闭' : '开启' }}</span>
         <span>Cron {{ serialScheduler.cron || '--' }}</span>
         <span>下次 {{ nextSchedulerRun || '--' }}</span>
         <span>失败重试 {{ serialScheduler.strategy1_failed_retry_rounds ?? '--' }} 轮</span>

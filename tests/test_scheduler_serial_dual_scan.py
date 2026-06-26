@@ -124,7 +124,7 @@ def test_get_scheduler_status_reports_registered_jobs(monkeypatch):
     assert status["jobs"][0]["next_run_time"] == "2026-06-17 15:50:00"
 
 
-def test_serial_scan_runs_strategy1_retries_failed_then_strategy2(monkeypatch, tmp_path):
+def test_serial_scan_runs_strategy1_retries_failed_then_strategy2_then_strategy3(monkeypatch, tmp_path):
     from scheduler import scheduler as sched_mod
     from scanner import db
 
@@ -197,9 +197,26 @@ def test_serial_scan_runs_strategy1_retries_failed_then_strategy2(monkeypatch, t
             "stats": {"candidates_found": 0, "elapsed_seconds": 1, **summary},
         }
 
+    def fake_scan_strategy3_all(config, task_id=None, stocks=None, **kwargs):
+        calls.append(("s3", "normal", [s["code"] for s in (stocks or [])]))
+        for stock in stocks:
+            db.update_task_stock(
+                task_id,
+                stock["code"],
+                status="scanned",
+                finished_at="2026-06-16 15:20:00",
+            )
+        summary = db.refresh_scan_task_counts(task_id)
+        return {
+            "task_id": task_id,
+            "candidates": [],
+            "stats": {"candidates_found": 0, "elapsed_seconds": 1, **summary},
+        }
+
     monkeypatch.setattr(sched_mod.stock_pool, "get_a_stock_pool", fake_stock_pool)
     monkeypatch.setattr(sched_mod, "scan_all", fake_scan_all)
     monkeypatch.setattr(sched_mod, "scan_strategy2_all", fake_scan_strategy2_all)
+    monkeypatch.setattr(sched_mod, "scan_strategy3_all", fake_scan_strategy3_all)
     monkeypatch.setattr(
         sched_mod.time,
         "strftime",
@@ -209,10 +226,15 @@ def test_serial_scan_runs_strategy1_retries_failed_then_strategy2(monkeypatch, t
     result = sched_mod.run_serial_dual_strategy_scan(config)
 
     assert result["status"] == "completed"
-    assert [c[0] for c in calls] == ["s1", "s1", "s1", "s1", "s2"]
+    assert [c[0] for c in calls] == ["s1", "s1", "s1", "s1", "s2", "s3"]
     assert calls[1][1] == "failed_only"
     assert calls[1][2] == ["000002"]
-    assert calls[-1][0] == "s2"
+    assert calls[-2][0] == "s2"
+    assert calls[-1][0] == "s3"
+    assert result["strategy3_task_id"].startswith("sched-s3-")
+    tasks = db.get_scan_tasks(strategy_type="STRATEGY_3_STRONG_PULLBACK_SECOND_BREAKOUT")
+    assert len(tasks) == 1
+    assert tasks[0]["id"] == result["strategy3_task_id"]
 
 
 def test_serial_scan_skips_when_lock_already_held(monkeypatch, tmp_path):
@@ -253,8 +275,10 @@ def test_serial_scan_marks_strategy1_failed_and_does_not_start_strategy2(monkeyp
         raise RuntimeError("strategy1 boom")
 
     s2_calls = []
+    s3_calls = []
     monkeypatch.setattr(sched_mod, "scan_all", boom)
     monkeypatch.setattr(sched_mod, "scan_strategy2_all", lambda *args, **kwargs: s2_calls.append("s2"))
+    monkeypatch.setattr(sched_mod, "scan_strategy3_all", lambda *args, **kwargs: s3_calls.append("s3"))
     monkeypatch.setattr(
         sched_mod.time,
         "strftime",
@@ -266,6 +290,7 @@ def test_serial_scan_marks_strategy1_failed_and_does_not_start_strategy2(monkeyp
     assert result["status"] == "failed"
     assert "strategy1 boom" in result["error"]
     assert s2_calls == []
+    assert s3_calls == []
 
     tasks = db.get_scan_tasks(strategy_type="STRATEGY_1_CUP_HANDLE")
     assert tasks[0]["status"] == "failed"
@@ -327,8 +352,18 @@ def test_serial_scan_persists_strategy1_discoveries(monkeypatch, tmp_path):
             "stats": {"candidates_found": 0, "elapsed_seconds": 1, **summary},
         }
 
+    def fake_scan_strategy3_all(config, task_id=None, stocks=None, **kwargs):
+        db.update_task_stock(task_id, "000001", status="scanned", finished_at="2026-06-16 15:20:00")
+        summary = db.refresh_scan_task_counts(task_id)
+        return {
+            "task_id": task_id,
+            "candidates": [],
+            "stats": {"candidates_found": 0, "elapsed_seconds": 1, **summary},
+        }
+
     monkeypatch.setattr(sched_mod, "scan_all", fake_scan_all)
     monkeypatch.setattr(sched_mod, "scan_strategy2_all", fake_scan_strategy2_all)
+    monkeypatch.setattr(sched_mod, "scan_strategy3_all", fake_scan_strategy3_all)
 
     result = sched_mod.run_serial_dual_strategy_scan(config)
 
@@ -396,8 +431,19 @@ def test_serial_scan_final_candidate_count_includes_retry_discoveries(monkeypatc
             "stats": {"candidates_found": 0, "elapsed_seconds": 1, **summary},
         }
 
+    def fake_scan_strategy3_all(config, task_id=None, stocks=None, **kwargs):
+        for stock in stocks:
+            db.update_task_stock(task_id, stock["code"], status="scanned", finished_at="2026-06-16 15:20:00")
+        summary = db.refresh_scan_task_counts(task_id)
+        return {
+            "task_id": task_id,
+            "candidates": [],
+            "stats": {"candidates_found": 0, "elapsed_seconds": 1, **summary},
+        }
+
     monkeypatch.setattr(sched_mod, "scan_all", fake_scan_all)
     monkeypatch.setattr(sched_mod, "scan_strategy2_all", fake_scan_strategy2_all)
+    monkeypatch.setattr(sched_mod, "scan_strategy3_all", fake_scan_strategy3_all)
 
     result = sched_mod.run_serial_dual_strategy_scan(config)
 

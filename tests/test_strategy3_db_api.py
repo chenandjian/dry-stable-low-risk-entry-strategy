@@ -574,3 +574,50 @@ def test_strategy3_running_status_includes_live_failed_counts(tmp_path, monkeypa
         assert status["stats"]["failed"] == 1
     finally:
         release.set()
+
+
+def test_scan_status_db_running_strategy3_returns_strategy3_discoveries(tmp_path, monkeypatch):
+    db_path = str(tmp_path / "test.db")
+    db.init_db(db_path)
+    monkeypatch.setattr(
+        server_mod,
+        "load_config",
+        lambda: {"data": {"database_path": db_path}, "liquidity": {"min_listing_days": 350}},
+    )
+    server_mod._running.update({"running": False, "task_id": None, "strategy_type": None, "stats": {}})
+    db.create_scan_task(
+        "sched-s3-running",
+        "2026-06-25 15:30:00",
+        total_stocks=2,
+        strategy_type="STRATEGY_3_STRONG_PULLBACK_SECOND_BREAKOUT",
+    )
+    db.save_task_stocks("sched-s3-running", [
+        {"code": "000001", "name": "平安银行", "market": "SZ"},
+        {"code": "000002", "name": "万科A", "market": "SZ"},
+    ])
+    db.update_task_stock("sched-s3-running", "000001", status="candidate", kline_latest_date="2026-06-25")
+    db.update_task_stock("sched-s3-running", "000002", status="fetching")
+    db.upsert_strategy3_candidate("sched-s3-running", {
+        "code": "000001",
+        "name": "平安银行",
+        "evaluation_date": "2026-06-25",
+        "total_score": 88,
+        "level": "核心候选",
+        "pullback_pct": 0.15,
+        "risk_ratio": 0.06,
+        "rr1": 2.6,
+    })
+
+    res = TestClient(server_mod.app).get("/api/scan/status")
+
+    assert res.status_code == 200
+    body = res.json()
+    assert body["running"] is True
+    assert body["task_id"] == "sched-s3-running"
+    assert body["strategyType"] == "STRATEGY_3_STRONG_PULLBACK_SECOND_BREAKOUT"
+    stats = body["stats"]
+    assert stats["candidates_found"] == 1
+    assert stats["current_code"] == "000002"
+    assert stats["discoveries"][0]["code"] == "000001"
+    assert stats["discoveries"][0]["total_score"] == 88
+    assert stats["discoveries"][0]["level"] == "核心候选"

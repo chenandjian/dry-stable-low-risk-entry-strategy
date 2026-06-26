@@ -75,6 +75,8 @@ describe('StrategyConfig scheduler controls', () => {
 
     expect(wrapper.text()).toContain('定时任务')
     expect(wrapper.text()).toContain('启用定时任务')
+    expect(wrapper.text()).toContain('启用串行三策略扫描')
+    expect(wrapper.text()).toContain('先执行策略1，完成后再执行策略2和策略3')
     expect(wrapper.text()).toContain('执行时间')
     expect(wrapper.find('[data-test="scheduler-time"]').element.value).toBe('15:15')
 

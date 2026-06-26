@@ -66,7 +66,7 @@
     <section class="section scheduler-section">
       <h3 class="section-title">定时任务</h3>
       <p class="section-hint">
-        串行任务会在工作日按设定时间先执行策略1，完成后再执行策略2。保存后会立即重载后端定时任务。
+        串行任务会在工作日按设定时间先执行策略1，完成后再执行策略2和策略3。保存后会立即重载后端定时任务。
       </p>
       <div class="toggle-grid" style="margin-bottom:16px">
         <label class="toggle-item">
@@ -75,7 +75,7 @@
             @click="toggleScheduler('enabled')">{{ config.scheduler?.enabled === true ? '开' : '关' }}</button>
         </label>
         <label class="toggle-item">
-          <span class="toggle-label">启用串行双策略扫描</span>
+          <span class="toggle-label">启用串行三策略扫描</span>
           <button data-test="serial-dual-scan-enabled" class="toggle" :class="{ active: config.scheduler?.serial_dual_scan?.enabled !== false }"
             @click="toggleSerialDualScan">{{ config.scheduler?.serial_dual_scan?.enabled !== false ? '开' : '关' }}</button>
         </label>

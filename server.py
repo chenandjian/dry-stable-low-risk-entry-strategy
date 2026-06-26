@@ -394,6 +394,24 @@ def _strategy2_discovery_from_candidate(candidate: dict) -> dict:
     }
 
 
+def _strategy3_discovery_from_candidate(candidate: dict) -> dict:
+    return {
+        "code": candidate.get("code", ""),
+        "name": candidate.get("name", ""),
+        "evaluation_date": candidate.get("evaluation_date", ""),
+        "total_score": candidate.get("total_score") or 0,
+        "level": candidate.get("level", ""),
+        "current_close": candidate.get("current_close", 0),
+        "pullback_pct": candidate.get("pullback_pct", 0),
+        "risk_ratio": candidate.get("risk_ratio", 0),
+        "rr1": candidate.get("rr1", 0),
+        "tactical_support": candidate.get("tactical_support") or candidate.get("support_price", 0),
+        "key_support": candidate.get("key_support", 0),
+        "tactical_stop_loss": candidate.get("tactical_stop_loss") or candidate.get("stop_loss", 0),
+        "target_1": candidate.get("target_1", 0),
+    }
+
+
 def _db_running_scan_status(running_task: dict) -> dict:
     """Build live scan status from persisted DB rows for scheduler-owned scans."""
     task_id = running_task["id"]
@@ -401,7 +419,12 @@ def _db_running_scan_status(running_task: dict) -> dict:
     summary = db.refresh_scan_task_counts(task_id)
     current = _first_current_task_stock(task_id) or {}
 
-    if strategy_type == "STRATEGY_2_EXTREME_DRY_STABLE":
+    if strategy_type == STRATEGY3_TYPE:
+        discoveries = [
+            _strategy3_discovery_from_candidate(c)
+            for c in db.get_strategy3_candidates(task_id=task_id)[:20]
+        ]
+    elif strategy_type == "STRATEGY_2_EXTREME_DRY_STABLE":
         discoveries = [
             _strategy2_discovery_from_candidate(c)
             for c in db.get_strategy2_candidates(task_id=task_id)[:20]
