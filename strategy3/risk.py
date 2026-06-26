@@ -23,10 +23,12 @@ def compute_strategy3_risk(
         if ind.current_close > 0 else 1.0
     )
     if ind.key_support > 0:
-        tactical_support = ind.key_support
-        support_quality = ",".join(ind.support_sources) if ind.support_sources else "key_support"
+        tactical_support, tactical_zone_low, support_quality = _select_tactical_support_zone(
+            ind,
+            config,
+        )
         stop_buffer = float(config.get("support_stop_buffer_pct", 0.01))
-        tactical_stop_loss = ind.key_support_zone_low * (1 - stop_buffer)
+        tactical_stop_loss = tactical_zone_low * (1 - stop_buffer)
     else:
         tactical_support, support_quality = _select_tactical_support(
             ind.current_close,
@@ -139,3 +141,33 @@ def _select_tactical_support(
         if gap >= 0.01:
             return value, name
     return valid[0][1], f"{valid[0][0]}_tight"
+
+
+def _select_tactical_support_zone(
+    ind: Strategy3Indicators,
+    config: dict,
+) -> tuple[float, float, str]:
+    zone_pct = float(config.get("support_zone_pct", 0.01))
+    key_quality = ",".join(ind.support_sources) if ind.support_sources else "key_support"
+    candidates = [
+        ("short_support", ind.short_support, ind.short_support_zone_low),
+        (key_quality, ind.key_support, ind.key_support_zone_low),
+        ("strong_support", ind.strong_support, ind.strong_support_zone_low),
+        ("ma20", ind.ma20, ind.ma20 * (1 - zone_pct) if ind.ma20 > 0 else 0.0),
+        ("ma60", ind.ma60, ind.ma60 * (1 - zone_pct) if ind.ma60 > 0 else 0.0),
+    ]
+    valid = [
+        (name, float(price), float(zone_low or price * (1 - zone_pct)))
+        for name, price, zone_low in candidates
+        if price and float(price) > 0 and float(price) < ind.current_close
+    ]
+    if not valid:
+        fallback = ind.key_support or ind.current_close
+        return fallback, fallback * (1 - zone_pct), "key_support_fallback"
+
+    valid.sort(key=lambda item: item[1], reverse=True)
+    for name, price, zone_low in valid:
+        gap = (ind.current_close - price) / ind.current_close if ind.current_close > 0 else 1.0
+        if gap >= 0.01:
+            return price, zone_low, name
+    return valid[0][1], valid[0][2], valid[0][0]

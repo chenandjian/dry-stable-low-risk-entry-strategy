@@ -74,10 +74,11 @@ zone_radius = max(price * support_zone_pct, ATR14 * support_zone_atr_ratio)
 
 1. 盘中最低价跌破支撑区但收盘收回，不视为失败。
 2. 最近出现收盘跌破后再收回，标记 `WEAKENING` 并排除，保证策略3偏高质量。
-3. `key_support` 替代旧战术支撑作为主要低风险入场支撑。
-4. `strong_support` 保留结构性风险视角，前端展示但不单独改变通过条件。
-5. 原有 `support_price`、`stop_loss`、`risk_ratio`、`rr1` 字段继续兼容，映射到关键支撑口径。
-6. `short_support` 使用评估日前 5 天，`key_support` 和 `strong_support` 使用最近 5 天之前的历史窗口，避免破位验证日把支撑价格同步拖低。
+3. `key_support` 用于判断缩量企稳和结构有效性，不直接等同于战术止损支撑。
+4. 战术风险优先选择离当前价最近且仍有效的支撑区，例如 `short_support`、MA20、MA60；`key_support` 作为较深层的有效性支撑和兜底支撑。
+5. `strong_support` 保留结构性风险视角，前端展示但不单独改变通过条件。
+6. 原有 `support_price`、`stop_loss`、`risk_ratio`、`rr1` 字段继续兼容，映射到战术支撑口径。
+7. `short_support` 使用评估日前 5 天，`key_support` 和 `strong_support` 使用最近 5 天之前的历史窗口，避免破位验证日把支撑价格同步拖低。
 
 ## 数据与前端
 

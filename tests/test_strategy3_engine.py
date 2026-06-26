@@ -310,6 +310,59 @@ def test_risk_model_exposes_key_support_zone_and_status():
     assert result.risk.support_sources
 
 
+def test_risk_model_uses_nearest_support_zone_for_tactical_risk_when_key_support_is_far():
+    start = date(2026, 1, 1)
+    data = []
+    for i in range(80):
+        data.append({
+            "date": (start + timedelta(days=i)).strftime("%Y-%m-%d"),
+            "open": 98.0,
+            "high": 101.0,
+            "low": 97.0,
+            "close": 99.0,
+            "volume": 1_000_000,
+            "turnover": 99_000_000,
+        })
+    data[-1].update({"open": 99.5, "high": 101.0, "low": 99.0, "close": 100.0})
+    ind = Strategy3Indicators(
+        current_close=100.0,
+        ma20=96.0,
+        ma60=90.0,
+        recent_high=112.0,
+        short_support=96.0,
+        short_support_zone_low=95.0,
+        short_support_zone_high=97.0,
+        key_support=88.0,
+        key_support_zone_low=86.0,
+        key_support_zone_high=90.0,
+        strong_support=82.0,
+        strong_support_zone_low=80.0,
+        strong_support_zone_high=84.0,
+        support_status="VALID",
+        break_status="NOT_BROKEN",
+        support_sources=["min_close_10"],
+    )
+
+    risk, rejects, score, reasons = compute_strategy3_risk(
+        data,
+        ind,
+        {
+            "support_lookback_days": 20,
+            "pullback_lookback_days": 60,
+            "max_risk_ratio": 0.08,
+            "support_stop_buffer_pct": 0.01,
+        },
+    )
+
+    assert risk.key_support == 88.0
+    assert risk.tactical_support == 96.0
+    assert risk.support_quality == "short_support"
+    assert risk.tactical_risk_ratio < 0.08
+    assert "RISK_RATIO_TOO_HIGH" not in rejects
+    assert score > 0
+    assert "tactical_support:short_support" in reasons
+
+
 def test_support_zone_does_not_reject_intraday_pierce_when_close_recovers():
     data = make_dry_cannot_fall_bars()
     data[-1].update({
