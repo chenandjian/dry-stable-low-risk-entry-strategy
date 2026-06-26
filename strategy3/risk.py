@@ -22,17 +22,23 @@ def compute_strategy3_risk(
         (ind.current_close - structural_stop_loss) / ind.current_close
         if ind.current_close > 0 else 1.0
     )
-    tactical_support, support_quality = _select_tactical_support(
-        ind.current_close,
-        [
-            ("pullback_low", pullback_low),
-            ("support_low", support_low),
-            ("ma20", ind.ma20),
-            ("ma60", ind.ma60),
-        ],
-        fallback=structural_support,
-    )
-    tactical_stop_loss = tactical_support * 0.98
+    if ind.key_support > 0:
+        tactical_support = ind.key_support
+        support_quality = ",".join(ind.support_sources) if ind.support_sources else "key_support"
+        stop_buffer = float(config.get("support_stop_buffer_pct", 0.01))
+        tactical_stop_loss = ind.key_support_zone_low * (1 - stop_buffer)
+    else:
+        tactical_support, support_quality = _select_tactical_support(
+            ind.current_close,
+            [
+                ("pullback_low", pullback_low),
+                ("support_low", support_low),
+                ("ma20", ind.ma20),
+                ("ma60", ind.ma60),
+            ],
+            fallback=structural_support,
+        )
+        tactical_stop_loss = tactical_support * 0.98
     tactical_risk_ratio = (
         (ind.current_close - tactical_stop_loss) / ind.current_close
         if ind.current_close > 0 else 1.0
@@ -63,9 +69,26 @@ def compute_strategy3_risk(
         tactical_risk_ratio=tactical_risk_ratio,
         tactical_rr1=tactical_rr1,
         support_quality=support_quality,
+        short_support=ind.short_support,
+        short_support_zone_low=ind.short_support_zone_low,
+        short_support_zone_high=ind.short_support_zone_high,
+        key_support=ind.key_support or tactical_support,
+        key_support_zone_low=ind.key_support_zone_low,
+        key_support_zone_high=ind.key_support_zone_high,
+        strong_support=ind.strong_support or structural_support,
+        strong_support_zone_low=ind.strong_support_zone_low,
+        strong_support_zone_high=ind.strong_support_zone_high,
+        support_status=ind.support_status,
+        break_status=ind.break_status,
+        nearest_support_distance=ind.nearest_support_distance,
+        support_sources=list(ind.support_sources),
     )
 
     rejects: list[str] = []
+    if ind.support_status == "FAILED":
+        rejects.append("KEY_SUPPORT_FAILED")
+    elif ind.support_status == "BROKEN":
+        rejects.append("KEY_SUPPORT_BROKEN")
     if tactical_risk_ratio > config["max_risk_ratio"]:
         rejects.append("RISK_RATIO_TOO_HIGH")
     if target_1 <= ind.current_close or tactical_rr1 < 1.5:
@@ -88,6 +111,9 @@ def compute_strategy3_risk(
     if ind.current_close >= tactical_support:
         score += 2
         reasons.append("above_support")
+    if ind.support_status in {"VALID", "TESTING"}:
+        score += 1
+        reasons.append(f"support_status:{ind.support_status}")
     if support_quality:
         reasons.append(f"tactical_support:{support_quality}")
     return risk, rejects, min(score, 15), reasons

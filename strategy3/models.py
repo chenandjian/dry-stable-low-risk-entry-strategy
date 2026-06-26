@@ -36,6 +36,19 @@ class Strategy3Indicators:
     support_price_10: float = 0.0
     support_test_count: int = 0
     support_valid: bool = False
+    short_support: float = 0.0
+    short_support_zone_low: float = 0.0
+    short_support_zone_high: float = 0.0
+    key_support: float = 0.0
+    key_support_zone_low: float = 0.0
+    key_support_zone_high: float = 0.0
+    strong_support: float = 0.0
+    strong_support_zone_low: float = 0.0
+    strong_support_zone_high: float = 0.0
+    support_status: str = ""
+    break_status: str = ""
+    nearest_support_distance: float = 0.0
+    support_sources: list[str] = field(default_factory=list)
     bear_body_shrink: bool = False
     lower_shadow_count: int = 0
     down_volume_ratio_5: float = 0.0
@@ -74,6 +87,19 @@ class Strategy3Risk:
     tactical_risk_ratio: float = 0.0
     tactical_rr1: float = 0.0
     support_quality: str = ""
+    short_support: float = 0.0
+    short_support_zone_low: float = 0.0
+    short_support_zone_high: float = 0.0
+    key_support: float = 0.0
+    key_support_zone_low: float = 0.0
+    key_support_zone_high: float = 0.0
+    strong_support: float = 0.0
+    strong_support_zone_low: float = 0.0
+    strong_support_zone_high: float = 0.0
+    support_status: str = ""
+    break_status: str = ""
+    nearest_support_distance: float = 0.0
+    support_sources: list[str] = field(default_factory=list)
 
 
 @dataclass

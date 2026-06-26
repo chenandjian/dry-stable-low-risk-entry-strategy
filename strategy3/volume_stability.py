@@ -19,7 +19,7 @@ def evaluate_volume_stability(
         rejects.append("SHRINKING_BEAR_DRIFT")
     if (
         ind.support_price_10 > 0
-        and not ind.support_valid
+        and ind.support_status in {"WEAKENING", "BROKEN", "FAILED"}
     ):
         rejects.append("SUPPORT_TEST_FAILED")
     if ind.atr_ratio_5_20 >= config["dry_atr_expand_reject_ratio"] and ind.return_5 < 0:
@@ -56,6 +56,8 @@ def evaluate_volume_stability(
     if ind.support_valid:
         score += 2
         reasons.append("support_valid")
+    if ind.support_status in {"VALID", "TESTING"}:
+        reasons.append(f"support_status:{ind.support_status}")
 
     if ind.bear_body_shrink:
         score += 1

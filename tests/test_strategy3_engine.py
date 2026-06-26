@@ -291,3 +291,88 @@ def test_risk_model_uses_tactical_support_but_keeps_structural_risk_visible():
     assert "RISK_RATIO_TOO_HIGH" not in rejects
     assert score > 0
     assert "tactical_support:ma20" in reasons
+
+
+def test_risk_model_exposes_key_support_zone_and_status():
+    result = StrongPullbackSecondBreakoutEngine({"liquidity": {"min_listing_days": 350}}).evaluate_at(
+        make_strategy3_candidate_bars(),
+        code="000020",
+    )
+
+    assert result.passed is True
+    assert result.risk.short_support > 0
+    assert result.risk.key_support > 0
+    assert result.risk.strong_support > 0
+    assert result.risk.key_support_zone_low < result.risk.key_support < result.risk.key_support_zone_high
+    assert result.risk.support_status in {"VALID", "TESTING"}
+    assert result.risk.break_status == "NOT_BROKEN"
+    assert result.risk.nearest_support_distance >= 0
+    assert result.risk.support_sources
+
+
+def test_support_zone_does_not_reject_intraday_pierce_when_close_recovers():
+    data = make_dry_cannot_fall_bars()
+    data[-1].update({
+        "open": 22.18,
+        "high": 22.30,
+        "low": 21.60,
+        "close": 22.12,
+        "volume": 340_000,
+        "turnover": round(22.12 * 340_000, 2),
+    })
+
+    result = StrongPullbackSecondBreakoutEngine({"liquidity": {"min_listing_days": 350}}).evaluate_at(
+        data,
+        code="000021",
+    )
+
+    assert "SUPPORT_TEST_FAILED" not in result.reject_reasons
+    assert "KEY_SUPPORT_FAILED" not in result.reject_reasons
+    assert result.risk.support_status in {"VALID", "TESTING"}
+
+
+def test_support_zone_rejects_two_consecutive_closes_below_key_zone():
+    data = make_dry_cannot_fall_bars()
+    for idx, close in [(-2, 21.35), (-1, 21.25)]:
+        data[idx].update({
+            "open": round(close + 0.10, 2),
+            "high": round(close + 0.18, 2),
+            "low": round(close - 0.12, 2),
+            "close": close,
+            "volume": 500_000,
+            "turnover": round(close * 500_000, 2),
+        })
+
+    result = StrongPullbackSecondBreakoutEngine({"liquidity": {"min_listing_days": 350}}).evaluate_at(
+        data,
+        code="000022",
+    )
+
+    assert result.passed is False
+    assert "SUPPORT_TEST_FAILED" in result.reject_reasons
+    assert "KEY_SUPPORT_FAILED" in result.reject_reasons
+    assert result.risk.support_status == "FAILED"
+    assert result.risk.break_status == "EFFECTIVE_BREAK"
+
+
+def test_support_zone_rejects_single_high_volume_close_below_key_zone():
+    data = make_dry_cannot_fall_bars()
+    data[-1].update({
+        "open": 22.05,
+        "high": 22.12,
+        "low": 21.20,
+        "close": 21.30,
+        "volume": 1_700_000,
+        "turnover": round(21.30 * 1_700_000, 2),
+    })
+
+    result = StrongPullbackSecondBreakoutEngine({"liquidity": {"min_listing_days": 350}}).evaluate_at(
+        data,
+        code="000023",
+    )
+
+    assert result.passed is False
+    assert "SUPPORT_TEST_FAILED" in result.reject_reasons
+    assert "KEY_SUPPORT_FAILED" in result.reject_reasons
+    assert result.risk.support_status == "FAILED"
+    assert result.risk.break_status == "EFFECTIVE_BREAK"

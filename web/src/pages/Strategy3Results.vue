@@ -86,6 +86,14 @@
                     <div>支撑口径：{{ c.support_quality || '--' }}</div>
                   </div>
                   <div>
+                    <h4>支撑区 V2</h4>
+                    <div>状态：{{ c.support_status || '--' }} · 跌破：{{ c.break_status || '--' }} · 距关键支撑：{{ formatPct(c.nearest_support_distance) }}</div>
+                    <div>短线支撑区：{{ fmtSupportZone(c.short_support_zone_low, c.short_support, c.short_support_zone_high) }}</div>
+                    <div>关键支撑区：{{ fmtSupportZone(c.key_support_zone_low, c.key_support, c.key_support_zone_high) }}</div>
+                    <div>强支撑区：{{ fmtSupportZone(c.strong_support_zone_low, c.strong_support, c.strong_support_zone_high) }}</div>
+                    <div>来源：{{ fmtList(c.support_sources) }}</div>
+                  </div>
+                  <div>
                     <h4>量干跌不动质量</h4>
                     <div>V3/5/10/20：{{ fmtNum(c.v3) }} / {{ fmtNum(c.v5) }} / {{ fmtNum(c.v10) }} / {{ fmtNum(c.v20) }}</div>
                     <div>V5/V20：{{ fmtNum(c.volume_ratio_5_20, 3) }} · 5日涨跌：{{ formatPct(c.return_5) }} · 不创新低：{{ fmtBool(c.no_new_low) }}</div>
@@ -196,6 +204,15 @@ export default {
     fmtBool(v) {
       if (v === true || v === 1) return '是'
       if (v === false || v === 0) return '否'
+      return '--'
+    },
+    fmtSupportZone(low, price, high) {
+      if (low == null && price == null && high == null) return '--'
+      return `${this.fmtPrice(low)} - ${this.fmtPrice(price)} - ${this.fmtPrice(high)}`
+    },
+    fmtList(v) {
+      if (Array.isArray(v) && v.length) return v.join(', ')
+      if (typeof v === 'string' && v) return v
       return '--'
     },
     toggleDetail(c) {

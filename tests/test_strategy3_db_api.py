@@ -60,6 +60,19 @@ def test_strategy3_candidate_table_roundtrip(tmp_path):
         "target_1": 12.0,
         "risk_ratio": 0.04,
         "rr1": 2.2,
+        "short_support": 9.8,
+        "short_support_zone_low": 9.65,
+        "short_support_zone_high": 9.95,
+        "key_support": 9.7,
+        "key_support_zone_low": 9.50,
+        "key_support_zone_high": 9.90,
+        "strong_support": 9.2,
+        "strong_support_zone_low": 9.05,
+        "strong_support_zone_high": 9.35,
+        "support_status": "VALID",
+        "break_status": "NOT_BROKEN",
+        "nearest_support_distance": 0.03,
+        "support_sources": ["min_close_10", "ma20"],
         "score_reasons": ["强趋势"],
         "reject_reasons": [],
     })
@@ -74,6 +87,12 @@ def test_strategy3_candidate_table_roundtrip(tmp_path):
     assert rows[0]["support_test_count"] == 3
     assert rows[0]["support_valid"] == 1
     assert rows[0]["atr_ratio_5_20"] == 0.68
+    assert rows[0]["key_support"] == 9.7
+    assert rows[0]["key_support_zone_low"] == 9.5
+    assert rows[0]["support_status"] == "VALID"
+    assert rows[0]["break_status"] == "NOT_BROKEN"
+    assert rows[0]["nearest_support_distance"] == 0.03
+    assert rows[0]["support_sources"] == ["min_close_10", "ma20"]
 
 
 def test_strategy3_candidates_do_not_leak_into_strategy1_or_strategy2_tables(tmp_path):
@@ -172,6 +191,19 @@ def test_build_strategy3_discovery_contains_frontend_fields():
             tactical_risk_ratio=0.069,
             tactical_rr1=2.9,
             support_quality="ma20",
+            short_support=9.8,
+            short_support_zone_low=9.65,
+            short_support_zone_high=9.95,
+            key_support=9.7,
+            key_support_zone_low=9.50,
+            key_support_zone_high=9.90,
+            strong_support=9.2,
+            strong_support_zone_low=9.05,
+            strong_support_zone_high=9.35,
+            support_status="VALID",
+            break_status="NOT_BROKEN",
+            nearest_support_distance=0.03,
+            support_sources=["min_close_10", "ma20"],
         ),
         score_reasons=["强趋势"],
     )
@@ -191,6 +223,13 @@ def test_build_strategy3_discovery_contains_frontend_fields():
     assert d["tactical_support"] == 9.5
     assert d["tactical_risk_ratio"] == 0.069
     assert d["support_quality"] == "ma20"
+    assert d["key_support"] == 9.7
+    assert d["key_support_zone_low"] == 9.5
+    assert d["key_support_zone_high"] == 9.9
+    assert d["support_status"] == "VALID"
+    assert d["break_status"] == "NOT_BROKEN"
+    assert d["nearest_support_distance"] == 0.03
+    assert d["support_sources"] == ["min_close_10", "ma20"]
 
 
 def test_strategy3_candidate_table_roundtrip_tactical_and_structural_risk(tmp_path):
@@ -220,6 +259,19 @@ def test_strategy3_candidate_table_roundtrip_tactical_and_structural_risk(tmp_pa
         "tactical_risk_ratio": 0.069,
         "tactical_rr1": 2.9,
         "support_quality": "ma20",
+        "short_support": 9.8,
+        "short_support_zone_low": 9.65,
+        "short_support_zone_high": 9.95,
+        "key_support": 9.7,
+        "key_support_zone_low": 9.50,
+        "key_support_zone_high": 9.90,
+        "strong_support": 9.2,
+        "strong_support_zone_low": 9.05,
+        "strong_support_zone_high": 9.35,
+        "support_status": "VALID",
+        "break_status": "NOT_BROKEN",
+        "nearest_support_distance": 0.03,
+        "support_sources": ["min_close_10", "ma20"],
     })
 
     row = db.get_strategy3_candidates(task_id="s3-task")[0]
@@ -229,6 +281,10 @@ def test_strategy3_candidate_table_roundtrip_tactical_and_structural_risk(tmp_pa
     assert row["tactical_support"] == 9.5
     assert row["tactical_risk_ratio"] == 0.069
     assert row["support_quality"] == "ma20"
+    assert row["key_support"] == 9.7
+    assert row["key_support_zone_low"] == 9.5
+    assert row["support_status"] == "VALID"
+    assert row["support_sources"] == ["min_close_10", "ma20"]
 
 
 def test_re_evaluate_strategy3_task_uses_cached_ohlc(tmp_path, monkeypatch):

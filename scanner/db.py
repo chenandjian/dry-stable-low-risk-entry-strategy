@@ -1212,6 +1212,19 @@ def _ensure_strategy3_candidates_table(conn: sqlite3.Connection):
     _ensure_column(conn, "strategy3_candidates", "down_volume_ratio_5", "REAL")
     _ensure_column(conn, "strategy3_candidates", "atr_ratio_5_20", "REAL")
     _ensure_column(conn, "strategy3_candidates", "has_big_down_volume", "INTEGER DEFAULT 0")
+    _ensure_column(conn, "strategy3_candidates", "short_support", "REAL")
+    _ensure_column(conn, "strategy3_candidates", "short_support_zone_low", "REAL")
+    _ensure_column(conn, "strategy3_candidates", "short_support_zone_high", "REAL")
+    _ensure_column(conn, "strategy3_candidates", "key_support", "REAL")
+    _ensure_column(conn, "strategy3_candidates", "key_support_zone_low", "REAL")
+    _ensure_column(conn, "strategy3_candidates", "key_support_zone_high", "REAL")
+    _ensure_column(conn, "strategy3_candidates", "strong_support", "REAL")
+    _ensure_column(conn, "strategy3_candidates", "strong_support_zone_low", "REAL")
+    _ensure_column(conn, "strategy3_candidates", "strong_support_zone_high", "REAL")
+    _ensure_column(conn, "strategy3_candidates", "support_status", "TEXT")
+    _ensure_column(conn, "strategy3_candidates", "break_status", "TEXT")
+    _ensure_column(conn, "strategy3_candidates", "nearest_support_distance", "REAL")
+    _ensure_column(conn, "strategy3_candidates", "support_sources", "TEXT")
 
 
 def _ensure_column(conn: sqlite3.Connection, table: str, column: str, col_type: str):
@@ -1366,6 +1379,10 @@ def upsert_strategy3_candidate(task_id: str, d: dict):
         "structural_support", "structural_stop_loss", "structural_risk_ratio",
         "structural_rr1", "tactical_support", "tactical_stop_loss",
         "tactical_risk_ratio", "tactical_rr1", "support_quality",
+        "short_support", "short_support_zone_low", "short_support_zone_high",
+        "key_support", "key_support_zone_low", "key_support_zone_high",
+        "strong_support", "strong_support_zone_low", "strong_support_zone_high",
+        "support_status", "break_status", "nearest_support_distance", "support_sources",
         "score_reasons", "reject_reasons", "data_source",
     ]
     values = (
@@ -1422,6 +1439,19 @@ def upsert_strategy3_candidate(task_id: str, d: dict):
         d.get("tactical_risk_ratio"),
         d.get("tactical_rr1"),
         d.get("support_quality", ""),
+        d.get("short_support"),
+        d.get("short_support_zone_low"),
+        d.get("short_support_zone_high"),
+        d.get("key_support"),
+        d.get("key_support_zone_low"),
+        d.get("key_support_zone_high"),
+        d.get("strong_support"),
+        d.get("strong_support_zone_low"),
+        d.get("strong_support_zone_high"),
+        d.get("support_status", ""),
+        d.get("break_status", ""),
+        d.get("nearest_support_distance"),
+        _json_dumps(d.get("support_sources")),
         _json_dumps(d.get("score_reasons")),
         _json_dumps(d.get("reject_reasons")),
         d.get("data_source", ""),
@@ -1483,7 +1513,7 @@ def get_strategy3_candidate(code: str, task_id: str = None) -> dict | None:
 
 def _deserialize_strategy3_candidate(row: dict) -> dict:
     """Convert strategy3 JSON string fields to Python lists."""
-    for field in ("score_reasons", "reject_reasons"):
+    for field in ("score_reasons", "reject_reasons", "support_sources"):
         value = row.get(field)
         if isinstance(value, str) and value:
             try:

@@ -15,7 +15,9 @@ def compute_indicators(
     high_120 = _max(data[-120:], "high")
     return_60 = _return(data, 60)
     index_return_60 = _return(market_data, 60) if market_data else 0.0
+    ma20 = _ma(data, 20)
     ma60 = _ma(data, 60)
+    ma120 = _ma(data, 120)
     ma60_20_days_ago = _ma(data[:-20], 60) if len(data) >= 80 else 0.0
 
     v3 = _avg(data[-3:], "volume")
@@ -43,18 +45,28 @@ def compute_indicators(
     support_history = data[-support_days - 5:-5] if len(data) > support_days + 5 else data[:-5]
     support_price = min((float(row["close"]) for row in support_history), default=0.0)
     support_test_tolerance = float(config.get("dry_support_test_tolerance", 0.02))
-    support_break_tolerance = float(config.get("dry_support_break_tolerance", 0.98))
-    support_test_count = _count_support_tests(data, support_price, support_days, support_test_tolerance)
-    support_valid = _support_valid(data, support_price, support_days, support_break_tolerance)
     atr5 = _atr(data, 5)
     atr20 = _atr(data, 20)
+    atr14 = _atr(data, 14)
+    support_levels = _compute_support_levels(
+        data=data,
+        current_close=close,
+        ma20=ma20,
+        ma60=ma60,
+        v20=v20,
+        atr14=atr14,
+        config=config,
+    )
+    support_price = support_levels["key_support"] or support_price
+    support_test_count = _count_support_tests(data, support_price, support_days, support_test_tolerance)
+    support_valid = support_levels["support_status"] in {"VALID", "TESTING"}
 
     return Strategy3Indicators(
         ma5=_ma(data, 5),
         ma10=_ma(data, 10),
-        ma20=_ma(data, 20),
+        ma20=ma20,
         ma60=ma60,
-        ma120=_ma(data, 120),
+        ma120=ma120,
         return_3=_return(data, 3),
         return_20=_return(data, 20),
         return_60=return_60,
@@ -81,6 +93,19 @@ def compute_indicators(
         support_price_10=support_price,
         support_test_count=support_test_count,
         support_valid=support_valid,
+        short_support=support_levels["short_support"],
+        short_support_zone_low=support_levels["short_support_zone_low"],
+        short_support_zone_high=support_levels["short_support_zone_high"],
+        key_support=support_levels["key_support"],
+        key_support_zone_low=support_levels["key_support_zone_low"],
+        key_support_zone_high=support_levels["key_support_zone_high"],
+        strong_support=support_levels["strong_support"],
+        strong_support_zone_low=support_levels["strong_support_zone_low"],
+        strong_support_zone_high=support_levels["strong_support_zone_high"],
+        support_status=support_levels["support_status"],
+        break_status=support_levels["break_status"],
+        nearest_support_distance=support_levels["nearest_support_distance"],
+        support_sources=support_levels["support_sources"],
         bear_body_shrink=_bear_body_shrink(data),
         lower_shadow_count=_lower_shadow_count(
             data,
@@ -138,6 +163,190 @@ def _support_valid(data: list[dict], support: float, days: int, break_tolerance:
         return False
     floor = support * break_tolerance
     return all(float(row["close"]) >= floor for row in data[-days:])
+
+
+def _compute_support_levels(
+    *,
+    data: list[dict],
+    current_close: float,
+    ma20: float,
+    ma60: float,
+    v20: float,
+    atr14: float,
+    config: dict,
+) -> dict:
+    validation_days = min(5, max(1, len(data) - 1))
+    short_window = _history_window_before_recent(data, 5, 1)
+    key_days = int(config.get("dry_support_lookback_days", 10))
+    key_window = _history_window_before_recent(data, key_days, validation_days)
+    strong_days = int(config.get("support_lookback_days", 20))
+    strong_window = _history_window_before_recent(data, strong_days, validation_days)
+
+    short = _build_support_from_base(
+        "min_close_5",
+        _min_field(short_window, "close"),
+        [
+            ("low_5", _min_field(short_window, "low")),
+            ("ma20", ma20),
+        ],
+        current_close,
+        atr14,
+        config,
+    )
+    key = _build_support_from_base(
+        "min_close_10",
+        _min_field(key_window, "close"),
+        [
+            ("low_10", _min_field(key_window, "low")),
+            ("platform_low_10", _platform_low(key_window, float(config.get("platform_range_threshold", 0.08)))),
+            ("ma20", ma20),
+            ("ma60", ma60),
+        ],
+        current_close,
+        atr14,
+        config,
+    )
+    strong = _build_support_from_base(
+        "min_close_20",
+        _min_field(strong_window, "close"),
+        [
+            ("low_20", _min_field(strong_window, "low")),
+            ("ma60", ma60),
+        ],
+        current_close,
+        atr14,
+        config,
+    )
+    support_status, break_status = _support_break_status(
+        data[-max(validation_days, int(config.get("support_effective_break_days", 2))):],
+        key["zone_low"],
+        key["zone_high"],
+        v20,
+        int(config.get("support_effective_break_days", 2)),
+        float(config.get("support_big_down_return", -0.04)),
+        float(config.get("support_big_down_volume_ratio", 1.30)),
+    )
+    distance = (
+        (current_close - key["price"]) / current_close
+        if current_close > 0 and key["price"] > 0 else 0.0
+    )
+    return {
+        "short_support": short["price"],
+        "short_support_zone_low": short["zone_low"],
+        "short_support_zone_high": short["zone_high"],
+        "key_support": key["price"],
+        "key_support_zone_low": key["zone_low"],
+        "key_support_zone_high": key["zone_high"],
+        "strong_support": strong["price"],
+        "strong_support_zone_low": strong["zone_low"],
+        "strong_support_zone_high": strong["zone_high"],
+        "support_status": support_status,
+        "break_status": break_status,
+        "nearest_support_distance": max(0.0, distance),
+        "support_sources": key["sources"],
+    }
+
+
+def _history_window_before_recent(data: list[dict], days: int, recent_days: int) -> list[dict]:
+    end = max(1, len(data) - recent_days)
+    start = max(0, end - days)
+    window = data[start:end]
+    if window:
+        return window
+    return data[: max(1, len(data) - 1)]
+
+
+def _build_support_from_base(
+    base_source: str,
+    base_price: float,
+    related: list[tuple[str, float]],
+    current_close: float,
+    atr14: float,
+    config: dict,
+) -> dict:
+    price = float(base_price or 0.0)
+    if price <= 0:
+        price = current_close
+    radius = _support_zone_radius(price, atr14, config)
+    sources = [base_source]
+    merge_tolerance = max(radius, price * 0.02)
+    for source, value in related:
+        value = float(value or 0.0)
+        if value <= 0:
+            continue
+        if abs(value - price) <= merge_tolerance:
+            sources.append(source)
+    return {
+        "price": price,
+        "zone_low": max(0.0, price - radius),
+        "zone_high": price + radius,
+        "sources": sources,
+    }
+
+
+def _support_zone_radius(price: float, atr14: float, config: dict) -> float:
+    pct_radius = price * float(config.get("support_zone_pct", 0.01))
+    atr_radius = atr14 * float(config.get("support_zone_atr_ratio", 0.30))
+    return max(pct_radius, atr_radius)
+
+
+def _support_break_status(
+    recent: list[dict],
+    zone_low: float,
+    zone_high: float,
+    v20: float,
+    break_days: int,
+    big_down_return: float,
+    big_down_volume_ratio: float,
+) -> tuple[str, str]:
+    if zone_low <= 0 or not recent:
+        return "UNKNOWN", "UNKNOWN"
+    closes_below: list[bool] = []
+    streak = 0
+    effective_break = False
+    previous_close = None
+    for row in recent:
+        close = float(row["close"])
+        below = close < zone_low
+        closes_below.append(below)
+        streak = streak + 1 if below else 0
+        if streak >= break_days:
+            effective_break = True
+        if below and v20 > 0 and float(row["volume"]) >= v20 * big_down_volume_ratio:
+            effective_break = True
+        if previous_close and previous_close > 0:
+            day_return = close / previous_close - 1
+            if below and day_return <= big_down_return:
+                effective_break = True
+        previous_close = close
+
+    current_close = float(recent[-1]["close"])
+    if effective_break:
+        return "FAILED", "EFFECTIVE_BREAK"
+    if current_close < zone_low:
+        return "BROKEN", "CLOSE_BELOW_ZONE"
+    if any(closes_below[:-1]):
+        return "WEAKENING", "RECENT_CLOSE_BELOW_ZONE"
+    if current_close <= zone_high:
+        return "TESTING", "NOT_BROKEN"
+    return "VALID", "NOT_BROKEN"
+
+
+def _min_field(data: list[dict], field: str) -> float:
+    if not data:
+        return 0.0
+    return min(float(row[field]) for row in data)
+
+
+def _platform_low(data: list[dict], range_threshold: float) -> float:
+    if not data:
+        return 0.0
+    high = max(float(row["high"]) for row in data)
+    low = min(float(row["low"]) for row in data)
+    close = float(data[-1]["close"])
+    if close <= 0:
+        return 0.0
+    return low if (high - low) / close <= range_threshold else 0.0
 
 
 def _bear_body_shrink(data: list[dict]) -> bool:

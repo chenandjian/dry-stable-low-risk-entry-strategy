@@ -145,3 +145,9 @@ strategy3:
   dry_atr_extreme_contract_ratio: 0.60
   dry_atr_expand_reject_ratio: 1.20
   dry_no_new_low_tolerance: 0.995
+  support_zone_pct: 0.01
+  support_zone_atr_ratio: 0.30
+  support_effective_break_days: 2
+  support_big_down_return: -0.04
+  support_big_down_volume_ratio: 1.30
+  support_stop_buffer_pct: 0.01

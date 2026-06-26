@@ -37,6 +37,12 @@ DEFAULT_STRATEGY3_CONFIG = {
     "dry_atr_extreme_contract_ratio": 0.60,
     "dry_atr_expand_reject_ratio": 1.20,
     "dry_no_new_low_tolerance": 0.995,
+    "support_zone_pct": 0.01,
+    "support_zone_atr_ratio": 0.30,
+    "support_effective_break_days": 2,
+    "support_big_down_return": -0.04,
+    "support_big_down_volume_ratio": 1.30,
+    "support_stop_buffer_pct": 0.01,
 }
 
 REQUIRED_OHLC_FIELDS = {"date", "open", "high", "low", "close", "volume"}
@@ -97,6 +103,12 @@ def resolve_strategy3_config(config: dict | None) -> dict:
         raise ValueError("dry_atr_extreme_contract_ratio must be <= dry_atr_contract_ratio")
     _validate_number_range(raw, "dry_atr_expand_reject_ratio", 0.5, 5.0)
     _validate_number_range(raw, "dry_no_new_low_tolerance", 0.9, 1.05)
+    _validate_number_range(raw, "support_zone_pct", 0.001, 0.10)
+    _validate_number_range(raw, "support_zone_atr_ratio", 0.0, 2.0)
+    _validate_int_range(raw, "support_effective_break_days", 1, 5)
+    _validate_number_range(raw, "support_big_down_return", -0.2, 0.0)
+    _validate_number_range(raw, "support_big_down_volume_ratio", 0.5, 5.0)
+    _validate_number_range(raw, "support_stop_buffer_pct", 0.0, 0.10)
     return raw
 
 

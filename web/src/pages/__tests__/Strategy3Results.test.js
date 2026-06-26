@@ -74,6 +74,19 @@ describe('Strategy3Results', () => {
         structural_stop_loss: 8.62,
         structural_risk_ratio: 0.138,
         support_quality: 'ma20',
+        short_support: 9.8,
+        short_support_zone_low: 9.65,
+        short_support_zone_high: 9.95,
+        key_support: 9.7,
+        key_support_zone_low: 9.5,
+        key_support_zone_high: 9.9,
+        strong_support: 9.2,
+        strong_support_zone_low: 9.05,
+        strong_support_zone_high: 9.35,
+        support_status: 'VALID',
+        break_status: 'NOT_BROKEN',
+        nearest_support_distance: 0.03,
+        support_sources: ['min_close_10', 'ma20'],
         target_1: 12,
         evaluation_date: '2026-06-25',
       }],
@@ -103,6 +116,10 @@ describe('Strategy3Results', () => {
     expect(wrapper.text()).toContain('5日涨跌')
     expect(wrapper.text()).toContain('支撑测试')
     expect(wrapper.text()).toContain('ATR5/20')
+    expect(wrapper.text()).toContain('支撑区 V2')
+    expect(wrapper.text()).toContain('关键支撑区')
+    expect(wrapper.text()).toContain('VALID')
+    expect(wrapper.text()).toContain('min_close_10')
   })
 
   it('keeps existing candidates when refresh fails', async () => {

@@ -24,6 +24,12 @@ def test_resolve_strategy3_config_defaults():
     assert cfg["dry_support_min_test_count"] == 2
     assert cfg["dry_support_break_tolerance"] == 0.98
     assert cfg["dry_atr_expand_reject_ratio"] == 1.20
+    assert cfg["support_zone_pct"] == 0.01
+    assert cfg["support_zone_atr_ratio"] == 0.30
+    assert cfg["support_effective_break_days"] == 2
+    assert cfg["support_big_down_return"] == -0.04
+    assert cfg["support_big_down_volume_ratio"] == 1.30
+    assert cfg["support_stop_buffer_pct"] == 0.01
 
 
 def test_resolve_strategy3_config_accepts_nested_overrides():
@@ -94,6 +100,34 @@ def test_rejects_invalid_dry_cannot_fall_thresholds():
         resolve_strategy3_config({
             "liquidity": {"min_listing_days": 350},
             "strategy3": {"dry_volume_ratio": 0.60, "dry_extreme_volume_ratio": 0.70},
+        })
+
+
+def test_rejects_invalid_support_zone_thresholds():
+    with pytest.raises(ValueError, match="support_zone_pct"):
+        resolve_strategy3_config({
+            "liquidity": {"min_listing_days": 350},
+            "strategy3": {"support_zone_pct": 0.50},
+        })
+    with pytest.raises(ValueError, match="support_zone_atr_ratio"):
+        resolve_strategy3_config({
+            "liquidity": {"min_listing_days": 350},
+            "strategy3": {"support_zone_atr_ratio": 3.0},
+        })
+    with pytest.raises(ValueError, match="support_effective_break_days"):
+        resolve_strategy3_config({
+            "liquidity": {"min_listing_days": 350},
+            "strategy3": {"support_effective_break_days": 0},
+        })
+    with pytest.raises(ValueError, match="support_big_down_volume_ratio"):
+        resolve_strategy3_config({
+            "liquidity": {"min_listing_days": 350},
+            "strategy3": {"support_big_down_volume_ratio": 0.1},
+        })
+    with pytest.raises(ValueError, match="support_stop_buffer_pct"):
+        resolve_strategy3_config({
+            "liquidity": {"min_listing_days": 350},
+            "strategy3": {"support_stop_buffer_pct": 0.20},
         })
 
 
