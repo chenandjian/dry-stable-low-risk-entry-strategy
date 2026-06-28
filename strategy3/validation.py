@@ -37,6 +37,13 @@ DEFAULT_STRATEGY3_CONFIG = {
     "dry_atr_extreme_contract_ratio": 0.60,
     "dry_atr_expand_reject_ratio": 1.20,
     "dry_no_new_low_tolerance": 0.995,
+    "dry_balance_direction_efficiency_threshold": 0.35,
+    "dry_balance_extreme_direction_efficiency_threshold": 0.25,
+    "dry_balance_max_up_5": 0.03,
+    "dry_balance_max_down_5": -0.03,
+    "dry_balance_close_position_min": 0.35,
+    "dry_balance_close_position_max": 0.65,
+    "dry_balance_close_range_tight": 0.03,
     "support_zone_pct": 0.01,
     "support_zone_atr_ratio": 0.30,
     "support_effective_break_days": 2,
@@ -103,6 +110,20 @@ def resolve_strategy3_config(config: dict | None) -> dict:
         raise ValueError("dry_atr_extreme_contract_ratio must be <= dry_atr_contract_ratio")
     _validate_number_range(raw, "dry_atr_expand_reject_ratio", 0.5, 5.0)
     _validate_number_range(raw, "dry_no_new_low_tolerance", 0.9, 1.05)
+    _validate_number_range(raw, "dry_balance_direction_efficiency_threshold", 0.0, 1.0)
+    _validate_number_range(raw, "dry_balance_extreme_direction_efficiency_threshold", 0.0, 1.0)
+    if raw["dry_balance_extreme_direction_efficiency_threshold"] > raw["dry_balance_direction_efficiency_threshold"]:
+        raise ValueError(
+            "dry_balance_extreme_direction_efficiency_threshold "
+            "must be <= dry_balance_direction_efficiency_threshold"
+        )
+    _validate_number_range(raw, "dry_balance_max_up_5", 0.0, 0.2)
+    _validate_number_range(raw, "dry_balance_max_down_5", -0.2, 0.0)
+    _validate_number_range(raw, "dry_balance_close_position_min", 0.0, 1.0)
+    _validate_number_range(raw, "dry_balance_close_position_max", 0.0, 1.0)
+    if raw["dry_balance_close_position_max"] < raw["dry_balance_close_position_min"]:
+        raise ValueError("dry_balance_close_position_max must be >= dry_balance_close_position_min")
+    _validate_number_range(raw, "dry_balance_close_range_tight", 0.0, 0.2)
     _validate_number_range(raw, "support_zone_pct", 0.001, 0.10)
     _validate_number_range(raw, "support_zone_atr_ratio", 0.0, 2.0)
     _validate_int_range(raw, "support_effective_break_days", 1, 5)

@@ -31,6 +31,9 @@ def compute_indicators(
     close_values = [float(row["close"]) for row in last5]
     high5 = max(float(row["high"]) for row in last5)
     low5 = min(float(row["low"]) for row in last5)
+    range_5 = (high5 - low5) / close if close > 0 else 0.0
+    range_10 = _range(data, 10, close)
+    range_20 = _range(data, 20, close)
     last10 = data[-10:] if len(data) >= 10 else data
     min_close_5 = min(close_values)
     min_close_10 = min(float(row["close"]) for row in last10)
@@ -77,7 +80,10 @@ def compute_indicators(
         ma60_slope_20=(ma60 / ma60_20_days_ago - 1) if ma60_20_days_ago > 0 else 0.0,
         recent_high=recent_high,
         pullback_pct=(recent_high - close) / recent_high if recent_high > 0 else 0.0,
-        range_5=(high5 - low5) / close if close > 0 else 0.0,
+        range_5=range_5,
+        range_10=range_10,
+        range_20=range_20,
+        range_compression_ok=0 < range_5 < range_10 < range_20,
         close_range_5=(max(close_values) - min(close_values)) / close if close > 0 else 0.0,
         volume_ratio_5_20=v5 / v20 if v20 > 0 else 0.0,
         v3=v3,
@@ -86,6 +92,10 @@ def compute_indicators(
         v20=v20,
         down_day_volume_ratio=down_day_avg_volume / v20 if v20 > 0 else 0.0,
         return_5=_return(data, 5),
+        max_up_5=_max_daily_return(data, 5),
+        max_down_5=_min_daily_return(data, 5),
+        direction_efficiency_5=_direction_efficiency(data, 5),
+        avg_close_position_5=_avg_close_position(data, 5),
         min_close_5=min_close_5,
         min_close_10=min_close_10,
         previous_min_close_5=previous_min_close_5,
@@ -149,6 +159,66 @@ def _return(data: list[dict] | None, days: int) -> float:
     if base <= 0:
         return 0.0
     return float(data[-1]["close"]) / base - 1
+
+
+def _range(data: list[dict], days: int, close: float) -> float:
+    if close <= 0 or len(data) < days:
+        return 0.0
+    window = data[-days:]
+    high = max(float(row["high"]) for row in window)
+    low = min(float(row["low"]) for row in window)
+    return (high - low) / close
+
+
+def _daily_returns(data: list[dict], days: int) -> list[float]:
+    if len(data) <= days:
+        return []
+    window = data[-days - 1:]
+    values: list[float] = []
+    for prev, curr in zip(window[:-1], window[1:]):
+        prev_close = float(prev["close"])
+        if prev_close <= 0:
+            continue
+        values.append(float(curr["close"]) / prev_close - 1)
+    return values
+
+
+def _max_daily_return(data: list[dict], days: int) -> float:
+    values = _daily_returns(data, days)
+    return max(values, default=0.0)
+
+
+def _min_daily_return(data: list[dict], days: int) -> float:
+    values = _daily_returns(data, days)
+    return min(values, default=0.0)
+
+
+def _direction_efficiency(data: list[dict], days: int) -> float:
+    if len(data) <= days:
+        return 0.0
+    base = float(data[-days - 1]["close"])
+    if base <= 0:
+        return 0.0
+    net_change = abs(float(data[-1]["close"]) / base - 1)
+    total_move = sum(abs(value) for value in _daily_returns(data, days))
+    if total_move <= 0:
+        return 0.0
+    return net_change / total_move
+
+
+def _avg_close_position(data: list[dict], days: int) -> float:
+    if not data:
+        return 0.0
+    positions: list[float] = []
+    for row in data[-days:]:
+        high = float(row["high"])
+        low = float(row["low"])
+        close = float(row["close"])
+        if high <= low:
+            positions.append(0.5)
+        else:
+            positions.append((close - low) / (high - low))
+    return _avg_values(positions)
 
 
 def _count_support_tests(data: list[dict], support: float, days: int, tolerance: float) -> int:

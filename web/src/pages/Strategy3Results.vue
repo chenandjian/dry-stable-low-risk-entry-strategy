@@ -108,6 +108,13 @@
                     <div>ATR5/20：{{ fmtNum(c.atr_ratio_5_20, 3) }} · 放量下跌：{{ fmtBool(c.has_big_down_volume) }}</div>
                   </div>
                   <div>
+                    <h4>极致价稳 V3</h4>
+                    <div>方向效率：{{ formatPct(c.direction_efficiency_5) }} · 收盘位置：{{ fmtNum(c.avg_close_position_5, 2) }}</div>
+                    <div>最大上涨/下跌：{{ formatPct(c.max_up_5) }} / {{ formatPct(c.max_down_5) }}</div>
+                    <div>振幅 5/10/20：{{ formatPct(c.range_5) }} / {{ formatPct(c.range_10) }} / {{ formatPct(c.range_20) }}</div>
+                    <div>压缩序列：{{ fmtBool(c.range_compression_ok) }}</div>
+                  </div>
+                  <div>
                     <h4>评分原因</h4>
                     <div v-for="(r, i) in (c.score_reasons || [])" :key="'sr'+i" class="reason-line">✓ {{ r }}</div>
                     <div v-if="!c.score_reasons?.length" class="muted">无评分原因</div>
@@ -246,6 +253,13 @@ export default {
           { header: 'Key支撑', value: c => this.fmtPrice(c.key_support) },
           { header: '止损', value: c => this.fmtPrice(c.tactical_stop_loss ?? c.stop_loss) },
           { header: '目标', value: c => this.fmtPrice(c.target_1) },
+          { header: '方向效率5日', value: c => this.formatPct(c.direction_efficiency_5) },
+          { header: '最大上涨5日', value: c => this.formatPct(c.max_up_5) },
+          { header: '最大下跌5日', value: c => this.formatPct(c.max_down_5) },
+          { header: '收盘位置5日', value: c => this.fmtNum(c.avg_close_position_5, 2) },
+          { header: '振幅10日', value: c => this.formatPct(c.range_10) },
+          { header: '振幅20日', value: c => this.formatPct(c.range_20) },
+          { header: '压缩序列', value: c => this.fmtBool(c.range_compression_ok) },
           { header: '评估日', value: c => c.evaluation_date || '' },
         ],
         rows: this.sortedCandidates,

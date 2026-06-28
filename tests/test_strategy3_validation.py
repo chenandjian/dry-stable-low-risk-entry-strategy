@@ -24,6 +24,13 @@ def test_resolve_strategy3_config_defaults():
     assert cfg["dry_support_min_test_count"] == 2
     assert cfg["dry_support_break_tolerance"] == 0.98
     assert cfg["dry_atr_expand_reject_ratio"] == 1.20
+    assert cfg["dry_balance_direction_efficiency_threshold"] == 0.35
+    assert cfg["dry_balance_extreme_direction_efficiency_threshold"] == 0.25
+    assert cfg["dry_balance_max_up_5"] == 0.03
+    assert cfg["dry_balance_max_down_5"] == -0.03
+    assert cfg["dry_balance_close_position_min"] == 0.35
+    assert cfg["dry_balance_close_position_max"] == 0.65
+    assert cfg["dry_balance_close_range_tight"] == 0.03
     assert cfg["support_zone_pct"] == 0.01
     assert cfg["support_zone_atr_ratio"] == 0.30
     assert cfg["support_effective_break_days"] == 2
@@ -128,6 +135,30 @@ def test_rejects_invalid_support_zone_thresholds():
         resolve_strategy3_config({
             "liquidity": {"min_listing_days": 350},
             "strategy3": {"support_stop_buffer_pct": 0.20},
+        })
+
+
+def test_rejects_invalid_extreme_balance_thresholds():
+    with pytest.raises(ValueError, match="dry_balance_extreme_direction_efficiency_threshold"):
+        resolve_strategy3_config({
+            "liquidity": {"min_listing_days": 350},
+            "strategy3": {
+                "dry_balance_direction_efficiency_threshold": 0.30,
+                "dry_balance_extreme_direction_efficiency_threshold": 0.40,
+            },
+        })
+    with pytest.raises(ValueError, match="dry_balance_max_up_5"):
+        resolve_strategy3_config({
+            "liquidity": {"min_listing_days": 350},
+            "strategy3": {"dry_balance_max_up_5": 0.30},
+        })
+    with pytest.raises(ValueError, match="dry_balance_close_position_max"):
+        resolve_strategy3_config({
+            "liquidity": {"min_listing_days": 350},
+            "strategy3": {
+                "dry_balance_close_position_min": 0.70,
+                "dry_balance_close_position_max": 0.60,
+            },
         })
 
 

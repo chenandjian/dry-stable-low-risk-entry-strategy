@@ -49,6 +49,32 @@ def evaluate_volume_stability(
     if ind.close_range_5 <= 0.05:
         score += 2
         reasons.append("close_range_tight")
+    if ind.close_range_5 <= config["dry_balance_close_range_tight"]:
+        score += 1
+        reasons.append("close_range_extreme_tight")
+
+    if ind.direction_efficiency_5 <= config["dry_balance_direction_efficiency_threshold"]:
+        score += 2
+        reasons.append("direction_efficiency_low")
+    if ind.direction_efficiency_5 <= config["dry_balance_extreme_direction_efficiency_threshold"]:
+        score += 1
+        reasons.append("direction_efficiency_extreme")
+    if (
+        ind.max_up_5 <= config["dry_balance_max_up_5"]
+        and ind.max_down_5 >= config["dry_balance_max_down_5"]
+    ):
+        score += 1
+        reasons.append("max_daily_move_balanced")
+    if (
+        config["dry_balance_close_position_min"]
+        <= ind.avg_close_position_5
+        <= config["dry_balance_close_position_max"]
+    ):
+        score += 1
+        reasons.append("close_position_balanced")
+    if ind.range_compression_ok:
+        score += 1
+        reasons.append("range_compression_sequence")
 
     if ind.support_test_count >= config["dry_support_min_test_count"]:
         score += 2

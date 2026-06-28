@@ -21,6 +21,9 @@ class Strategy3Indicators:
     recent_high: float = 0.0
     pullback_pct: float = 0.0
     range_5: float = 0.0
+    range_10: float = 0.0
+    range_20: float = 0.0
+    range_compression_ok: bool = False
     close_range_5: float = 0.0
     volume_ratio_5_20: float = 0.0
     v3: float = 0.0
@@ -29,6 +32,10 @@ class Strategy3Indicators:
     v20: float = 0.0
     down_day_volume_ratio: float = 0.0
     return_5: float = 0.0
+    max_up_5: float = 0.0
+    max_down_5: float = 0.0
+    direction_efficiency_5: float = 0.0
+    avg_close_position_5: float = 0.0
     min_close_5: float = 0.0
     min_close_10: float = 0.0
     previous_min_close_5: float = 0.0

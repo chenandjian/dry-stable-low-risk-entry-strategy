@@ -1156,7 +1156,14 @@ def _ensure_strategy3_candidates_table(conn: sqlite3.Connection):
             relative_strength_60       REAL,
             volume_ratio_5_20          REAL,
             range_5                    REAL,
+            range_10                   REAL,
+            range_20                   REAL,
+            range_compression_ok       INTEGER DEFAULT 0,
             close_range_5              REAL,
+            direction_efficiency_5     REAL,
+            max_up_5                   REAL,
+            max_down_5                 REAL,
+            avg_close_position_5       REAL,
             support_price              REAL,
             stop_loss                  REAL,
             target_1                   REAL,
@@ -1212,6 +1219,13 @@ def _ensure_strategy3_candidates_table(conn: sqlite3.Connection):
     _ensure_column(conn, "strategy3_candidates", "down_volume_ratio_5", "REAL")
     _ensure_column(conn, "strategy3_candidates", "atr_ratio_5_20", "REAL")
     _ensure_column(conn, "strategy3_candidates", "has_big_down_volume", "INTEGER DEFAULT 0")
+    _ensure_column(conn, "strategy3_candidates", "range_10", "REAL")
+    _ensure_column(conn, "strategy3_candidates", "range_20", "REAL")
+    _ensure_column(conn, "strategy3_candidates", "range_compression_ok", "INTEGER DEFAULT 0")
+    _ensure_column(conn, "strategy3_candidates", "direction_efficiency_5", "REAL")
+    _ensure_column(conn, "strategy3_candidates", "max_up_5", "REAL")
+    _ensure_column(conn, "strategy3_candidates", "max_down_5", "REAL")
+    _ensure_column(conn, "strategy3_candidates", "avg_close_position_5", "REAL")
     _ensure_column(conn, "strategy3_candidates", "short_support", "REAL")
     _ensure_column(conn, "strategy3_candidates", "short_support_zone_low", "REAL")
     _ensure_column(conn, "strategy3_candidates", "short_support_zone_high", "REAL")
@@ -1374,7 +1388,9 @@ def upsert_strategy3_candidate(task_id: str, d: dict):
         "no_new_low", "support_price_10", "support_test_count", "support_valid",
         "bear_body_shrink", "lower_shadow_count", "down_volume_ratio_5",
         "atr_ratio_5_20", "has_big_down_volume",
-        "range_5", "close_range_5", "support_price", "stop_loss",
+        "range_5", "range_10", "range_20", "range_compression_ok",
+        "close_range_5", "direction_efficiency_5", "max_up_5", "max_down_5",
+        "avg_close_position_5", "support_price", "stop_loss",
         "target_1", "risk_ratio", "rr1",
         "structural_support", "structural_stop_loss", "structural_risk_ratio",
         "structural_rr1", "tactical_support", "tactical_stop_loss",
@@ -1424,7 +1440,14 @@ def upsert_strategy3_candidate(task_id: str, d: dict):
         d.get("atr_ratio_5_20"),
         int(bool(d.get("has_big_down_volume"))),
         d.get("range_5"),
+        d.get("range_10"),
+        d.get("range_20"),
+        int(bool(d.get("range_compression_ok"))),
         d.get("close_range_5"),
+        d.get("direction_efficiency_5"),
+        d.get("max_up_5"),
+        d.get("max_down_5"),
+        d.get("avg_close_position_5"),
         d.get("support_price"),
         d.get("stop_loss"),
         d.get("target_1"),

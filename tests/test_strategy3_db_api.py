@@ -54,7 +54,14 @@ def test_strategy3_candidate_table_roundtrip(tmp_path):
         "atr_ratio_5_20": 0.68,
         "has_big_down_volume": False,
         "range_5": 0.04,
+        "range_10": 0.07,
+        "range_20": 0.12,
+        "range_compression_ok": True,
         "close_range_5": 0.03,
+        "direction_efficiency_5": 0.22,
+        "max_up_5": 0.018,
+        "max_down_5": -0.015,
+        "avg_close_position_5": 0.52,
         "support_price": 9.5,
         "stop_loss": 9.31,
         "target_1": 12.0,
@@ -87,6 +94,13 @@ def test_strategy3_candidate_table_roundtrip(tmp_path):
     assert rows[0]["support_test_count"] == 3
     assert rows[0]["support_valid"] == 1
     assert rows[0]["atr_ratio_5_20"] == 0.68
+    assert rows[0]["range_10"] == 0.07
+    assert rows[0]["range_20"] == 0.12
+    assert rows[0]["range_compression_ok"] == 1
+    assert rows[0]["direction_efficiency_5"] == 0.22
+    assert rows[0]["max_up_5"] == 0.018
+    assert rows[0]["max_down_5"] == -0.015
+    assert rows[0]["avg_close_position_5"] == 0.52
     assert rows[0]["key_support"] == 9.7
     assert rows[0]["key_support_zone_low"] == 9.5
     assert rows[0]["support_status"] == "VALID"
@@ -175,7 +189,14 @@ def test_build_strategy3_discovery_contains_frontend_fields():
             atr_ratio_5_20=0.68,
             has_big_down_volume=False,
             range_5=0.04,
+            range_10=0.07,
+            range_20=0.12,
+            range_compression_ok=True,
             close_range_5=0.03,
+            direction_efficiency_5=0.22,
+            max_up_5=0.018,
+            max_down_5=-0.015,
+            avg_close_position_5=0.52,
         ),
         risk=Strategy3Risk(
             support_price=9.5,
@@ -219,6 +240,13 @@ def test_build_strategy3_discovery_contains_frontend_fields():
     assert d["support_test_count"] == 3
     assert d["support_valid"] is True
     assert d["atr_ratio_5_20"] == 0.68
+    assert d["range_10"] == 0.07
+    assert d["range_20"] == 0.12
+    assert d["range_compression_ok"] is True
+    assert d["direction_efficiency_5"] == 0.22
+    assert d["max_up_5"] == 0.018
+    assert d["max_down_5"] == -0.015
+    assert d["avg_close_position_5"] == 0.52
     assert d["structural_support"] == 8.8
     assert d["tactical_support"] == 9.5
     assert d["tactical_risk_ratio"] == 0.069

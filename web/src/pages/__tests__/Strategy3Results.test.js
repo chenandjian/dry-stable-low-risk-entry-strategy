@@ -76,6 +76,15 @@ describe('Strategy3Results', () => {
         down_volume_ratio_5: 0.42,
         atr_ratio_5_20: 0.68,
         has_big_down_volume: 0,
+        range_5: 0.026,
+        range_10: 0.061,
+        range_20: 0.118,
+        range_compression_ok: 1,
+        close_range_5: 0.018,
+        direction_efficiency_5: 0.22,
+        max_up_5: 0.021,
+        max_down_5: -0.018,
+        avg_close_position_5: 0.52,
         pullback_pct: 0.15,
         risk_ratio: 0.05,
         rr1: 2.1,
@@ -138,6 +147,10 @@ describe('Strategy3Results', () => {
     expect(wrapper.text()).toContain('5日涨跌')
     expect(wrapper.text()).toContain('支撑测试')
     expect(wrapper.text()).toContain('ATR5/20')
+    expect(wrapper.text()).toContain('极致价稳 V3')
+    expect(wrapper.text()).toContain('方向效率')
+    expect(wrapper.text()).toContain('最大上涨/下跌')
+    expect(wrapper.text()).toContain('压缩序列')
     expect(wrapper.text()).toContain('支撑区 V2')
     expect(wrapper.text()).toContain('关键支撑区')
     expect(wrapper.text()).toContain('VALID')
@@ -173,5 +186,6 @@ describe('Strategy3Results', () => {
     expect(csv).toContain('代码,名称,总分,等级')
     expect(csv).toContain('000001,平安银行,88,核心候选')
     expect(csv).toContain('9.50,9.70,9.31,12.00')
+    expect(csv).toContain('22.00%,2.10%,-1.80%,0.52,6.10%,11.80%,是')
   })
 })

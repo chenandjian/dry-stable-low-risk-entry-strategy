@@ -97,6 +97,27 @@ def make_dry_cannot_fall_bars(days=220, scenario="healthy"):
     return rows
 
 
+def make_extreme_balance_bars(days=220, scenario="healthy"):
+    rows = make_dry_cannot_fall_bars(days)
+    closes = [22.08, 22.14, 22.07, 22.13, 22.06, 22.11]
+    volumes = [430_000, 410_000, 390_000, 370_000, 350_000, 330_000]
+
+    if scenario == "single_day_spike":
+        closes = [22.08, 23.05, 22.92, 22.86, 22.80, 22.74]
+
+    for idx, close in zip(range(days - 6, days), closes):
+        volume = volumes[idx - (days - 6)]
+        rows[idx].update({
+            "open": round(close, 2),
+            "high": round(close + 0.10, 2),
+            "low": round(close - 0.10, 2),
+            "close": round(close, 2),
+            "volume": volume,
+            "turnover": round(close * volume, 2),
+        })
+    return rows
+
+
 def test_engine_passes_healthy_strong_pullback():
     engine = StrongPullbackSecondBreakoutEngine({"liquidity": {"min_listing_days": 350}})
     result = engine.evaluate_at(make_strategy3_candidate_bars(), code="000001", name="样本")
@@ -125,6 +146,18 @@ def test_strategy3_indicators_include_dry_cannot_fall_quality_fields():
     assert 0 < ind.atr_ratio_5_20 <= 0.75
 
 
+def test_strategy3_indicators_include_extreme_balance_quality_fields():
+    engine = StrongPullbackSecondBreakoutEngine({"liquidity": {"min_listing_days": 350}})
+    ind = compute_indicators(make_extreme_balance_bars(), engine.config)
+
+    assert 0 < ind.range_5 < ind.range_10 < ind.range_20
+    assert ind.range_compression_ok is True
+    assert ind.direction_efficiency_5 <= 0.35
+    assert ind.max_up_5 <= 0.03
+    assert ind.max_down_5 >= -0.03
+    assert 0.35 <= ind.avg_close_position_5 <= 0.65
+
+
 def test_volume_stability_v2_rewards_dry_cannot_fall_quality():
     engine = StrongPullbackSecondBreakoutEngine({"liquidity": {"min_listing_days": 350}})
     result = engine.evaluate_at(make_dry_cannot_fall_bars(), code="000010")
@@ -133,6 +166,26 @@ def test_volume_stability_v2_rewards_dry_cannot_fall_quality():
     assert "volume:no_new_low" in result.score_reasons
     assert "volume:support_test_count>=2" in result.score_reasons
     assert "volume:atr_contracted" in result.score_reasons
+
+
+def test_volume_stability_v3_rewards_extreme_balance_quality():
+    engine = StrongPullbackSecondBreakoutEngine({"liquidity": {"min_listing_days": 350}})
+    result = engine.evaluate_at(make_extreme_balance_bars(), code="000016")
+
+    assert result.volume_stability_score >= 18
+    assert "volume:direction_efficiency_low" in result.score_reasons
+    assert "volume:max_daily_move_balanced" in result.score_reasons
+    assert "volume:close_position_balanced" in result.score_reasons
+    assert "volume:range_compression_sequence" in result.score_reasons
+
+
+def test_volume_stability_v3_does_not_reward_single_day_spike_as_extreme_balance():
+    engine = StrongPullbackSecondBreakoutEngine({"liquidity": {"min_listing_days": 350}})
+    result = engine.evaluate_at(make_extreme_balance_bars(scenario="single_day_spike"), code="000017")
+
+    assert result.indicators.max_up_5 > 0.03
+    assert "volume:max_daily_move_balanced" not in result.score_reasons
+    assert "volume:direction_efficiency_low" not in result.score_reasons
 
 
 def test_volume_stability_rejects_shrinking_bear_drift():
