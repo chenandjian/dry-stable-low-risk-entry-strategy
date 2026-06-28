@@ -4,6 +4,8 @@ from strategy3.engine import StrongPullbackSecondBreakoutEngine
 from strategy3.indicators import compute_indicators
 from strategy3.models import Strategy3Indicators
 from strategy3.risk import compute_strategy3_risk
+from strategy3.validation import resolve_strategy3_config
+from strategy3.volume_stability import evaluate_volume_stability
 
 
 def make_strategy3_candidate_bars(days=220):
@@ -23,10 +25,11 @@ def make_strategy3_candidate_bars(days=220):
         volume = 1_000_000 if i < 175 else 650_000
         if i >= days - 3:
             volume = 760_000
+        high_multiplier = 1.05 if i == 174 else 1.012
         rows.append({
             "date": (start + timedelta(days=i)).strftime("%Y-%m-%d"),
             "open": round(close * 0.995, 2),
-            "high": round(close * 1.012, 2),
+            "high": round(close * high_multiplier, 2),
             "low": round(close * 0.988, 2),
             "close": round(close, 2),
             "volume": volume,
@@ -118,6 +121,52 @@ def make_extreme_balance_bars(days=220, scenario="healthy"):
     return rows
 
 
+
+def _flat_volume_rows(days=20):
+    start = date(2026, 1, 1)
+    return [
+        {
+            "date": (start + timedelta(days=i)).strftime("%Y-%m-%d"),
+            "open": 10.0,
+            "high": 10.2,
+            "low": 9.8,
+            "close": 10.0,
+            "volume": 1_000_000,
+            "turnover": 10_000_000,
+        }
+        for i in range(days)
+    ]
+
+
+def test_volume_stability_rewards_support_tests_only_within_approved_range():
+    cfg = resolve_strategy3_config({"liquidity": {"min_listing_days": 350}})
+    data = _flat_volume_rows()
+    base = dict(
+        volume_ratio_5_20=0.75,
+        return_3=0.01,
+        return_5=0.03,
+        close_range_5=0.04,
+        support_price_10=9.7,
+        support_valid=True,
+        support_status="VALID",
+        atr_ratio_5_20=0.80,
+        no_new_low=True,
+        down_volume_ratio_5=0.40,
+        current_close=10.0,
+    )
+
+    healthy = Strategy3Indicators(**base, support_test_count=2)
+    over_tested = Strategy3Indicators(**base, support_test_count=3)
+
+    _, healthy_score, healthy_reasons = evaluate_volume_stability(healthy, data, cfg)
+    _, over_score, over_reasons = evaluate_volume_stability(over_tested, data, cfg)
+
+    assert "support_test_count=2" in healthy_reasons
+    assert "support_test_count>2" in over_reasons
+    assert not any(r.startswith("support_test_count>=") for r in over_reasons)
+    assert over_score == healthy_score - 2
+
+
 def test_engine_passes_healthy_strong_pullback():
     engine = StrongPullbackSecondBreakoutEngine({"liquidity": {"min_listing_days": 350}})
     result = engine.evaluate_at(make_strategy3_candidate_bars(), code="000001", name="样本")
@@ -164,7 +213,8 @@ def test_volume_stability_v2_rewards_dry_cannot_fall_quality():
 
     assert result.volume_stability_score >= 17
     assert "volume:no_new_low" in result.score_reasons
-    assert "volume:support_test_count>=2" in result.score_reasons
+    assert "volume:support_test_count>2" in result.score_reasons
+    assert not any(r.startswith("volume:support_test_count>=") for r in result.score_reasons)
     assert "volume:atr_contracted" in result.score_reasons
 
 

@@ -17,11 +17,16 @@ def test_resolve_strategy3_config_defaults():
     assert cfg["candidate_min_score"] == 75
     assert cfg["core_min_score"] == 85
     assert cfg["max_risk_ratio"] == 0.08
+    assert cfg["min_pullback_from_high"] == 0.12
+    assert cfg["max_pullback_from_high"] == 0.25
     assert cfg["min_relative_strength_60"] == 0.05
+    assert cfg["volume_shrink_ratio"] == 0.70
+    assert cfg["dry_return_5_floor"] == 0.02
     assert cfg["dry_volume_ratio"] == 0.60
     assert cfg["dry_extreme_volume_ratio"] == 0.50
     assert cfg["dry_support_lookback_days"] == 10
     assert cfg["dry_support_min_test_count"] == 2
+    assert cfg["dry_support_max_test_count"] == 2
     assert cfg["dry_support_break_tolerance"] == 0.98
     assert cfg["dry_atr_expand_reject_ratio"] == 1.20
     assert cfg["dry_balance_direction_efficiency_threshold"] == 0.35
@@ -97,6 +102,16 @@ def test_rejects_invalid_dry_cannot_fall_thresholds():
         resolve_strategy3_config({
             "liquidity": {"min_listing_days": 350},
             "strategy3": {"dry_support_min_test_count": 11},
+        })
+    with pytest.raises(ValueError, match="dry_support_max_test_count"):
+        resolve_strategy3_config({
+            "liquidity": {"min_listing_days": 350},
+            "strategy3": {"dry_support_max_test_count": 11},
+        })
+    with pytest.raises(ValueError, match="dry_support_max_test_count"):
+        resolve_strategy3_config({
+            "liquidity": {"min_listing_days": 350},
+            "strategy3": {"dry_support_min_test_count": 3, "dry_support_max_test_count": 2},
         })
     with pytest.raises(ValueError, match="dry_support_break_tolerance"):
         resolve_strategy3_config({

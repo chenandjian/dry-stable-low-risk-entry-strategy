@@ -76,9 +76,13 @@ def evaluate_volume_stability(
         score += 1
         reasons.append("range_compression_sequence")
 
-    if ind.support_test_count >= config["dry_support_min_test_count"]:
+    min_tests = config["dry_support_min_test_count"]
+    max_tests = config.get("dry_support_max_test_count", min_tests)
+    if min_tests <= ind.support_test_count <= max_tests:
         score += 2
-        reasons.append(f"support_test_count>={config['dry_support_min_test_count']}")
+        reasons.append(f"support_test_count={ind.support_test_count}")
+    elif ind.support_test_count > max_tests:
+        reasons.append(f"support_test_count>{max_tests}")
     if ind.support_valid:
         score += 2
         reasons.append("support_valid")

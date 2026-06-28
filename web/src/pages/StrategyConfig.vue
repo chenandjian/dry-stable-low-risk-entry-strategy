@@ -443,12 +443,15 @@ const defaultStrategy3Config = {
   candidate_min_score: 75,
   core_min_score: 85,
   max_risk_ratio: 0.08,
-  max_pullback_from_high: 0.30,
-  min_pullback_from_high: 0.08,
+  max_pullback_from_high: 0.25,
+  min_pullback_from_high: 0.12,
   max_recent_range_5: 0.12,
   max_recent_surge_3: 0.10,
   min_relative_strength_60: 0.05,
-  volume_shrink_ratio: 0.85,
+  volume_shrink_ratio: 0.70,
+  dry_return_5_floor: 0.02,
+  dry_support_min_test_count: 2,
+  dry_support_max_test_count: 2,
 }
 
 const config = reactive({
@@ -543,11 +546,11 @@ const strategy3MaxRiskPct = computed({
   set: (v) => { ensureStrategy3Config(); config.strategy3.max_risk_ratio = v / 100 },
 })
 const strategy3MinPullbackPct = computed({
-  get: () => Number(((config.strategy3?.min_pullback_from_high ?? 0.08) * 100).toFixed(1)),
+  get: () => Number(((config.strategy3?.min_pullback_from_high ?? 0.12) * 100).toFixed(1)),
   set: (v) => { ensureStrategy3Config(); config.strategy3.min_pullback_from_high = v / 100 },
 })
 const strategy3MaxPullbackPct = computed({
-  get: () => Number(((config.strategy3?.max_pullback_from_high ?? 0.30) * 100).toFixed(1)),
+  get: () => Number(((config.strategy3?.max_pullback_from_high ?? 0.25) * 100).toFixed(1)),
   set: (v) => { ensureStrategy3Config(); config.strategy3.max_pullback_from_high = v / 100 },
 })
 const strategy3MaxRange5Pct = computed({

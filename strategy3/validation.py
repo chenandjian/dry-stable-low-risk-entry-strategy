@@ -14,18 +14,19 @@ DEFAULT_STRATEGY3_CONFIG = {
     "candidate_min_score": 75,
     "core_min_score": 85,
     "max_risk_ratio": 0.08,
-    "max_pullback_from_high": 0.30,
-    "min_pullback_from_high": 0.08,
+    "max_pullback_from_high": 0.25,
+    "min_pullback_from_high": 0.12,
     "max_recent_range_5": 0.12,
     "max_recent_surge_3": 0.10,
     "min_relative_strength_60": 0.05,
-    "volume_shrink_ratio": 0.85,
+    "volume_shrink_ratio": 0.70,
     "dry_volume_ratio": 0.60,
     "dry_extreme_volume_ratio": 0.50,
-    "dry_return_5_floor": -0.03,
+    "dry_return_5_floor": 0.02,
     "dry_return_5_reject": -0.05,
     "dry_support_lookback_days": 10,
     "dry_support_min_test_count": 2,
+    "dry_support_max_test_count": 2,
     "dry_support_test_tolerance": 0.02,
     "dry_support_break_tolerance": 0.98,
     "dry_lower_shadow_threshold": 0.40,
@@ -97,6 +98,9 @@ def resolve_strategy3_config(config: dict | None) -> dict:
     _validate_number_range(raw, "dry_return_5_reject", -0.5, 0.0)
     _validate_int_range(raw, "dry_support_lookback_days", 5, 40)
     _validate_int_range(raw, "dry_support_min_test_count", 0, 10)
+    _validate_int_range(raw, "dry_support_max_test_count", 0, 10)
+    if raw["dry_support_max_test_count"] < raw["dry_support_min_test_count"]:
+        raise ValueError("dry_support_max_test_count must be >= dry_support_min_test_count")
     _validate_number_range(raw, "dry_support_test_tolerance", 0.0, 0.2)
     _validate_number_range(raw, "dry_support_break_tolerance", 0.8, 1.0)
     _validate_number_range(raw, "dry_lower_shadow_threshold", 0.0, 1.0)
