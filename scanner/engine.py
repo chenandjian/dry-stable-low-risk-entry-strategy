@@ -206,6 +206,7 @@ def scan_all(
                             fallback_attempts=fetch_result.fallback_attempts,
                             primary_error=fetch_result.primary_error,
                             fallback_error=fetch_result.fallback_error,
+                            source_errors=_encode_source_errors(fetch_result.source_errors),
                             finished_at=_now(),
                         )
                         db.refresh_scan_task_counts(task_id)
@@ -763,7 +764,11 @@ def _fetch_with_retry(
                 selected_source=ds_name, selected_attempts=used_attempts,
             )
 
-    if stale_success is not None:
+    if (
+        stale_success is not None
+        and not saw_busy
+        and _stale_success_is_conclusive_no_trade(chain, source_errors)
+    ):
         stale_data, stale_source, stale_attempts = stale_success
         target_date = freshness_context.target_trade_date if freshness_context else None
         stale_latest_date = stale_data[-1].get("date")
@@ -966,18 +971,29 @@ def _encode_source_errors(source_errors: dict | None) -> str | None:
     return json.dumps(source_errors, ensure_ascii=False, separators=(",", ":"))
 
 
-def _classify_fetch_error(exc: Exception) -> str:
-    text = str(exc)
-    if "456" in text or "429" in text:
-        return "data source busy"
-    return text
-
-
 def _call_fetch_fn(fetch_fn, code: str, days: int) -> list[dict] | None:
     try:
         return fetch_fn(code, days=days)
     except TypeError:
         return fetch_fn(code)
+
+
+def _stale_success_is_conclusive_no_trade(
+    chain: list[str],
+    source_errors: dict[str, str],
+) -> bool:
+    """Only classify stale rows as no-trade when every source missed the target date."""
+    return all(
+        "missing target trade date" in source_errors.get(ds_name, "")
+        for ds_name in chain
+    )
+
+
+def _classify_fetch_error(exc: Exception) -> str:
+    text = str(exc)
+    if "456" in text or "429" in text:
+        return "data source busy"
+    return text
 
 
 def _merge_data(cached: list[dict], fresh: list[dict], max_rows: int = 0) -> list[dict]:

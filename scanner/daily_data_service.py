@@ -202,7 +202,11 @@ def fetch_with_retry(
                 selected_source=ds_name, selected_attempts=used_attempts,
             )
 
-    if stale_success is not None:
+    if (
+        stale_success is not None
+        and not saw_busy
+        and _stale_success_is_conclusive_no_trade(chain, source_errors)
+    ):
         stale_data, stale_source, stale_attempts = stale_success
         stale_latest_date = stale_data[-1].get("date")
         effective_cached = trim_ohlc_to_target(cached or [], stale_latest_date)
@@ -436,6 +440,17 @@ def _call_fetch_fn(fetch_fn, code: str, days: int) -> list[dict] | None:
         return fetch_fn(code, days=days)
     except TypeError:
         return fetch_fn(code)
+
+
+def _stale_success_is_conclusive_no_trade(
+    chain: list[str],
+    source_errors: dict[str, str],
+) -> bool:
+    """Only classify stale rows as no-trade when every source missed the target date."""
+    return all(
+        "missing target trade date" in source_errors.get(ds_name, "")
+        for ds_name in chain
+    )
 
 
 def _classify_fetch_error(exc: Exception) -> str:

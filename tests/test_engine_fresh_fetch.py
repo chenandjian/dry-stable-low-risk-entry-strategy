@@ -196,6 +196,54 @@ def test_scan_all_stops_requeue_after_busy_retry_budget(monkeypatch, tmp_path):
     assert sleep_calls == [0.1]
 
 
+def test_scan_all_preserves_source_errors_after_busy_retry_budget(monkeypatch, tmp_path):
+    import json
+
+    db_path = tmp_path / 'cuphandle.db'
+    config = {
+        'data': {
+            'database_path': str(db_path),
+            'source_busy_max_retries': 0,
+        },
+        'liquidity': {'enabled': False, 'min_listing_days': 250},
+        'scoring': {'medium_threshold': 70},
+    }
+    stocks = [{'code': '000921', 'name': '海信家电', 'market': 'SZSE'}]
+    source_errors = {
+        'baidu': 'busy',
+        'sina': 'attempts=1 error=missing target trade date 2026-06-29',
+        'tencent': 'busy',
+    }
+
+    db.init_db(str(db_path))
+    db.create_scan_task('task-1', '2026-06-29 15:44:00', total_stocks=1)
+    db.save_task_stocks('task-1', stocks)
+
+    monkeypatch.setattr(engine, 'DataSourceManager', FakeScanManager)
+    monkeypatch.setattr(engine.threading, 'Thread', ImmediateThread)
+    monkeypatch.setattr(engine, 'fetch_market_index_daily', lambda symbol=None: [])
+    monkeypatch.setattr(
+        engine,
+        '_fetch_with_retry',
+        lambda *args, **kwargs: engine.FetchResult(
+            data=None,
+            primary_source='baidu',
+            fallback_source='sina',
+            primary_error='data source busy',
+            fallback_error='missing target trade date 2026-06-29',
+            source_errors=source_errors,
+        ),
+    )
+
+    result = engine.scan_all(config, task_id='task-1', stocks=stocks, worker_count=1)
+    failed_rows = db.get_task_stocks('task-1', status='failed')
+
+    assert result['stats']['failed'] == 1
+    assert len(failed_rows) == 1
+    assert failed_rows[0]['status_reason'] == '数据源忙，超过重试次数'
+    assert json.loads(failed_rows[0]['source_errors']) == source_errors
+
+
 def test_scan_all_records_failed_stock_when_fetch_fails(monkeypatch, tmp_path):
     db_path = tmp_path / 'cuphandle.db'
     config = {'data': {'database_path': str(db_path)}, 'liquidity': {'enabled': False}}
@@ -567,6 +615,46 @@ def test_engine_fetch_after_close_skips_sina_missing_target_and_uses_fallback(mo
     assert calls == ["sina", "tencent"]
     assert result.data[-1]["date"] == "2026-06-16"
     assert result.fallback_source == "tencent"
+
+
+def test_engine_fetch_after_close_does_not_mark_suspended_when_other_sources_are_busy(monkeypatch, tmp_path):
+    db.init_db(str(tmp_path / "cuphandle.db"))
+    mgr = FakeManager({"baidu": False, "sina": True, "tencent": False})
+    calls = []
+
+    def fake_try_fetch(code, ds_name, attempts, sleep_fn, kline_days):
+        calls.append(ds_name)
+        return [_row("2026-06-26", close=10.0)], 1, None
+
+    monkeypatch.setattr(engine, "_try_fetch_source", fake_try_fetch)
+    context = engine.CacheFreshnessContext(
+        target_trade_date="2026-06-29",
+        min_fetch_time="2026-06-29 15:00:00",
+    )
+
+    result = engine._fetch_with_retry(
+        "000921",
+        "baidu",
+        retry_attempts=1,
+        fallback_attempts=1,
+        sleep_fn=lambda _: None,
+        mgr=mgr,
+        source_chain=["baidu", "sina", "tencent"],
+        kline_days=250,
+        freshness_context=context,
+    )
+
+    assert calls == ["sina"]
+    assert result.data is None
+    assert engine._is_transient_source_busy(result) is True
+    assert result.primary_error == "data source busy"
+    assert "missing target trade date 2026-06-29" in result.fallback_error
+    assert result.source_errors == {
+        "baidu": "busy",
+        "sina": "attempts=1 error=missing target trade date 2026-06-29",
+        "tencent": "busy",
+    }
+    assert not db.get_ohlc("000921")
 
 
 def test_fetch_all_sources_fail_returns_none(monkeypatch, tmp_path):

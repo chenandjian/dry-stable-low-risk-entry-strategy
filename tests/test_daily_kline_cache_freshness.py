@@ -5,6 +5,7 @@ from scanner.daily_data_service import (
     build_cache_freshness_context,
     compute_target_trade_date,
     fetch_with_retry,
+    is_transient_source_busy,
     select_fresh_cached_ohlc,
 )
 from scanner import db
@@ -44,6 +45,20 @@ def _infinite_turnover_row(day: str) -> dict:
     row = _row(day)
     row["turnover"] = float("inf")
     return row
+
+
+class FakeManager:
+    def __init__(self, acquire_results: dict[str, bool]):
+        self.acquire_results = acquire_results
+        self.acquire_calls = []
+        self.release_calls = []
+
+    def acquire(self, ds_name):
+        self.acquire_calls.append(ds_name)
+        return self.acquire_results.get(ds_name, False)
+
+    def release(self, ds_name):
+        self.release_calls.append(ds_name)
 
 
 def test_target_trade_date_before_close_confirm_uses_previous_weekday():
@@ -186,6 +201,46 @@ def test_fetch_after_close_does_not_return_stale_intraday_cached_target_when_all
     assert result.quote_status == "suspended"
     assert result.data[-1]["date"] == "2026-06-15"
     assert db.get_ohlc("000831")[-1]["date"] == "2026-06-15"
+
+
+def test_fetch_after_close_does_not_mark_suspended_when_other_sources_are_busy(monkeypatch, tmp_path):
+    db.init_db(str(tmp_path / "cuphandle.db"))
+    calls = []
+    mgr = FakeManager({"baidu": False, "sina": True, "tencent": False})
+
+    def fake_try_fetch(code, ds_name, attempts, sleep_fn, kline_days):
+        calls.append(ds_name)
+        return [_row("2026-06-26", close=10.0)], 1, None
+
+    monkeypatch.setattr("scanner.daily_data_service._try_fetch_source", fake_try_fetch)
+    context = CacheFreshnessContext(
+        target_trade_date="2026-06-29",
+        min_fetch_time="2026-06-29 15:00:00",
+    )
+
+    result = fetch_with_retry(
+        "000921",
+        "baidu",
+        retry_attempts=1,
+        fallback_attempts=1,
+        sleep_fn=lambda _: None,
+        mgr=mgr,
+        source_chain=["baidu", "sina", "tencent"],
+        kline_days=250,
+        freshness_context=context,
+    )
+
+    assert calls == ["sina"]
+    assert result.data is None
+    assert is_transient_source_busy(result) is True
+    assert result.primary_error == "data source busy"
+    assert "missing target trade date 2026-06-29" in result.fallback_error
+    assert result.source_errors == {
+        "baidu": "busy",
+        "sina": "attempts=1 error=missing target trade date 2026-06-29",
+        "tencent": "busy",
+    }
+    assert not db.get_ohlc("000921")
 
 
 def test_fetch_rejects_invalid_ohlc_source_and_uses_fallback(monkeypatch, tmp_path):

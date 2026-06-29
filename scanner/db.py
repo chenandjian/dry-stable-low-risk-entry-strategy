@@ -441,9 +441,10 @@ def get_reusable_task_stock_kline_context(
     if exclude_task_id:
         exclude_clause = "AND ts.task_id != ?"
         params.append(exclude_task_id)
-    row = conn.execute(
+    rows = conn.execute(
         f"""SELECT ts.kline_latest_date, ts.kline_fetched_at,
-                  ts.kline_target_trade_date, ts.quote_status
+                  ts.kline_target_trade_date, ts.quote_status,
+                  ts.source_errors
             FROM task_stocks ts
             WHERE ts.code = ?
               AND ts.kline_target_trade_date = ?
@@ -457,17 +458,38 @@ def get_reusable_task_stock_kline_context(
                   )
               {exclude_clause}
             ORDER BY ts.kline_fetched_at DESC, ts.updated_at DESC
-            LIMIT 1""",
+            LIMIT 20""",
         params,
-    ).fetchone()
-    if not row:
-        return None
-    return {
-        "kline_latest_date": row[0],
-        "kline_fetched_at": row[1],
-        "kline_target_trade_date": row[2],
-        "quote_status": row[3] or "not_requested",
-    }
+    ).fetchall()
+    for row in rows:
+        latest_date = row[0]
+        quote_status = row[3] or "not_requested"
+        if latest_date >= target_trade_date or (
+            quote_status in {"suspended", "no_trade"}
+            and _source_errors_confirm_no_trade(row[4])
+        ):
+            return {
+                "kline_latest_date": latest_date,
+                "kline_fetched_at": row[1],
+                "kline_target_trade_date": row[2],
+                "quote_status": quote_status,
+            }
+    return None
+
+
+def _source_errors_confirm_no_trade(source_errors: str | None) -> bool:
+    if not source_errors:
+        return False
+    try:
+        parsed = json.loads(source_errors)
+    except (TypeError, json.JSONDecodeError):
+        return False
+    if not isinstance(parsed, dict) or not parsed:
+        return False
+    return all(
+        isinstance(error, str) and "missing target trade date" in error
+        for error in parsed.values()
+    )
 
 
 def get_today_task_stock_latest_date(code: str, today: str, exclude_task_id: str | None = None) -> str | None:
