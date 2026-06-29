@@ -31,7 +31,9 @@ class Strategy3Indicators:
     v10: float = 0.0
     v20: float = 0.0
     down_day_volume_ratio: float = 0.0
+    volume_percentile_60: float = 0.0
     return_5: float = 0.0
+    avg_abs_return_5: float = 0.0
     max_up_5: float = 0.0
     max_down_5: float = 0.0
     direction_efficiency_5: float = 0.0
@@ -40,6 +42,7 @@ class Strategy3Indicators:
     min_close_10: float = 0.0
     previous_min_close_5: float = 0.0
     no_new_low: bool = False
+    new_low_count_5: int = 0
     support_price_10: float = 0.0
     support_test_count: int = 0
     support_valid: bool = False
@@ -57,6 +60,8 @@ class Strategy3Indicators:
     nearest_support_distance: float = 0.0
     support_sources: list[str] = field(default_factory=list)
     bear_body_shrink: bool = False
+    bear_body_expanding: bool = False
+    down_return_contracting: bool = False
     lower_shadow_count: int = 0
     down_volume_ratio_5: float = 0.0
     atr_ratio_5_20: float = 0.0
@@ -110,6 +115,27 @@ class Strategy3Risk:
 
 
 @dataclass
+class Strategy3TradeQuality:
+    """策略3交易质量过滤层结果。"""
+    trade_quality_score: int = 0
+    volume_dry_score: int = 0
+    price_stability_score: int = 0
+    cannot_fall_score: int = 0
+    balance_powerless_score: int = 0
+    support_distance_pct: float = 0.0
+    key_support_distance_pct: float = 0.0
+    target_price: float = 0.0
+    target_room_pct: float = 0.0
+    estimated_rr: float = 0.0
+    trade_state: str = ""
+    trade_state_label: str = ""
+    trigger_reasons: list[str] = field(default_factory=list)
+    risk_warnings: list[str] = field(default_factory=list)
+    invalid_conditions: list[str] = field(default_factory=list)
+    reject_reasons: list[str] = field(default_factory=list)
+
+
+@dataclass
 class Strategy3Evaluation:
     """策略3最终评估结果。"""
     passed: bool
@@ -118,6 +144,7 @@ class Strategy3Evaluation:
     evaluation_date: str = ""
     indicators: Strategy3Indicators = field(default_factory=Strategy3Indicators)
     risk: Strategy3Risk = field(default_factory=Strategy3Risk)
+    trade_quality: Strategy3TradeQuality = field(default_factory=Strategy3TradeQuality)
     trend_score: int = 0
     pullback_score: int = 0
     volume_stability_score: int = 0

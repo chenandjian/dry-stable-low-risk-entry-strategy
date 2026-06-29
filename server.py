@@ -426,6 +426,21 @@ def _strategy3_discovery_from_candidate(candidate: dict) -> dict:
         "key_support": candidate.get("key_support", 0),
         "tactical_stop_loss": candidate.get("tactical_stop_loss") or candidate.get("stop_loss", 0),
         "target_1": candidate.get("target_1", 0),
+        "trade_quality_score": candidate.get("trade_quality_score", 0),
+        "volume_dry_score": candidate.get("volume_dry_score", 0),
+        "price_stability_score": candidate.get("price_stability_score", 0),
+        "cannot_fall_score": candidate.get("cannot_fall_score", 0),
+        "balance_powerless_score": candidate.get("balance_powerless_score", 0),
+        "support_distance_pct": candidate.get("support_distance_pct", 0),
+        "key_support_distance_pct": candidate.get("key_support_distance_pct", 0),
+        "target_price": candidate.get("target_price", 0),
+        "target_room_pct": candidate.get("target_room_pct", 0),
+        "estimated_rr": candidate.get("estimated_rr", 0),
+        "trade_state": candidate.get("trade_state", ""),
+        "trade_state_label": candidate.get("trade_state_label", ""),
+        "trigger_reasons": candidate.get("trigger_reasons", []),
+        "risk_warnings": candidate.get("risk_warnings", []),
+        "invalid_conditions": candidate.get("invalid_conditions", []),
     }
 
 
@@ -2170,6 +2185,10 @@ async def start_strategy3_scan():
                         "pullback_pct": discovery["pullback_pct"],
                         "risk_ratio": discovery["risk_ratio"],
                         "rr1": discovery["rr1"],
+                        "trade_quality_score": discovery.get("trade_quality_score", 0),
+                        "trade_state": discovery.get("trade_state", ""),
+                        "trade_state_label": discovery.get("trade_state_label", ""),
+                        "estimated_rr": discovery.get("estimated_rr", 0),
                     })
                     _running["stats"] = {**stats, "discoveries": discoveries[:20], "candidates_found": found}
                 else:

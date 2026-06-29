@@ -24,6 +24,7 @@ def compute_indicators(
     v5 = _avg(data[-5:], "volume")
     v10 = _avg(data[-10:], "volume")
     v20 = _avg(data[-20:], "volume")
+    volume_percentile_60 = _volume_percentile(data, v5, 60)
     down_days = [row for row in data[-20:] if float(row["close"]) < float(row["open"])]
     down_day_avg_volume = _avg(down_days, "volume") if down_days else 0.0
 
@@ -44,6 +45,7 @@ def compute_indicators(
         previous_min_close_5 <= 0
         or min_close_5 >= previous_min_close_5 * no_new_low_tolerance
     )
+    new_low_count_5 = _new_low_count(data, 5, no_new_low_tolerance)
     support_days = int(config.get("dry_support_lookback_days", 10))
     support_history = data[-support_days - 5:-5] if len(data) > support_days + 5 else data[:-5]
     support_price = min((float(row["close"]) for row in support_history), default=0.0)
@@ -91,7 +93,9 @@ def compute_indicators(
         v10=v10,
         v20=v20,
         down_day_volume_ratio=down_day_avg_volume / v20 if v20 > 0 else 0.0,
+        volume_percentile_60=volume_percentile_60,
         return_5=_return(data, 5),
+        avg_abs_return_5=_avg_abs_return(data, 5),
         max_up_5=_max_daily_return(data, 5),
         max_down_5=_min_daily_return(data, 5),
         direction_efficiency_5=_direction_efficiency(data, 5),
@@ -100,6 +104,7 @@ def compute_indicators(
         min_close_10=min_close_10,
         previous_min_close_5=previous_min_close_5,
         no_new_low=no_new_low,
+        new_low_count_5=new_low_count_5,
         support_price_10=support_price,
         support_test_count=support_test_count,
         support_valid=support_valid,
@@ -117,6 +122,8 @@ def compute_indicators(
         nearest_support_distance=support_levels["nearest_support_distance"],
         support_sources=support_levels["support_sources"],
         bear_body_shrink=_bear_body_shrink(data),
+        bear_body_expanding=_bear_body_expanding(data),
+        down_return_contracting=_down_return_contracting(data),
         lower_shadow_count=_lower_shadow_count(
             data,
             5,
@@ -183,6 +190,11 @@ def _daily_returns(data: list[dict], days: int) -> list[float]:
     return values
 
 
+def _avg_abs_return(data: list[dict], days: int) -> float:
+    values = _daily_returns(data, days)
+    return _avg_values([abs(value) for value in values])
+
+
 def _max_daily_return(data: list[dict], days: int) -> float:
     values = _daily_returns(data, days)
     return max(values, default=0.0)
@@ -226,6 +238,17 @@ def _count_support_tests(data: list[dict], support: float, days: int, tolerance:
         return 0
     threshold = support * (1 + tolerance)
     return sum(1 for row in data[-days:] if float(row["low"]) <= threshold)
+
+
+def _new_low_count(data: list[dict], days: int, tolerance: float) -> int:
+    if len(data) <= days:
+        return 0
+    prior = data[-days * 2:-days] if len(data) >= days * 2 else data[:-days]
+    if not prior:
+        return 0
+    prior_low = min(float(row["low"]) for row in prior)
+    floor = prior_low * tolerance
+    return sum(1 for row in data[-days:] if float(row["low"]) < floor)
 
 
 def _support_valid(data: list[dict], support: float, days: int, break_tolerance: float) -> bool:
@@ -429,6 +452,26 @@ def _bear_body_shrink(data: list[dict]) -> bool:
     return _avg_values(recent[-3:]) < _avg_values(prior)
 
 
+def _bear_body_expanding(data: list[dict]) -> bool:
+    prior = [_bear_body_ratio(row) for row in data[-10:-5] if _is_bear(row)]
+    recent = [_bear_body_ratio(row) for row in data[-5:] if _is_bear(row)]
+    if not recent or not prior:
+        return False
+    return _avg_values(recent[-3:]) > _avg_values(prior) * 1.2
+
+
+def _down_return_contracting(data: list[dict]) -> bool:
+    if len(data) < 11:
+        return True
+    prior = [abs(v) for v in _daily_returns(data[:-5], 5) if v < 0]
+    recent = [abs(v) for v in _daily_returns(data, 5) if v < 0]
+    if not recent:
+        return True
+    if not prior:
+        return False
+    return _avg_values(recent) <= _avg_values(prior)
+
+
 def _lower_shadow_count(data: list[dict], days: int, threshold: float) -> int:
     count = 0
     for row in data[-days:]:
@@ -465,6 +508,16 @@ def _has_big_down_volume(data: list[dict], v20: float, drop_threshold: float, vo
         if change <= drop_threshold and float(curr["volume"]) >= v20 * volume_ratio:
             return True
     return False
+
+
+def _volume_percentile(data: list[dict], value: float, days: int) -> float:
+    if value <= 0:
+        return 0.0
+    window = data[-days:] if len(data) >= days else data
+    volumes = [float(row["volume"]) for row in window if float(row["volume"]) > 0]
+    if not volumes:
+        return 0.0
+    return sum(1 for volume in volumes if volume <= value) / len(volumes)
 
 
 def _atr(data: list[dict], days: int) -> float:

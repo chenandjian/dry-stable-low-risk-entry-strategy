@@ -2,7 +2,7 @@ from datetime import date, timedelta
 
 from strategy3.engine import StrongPullbackSecondBreakoutEngine
 from strategy3.indicators import compute_indicators
-from strategy3.models import Strategy3Indicators
+from strategy3.models import Strategy3Indicators, Strategy3Risk
 from strategy3.risk import compute_strategy3_risk
 from strategy3.validation import resolve_strategy3_config
 from strategy3.volume_stability import evaluate_volume_stability
@@ -136,6 +136,299 @@ def _flat_volume_rows(days=20):
         }
         for i in range(days)
     ]
+
+
+def _quality_data(days=60):
+    start = date(2026, 1, 1)
+    rows = []
+    for i in range(days):
+        close = 10.0 + min(i, days - 10) * 0.01
+        rows.append({
+            "date": (start + timedelta(days=i)).strftime("%Y-%m-%d"),
+            "open": round(close * 0.998, 2),
+            "high": round(close * 1.006, 2),
+            "low": round(close * 0.994, 2),
+            "close": round(close, 2),
+            "volume": 1_000_000,
+            "turnover": round(close * 1_000_000, 2),
+        })
+    return rows
+
+
+def _quality_indicators(**overrides):
+    values = dict(
+        current_close=10.0,
+        volume_ratio_5_20=0.48,
+        v3=420_000,
+        v5=480_000,
+        v10=700_000,
+        v20=1_000_000,
+        volume_percentile_60=0.12,
+        down_volume_ratio_5=0.42,
+        down_day_volume_ratio=0.55,
+        has_big_down_volume=False,
+        range_5=0.028,
+        range_10=0.055,
+        range_20=0.095,
+        range_compression_ok=True,
+        close_range_5=0.018,
+        atr_ratio_5_20=0.62,
+        max_up_5=0.018,
+        max_down_5=-0.015,
+        direction_efficiency_5=0.22,
+        avg_abs_return_5=0.009,
+        avg_close_position_5=0.55,
+        no_new_low=True,
+        new_low_count_5=0,
+        bear_body_shrink=True,
+        bear_body_expanding=False,
+        down_return_contracting=True,
+        lower_shadow_count=2,
+        support_valid=True,
+        support_status="VALID",
+        break_status="NOT_BROKEN",
+        support_sources=["min_close_10", "ma20"],
+    )
+    values.update(overrides)
+    return Strategy3Indicators(**values)
+
+
+def _quality_risk(**overrides):
+    values = dict(
+        support_price=9.75,
+        stop_loss=9.60,
+        target_1=11.50,
+        risk_ratio=0.04,
+        rr1=3.75,
+        tactical_support=9.75,
+        tactical_stop_loss=9.60,
+        tactical_risk_ratio=0.04,
+        tactical_rr1=3.75,
+        key_support=9.70,
+        key_support_zone_low=9.55,
+        key_support_zone_high=9.85,
+        support_status="VALID",
+        break_status="NOT_BROKEN",
+        nearest_support_distance=0.025,
+        support_sources=["min_close_10", "ma20"],
+    )
+    values.update(overrides)
+    return Strategy3Risk(**values)
+
+
+def _quality_config(**overrides):
+    cfg = resolve_strategy3_config({"liquidity": {"min_listing_days": 350}})
+    cfg.update(overrides)
+    return cfg
+
+
+def test_engine_keeps_legacy_candidate_fields_and_adds_trade_quality():
+    result = StrongPullbackSecondBreakoutEngine({"liquidity": {"min_listing_days": 350}}).evaluate_at(
+        make_strategy3_candidate_bars(),
+        code="000030",
+        name="兼容样本",
+    )
+
+    assert result.passed is True
+    assert result.total_score >= 75
+    assert result.risk.rr1 >= 1.5
+    assert result.trade_quality.trade_state in {"LOW_ABSORB", "WATCH", "WAIT_BREAKOUT"}
+    assert result.trade_quality.trade_state_label in {"低吸", "观察", "等待突破"}
+    assert result.trade_quality.trade_quality_score >= 0
+    assert result.trade_quality.volume_dry_score >= 0
+    assert result.trade_quality.price_stability_score >= 0
+    assert result.trade_quality.cannot_fall_score >= 0
+    assert result.trade_quality.balance_powerless_score >= 0
+    assert isinstance(result.trade_quality.trigger_reasons, list)
+    assert isinstance(result.trade_quality.risk_warnings, list)
+    assert isinstance(result.trade_quality.invalid_conditions, list)
+
+
+def test_trade_quality_marks_low_absorb_when_dry_stable_near_support_with_good_rr():
+    from strategy3.trade_quality import evaluate_trade_quality
+
+    quality = evaluate_trade_quality(
+        _quality_data(),
+        _quality_indicators(),
+        _quality_risk(),
+        _quality_config(),
+    )
+
+    assert quality.trade_state == "LOW_ABSORB"
+    assert quality.trade_state_label == "低吸"
+    assert quality.volume_dry_score >= 15
+    assert quality.price_stability_score >= 15
+    assert quality.cannot_fall_score >= 14
+    assert quality.balance_powerless_score >= 12
+    assert quality.support_distance_pct <= 0.04
+    assert quality.target_room_pct >= 0.10
+    assert quality.estimated_rr >= 2.0
+    assert "volume:extreme_dry" in quality.trigger_reasons
+    assert "price:stable" in quality.trigger_reasons
+    assert "support:near_tactical_support" in quality.trigger_reasons
+    assert quality.invalid_conditions == []
+
+
+def test_trade_quality_does_not_low_absorb_when_price_stable_but_volume_not_dry():
+    from strategy3.trade_quality import evaluate_trade_quality
+
+    quality = evaluate_trade_quality(
+        _quality_data(),
+        _quality_indicators(
+            volume_ratio_5_20=0.96,
+            volume_percentile_60=0.62,
+            v3=980_000,
+            v5=960_000,
+            v10=940_000,
+            v20=1_000_000,
+        ),
+        _quality_risk(),
+        _quality_config(),
+    )
+
+    assert quality.trade_state != "LOW_ABSORB"
+    assert quality.volume_dry_score < 15
+    assert "risk:volume_not_dry_enough" in quality.risk_warnings
+
+
+def test_trade_quality_marks_sideways_setup_as_watch_not_low_absorb():
+    from strategy3.trade_quality import evaluate_trade_quality
+
+    quality = evaluate_trade_quality(
+        _quality_data(),
+        _quality_indicators(
+            volume_ratio_5_20=0.68,
+            volume_percentile_60=0.42,
+            v3=680_000,
+            v5=690_000,
+            v10=710_000,
+            v20=1_000_000,
+        ),
+        _quality_risk(),
+        _quality_config(),
+    )
+
+    assert quality.trade_state == "WATCH"
+    assert quality.trade_state_label == "观察"
+    assert quality.price_stability_score >= 15
+    assert quality.volume_dry_score < 15
+
+
+def test_engine_rejects_downtrend_dry_stable_as_avoid():
+    result = StrongPullbackSecondBreakoutEngine({"liquidity": {"min_listing_days": 350}}).evaluate_at(
+        make_dry_cannot_fall_bars(),
+        code="000031",
+    )
+
+    assert result.passed is False
+    assert "BELOW_MA60_AND_WEAK_TREND" in result.reject_reasons
+    assert result.trade_quality.trade_state == "AVOID"
+    assert "TREND_REJECTED" in result.trade_quality.invalid_conditions
+
+
+def test_trade_quality_avoids_extreme_dry_when_price_is_not_stable():
+    from strategy3.trade_quality import evaluate_trade_quality
+
+    quality = evaluate_trade_quality(
+        _quality_data(),
+        _quality_indicators(
+            range_5=0.11,
+            close_range_5=0.09,
+            atr_ratio_5_20=1.35,
+            max_down_5=-0.055,
+            range_compression_ok=False,
+        ),
+        _quality_risk(),
+        _quality_config(),
+    )
+
+    assert quality.trade_state == "AVOID"
+    assert "PRICE_NOT_STABLE" in quality.invalid_conditions
+    assert "DOWNSIDE_VOLATILITY_EXPANDING" in quality.invalid_conditions
+
+
+def test_trade_quality_waits_for_breakout_when_support_is_too_far_but_setup_is_good():
+    from strategy3.trade_quality import evaluate_trade_quality
+
+    quality = evaluate_trade_quality(
+        _quality_data(),
+        _quality_indicators(),
+        _quality_risk(
+            support_price=9.45,
+            tactical_support=9.45,
+            tactical_stop_loss=9.30,
+            risk_ratio=0.07,
+            tactical_risk_ratio=0.07,
+            rr1=2.14,
+            tactical_rr1=2.14,
+            nearest_support_distance=0.055,
+        ),
+        _quality_config(),
+    )
+
+    assert quality.trade_state == "WAIT_BREAKOUT"
+    assert quality.trade_state_label == "等待突破"
+    assert quality.support_distance_pct > 0.04
+    assert "risk:support_too_far_for_low_absorb" in quality.risk_warnings
+
+
+def test_trade_quality_avoids_when_rr_is_insufficient_even_near_support():
+    from strategy3.trade_quality import evaluate_trade_quality
+
+    quality = evaluate_trade_quality(
+        _quality_data(),
+        _quality_indicators(),
+        _quality_risk(target_1=10.30, rr1=0.75, tactical_rr1=0.75),
+        _quality_config(),
+    )
+
+    assert quality.trade_state == "AVOID"
+    assert "RR_TOO_LOW" in quality.invalid_conditions
+    assert quality.estimated_rr < 1.5
+
+
+def test_trade_quality_does_not_low_absorb_when_rr_is_good_but_price_not_stable():
+    from strategy3.trade_quality import evaluate_trade_quality
+
+    quality = evaluate_trade_quality(
+        _quality_data(),
+        _quality_indicators(
+            range_5=0.095,
+            close_range_5=0.075,
+            max_up_5=0.052,
+            avg_abs_return_5=0.026,
+            range_compression_ok=False,
+        ),
+        _quality_risk(rr1=3.0, tactical_rr1=3.0),
+        _quality_config(),
+    )
+
+    assert quality.trade_state != "LOW_ABSORB"
+    assert "PRICE_NOT_STABLE" in quality.invalid_conditions
+
+
+def test_trade_quality_avoids_heavy_volume_breakdown():
+    from strategy3.trade_quality import evaluate_trade_quality
+
+    quality = evaluate_trade_quality(
+        _quality_data(),
+        _quality_indicators(
+            has_big_down_volume=True,
+            support_status="FAILED",
+            break_status="EFFECTIVE_BREAK",
+            new_low_count_5=2,
+            no_new_low=False,
+            bear_body_expanding=True,
+        ),
+        _quality_risk(support_status="FAILED", break_status="EFFECTIVE_BREAK"),
+        _quality_config(),
+    )
+
+    assert quality.trade_state == "AVOID"
+    assert "VOLUME_BREAKDOWN" in quality.invalid_conditions
+    assert "KEY_SUPPORT_FAILED" in quality.invalid_conditions
+    assert "CONTINUOUS_NEW_LOW" in quality.invalid_conditions
+    assert "BEAR_BODY_EXPANDING" in quality.invalid_conditions
 
 
 def test_volume_stability_rewards_support_tests_only_within_approved_range():

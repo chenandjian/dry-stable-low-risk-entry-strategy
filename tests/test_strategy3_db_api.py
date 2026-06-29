@@ -3,9 +3,14 @@ import server as server_mod
 import threading
 from fastapi.testclient import TestClient
 from scanner.daily_data_service import FetchResult
-from strategy3.models import Strategy3Evaluation, Strategy3Indicators, Strategy3Risk
+from strategy3.models import (
+    Strategy3Evaluation,
+    Strategy3Indicators,
+    Strategy3Risk,
+    Strategy3TradeQuality,
+)
 from strategy3.scanner import _build_strategy3_discovery, re_evaluate_strategy3_task, scan_strategy3_all
-from tests.test_strategy3_engine import make_strategy3_candidate_bars
+from tests.test_strategy3_engine import make_dry_cannot_fall_bars, make_strategy3_candidate_bars
 
 
 def test_strategy3_candidate_table_roundtrip(tmp_path):
@@ -80,6 +85,21 @@ def test_strategy3_candidate_table_roundtrip(tmp_path):
         "break_status": "NOT_BROKEN",
         "nearest_support_distance": 0.03,
         "support_sources": ["min_close_10", "ma20"],
+        "trade_quality_score": 92,
+        "volume_dry_score": 18,
+        "price_stability_score": 17,
+        "cannot_fall_score": 16,
+        "balance_powerless_score": 14,
+        "support_distance_pct": 0.025,
+        "key_support_distance_pct": 0.03,
+        "target_price": 12.0,
+        "target_room_pct": 0.20,
+        "estimated_rr": 2.2,
+        "trade_state": "LOW_ABSORB",
+        "trade_state_label": "低吸",
+        "trigger_reasons": ["volume:extreme_dry", "support:near_tactical_support"],
+        "risk_warnings": [],
+        "invalid_conditions": [],
         "score_reasons": ["强趋势"],
         "reject_reasons": [],
     })
@@ -107,6 +127,21 @@ def test_strategy3_candidate_table_roundtrip(tmp_path):
     assert rows[0]["break_status"] == "NOT_BROKEN"
     assert rows[0]["nearest_support_distance"] == 0.03
     assert rows[0]["support_sources"] == ["min_close_10", "ma20"]
+    assert rows[0]["trade_quality_score"] == 92
+    assert rows[0]["volume_dry_score"] == 18
+    assert rows[0]["price_stability_score"] == 17
+    assert rows[0]["cannot_fall_score"] == 16
+    assert rows[0]["balance_powerless_score"] == 14
+    assert rows[0]["support_distance_pct"] == 0.025
+    assert rows[0]["key_support_distance_pct"] == 0.03
+    assert rows[0]["target_price"] == 12.0
+    assert rows[0]["target_room_pct"] == 0.20
+    assert rows[0]["estimated_rr"] == 2.2
+    assert rows[0]["trade_state"] == "LOW_ABSORB"
+    assert rows[0]["trade_state_label"] == "低吸"
+    assert rows[0]["trigger_reasons"] == ["volume:extreme_dry", "support:near_tactical_support"]
+    assert rows[0]["risk_warnings"] == []
+    assert rows[0]["invalid_conditions"] == []
 
 
 def test_strategy3_candidates_do_not_leak_into_strategy1_or_strategy2_tables(tmp_path):
@@ -226,6 +261,23 @@ def test_build_strategy3_discovery_contains_frontend_fields():
             nearest_support_distance=0.03,
             support_sources=["min_close_10", "ma20"],
         ),
+        trade_quality=Strategy3TradeQuality(
+            trade_quality_score=92,
+            volume_dry_score=18,
+            price_stability_score=17,
+            cannot_fall_score=16,
+            balance_powerless_score=14,
+            support_distance_pct=0.025,
+            key_support_distance_pct=0.03,
+            target_price=12.0,
+            target_room_pct=0.20,
+            estimated_rr=2.2,
+            trade_state="LOW_ABSORB",
+            trade_state_label="低吸",
+            trigger_reasons=["volume:extreme_dry", "support:near_tactical_support"],
+            risk_warnings=[],
+            invalid_conditions=[],
+        ),
         score_reasons=["强趋势"],
     )
 
@@ -258,6 +310,21 @@ def test_build_strategy3_discovery_contains_frontend_fields():
     assert d["break_status"] == "NOT_BROKEN"
     assert d["nearest_support_distance"] == 0.03
     assert d["support_sources"] == ["min_close_10", "ma20"]
+    assert d["trade_quality_score"] == 92
+    assert d["volume_dry_score"] == 18
+    assert d["price_stability_score"] == 17
+    assert d["cannot_fall_score"] == 16
+    assert d["balance_powerless_score"] == 14
+    assert d["support_distance_pct"] == 0.025
+    assert d["key_support_distance_pct"] == 0.03
+    assert d["target_price"] == 12.0
+    assert d["target_room_pct"] == 0.20
+    assert d["estimated_rr"] == 2.2
+    assert d["trade_state"] == "LOW_ABSORB"
+    assert d["trade_state_label"] == "低吸"
+    assert d["trigger_reasons"] == ["volume:extreme_dry", "support:near_tactical_support"]
+    assert d["risk_warnings"] == []
+    assert d["invalid_conditions"] == []
 
 
 def test_strategy3_candidate_table_roundtrip_tactical_and_structural_risk(tmp_path):
@@ -348,6 +415,122 @@ def test_re_evaluate_strategy3_task_uses_cached_ohlc(tmp_path, monkeypatch):
     assert task_stock["status"] == "candidate"
     summary = db.refresh_scan_task_counts("s3-task")
     assert summary["candidates_count"] == 1
+
+
+def test_scan_strategy3_all_writes_trade_quality_candidate_once(monkeypatch, tmp_path):
+    import strategy3.scanner as s3_scanner
+
+    db_path = str(tmp_path / "test.db")
+    db.init_db(db_path)
+    db.create_scan_task(
+        "s3-task",
+        "2026-06-25 15:30:00",
+        strategy_type="STRATEGY_3_STRONG_PULLBACK_SECOND_BREAKOUT",
+    )
+    stocks = [{"code": "000001", "name": "平安银行", "market": "SZ"}]
+    db.save_task_stocks("s3-task", stocks)
+    data = make_strategy3_candidate_bars()
+    data[-1]["date"] = "2026-06-25"
+
+    monkeypatch.setattr(
+        s3_scanner,
+        "fetch_with_retry",
+        lambda *args, **kwargs: FetchResult(
+            data=data,
+            primary_source="cache",
+            fallback_source="cache",
+            from_cache=True,
+            kline_fetched_at="2026-06-25 15:30:00",
+            kline_target_trade_date="2026-06-25",
+        ),
+    )
+    monkeypatch.setattr(s3_scanner, "fetch_market_index_daily", lambda symbol=None: [], raising=False)
+
+    result = scan_strategy3_all(
+        {
+            "data": {"database_path": db_path, "daily_sources": ["cache"], "worker_count": 1},
+            "liquidity": {"enabled": False, "min_listing_days": 350},
+            "strategy3": {"strategy_window_days": 250, "minimum_required_days": 180},
+        },
+        task_id="s3-task",
+        stocks=stocks,
+        worker_count=1,
+    )
+
+    assert result["stats"]["candidates_found"] == 1
+    rows = db.get_strategy3_candidates(task_id="s3-task")
+    assert len(rows) == 1
+    row = rows[0]
+    assert row["code"] == "000001"
+    assert row["support_price"] > 0
+    assert row["stop_loss"] > 0
+    assert row["target_1"] > 0
+    assert row["trade_quality_score"] >= 0
+    assert row["volume_dry_score"] >= 0
+    assert row["price_stability_score"] >= 0
+    assert row["cannot_fall_score"] >= 0
+    assert row["balance_powerless_score"] >= 0
+    assert row["estimated_rr"] >= 1.5
+    assert row["trade_state"] in {"LOW_ABSORB", "WATCH", "WAIT_BREAKOUT"}
+    assert row["trade_state_label"] in {"低吸", "观察", "等待突破"}
+    assert isinstance(row["trigger_reasons"], list)
+    assert isinstance(row["risk_warnings"], list)
+    assert isinstance(row["invalid_conditions"], list)
+    task_stock = db.get_task_stocks("s3-task", limit=1)[0]
+    assert task_stock["status"] == "candidate"
+    assert db.refresh_scan_task_counts("s3-task")["candidates_count"] == 1
+
+
+def test_scan_strategy3_all_keeps_avoid_out_of_candidates_with_debug(monkeypatch, tmp_path):
+    import json
+    import strategy3.scanner as s3_scanner
+
+    db_path = str(tmp_path / "test.db")
+    db.init_db(db_path)
+    db.create_scan_task(
+        "s3-task",
+        "2026-06-25 15:30:00",
+        strategy_type="STRATEGY_3_STRONG_PULLBACK_SECOND_BREAKOUT",
+    )
+    stocks = [{"code": "000001", "name": "平安银行", "market": "SZ"}]
+    db.save_task_stocks("s3-task", stocks)
+    data = make_dry_cannot_fall_bars(scenario="big_down_volume")
+    data[-1]["date"] = "2026-06-25"
+
+    monkeypatch.setattr(
+        s3_scanner,
+        "fetch_with_retry",
+        lambda *args, **kwargs: FetchResult(
+            data=data,
+            primary_source="cache",
+            fallback_source="cache",
+            from_cache=True,
+            kline_fetched_at="2026-06-25 15:30:00",
+            kline_target_trade_date="2026-06-25",
+        ),
+    )
+    monkeypatch.setattr(s3_scanner, "fetch_market_index_daily", lambda symbol=None: [], raising=False)
+
+    result = scan_strategy3_all(
+        {
+            "data": {"database_path": db_path, "daily_sources": ["cache"], "worker_count": 1},
+            "liquidity": {"enabled": False, "min_listing_days": 350},
+            "strategy3": {"strategy_window_days": 250, "minimum_required_days": 180},
+        },
+        task_id="s3-task",
+        stocks=stocks,
+        worker_count=1,
+    )
+
+    assert result["stats"]["candidates_found"] == 0
+    assert db.get_strategy3_candidates(task_id="s3-task") == []
+    task_stock = db.get_task_stocks("s3-task", limit=1)[0]
+    assert task_stock["status"] == "scanned"
+    debug = json.loads(task_stock["error_detail"])
+    assert debug["tradeState"] == "AVOID"
+    assert debug["tradeStateLabel"] == "回避"
+    assert "VOLUME_BREAKDOWN" in debug["invalidConditions"]
+    assert "DRY_HEAVY_DOWNSIDE_VOLUME" in debug["rejectReasons"]
 
 
 def test_scan_strategy3_all_passes_truncated_market_data(monkeypatch, tmp_path):
@@ -634,6 +817,10 @@ def test_scan_status_db_running_strategy3_returns_strategy3_discoveries(tmp_path
         "pullback_pct": 0.15,
         "risk_ratio": 0.06,
         "rr1": 2.6,
+        "trade_quality_score": 91,
+        "trade_state": "LOW_ABSORB",
+        "trade_state_label": "低吸",
+        "estimated_rr": 2.6,
     })
 
     res = TestClient(server_mod.app).get("/api/scan/status")
@@ -649,6 +836,10 @@ def test_scan_status_db_running_strategy3_returns_strategy3_discoveries(tmp_path
     assert stats["discoveries"][0]["code"] == "000001"
     assert stats["discoveries"][0]["total_score"] == 88
     assert stats["discoveries"][0]["level"] == "核心候选"
+    assert stats["discoveries"][0]["trade_quality_score"] == 91
+    assert stats["discoveries"][0]["trade_state"] == "LOW_ABSORB"
+    assert stats["discoveries"][0]["trade_state_label"] == "低吸"
+    assert stats["discoveries"][0]["estimated_rr"] == 2.6
 
 
 def test_scan_status_db_running_uses_recent_fetching_stock_as_current(tmp_path, monkeypatch):

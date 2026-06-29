@@ -42,6 +42,8 @@
           <th>股票</th>
           <th>总分</th>
           <th>等级</th>
+          <th>交易状态</th>
+          <th>交易质量</th>
           <th>趋势</th>
           <th>回踩</th>
           <th>缩量企稳</th>
@@ -51,6 +53,7 @@
           <th>战术风险比</th>
           <th>结构风险比</th>
           <th>RR1</th>
+          <th>预估RR</th>
           <th>战术支撑/Key支撑/止损/目标</th>
           <th>评估日</th>
         </tr>
@@ -61,6 +64,8 @@
             <td><span class="code-link">{{ c.code }}</span><span class="name">{{ c.name }}</span></td>
             <td class="score">{{ c.total_score }}</td>
             <td><span class="level-badge" :class="levelClass(c.level)">{{ c.level || '--' }}</span></td>
+            <td><span class="state-badge" :class="tradeStateClass(c.trade_state)">{{ c.trade_state_label || c.trade_state || '--' }}</span></td>
+            <td class="score">{{ c.trade_quality_score ?? 0 }}</td>
             <td>{{ c.trend_score ?? 0 }}</td>
             <td>{{ c.pullback_score ?? 0 }}</td>
             <td>{{ c.volume_stability_score ?? 0 }}</td>
@@ -70,11 +75,12 @@
             <td>{{ formatPct(c.tactical_risk_ratio ?? c.risk_ratio) }}</td>
             <td>{{ formatPct(c.structural_risk_ratio) }}</td>
             <td>{{ fmtNum(c.rr1, 2) }}</td>
+            <td>{{ fmtNum(c.estimated_rr, 2) }}</td>
             <td>{{ fmtPrice(c.tactical_support ?? c.support_price) }} / {{ fmtPrice(c.key_support) }} / {{ fmtPrice(c.tactical_stop_loss ?? c.stop_loss) }} / {{ fmtPrice(c.target_1) }}</td>
             <td>{{ c.evaluation_date || '--' }}</td>
           </tr>
           <tr v-if="expandedCode === c.code" class="detail-row">
-            <td colspan="14">
+            <td colspan="17">
               <div class="detail-panel">
                 <div class="detail-grid">
                   <div>
@@ -113,6 +119,28 @@
                     <div>最大上涨/下跌：{{ formatPct(c.max_up_5) }} / {{ formatPct(c.max_down_5) }}</div>
                     <div>振幅 5/10/20：{{ formatPct(c.range_5) }} / {{ formatPct(c.range_10) }} / {{ formatPct(c.range_20) }}</div>
                     <div>压缩序列：{{ fmtBool(c.range_compression_ok) }}</div>
+                  </div>
+                  <div>
+                    <h4>交易质量过滤层</h4>
+                    <div>交易状态：{{ c.trade_state_label || c.trade_state || '--' }} · 交易质量：{{ c.trade_quality_score ?? 0 }}</div>
+                    <div>量干/价稳/跌不动/无力：{{ c.volume_dry_score ?? 0 }} / {{ c.price_stability_score ?? 0 }} / {{ c.cannot_fall_score ?? 0 }} / {{ c.balance_powerless_score ?? 0 }}</div>
+                    <div>距战术支撑：{{ formatPct(c.support_distance_pct) }} · 距Key支撑：{{ formatPct(c.key_support_distance_pct) }}</div>
+                    <div>目标价：{{ fmtPrice(c.target_price ?? c.target_1) }} · 目标空间：{{ formatPct(c.target_room_pct) }} · 预估RR：{{ fmtNum(c.estimated_rr, 2) }}</div>
+                  </div>
+                  <div>
+                    <h4>触发原因</h4>
+                    <div v-for="(r, i) in (c.trigger_reasons || [])" :key="'tr'+i" class="reason-line">✓ {{ r }}</div>
+                    <div v-if="!c.trigger_reasons?.length" class="muted">无触发原因</div>
+                  </div>
+                  <div>
+                    <h4>风险提示</h4>
+                    <div v-for="(r, i) in (c.risk_warnings || [])" :key="'rw'+i" class="reason-line warning">! {{ r }}</div>
+                    <div v-if="!c.risk_warnings?.length" class="muted">无风险提示</div>
+                  </div>
+                  <div>
+                    <h4>无效条件</h4>
+                    <div v-for="(r, i) in (c.invalid_conditions || [])" :key="'ic'+i" class="reason-line reject">✗ {{ r }}</div>
+                    <div v-if="!c.invalid_conditions?.length" class="muted">无无效条件</div>
                   </div>
                   <div>
                     <h4>评分原因</h4>
@@ -203,6 +231,13 @@ export default {
       if (level === '观察候选') return 'level-watch'
       return ''
     },
+    tradeStateClass(state) {
+      if (state === 'LOW_ABSORB') return 'state-low'
+      if (state === 'WATCH') return 'state-watch'
+      if (state === 'WAIT_BREAKOUT') return 'state-breakout'
+      if (state === 'AVOID') return 'state-avoid'
+      return ''
+    },
     formatPct(v) {
       if (v == null) return '--'
       return (Number(v) * 100).toFixed(2) + '%'
@@ -240,6 +275,13 @@ export default {
           { header: '名称', value: c => c.name },
           { header: '总分', value: c => c.total_score },
           { header: '等级', value: c => c.level || '' },
+          { header: '交易状态', value: c => c.trade_state_label || c.trade_state || '' },
+          { header: '交易质量', value: c => c.trade_quality_score ?? '' },
+          { header: '预估RR', value: c => this.fmtNum(c.estimated_rr, 2) },
+          { header: '量干评分', value: c => c.volume_dry_score ?? '' },
+          { header: '价稳评分', value: c => c.price_stability_score ?? '' },
+          { header: '跌不动评分', value: c => c.cannot_fall_score ?? '' },
+          { header: '涨跌无力评分', value: c => c.balance_powerless_score ?? '' },
           { header: '趋势', value: c => c.trend_score ?? '' },
           { header: '回踩', value: c => c.pullback_score ?? '' },
           { header: '缩量企稳', value: c => c.volume_stability_score ?? '' },
@@ -252,7 +294,10 @@ export default {
           { header: '战术支撑', value: c => this.fmtPrice(c.tactical_support ?? c.support_price) },
           { header: 'Key支撑', value: c => this.fmtPrice(c.key_support) },
           { header: '止损', value: c => this.fmtPrice(c.tactical_stop_loss ?? c.stop_loss) },
-          { header: '目标', value: c => this.fmtPrice(c.target_1) },
+          { header: '目标', value: c => this.fmtPrice(c.target_price ?? c.target_1) },
+          { header: '目标空间', value: c => this.formatPct(c.target_room_pct) },
+          { header: '距战术支撑', value: c => this.formatPct(c.support_distance_pct) },
+          { header: '距Key支撑', value: c => this.formatPct(c.key_support_distance_pct) },
           { header: '方向效率5日', value: c => this.formatPct(c.direction_efficiency_5) },
           { header: '最大上涨5日', value: c => this.formatPct(c.max_up_5) },
           { header: '最大下跌5日', value: c => this.formatPct(c.max_down_5) },
@@ -260,6 +305,9 @@ export default {
           { header: '振幅10日', value: c => this.formatPct(c.range_10) },
           { header: '振幅20日', value: c => this.formatPct(c.range_20) },
           { header: '压缩序列', value: c => this.fmtBool(c.range_compression_ok) },
+          { header: '触发原因', value: c => this.fmtList(c.trigger_reasons) },
+          { header: '风险提示', value: c => this.fmtList(c.risk_warnings) },
+          { header: '无效条件', value: c => this.fmtList(c.invalid_conditions) },
           { header: '评估日', value: c => c.evaluation_date || '' },
         ],
         rows: this.sortedCandidates,
@@ -283,6 +331,11 @@ h1 { font-size: 1.5rem; margin-bottom: 4px; color: #d6b35a; }
 .level-chip, .level-badge { font-size: 0.8rem; padding: 2px 8px; border-radius: 3px; }
 .level-core, .core { background: rgba(214, 179, 90, 0.14); color: #d6b35a; }
 .level-watch, .watch { background: rgba(80, 130, 220, 0.16); color: #8bb4ff; }
+.state-badge { font-size: 0.8rem; padding: 2px 8px; border-radius: 3px; white-space: nowrap; }
+.state-low { background: rgba(214, 179, 90, 0.16); color: #f0ca6a; }
+.state-watch { background: rgba(80, 130, 220, 0.16); color: #8bb4ff; }
+.state-breakout { background: rgba(168, 120, 255, 0.16); color: #b99cff; }
+.state-avoid { background: rgba(239,68,68,0.16); color: #ff8888; }
 .empty { text-align: center; padding: 60px; color: #666; }
 .error { background: rgba(239,68,68,0.1); border: 1px solid rgba(239,68,68,0.3); color: #ff8888; padding: 10px 12px; border-radius: 4px; margin-bottom: 12px; }
 .candidates-table { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
@@ -299,6 +352,7 @@ tr.core { border-left: 3px solid #d6b35a; }
 .detail-grid h4 { font-size: 0.8rem; color: #888; margin-bottom: 6px; text-transform: uppercase; }
 .detail-grid div { font-size: 0.8rem; color: #ccc; line-height: 1.6; }
 .reason-line { color: #aa8; padding: 1px 0; }
+.reason-line.warning { color: #e6b85c; }
 .reason-line.reject { color: #e44; }
 .muted { color: #666; }
 .failed-count { color: #e88; font-size: 0.85rem; }

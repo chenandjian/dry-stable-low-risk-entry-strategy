@@ -1267,6 +1267,21 @@ def _ensure_strategy3_candidates_table(conn: sqlite3.Connection):
     _ensure_column(conn, "strategy3_candidates", "break_status", "TEXT")
     _ensure_column(conn, "strategy3_candidates", "nearest_support_distance", "REAL")
     _ensure_column(conn, "strategy3_candidates", "support_sources", "TEXT")
+    _ensure_column(conn, "strategy3_candidates", "trade_quality_score", "INTEGER DEFAULT 0")
+    _ensure_column(conn, "strategy3_candidates", "volume_dry_score", "INTEGER DEFAULT 0")
+    _ensure_column(conn, "strategy3_candidates", "price_stability_score", "INTEGER DEFAULT 0")
+    _ensure_column(conn, "strategy3_candidates", "cannot_fall_score", "INTEGER DEFAULT 0")
+    _ensure_column(conn, "strategy3_candidates", "balance_powerless_score", "INTEGER DEFAULT 0")
+    _ensure_column(conn, "strategy3_candidates", "support_distance_pct", "REAL")
+    _ensure_column(conn, "strategy3_candidates", "key_support_distance_pct", "REAL")
+    _ensure_column(conn, "strategy3_candidates", "target_price", "REAL")
+    _ensure_column(conn, "strategy3_candidates", "target_room_pct", "REAL")
+    _ensure_column(conn, "strategy3_candidates", "estimated_rr", "REAL")
+    _ensure_column(conn, "strategy3_candidates", "trade_state", "TEXT")
+    _ensure_column(conn, "strategy3_candidates", "trade_state_label", "TEXT")
+    _ensure_column(conn, "strategy3_candidates", "trigger_reasons", "TEXT")
+    _ensure_column(conn, "strategy3_candidates", "risk_warnings", "TEXT")
+    _ensure_column(conn, "strategy3_candidates", "invalid_conditions", "TEXT")
 
 
 def _ensure_column(conn: sqlite3.Connection, table: str, column: str, col_type: str):
@@ -1427,6 +1442,11 @@ def upsert_strategy3_candidate(task_id: str, d: dict):
         "key_support", "key_support_zone_low", "key_support_zone_high",
         "strong_support", "strong_support_zone_low", "strong_support_zone_high",
         "support_status", "break_status", "nearest_support_distance", "support_sources",
+        "trade_quality_score", "volume_dry_score", "price_stability_score",
+        "cannot_fall_score", "balance_powerless_score", "support_distance_pct",
+        "key_support_distance_pct", "target_price", "target_room_pct",
+        "estimated_rr", "trade_state", "trade_state_label", "trigger_reasons",
+        "risk_warnings", "invalid_conditions",
         "score_reasons", "reject_reasons", "data_source",
     ]
     values = (
@@ -1503,6 +1523,21 @@ def upsert_strategy3_candidate(task_id: str, d: dict):
         d.get("break_status", ""),
         d.get("nearest_support_distance"),
         _json_dumps(d.get("support_sources")),
+        d.get("trade_quality_score", 0),
+        d.get("volume_dry_score", 0),
+        d.get("price_stability_score", 0),
+        d.get("cannot_fall_score", 0),
+        d.get("balance_powerless_score", 0),
+        d.get("support_distance_pct"),
+        d.get("key_support_distance_pct"),
+        d.get("target_price"),
+        d.get("target_room_pct"),
+        d.get("estimated_rr"),
+        d.get("trade_state", ""),
+        d.get("trade_state_label", ""),
+        _json_dumps(d.get("trigger_reasons")),
+        _json_dumps(d.get("risk_warnings")),
+        _json_dumps(d.get("invalid_conditions")),
         _json_dumps(d.get("score_reasons")),
         _json_dumps(d.get("reject_reasons")),
         d.get("data_source", ""),
@@ -1564,7 +1599,10 @@ def get_strategy3_candidate(code: str, task_id: str = None) -> dict | None:
 
 def _deserialize_strategy3_candidate(row: dict) -> dict:
     """Convert strategy3 JSON string fields to Python lists."""
-    for field in ("score_reasons", "reject_reasons", "support_sources"):
+    for field in (
+        "score_reasons", "reject_reasons", "support_sources",
+        "trigger_reasons", "risk_warnings", "invalid_conditions",
+    ):
         value = row.get(field)
         if isinstance(value, str) and value:
             try:

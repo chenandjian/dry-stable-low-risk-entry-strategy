@@ -111,6 +111,21 @@ describe('Strategy3Results', () => {
         break_status: 'NOT_BROKEN',
         nearest_support_distance: 0.03,
         support_sources: ['min_close_10', 'ma20'],
+        trade_quality_score: 92,
+        volume_dry_score: 18,
+        price_stability_score: 17,
+        cannot_fall_score: 16,
+        balance_powerless_score: 14,
+        support_distance_pct: 0.025,
+        key_support_distance_pct: 0.03,
+        target_price: 12,
+        target_room_pct: 0.20,
+        estimated_rr: 2.2,
+        trade_state: 'LOW_ABSORB',
+        trade_state_label: '低吸',
+        trigger_reasons: ['volume:extreme_dry', 'support:near_tactical_support'],
+        risk_warnings: ['risk:rr_not_enough_for_low_absorb'],
+        invalid_conditions: [],
         target_1: 12,
         evaluation_date: '2026-06-25',
       }],
@@ -136,6 +151,12 @@ describe('Strategy3Results', () => {
     expect(wrapper.text()).toContain('战术风险比')
     expect(wrapper.text()).toContain('结构风险比')
     expect(wrapper.text()).toContain('RR1')
+    expect(wrapper.text()).toContain('交易状态')
+    expect(wrapper.text()).toContain('低吸')
+    expect(wrapper.text()).toContain('交易质量')
+    expect(wrapper.text()).toContain('92')
+    expect(wrapper.text()).toContain('预估RR')
+    expect(wrapper.text()).toContain('2.20')
     expect(wrapper.text()).toContain('战术支撑/Key支撑/止损/目标')
     expect(wrapper.text()).toContain('9.50 / 9.70 / 9.31 / 12.00')
     expect(wrapper.text()).toContain('2026-06-25')
@@ -153,6 +174,17 @@ describe('Strategy3Results', () => {
     expect(wrapper.text()).toContain('压缩序列')
     expect(wrapper.text()).toContain('支撑区 V2')
     expect(wrapper.text()).toContain('关键支撑区')
+    expect(wrapper.text()).toContain('交易质量过滤层')
+    expect(wrapper.text()).toContain('量干/价稳/跌不动/无力')
+    expect(wrapper.text()).toContain('18 / 17 / 16 / 14')
+    expect(wrapper.text()).toContain('距战术支撑')
+    expect(wrapper.text()).toContain('2.50%')
+    expect(wrapper.text()).toContain('目标空间')
+    expect(wrapper.text()).toContain('20.00%')
+    expect(wrapper.text()).toContain('触发原因')
+    expect(wrapper.text()).toContain('volume:extreme_dry')
+    expect(wrapper.text()).toContain('风险提示')
+    expect(wrapper.text()).toContain('risk:rr_not_enough_for_low_absorb')
     expect(wrapper.text()).toContain('VALID')
     expect(wrapper.text()).toContain('min_close_10')
   })
@@ -186,6 +218,7 @@ describe('Strategy3Results', () => {
     expect(csv).toContain('代码,名称,总分,等级')
     expect(csv).toContain('000001,平安银行,88,核心候选')
     expect(csv).toContain('9.50,9.70,9.31,12.00')
+    expect(csv).toContain('低吸,92,2.20,18,17,16,14')
     expect(csv).toContain('22.00%,2.10%,-1.80%,0.52,6.10%,11.80%,是')
   })
 })

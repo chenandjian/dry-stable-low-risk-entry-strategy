@@ -253,6 +253,7 @@ def _build_strategy3_discovery(evaluation, fetch_result=None) -> dict:
     """Build strategy3 candidate dict for persistence and frontend."""
     ind = evaluation.indicators
     risk = evaluation.risk
+    quality = evaluation.trade_quality
     return {
         "code": evaluation.code,
         "name": evaluation.name,
@@ -326,6 +327,21 @@ def _build_strategy3_discovery(evaluation, fetch_result=None) -> dict:
         "break_status": risk.break_status,
         "nearest_support_distance": risk.nearest_support_distance,
         "support_sources": risk.support_sources,
+        "trade_quality_score": quality.trade_quality_score,
+        "volume_dry_score": quality.volume_dry_score,
+        "price_stability_score": quality.price_stability_score,
+        "cannot_fall_score": quality.cannot_fall_score,
+        "balance_powerless_score": quality.balance_powerless_score,
+        "support_distance_pct": quality.support_distance_pct,
+        "key_support_distance_pct": quality.key_support_distance_pct,
+        "target_price": quality.target_price,
+        "target_room_pct": quality.target_room_pct,
+        "estimated_rr": quality.estimated_rr,
+        "trade_state": quality.trade_state,
+        "trade_state_label": quality.trade_state_label,
+        "trigger_reasons": quality.trigger_reasons,
+        "risk_warnings": quality.risk_warnings,
+        "invalid_conditions": quality.invalid_conditions,
         "score_reasons": evaluation.score_reasons,
         "reject_reasons": evaluation.reject_reasons,
         "data_source": fetch_result.primary_source if fetch_result else "",
@@ -463,6 +479,21 @@ def _evaluation_debug_json(evaluation) -> str:
         "atrRatio5_20": evaluation.indicators.atr_ratio_5_20,
         "riskRatio": evaluation.risk.risk_ratio,
         "rr1": evaluation.risk.rr1,
+        "tradeQualityScore": evaluation.trade_quality.trade_quality_score,
+        "volumeDryScore": evaluation.trade_quality.volume_dry_score,
+        "priceStabilityScore": evaluation.trade_quality.price_stability_score,
+        "cannotFallScore": evaluation.trade_quality.cannot_fall_score,
+        "balancePowerlessScore": evaluation.trade_quality.balance_powerless_score,
+        "supportDistancePct": evaluation.trade_quality.support_distance_pct,
+        "keySupportDistancePct": evaluation.trade_quality.key_support_distance_pct,
+        "targetPrice": evaluation.trade_quality.target_price,
+        "targetRoomPct": evaluation.trade_quality.target_room_pct,
+        "estimatedRr": evaluation.trade_quality.estimated_rr,
+        "tradeState": evaluation.trade_quality.trade_state,
+        "tradeStateLabel": evaluation.trade_quality.trade_state_label,
+        "triggerReasons": evaluation.trade_quality.trigger_reasons,
+        "riskWarnings": evaluation.trade_quality.risk_warnings,
+        "invalidConditions": evaluation.trade_quality.invalid_conditions,
     }, ensure_ascii=False)
 
 
