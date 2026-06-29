@@ -19,6 +19,8 @@ from scanner.daily_data_service import (
     CacheFreshnessContext,
     build_cache_freshness_context,
     select_fresh_cached_ohlc,
+    source_error_confirms_no_trade,
+    strip_zero_volume_target_row,
     trim_ohlc_to_target,
 )
 from scanner.pattern_detector import CupHandleResult
@@ -715,6 +717,16 @@ def _fetch_with_retry(
             target_date = freshness_context.target_trade_date if freshness_context else None
             effective_cached = trim_ohlc_to_target(cached or [], target_date)
             effective_data = trim_ohlc_to_target(data, target_date)
+            effective_data, no_trade_error = strip_zero_volume_target_row(effective_data, target_date)
+            if no_trade_error:
+                source_errors[ds_name] = f"attempts={used_attempts} error={no_trade_error}"
+                stale_candidate = effective_data or effective_cached
+                if stale_candidate:
+                    latest_date = stale_candidate[-1].get("date")
+                    if stale_success is None or latest_date > stale_success[0][-1].get("date"):
+                        stale_success = (stale_candidate, ds_name, used_attempts)
+                failed_sources.add(ds_name)
+                continue
             if not effective_data:
                 source_errors[ds_name] = f"attempts={used_attempts} error=missing target trade date"
                 failed_sources.add(ds_name)
@@ -982,11 +994,8 @@ def _stale_success_is_conclusive_no_trade(
     chain: list[str],
     source_errors: dict[str, str],
 ) -> bool:
-    """Only classify stale rows as no-trade when every source missed the target date."""
-    return all(
-        "missing target trade date" in source_errors.get(ds_name, "")
-        for ds_name in chain
-    )
+    """Only classify stale rows as no-trade when every source has conclusive no-trade evidence."""
+    return all(source_error_confirms_no_trade(source_errors.get(ds_name)) for ds_name in chain)
 
 
 def _classify_fetch_error(exc: Exception) -> str:

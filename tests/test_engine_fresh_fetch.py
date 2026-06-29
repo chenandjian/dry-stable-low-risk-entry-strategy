@@ -53,6 +53,13 @@ def _row(day, close=10.0):
     return {"date": day, "open": close, "high": close, "low": close, "close": close, "volume": 10_000_000, "turnover": close * 10_000_000}
 
 
+def _zero_volume_flat_row(day, close=10.0):
+    row = _row(day, close)
+    row["volume"] = 0
+    row["turnover"] = 0
+    return row
+
+
 def _rows(count, close=10.0):
     rows = []
     for day in range(1, count + 1):
@@ -655,6 +662,49 @@ def test_engine_fetch_after_close_does_not_mark_suspended_when_other_sources_are
         "tencent": "busy",
     }
     assert not db.get_ohlc("000921")
+
+
+def test_engine_fetch_after_close_skips_zero_volume_target_row_and_uses_fallback(monkeypatch, tmp_path):
+    db.init_db(str(tmp_path / "cuphandle.db"))
+    calls = []
+
+    def fake_try_fetch(code, ds_name, attempts, sleep_fn, kline_days):
+        calls.append(ds_name)
+        if ds_name == "sina":
+            return [
+                _row("2026-06-26", close=14.14),
+                _zero_volume_flat_row("2026-06-29", close=14.14),
+            ], 1, None
+        if ds_name == "tencent":
+            return [
+                _row("2026-06-26", close=14.14),
+                _row("2026-06-29", close=14.50),
+            ], 1, None
+        return None, 1, "empty response"
+
+    monkeypatch.setattr(engine, "_try_fetch_source", fake_try_fetch)
+    context = engine.CacheFreshnessContext(
+        target_trade_date="2026-06-29",
+        min_fetch_time="2026-06-29 15:00:00",
+    )
+
+    result = engine._fetch_with_retry(
+        "603001",
+        "sina",
+        retry_attempts=1,
+        fallback_attempts=1,
+        sleep_fn=lambda _: None,
+        source_chain=["sina", "tencent"],
+        kline_days=250,
+        freshness_context=context,
+    )
+
+    assert calls == ["sina", "tencent"]
+    assert result.data[-1]["date"] == "2026-06-29"
+    assert result.data[-1]["volume"] > 0
+    assert result.fallback_source == "tencent"
+    assert "zero-volume target trade date 2026-06-29" in result.source_errors["sina"]
+    assert db.get_ohlc("603001")[-1]["volume"] > 0
 
 
 def test_fetch_all_sources_fail_returns_none(monkeypatch, tmp_path):

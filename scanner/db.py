@@ -486,9 +486,15 @@ def _source_errors_confirm_no_trade(source_errors: str | None) -> bool:
         return False
     if not isinstance(parsed, dict) or not parsed:
         return False
-    return all(
-        isinstance(error, str) and "missing target trade date" in error
-        for error in parsed.values()
+    return all(_source_error_confirms_no_trade(error) for error in parsed.values())
+
+
+def _source_error_confirms_no_trade(error: str | None) -> bool:
+    if not isinstance(error, str):
+        return False
+    return (
+        "missing target trade date" in error
+        or "zero-volume target trade date" in error
     )
 
 

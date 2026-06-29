@@ -159,6 +159,16 @@ def fetch_with_retry(
             target_date = freshness_context.target_trade_date if freshness_context else None
             effective_cached = trim_ohlc_to_target(cached or [], target_date)
             effective_data = trim_ohlc_to_target(data, target_date)
+            effective_data, no_trade_error = strip_zero_volume_target_row(effective_data, target_date)
+            if no_trade_error:
+                source_errors[ds_name] = f"attempts={used_attempts} error={no_trade_error}"
+                stale_candidate = effective_data or effective_cached
+                if stale_candidate:
+                    latest_date = stale_candidate[-1].get("date")
+                    if stale_success is None or latest_date > stale_success[0][-1].get("date"):
+                        stale_success = (stale_candidate, ds_name, used_attempts)
+                failed_sources.add(ds_name)
+                continue
             if not effective_data:
                 source_errors[ds_name] = f"attempts={used_attempts} error=missing target trade date"
                 failed_sources.add(ds_name)
@@ -317,6 +327,37 @@ def trim_ohlc_to_target(
     return [row for row in data if row.get("date") <= target_trade_date]
 
 
+def strip_zero_volume_target_row(
+    data: list[dict] | None,
+    target_trade_date: str | None,
+) -> tuple[list[dict], str | None]:
+    """Remove an untrusted zero-volume flat row on the target trade date.
+
+    Some sources publish a target-date placeholder for suspended/no-trade stocks:
+    O=H=L=C with volume=0 and turnover=0. That row must not be treated as fresh
+    tradable OHLC, otherwise it blocks fallback sources and pollutes daily_ohlc.
+    """
+    if not data:
+        return [], None
+    rows = list(data)
+    if not target_trade_date:
+        return rows, None
+    latest = rows[-1]
+    if latest.get("date") == target_trade_date and _is_zero_volume_flat_row(latest):
+        return rows[:-1], f"zero-volume target trade date {target_trade_date}"
+    return rows, None
+
+
+def source_error_confirms_no_trade(error: str | None) -> bool:
+    """Return true when a source conclusively did not provide target-day trading data."""
+    if not isinstance(error, str):
+        return False
+    return (
+        "missing target trade date" in error
+        or "zero-volume target trade date" in error
+    )
+
+
 def compute_target_trade_date(
     now: datetime | None = None,
     *,
@@ -400,6 +441,27 @@ def _validate_ohlc_data(data: list[dict]) -> str | None:
     return None
 
 
+def _is_zero_volume_flat_row(row: dict) -> bool:
+    try:
+        open_ = float(row["open"])
+        high = float(row["high"])
+        low = float(row["low"])
+        close = float(row["close"])
+        volume = float(row["volume"])
+    except (TypeError, ValueError, KeyError):
+        return False
+    turnover = row.get("turnover", 0)
+    try:
+        turnover_value = float(turnover)
+    except (TypeError, ValueError):
+        return False
+    return (
+        volume == 0
+        and turnover_value == 0
+        and open_ == high == low == close
+    )
+
+
 def _fetch_time_is_fresh(context: CacheFreshnessContext) -> bool:
     if not context.min_fetch_time:
         return True
@@ -446,11 +508,8 @@ def _stale_success_is_conclusive_no_trade(
     chain: list[str],
     source_errors: dict[str, str],
 ) -> bool:
-    """Only classify stale rows as no-trade when every source missed the target date."""
-    return all(
-        "missing target trade date" in source_errors.get(ds_name, "")
-        for ds_name in chain
-    )
+    """Only classify stale rows as no-trade when every source has conclusive no-trade evidence."""
+    return all(source_error_confirms_no_trade(source_errors.get(ds_name)) for ds_name in chain)
 
 
 def _classify_fetch_error(exc: Exception) -> str:

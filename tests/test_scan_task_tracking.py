@@ -412,6 +412,35 @@ def test_reusable_kline_context_allows_conclusive_suspended_source_errors(tmp_pa
     assert reusable["quote_status"] == "suspended"
 
 
+def test_reusable_kline_context_allows_zero_volume_no_trade_source_errors(tmp_path):
+    db.init_db(str(tmp_path / "cuphandle.db"))
+    db.create_scan_task("task-zero-volume-no-trade", "2026-06-29 15:20:00", total_stocks=0)
+    db.save_task_stocks("task-zero-volume-no-trade", [{"code": "603722", "name": "阿科力"}])
+    db.update_task_stock(
+        "task-zero-volume-no-trade",
+        "603722",
+        status="scanned",
+        kline_latest_date="2026-06-26",
+        kline_fetched_at="2026-06-29 15:21:03",
+        kline_target_trade_date="2026-06-29",
+        quote_status="suspended",
+        source_errors=(
+            '{"baidu":"attempts=1 error=zero-volume target trade date 2026-06-29",'
+            '"sina":"attempts=1 error=zero-volume target trade date 2026-06-29",'
+            '"tencent":"attempts=1 error=zero-volume target trade date 2026-06-29"}'
+        ),
+    )
+
+    reusable = db.get_reusable_task_stock_kline_context(
+        "603722",
+        target_trade_date="2026-06-29",
+        min_fetch_time="2026-06-29 15:00:00",
+    )
+
+    assert reusable["kline_latest_date"] == "2026-06-26"
+    assert reusable["quote_status"] == "suspended"
+
+
 def test_update_scan_task_from_task_stock_summary(tmp_path):
     db.init_db(str(tmp_path / "cuphandle.db"))
     db.create_scan_task("task-1", "2026-06-04 09:30:00", total_stocks=0)

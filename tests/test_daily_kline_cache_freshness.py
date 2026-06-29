@@ -47,6 +47,13 @@ def _infinite_turnover_row(day: str) -> dict:
     return row
 
 
+def _zero_volume_flat_row(day: str, close: float = 10.0) -> dict:
+    row = _row(day, close)
+    row["volume"] = 0
+    row["turnover"] = 0
+    return row
+
+
 class FakeManager:
     def __init__(self, acquire_results: dict[str, bool]):
         self.acquire_results = acquire_results
@@ -241,6 +248,81 @@ def test_fetch_after_close_does_not_mark_suspended_when_other_sources_are_busy(m
         "tencent": "busy",
     }
     assert not db.get_ohlc("000921")
+
+
+def test_fetch_after_close_skips_zero_volume_target_row_and_uses_fallback(monkeypatch, tmp_path):
+    db.init_db(str(tmp_path / "cuphandle.db"))
+    zero_volume_sina = [
+        _row("2026-06-26", close=14.14),
+        _zero_volume_flat_row("2026-06-29", close=14.14),
+    ]
+    fresh_tencent = [_row("2026-06-26", close=14.14), _row("2026-06-29", close=14.5)]
+    calls = []
+
+    def fake_try_fetch(code, ds_name, attempts, sleep_fn, kline_days):
+        calls.append(ds_name)
+        if ds_name == "sina":
+            return zero_volume_sina, 1, None
+        if ds_name == "tencent":
+            return fresh_tencent, 1, None
+        return None, 1, "empty response"
+
+    monkeypatch.setattr("scanner.daily_data_service._try_fetch_source", fake_try_fetch)
+    context = CacheFreshnessContext(
+        target_trade_date="2026-06-29",
+        min_fetch_time="2026-06-29 15:00:00",
+    )
+
+    result = fetch_with_retry(
+        "603001",
+        "sina",
+        retry_attempts=1,
+        fallback_attempts=1,
+        sleep_fn=lambda _: None,
+        source_chain=["sina", "tencent"],
+        kline_days=250,
+        freshness_context=context,
+    )
+
+    assert calls == ["sina", "tencent"]
+    assert result.data[-1]["date"] == "2026-06-29"
+    assert result.data[-1]["volume"] > 0
+    assert result.fallback_source == "tencent"
+    assert "zero-volume target trade date 2026-06-29" in result.source_errors["sina"]
+    assert db.get_ohlc("603001")[-1]["volume"] > 0
+
+
+def test_fetch_after_close_strips_zero_volume_target_when_all_sources_have_no_trade(monkeypatch, tmp_path):
+    db.init_db(str(tmp_path / "cuphandle.db"))
+    db.save_ohlc("603722", [_row("2026-06-26", close=39.6)])
+
+    def fake_try_fetch(code, ds_name, attempts, sleep_fn, kline_days):
+        return [
+            _row("2026-06-26", close=39.6),
+            _zero_volume_flat_row("2026-06-29", close=39.6),
+        ], 1, None
+
+    monkeypatch.setattr("scanner.daily_data_service._try_fetch_source", fake_try_fetch)
+    context = CacheFreshnessContext(
+        target_trade_date="2026-06-29",
+        min_fetch_time="2026-06-29 15:00:00",
+    )
+
+    result = fetch_with_retry(
+        "603722",
+        "sina",
+        retry_attempts=1,
+        fallback_attempts=1,
+        sleep_fn=lambda _: None,
+        source_chain=["sina", "tencent"],
+        kline_days=250,
+        freshness_context=context,
+    )
+
+    assert result.quote_status == "suspended"
+    assert result.data[-1]["date"] == "2026-06-26"
+    assert all("zero-volume target trade date 2026-06-29" in error for error in result.source_errors.values())
+    assert db.get_ohlc("603722")[-1]["date"] == "2026-06-26"
 
 
 def test_fetch_rejects_invalid_ohlc_source_and_uses_fallback(monkeypatch, tmp_path):
