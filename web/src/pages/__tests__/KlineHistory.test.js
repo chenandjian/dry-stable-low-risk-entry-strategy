@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { nextTick } from 'vue'
 
-const api = { getKlineHistory: vi.fn(), getKlineHealth: vi.fn() }
+const api = { getKlineHistory: vi.fn(), getKlineHealth: vi.fn(), refreshKlineData: vi.fn() }
 vi.mock('../../composables/useApi.js', () => ({ useApi: () => api }))
 
 import KlineHistory from '../KlineHistory.vue'
@@ -57,6 +57,7 @@ function healthResponse(overrides = {}) {
         target_trade_date: '2026-06-16',
         health_status: 'no_trade',
         severity: 'warning',
+        needs_refetch: false,
         reason: '股票停牌或无交易，已在目标交易日收盘后确认',
       },
       {
@@ -67,6 +68,7 @@ function healthResponse(overrides = {}) {
         target_trade_date: '2026-06-16',
         health_status: 'anomaly',
         severity: 'danger',
+        needs_refetch: true,
         reason: '目标交易日存在零成交量平盘K线，需要重新拉取确认',
       },
     ],
@@ -82,6 +84,7 @@ describe('KlineHistory', () => {
     vi.clearAllMocks()
     api.getKlineHistory.mockResolvedValue(freshResponse())
     api.getKlineHealth.mockResolvedValue(healthResponse())
+    api.refreshKlineData.mockResolvedValue({ ok: true, summary: { health_status: 'fresh' } })
   })
 
   it('renders freshness summary and kline rows', async () => {
@@ -115,6 +118,16 @@ describe('KlineHistory', () => {
     expect(wrapper.text()).toContain('零成交量平盘K线')
   })
 
+  it('renders stock code as a baidu search link', async () => {
+    const wrapper = mount(KlineHistory)
+    await flushUi()
+
+    const link = wrapper.find('[data-test="stock-search-000003"]')
+    expect(link.exists()).toBe(true)
+    expect(link.attributes('href')).toBe('https://www.baidu.com/s?ie=UTF-8&wd=000003')
+    expect(link.attributes('target')).toBe('_blank')
+  })
+
   it('loads a stock query from a health problem row', async () => {
     const wrapper = mount(KlineHistory)
     await flushUi()
@@ -140,6 +153,24 @@ describe('KlineHistory', () => {
     await flushUi()
 
     expect(api.getKlineHealth).toHaveBeenLastCalledWith({ status: 'failed', page: 1, page_size: 100 })
+  })
+
+  it('refreshes one problematic stock from the health row', async () => {
+    const wrapper = mount(KlineHistory)
+    await flushUi()
+
+    await wrapper.find('[data-test="refresh-health-row-000003"]').trigger('click')
+    await flushUi()
+
+    expect(api.refreshKlineData).toHaveBeenCalledWith('000003')
+    expect(api.getKlineHealth).toHaveBeenLastCalledWith({ status: 'problem', page: 1, page_size: 100 })
+    expect(api.getKlineHistory).toHaveBeenLastCalledWith({
+      code: '000003',
+      start_date: '',
+      end_date: '',
+      page: 1,
+      page_size: 50,
+    })
   })
 
   it('loads the next page with the current query', async () => {

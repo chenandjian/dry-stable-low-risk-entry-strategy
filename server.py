@@ -36,7 +36,12 @@ from scanner.single_stock_backtest import (
 )
 from scanner.stock_pool import _filter_stocks as filter_stock_pool_for_scan
 from scanner.strategy1_backtest_service import run_strategy1_experiment_from_baseline
-from scanner.daily_data_service import build_cache_freshness_context
+from scanner.daily_data_service import (
+    build_cache_freshness_context,
+    encode_source_errors,
+    fetch_with_retry,
+)
+from scanner.data_source import DataSourceManager
 
 logger = logging.getLogger(__name__)
 
@@ -1226,6 +1231,16 @@ def _classify_kline_health_item(
     return {**base, "health_status": "stale", "severity": "danger", "needs_refetch": True, "reason": reason}
 
 
+def _stock_pool_meta_for_code(config: dict, code: str) -> dict:
+    for stock in filter_stock_pool_for_scan([stock.copy() for stock in db.get_stock_pool()], config):
+        if stock["code"] == code:
+            return stock
+    for stock in db.get_stock_pool():
+        if stock["code"] == code:
+            return stock
+    return {"code": code, "name": "", "market": ""}
+
+
 @app.get("/api/kline-health")
 async def get_kline_health(status: str = "problem", page: int = 1, page_size: int = 100):
     """Return market-wide local K-line freshness and anomaly diagnostics."""
@@ -1274,6 +1289,149 @@ async def get_kline_health(status: str = "problem", page: int = 1, page_size: in
         "total": len(filtered),
         "page": page,
         "page_size": page_size,
+    }
+
+
+@app.post("/api/stock/{code}/kline-refresh")
+async def refresh_stock_kline(code: str):
+    """Force refresh one stock's local K-line data for health diagnostics."""
+    code = code.strip()
+    if not code:
+        return JSONResponse({"error": "Invalid code", "message": "stock code is required"}, status_code=400)
+
+    config = _ensure_db_initialized_from_config()
+    try:
+        windows = resolve_strategy_windows(config)
+    except ValueError as exc:
+        return JSONResponse({"error": "Invalid window config", "message": str(exc)}, status_code=400)
+
+    data_cfg = config.get("data", {}) or {}
+    daily_sources = data_cfg.get("daily_sources") or ["baidu", "sina", "tencent"]
+    if not daily_sources:
+        return JSONResponse({"error": "No data source", "message": "data.daily_sources is empty"}, status_code=400)
+
+    started = _now()
+    started_at = started.strftime("%Y-%m-%d %H:%M:%S")
+    task_id = f"kline-refresh-{started.strftime('%Y%m%d-%H%M%S-%f')}-{code}"
+    stock = _stock_pool_meta_for_code(config, code)
+    db.create_scan_task(
+        task_id,
+        started_at,
+        total_stocks=1,
+        retry_mode="kline_refresh",
+        strategy_type="KLINE_HEALTH_REFRESH",
+    )
+    conn = db.get_conn()
+    conn.execute("UPDATE scan_tasks SET status='refreshing' WHERE id=?", (task_id,))
+    conn.commit()
+    db.save_task_stocks(task_id, [stock])
+    db.update_task_stock(
+        task_id,
+        code,
+        status="fetching",
+        primary_source=daily_sources[0],
+        fallback_source=daily_sources[-1],
+        started_at=started_at,
+    )
+
+    context = build_cache_freshness_context(now=started)
+    fetch_result = fetch_with_retry(
+        code,
+        daily_sources[0],
+        retry_attempts=2,
+        fallback_attempts=2,
+        mgr=DataSourceManager(),
+        source_chain=daily_sources,
+        kline_days=windows.min_listing_days,
+        freshness_context=context,
+        force_refresh=True,
+    )
+    finished_at = _now().strftime("%Y-%m-%d %H:%M:%S")
+    source_errors = encode_source_errors(fetch_result.source_errors)
+    fetched_at = fetch_result.kline_fetched_at or finished_at
+    target_trade_date = fetch_result.kline_target_trade_date or context.target_trade_date
+
+    if fetch_result.data is None:
+        reason = "ALL_DATA_SOURCES_FAILED"
+        db.update_task_stock(
+            task_id,
+            code,
+            status="failed",
+            status_reason=reason,
+            primary_source=fetch_result.primary_source,
+            fallback_source=fetch_result.fallback_source,
+            primary_attempts=fetch_result.primary_attempts,
+            fallback_attempts=fetch_result.fallback_attempts,
+            primary_error=fetch_result.primary_error,
+            fallback_error=fetch_result.fallback_error,
+            source_errors=source_errors,
+            kline_fetched_at=fetched_at,
+            kline_target_trade_date=target_trade_date,
+            quote_status=fetch_result.quote_status,
+            finished_at=finished_at,
+        )
+        conn = db.get_conn()
+        conn.execute(
+            "UPDATE scan_tasks SET status='failed', finished_at=?, error=? WHERE id=?",
+            (finished_at, reason, task_id),
+        )
+        conn.commit()
+        return JSONResponse(
+            {
+                "code": code,
+                "task_id": task_id,
+                "status": "failed",
+                "message": reason,
+                "source_errors": fetch_result.source_errors,
+            },
+            status_code=502,
+        )
+
+    db.save_ohlc(code, fetch_result.data)
+    latest_date = fetch_result.data[-1].get("date") if fetch_result.data else None
+    quote_status = fetch_result.quote_status or "not_requested"
+    no_trade = quote_status in {"suspended", "no_trade"}
+    db.update_task_stock(
+        task_id,
+        code,
+        status="skipped" if no_trade else "scanned",
+        status_reason="SUSPENDED_OR_NO_TRADE_ON_TARGET_DATE" if no_trade else None,
+        primary_source=fetch_result.primary_source,
+        fallback_source=fetch_result.fallback_source,
+        primary_attempts=fetch_result.primary_attempts,
+        fallback_attempts=fetch_result.fallback_attempts,
+        primary_error=fetch_result.primary_error,
+        fallback_error=fetch_result.fallback_error,
+        source_errors=source_errors,
+        kline_latest_date=latest_date,
+        kline_fetched_at=fetched_at,
+        kline_target_trade_date=target_trade_date,
+        quote_status=quote_status,
+        finished_at=finished_at,
+    )
+    db.finish_scan_task(
+        task_id,
+        finished_at=finished_at,
+        candidates_count=0,
+        elapsed_seconds=max(0, (_now() - started).total_seconds()),
+        scanned=1,
+        skipped=1 if no_trade else 0,
+    )
+
+    latest_by_code, task_by_code = _load_kline_health_inputs(config)
+    summary = _classify_kline_health_item(
+        code,
+        latest_by_code.get(code),
+        task_by_code.get(code, stock),
+        build_cache_freshness_context(now=_now()),
+    )
+    return {
+        "code": code,
+        "task_id": task_id,
+        "status": "refetched",
+        "rows": len(fetch_result.data),
+        "source": fetch_result.fallback_source or fetch_result.primary_source,
+        "summary": summary,
     }
 
 

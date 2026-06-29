@@ -80,15 +80,37 @@
         <tbody>
           <tr v-for="item in healthItems" :key="item.code">
             <td><span class="health-badge" :class="item.severity">{{ healthStatusLabel(item) }}</span></td>
-            <td>{{ item.code }} {{ item.name || '' }}</td>
+            <td>
+              <a
+                class="stock-link"
+                :href="baiduSearchUrl(item.code)"
+                target="_blank"
+                rel="noopener noreferrer"
+                :data-test="`stock-search-${item.code}`"
+              >
+                {{ item.code }}
+              </a>
+              {{ item.name || '' }}
+            </td>
             <td>{{ fmt(item.latest_kline_date) }}</td>
             <td>{{ fmt(item.target_trade_date) }}</td>
             <td>{{ fmt(item.latest_fetch_time) }}</td>
             <td class="reason-cell">{{ item.reason }}</td>
             <td>
-              <button class="link-button" :data-test="`inspect-health-row-${item.code}`" @click="inspectHealthRow(item)">
+              <div class="action-cell">
+                <button class="link-button" :data-test="`inspect-health-row-${item.code}`" @click="inspectHealthRow(item)">
                 查看
-              </button>
+                </button>
+                <button
+                  v-if="item.needs_refetch"
+                  class="link-button danger-action"
+                  :disabled="isRefreshing(item.code)"
+                  :data-test="`refresh-health-row-${item.code}`"
+                  @click="refreshHealthRow(item)"
+                >
+                  {{ isRefreshing(item.code) ? '拉取中...' : '重新拉取' }}
+                </button>
+              </div>
             </td>
           </tr>
         </tbody>
@@ -203,7 +225,7 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useApi } from '../composables/useApi.js'
 
-const { getKlineHistory, getKlineHealth } = useApi()
+const { getKlineHistory, getKlineHealth, refreshKlineData } = useApi()
 
 const form = reactive({
   code: '000831',
@@ -224,6 +246,7 @@ const healthTotal = ref(0)
 const healthLoading = ref(false)
 const healthError = ref('')
 const healthFilter = ref('problem')
+const refreshingCodes = ref({})
 
 const totalPages = computed(() => Math.max(1, Math.ceil(total.value / form.page_size)))
 const healthFilterLabel = computed(() => {
@@ -255,6 +278,14 @@ function healthStatusLabel(item) {
     stale: '过期',
   }
   return labels[item.health_status] || item.health_status || '--'
+}
+
+function baiduSearchUrl(code) {
+  return `https://www.baidu.com/s?ie=UTF-8&wd=${encodeURIComponent(code)}`
+}
+
+function isRefreshing(code) {
+  return Boolean(refreshingCodes.value[code])
 }
 
 function buildParams(nextPage) {
@@ -293,6 +324,26 @@ function setHealthFilter(nextFilter) {
 function inspectHealthRow(item) {
   form.code = item.code
   loadPage(1)
+}
+
+async function refreshHealthRow(item) {
+  if (!item?.code || isRefreshing(item.code)) return
+  refreshingCodes.value = { ...refreshingCodes.value, [item.code]: true }
+  healthError.value = ''
+  try {
+    const data = await refreshKlineData(item.code)
+    if (data.ok === false) {
+      throw new Error(data.message || data.error || '重新拉取失败')
+    }
+    form.code = item.code
+    await Promise.all([loadKlineHealth(), loadPage(1)])
+  } catch (err) {
+    healthError.value = `${item.code} 重新拉取失败：${err?.message || '未知错误'}`
+  } finally {
+    const next = { ...refreshingCodes.value }
+    delete next[item.code]
+    refreshingCodes.value = next
+  }
 }
 
 async function loadPage(nextPage = 1) {
@@ -511,6 +562,23 @@ button.health-card {
 }
 .link-button {
   color: var(--accent);
+}
+.stock-link {
+  color: var(--accent);
+  text-decoration: none;
+  font-weight: 600;
+}
+.stock-link:hover {
+  text-decoration: underline;
+}
+.action-cell {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.danger-action {
+  color: var(--down-green);
+  border-color: rgba(34, 197, 94, 0.35);
 }
 .query-panel {
   display: grid;

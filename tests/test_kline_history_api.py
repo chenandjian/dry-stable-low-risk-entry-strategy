@@ -5,6 +5,7 @@ from fastapi.testclient import TestClient
 
 import server
 from scanner import db
+from scanner.daily_data_service import FetchResult
 
 
 def _row(day: str, close: float = 10.0) -> dict:
@@ -288,3 +289,54 @@ def test_kline_health_initializes_database_from_config_when_needed(monkeypatch, 
     body = res.json()
     assert body["summary"]["total"] == 1
     assert body["summary"]["fresh"] == 1
+
+
+def test_kline_refresh_forces_online_refetch_and_updates_health_metadata(monkeypatch, tmp_path):
+    db_path = tmp_path / "cuphandle.db"
+    db.init_db(str(db_path))
+    target = "2026-06-16"
+    db.save_stock_pool([{"code": "000003", "name": "异常股份", "market": "SZ"}])
+    db.save_ohlc("000003", [_row("2026-06-15", 30), _zero_volume_flat_row(target, 30)])
+    monkeypatch.setattr(server, "load_config", lambda path="config.yaml": {
+        "data": {
+            "database_path": str(db_path),
+            "daily_sources": ["baidu", "sina", "tencent"],
+        },
+        "liquidity": {"min_listing_days": 250},
+    })
+    monkeypatch.setattr(server, "_now", lambda: datetime(2026, 6, 16, 15, 20, 0), raising=False)
+    captured = {}
+
+    def fake_fetch_with_retry(code, primary_ds, **kwargs):
+        captured["code"] = code
+        captured["primary_ds"] = primary_ds
+        captured["kwargs"] = kwargs
+        captured["running_task_during_fetch"] = db.get_running_task()
+        return FetchResult(
+            data=[_row("2026-06-15", 30), _row(target, 31)],
+            primary_source="baidu",
+            fallback_source="baidu",
+            primary_attempts=1,
+            fallback_attempts=0,
+            kline_fetched_at="2026-06-16 15:20:00",
+            kline_target_trade_date=target,
+            quote_status="not_requested",
+        )
+
+    monkeypatch.setattr(server, "fetch_with_retry", fake_fetch_with_retry, raising=False)
+
+    res = TestClient(server.app).post("/api/stock/000003/kline-refresh")
+
+    assert res.status_code == 200
+    body = res.json()
+    assert body["code"] == "000003"
+    assert body["summary"]["health_status"] == "fresh"
+    assert body["summary"]["latest_kline_date"] == target
+    assert body["summary"]["latest_fetch_time"] == "2026-06-16 15:20:00"
+    assert captured["code"] == "000003"
+    assert captured["primary_ds"] == "baidu"
+    assert captured["running_task_during_fetch"] is None
+    assert captured["kwargs"]["force_refresh"] is True
+    assert captured["kwargs"]["source_chain"] == ["baidu", "sina", "tencent"]
+    rows = db.get_ohlc("000003")
+    assert rows[-1]["close"] == 31

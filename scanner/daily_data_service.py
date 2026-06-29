@@ -101,6 +101,7 @@ def fetch_with_retry(
     kline_days: int = 250,
     cache_fresh_date: str | None = None,
     freshness_context: CacheFreshnessContext | None = None,
+    force_refresh: bool = False,
 ) -> FetchResult:
     """从数据源链逐级拉取K线数据。
 
@@ -111,9 +112,11 @@ def fetch_with_retry(
     cached = db.get_ohlc(code)
     if freshness_context is None and cache_fresh_date:
         freshness_context = CacheFreshnessContext(target_trade_date=cache_fresh_date)
-    fresh_cached = select_fresh_cached_ohlc(
-        cached, kline_days, cache_fresh_date, freshness_context=freshness_context,
-    )
+    fresh_cached = None
+    if not force_refresh:
+        fresh_cached = select_fresh_cached_ohlc(
+            cached, kline_days, cache_fresh_date, freshness_context=freshness_context,
+        )
     if fresh_cached is not None:
         return FetchResult(
             data=fresh_cached,
