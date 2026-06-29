@@ -17,9 +17,19 @@
           <h2>全市场数据健康</h2>
           <p>自动列出需要关注的停牌、异常和拉取失败股票，不需要手动撞代码。</p>
         </div>
-        <button class="btn-secondary" :disabled="healthLoading" @click="loadKlineHealth">
-          {{ healthLoading ? '刷新中...' : '刷新健康状态' }}
-        </button>
+        <div class="panel-actions">
+          <button
+            class="btn-secondary danger-action"
+            :disabled="bulkRefreshing || healthLoading || !bulkRefreshableCount"
+            data-test="bulk-refresh-health"
+            @click="bulkRefreshHealth"
+          >
+            {{ bulkRefreshing ? '批量拉取中...' : `一键重新拉取 ${bulkRefreshableCount} 只` }}
+          </button>
+          <button class="btn-secondary" :disabled="healthLoading || bulkRefreshing" @click="loadKlineHealth">
+            {{ healthLoading ? '刷新中...' : '刷新健康状态' }}
+          </button>
+        </div>
       </div>
 
       <div class="health-grid" v-if="healthSummary">
@@ -50,6 +60,7 @@
       </div>
 
       <p v-if="healthError" class="error-line">{{ healthError }}</p>
+      <p v-if="bulkRefreshMessage" class="success-line">{{ bulkRefreshMessage }}</p>
 
       <div class="table-head sub-head">
         <div>
@@ -225,7 +236,7 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useApi } from '../composables/useApi.js'
 
-const { getKlineHistory, getKlineHealth, refreshKlineData } = useApi()
+const { getKlineHistory, getKlineHealth, refreshKlineData, refreshKlineHealth } = useApi()
 
 const form = reactive({
   code: '000831',
@@ -247,11 +258,19 @@ const healthLoading = ref(false)
 const healthError = ref('')
 const healthFilter = ref('problem')
 const refreshingCodes = ref({})
+const bulkRefreshing = ref(false)
+const bulkRefreshMessage = ref('')
 
 const totalPages = computed(() => Math.max(1, Math.ceil(total.value / form.page_size)))
 const healthFilterLabel = computed(() => {
   const labels = { problem: '问题', anomaly: '异常/需重拉', failed: '拉取失败', no_trade: '停牌/无交易', fresh: '最新', all: '全部' }
   return labels[healthFilter.value] || healthFilter.value
+})
+const bulkRefreshableCount = computed(() => {
+  if (!healthSummary.value) return 0
+  if (healthFilter.value === 'problem' || healthFilter.value === 'all') return healthSummary.value.needs_refetch || 0
+  if (healthFilter.value === 'anomaly' || healthFilter.value === 'failed') return healthTotal.value || 0
+  return healthItems.value.filter(item => item.needs_refetch).length
 })
 
 function fmt(value) {
@@ -343,6 +362,25 @@ async function refreshHealthRow(item) {
     const next = { ...refreshingCodes.value }
     delete next[item.code]
     refreshingCodes.value = next
+  }
+}
+
+async function bulkRefreshHealth() {
+  if (bulkRefreshing.value) return
+  bulkRefreshing.value = true
+  healthError.value = ''
+  bulkRefreshMessage.value = ''
+  try {
+    const data = await refreshKlineHealth({ status: healthFilter.value })
+    if (data.ok === false) {
+      throw new Error(data.message || data.error || '批量重新拉取失败')
+    }
+    bulkRefreshMessage.value = `批量重拉完成：成功 ${data.succeeded_count || 0}，失败 ${data.failed_count || 0}，跳过 ${data.skipped_count || 0}`
+    await loadKlineHealth()
+  } catch (err) {
+    healthError.value = `批量重新拉取失败：${err?.message || '未知错误'}`
+  } finally {
+    bulkRefreshing.value = false
   }
 }
 
@@ -511,6 +549,11 @@ button.health-card {
 .sub-head {
   margin-top: 8px;
 }
+.panel-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
 .btn-secondary,
 .health-filters button,
 .link-button {
@@ -619,6 +662,10 @@ button:disabled {
 .error-line {
   margin: 0 0 16px;
   color: var(--down-green);
+}
+.success-line {
+  margin: 0 0 16px;
+  color: var(--up-red);
 }
 .table-head {
   display: flex;

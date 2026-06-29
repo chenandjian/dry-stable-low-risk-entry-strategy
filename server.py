@@ -1241,10 +1241,21 @@ def _stock_pool_meta_for_code(config: dict, code: str) -> dict:
     return {"code": code, "name": "", "market": ""}
 
 
-@app.get("/api/kline-health")
-async def get_kline_health(status: str = "problem", page: int = 1, page_size: int = 100):
-    """Return market-wide local K-line freshness and anomaly diagnostics."""
-    config = _ensure_db_initialized_from_config()
+def _filter_kline_health_items(items: list[dict], status: str) -> list[dict]:
+    if status == "problem":
+        return [item for item in items if item["health_status"] != "fresh"]
+    if status == "anomaly":
+        return [item for item in items if item["severity"] == "danger"]
+    if status == "failed":
+        return [item for item in items if item["health_status"] == "failed"]
+    if status == "no_trade":
+        return [item for item in items if item["health_status"] == "no_trade"]
+    if status == "fresh":
+        return [item for item in items if item["health_status"] == "fresh"]
+    return items
+
+
+def _build_kline_health_items(config: dict) -> tuple[dict, list[dict]]:
     context = build_cache_freshness_context(now=_now())
     latest_by_code, task_by_code = _load_kline_health_inputs(config)
     codes = sorted(set(latest_by_code) | set(task_by_code))
@@ -1267,18 +1278,15 @@ async def get_kline_health(status: str = "problem", page: int = 1, page_size: in
         "failed": sum(1 for item in items if item["health_status"] == "failed"),
         "needs_refetch": sum(1 for item in items if item["needs_refetch"]),
     }
-    if status == "problem":
-        filtered = [item for item in items if item["health_status"] != "fresh"]
-    elif status == "anomaly":
-        filtered = [item for item in items if item["severity"] == "danger"]
-    elif status == "failed":
-        filtered = [item for item in items if item["health_status"] == "failed"]
-    elif status == "no_trade":
-        filtered = [item for item in items if item["health_status"] == "no_trade"]
-    elif status == "fresh":
-        filtered = [item for item in items if item["health_status"] == "fresh"]
-    else:
-        filtered = items
+    return summary, items
+
+
+@app.get("/api/kline-health")
+async def get_kline_health(status: str = "problem", page: int = 1, page_size: int = 100):
+    """Return market-wide local K-line freshness and anomaly diagnostics."""
+    config = _ensure_db_initialized_from_config()
+    summary, items = _build_kline_health_items(config)
+    filtered = _filter_kline_health_items(items, status)
 
     page = max(1, int(page or 1))
     page_size = min(500, max(1, int(page_size or 100)))
@@ -1289,6 +1297,42 @@ async def get_kline_health(status: str = "problem", page: int = 1, page_size: in
         "total": len(filtered),
         "page": page,
         "page_size": page_size,
+    }
+
+
+@app.post("/api/kline-health/refresh")
+async def refresh_kline_health(payload: dict | None = None):
+    """Force refresh all refetchable stocks in the selected health filter."""
+    payload = payload or {}
+    status = payload.get("status") or "problem"
+    limit = min(500, max(1, int(payload.get("limit") or 200)))
+    config = _ensure_db_initialized_from_config()
+    _, items = _build_kline_health_items(config)
+    filtered = _filter_kline_health_items(items, status)
+    targets = [item for item in filtered if item.get("needs_refetch")][:limit]
+    skipped_count = sum(1 for item in filtered if not item.get("needs_refetch"))
+
+    succeeded = []
+    failed = []
+    for item in targets:
+        code = item["code"]
+        result = await refresh_stock_kline(code)
+        if isinstance(result, JSONResponse):
+            failed.append({"code": code, "status_code": result.status_code, "reason": item.get("reason")})
+        else:
+            succeeded.append({"code": code, "result": result})
+
+    return {
+        "status": "completed",
+        "filter": status,
+        "limit": limit,
+        "requested_count": len(targets),
+        "succeeded_count": len(succeeded),
+        "failed_count": len(failed),
+        "skipped_count": skipped_count,
+        "truncated": len([item for item in filtered if item.get("needs_refetch")]) > len(targets),
+        "succeeded": succeeded,
+        "failed": failed,
     }
 
 

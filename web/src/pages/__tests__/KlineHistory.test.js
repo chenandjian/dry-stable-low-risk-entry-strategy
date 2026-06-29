@@ -2,7 +2,12 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { nextTick } from 'vue'
 
-const api = { getKlineHistory: vi.fn(), getKlineHealth: vi.fn(), refreshKlineData: vi.fn() }
+const api = {
+  getKlineHistory: vi.fn(),
+  getKlineHealth: vi.fn(),
+  refreshKlineData: vi.fn(),
+  refreshKlineHealth: vi.fn(),
+}
 vi.mock('../../composables/useApi.js', () => ({ useApi: () => api }))
 
 import KlineHistory from '../KlineHistory.vue'
@@ -85,6 +90,13 @@ describe('KlineHistory', () => {
     api.getKlineHistory.mockResolvedValue(freshResponse())
     api.getKlineHealth.mockResolvedValue(healthResponse())
     api.refreshKlineData.mockResolvedValue({ ok: true, summary: { health_status: 'fresh' } })
+    api.refreshKlineHealth.mockResolvedValue({
+      ok: true,
+      requested_count: 1,
+      succeeded_count: 1,
+      failed_count: 0,
+      skipped_count: 1,
+    })
   })
 
   it('renders freshness summary and kline rows', async () => {
@@ -171,6 +183,18 @@ describe('KlineHistory', () => {
       page: 1,
       page_size: 50,
     })
+  })
+
+  it('bulk refreshes all refetchable stocks in the current health filter', async () => {
+    const wrapper = mount(KlineHistory)
+    await flushUi()
+
+    await wrapper.find('[data-test="bulk-refresh-health"]').trigger('click')
+    await flushUi()
+
+    expect(api.refreshKlineHealth).toHaveBeenCalledWith({ status: 'problem' })
+    expect(wrapper.text()).toContain('批量重拉完成：成功 1，失败 0，跳过 1')
+    expect(api.getKlineHealth).toHaveBeenLastCalledWith({ status: 'problem', page: 1, page_size: 100 })
   })
 
   it('loads the next page with the current query', async () => {
