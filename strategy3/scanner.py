@@ -15,6 +15,7 @@ from scanner.daily_data_service import (
     encode_source_errors,
     fetch_with_retry,
     is_transient_source_busy,
+    resolve_effective_worker_count,
 )
 from scanner.data_source import DataSourceManager
 from scanner.index_source import fetch_market_index_daily
@@ -50,9 +51,10 @@ def scan_strategy3_all(
     daily_sources = config.get("data", {}).get("daily_sources") or DEFAULT_DAILY_SOURCES
     kline_days = liquidity_cfg.get("min_listing_days", 350)
     configured_workers = config.get("data", {}).get("worker_count")
-    if configured_workers is not None:
-        worker_count = int(configured_workers)
-    worker_count = max(1, worker_count)
+    worker_count = resolve_effective_worker_count(
+        configured_workers if configured_workers is not None else worker_count,
+        daily_sources,
+    )
     max_busy_retries = config.get("data", {}).get("source_busy_max_retries", 3)
 
     stock_queue = Queue()

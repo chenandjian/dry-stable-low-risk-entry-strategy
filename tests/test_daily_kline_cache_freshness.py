@@ -6,6 +6,7 @@ from scanner.daily_data_service import (
     compute_target_trade_date,
     fetch_with_retry,
     is_transient_source_busy,
+    resolve_effective_worker_count,
     select_fresh_cached_ohlc,
 )
 from scanner import db
@@ -142,6 +143,12 @@ def test_build_cache_context_uses_weekday_calendar_only():
 
     assert context.target_trade_date == "2026-06-15"
     assert context.min_fetch_time == "2026-06-15 15:00:00"
+
+
+def test_effective_worker_count_never_exceeds_enabled_daily_source_count():
+    assert resolve_effective_worker_count(4, ["baidu", "sina", "tencent"]) == 3
+    assert resolve_effective_worker_count(2, ["baidu", "sina", "tencent"]) == 2
+    assert resolve_effective_worker_count(None, ["baidu", "sina", "tencent"]) == 3
 
 
 def test_fetch_after_close_skips_source_missing_target_and_uses_fallback(monkeypatch, tmp_path):

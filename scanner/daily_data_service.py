@@ -79,6 +79,17 @@ def _normalize_source_chain(source_chain: list[str] | None, primary_ds: str) -> 
     return chain
 
 
+def resolve_effective_worker_count(
+    configured_workers: int | str | None,
+    daily_sources: list[str] | None,
+) -> int:
+    """Resolve scan worker count so it never exceeds the enabled data source count."""
+    source_count = len(daily_sources or DEFAULT_DAILY_SOURCES)
+    if configured_workers is None:
+        return max(1, source_count)
+    return max(1, min(int(configured_workers), source_count))
+
+
 def fetch_with_retry(
     code: str,
     primary_ds: str,

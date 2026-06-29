@@ -18,6 +18,8 @@ from scanner.liquidity_filter import passes_liquidity_filter
 from scanner.daily_data_service import (
     CacheFreshnessContext,
     build_cache_freshness_context,
+    DEFAULT_DAILY_SOURCES,
+    resolve_effective_worker_count,
     select_fresh_cached_ohlc,
     source_error_confirms_no_trade,
     strip_zero_volume_target_row,
@@ -94,10 +96,12 @@ def scan_all(
         primary_attempts = 2
         fallback_attempts = 2
 
+    daily_sources = config.get("data", {}).get("daily_sources") or DEFAULT_DAILY_SOURCES
     configured_workers = config.get("data", {}).get("worker_count")
-    if configured_workers is not None:
-        worker_count = int(configured_workers)
-    worker_count = max(1, worker_count)
+    worker_count = resolve_effective_worker_count(
+        configured_workers if configured_workers is not None else worker_count,
+        daily_sources,
+    )
 
     stock_queue = Queue()
     for stock in stocks:
@@ -114,10 +118,9 @@ def scan_all(
     busy_retry_lock = threading.Lock()
 
     liquidity_cfg = config.get("liquidity", {})
-    daily_sources = config.get("data", {}).get("daily_sources") or DEFAULT_DAILY_SOURCES
     windows = resolve_strategy_windows(config)
 
-    # 并发不足警告
+    # 并发按启用数据源数量收敛，避免多余线程反复抢同一数据源锁。
     num_sources = len(daily_sources)
     if worker_count < num_sources:
         logger.warning(
