@@ -11,6 +11,93 @@
       </div>
     </section>
 
+    <section class="panel health-panel">
+      <div class="table-head">
+        <div>
+          <h2>全市场数据健康</h2>
+          <p>自动列出需要关注的停牌、异常和拉取失败股票，不需要手动撞代码。</p>
+        </div>
+        <button class="btn-secondary" :disabled="healthLoading" @click="loadKlineHealth">
+          {{ healthLoading ? '刷新中...' : '刷新健康状态' }}
+        </button>
+      </div>
+
+      <div class="health-grid" v-if="healthSummary">
+        <button class="health-card ok" @click="setHealthFilter('fresh')">
+          <span>最新数据</span>
+          <strong>{{ healthSummary.fresh }} / {{ healthSummary.total }}</strong>
+        </button>
+        <button class="health-card warning" @click="setHealthFilter('no_trade')">
+          <span>停牌/无交易</span>
+          <strong>{{ healthSummary.no_trade }}</strong>
+        </button>
+        <button class="health-card danger" @click="setHealthFilter('anomaly')">
+          <span>异常/需重拉</span>
+          <strong>{{ healthSummary.anomaly }}</strong>
+        </button>
+        <button class="health-card danger" @click="setHealthFilter('failed')">
+          <span>拉取失败</span>
+          <strong>{{ healthSummary.failed }}</strong>
+        </button>
+        <div class="health-card">
+          <span>目标完整交易日</span>
+          <strong>{{ fmt(healthSummary.target_trade_date) }}</strong>
+        </div>
+        <div class="health-card">
+          <span>收盘校验时间</span>
+          <strong>{{ fmt(healthSummary.min_fetch_time) }}</strong>
+        </div>
+      </div>
+
+      <p v-if="healthError" class="error-line">{{ healthError }}</p>
+
+      <div class="table-head sub-head">
+        <div>
+          <h2>数据问题列表</h2>
+          <p>当前筛选 {{ healthFilterLabel }}，共 {{ healthTotal }} 条</p>
+        </div>
+        <div class="health-filters">
+          <button :class="{ active: healthFilter === 'problem' }" @click="setHealthFilter('problem')">问题</button>
+          <button :class="{ active: healthFilter === 'anomaly' }" @click="setHealthFilter('anomaly')">异常</button>
+          <button :class="{ active: healthFilter === 'failed' }" @click="setHealthFilter('failed')">失败</button>
+          <button :class="{ active: healthFilter === 'no_trade' }" @click="setHealthFilter('no_trade')">停牌</button>
+          <button :class="{ active: healthFilter === 'all' }" @click="setHealthFilter('all')">全部</button>
+        </div>
+      </div>
+
+      <table v-if="healthItems.length" class="health-table">
+        <thead>
+          <tr>
+            <th>状态</th>
+            <th>股票</th>
+            <th>最新K线日</th>
+            <th>目标交易日</th>
+            <th>最近拉取时间</th>
+            <th>问题原因</th>
+            <th>操作</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr v-for="item in healthItems" :key="item.code">
+            <td><span class="health-badge" :class="item.severity">{{ healthStatusLabel(item) }}</span></td>
+            <td>{{ item.code }} {{ item.name || '' }}</td>
+            <td>{{ fmt(item.latest_kline_date) }}</td>
+            <td>{{ fmt(item.target_trade_date) }}</td>
+            <td>{{ fmt(item.latest_fetch_time) }}</td>
+            <td class="reason-cell">{{ item.reason }}</td>
+            <td>
+              <button class="link-button" :data-test="`inspect-health-row-${item.code}`" @click="inspectHealthRow(item)">
+                查看
+              </button>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+      <div v-else class="empty-state">
+        当前筛选下没有数据问题
+      </div>
+    </section>
+
     <section class="summary-grid" v-if="summary">
       <div class="summary-card">
         <span>最新K线日期</span>
@@ -116,7 +203,7 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useApi } from '../composables/useApi.js'
 
-const { getKlineHistory } = useApi()
+const { getKlineHistory, getKlineHealth } = useApi()
 
 const form = reactive({
   code: '000831',
@@ -131,8 +218,18 @@ const total = ref(0)
 const currentCode = ref('')
 const loading = ref(false)
 const error = ref('')
+const healthSummary = ref(null)
+const healthItems = ref([])
+const healthTotal = ref(0)
+const healthLoading = ref(false)
+const healthError = ref('')
+const healthFilter = ref('problem')
 
 const totalPages = computed(() => Math.max(1, Math.ceil(total.value / form.page_size)))
+const healthFilterLabel = computed(() => {
+  const labels = { problem: '问题', anomaly: '异常/需重拉', failed: '拉取失败', no_trade: '停牌/无交易', fresh: '最新', all: '全部' }
+  return labels[healthFilter.value] || healthFilter.value
+})
 
 function fmt(value) {
   return value || '--'
@@ -148,6 +245,18 @@ function integer(value) {
   return Number(value).toLocaleString('zh-CN', { maximumFractionDigits: 0 })
 }
 
+function healthStatusLabel(item) {
+  const labels = {
+    fresh: '最新',
+    no_trade: '停牌',
+    anomaly: '异常',
+    failed: '失败',
+    missing: '缺失',
+    stale: '过期',
+  }
+  return labels[item.health_status] || item.health_status || '--'
+}
+
 function buildParams(nextPage) {
   return {
     code: form.code,
@@ -156,6 +265,34 @@ function buildParams(nextPage) {
     page: nextPage,
     page_size: form.page_size,
   }
+}
+
+async function loadKlineHealth() {
+  healthLoading.value = true
+  healthError.value = ''
+  try {
+    const data = await getKlineHealth({ status: healthFilter.value, page: 1, page_size: 100 })
+    if (data.ok === false) {
+      throw new Error(data.message || data.error || '健康检查失败')
+    }
+    healthSummary.value = data.summary || null
+    healthItems.value = data.items || []
+    healthTotal.value = data.total || 0
+  } catch (err) {
+    healthError.value = err?.message || '健康检查失败'
+  } finally {
+    healthLoading.value = false
+  }
+}
+
+function setHealthFilter(nextFilter) {
+  healthFilter.value = nextFilter
+  loadKlineHealth()
+}
+
+function inspectHealthRow(item) {
+  form.code = item.code
+  loadPage(1)
 }
 
 async function loadPage(nextPage = 1) {
@@ -184,6 +321,7 @@ function submitQuery() {
 }
 
 onMounted(() => {
+  loadKlineHealth()
   loadPage(1)
 })
 </script>
@@ -280,6 +418,100 @@ h2 {
 .summary-card.warning {
   border-color: rgba(34, 197, 94, 0.35);
 }
+.health-panel {
+  margin-bottom: 16px;
+}
+.health-grid {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 12px;
+  margin: 14px 0 16px;
+}
+.health-card {
+  text-align: left;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  color: var(--text-primary);
+  padding: 14px;
+}
+button.health-card {
+  cursor: pointer;
+}
+.health-card span {
+  display: block;
+  color: var(--text-secondary);
+  font-size: 12px;
+  margin-bottom: 8px;
+}
+.health-card strong {
+  display: block;
+  font-size: 18px;
+}
+.health-card.ok {
+  border-color: rgba(239, 68, 68, 0.35);
+}
+.health-card.warning {
+  border-color: rgba(234, 179, 8, 0.45);
+}
+.health-card.danger {
+  border-color: rgba(34, 197, 94, 0.45);
+}
+.sub-head {
+  margin-top: 8px;
+}
+.btn-secondary,
+.health-filters button,
+.link-button {
+  height: 32px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-card);
+  color: var(--text-primary);
+  padding: 0 12px;
+  cursor: pointer;
+}
+.health-filters {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.health-filters button.active {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.health-table th,
+.health-table td {
+  text-align: left;
+}
+.reason-cell {
+  max-width: 340px;
+  color: var(--text-secondary);
+}
+.health-badge {
+  display: inline-flex;
+  align-items: center;
+  min-width: 44px;
+  justify-content: center;
+  border-radius: 999px;
+  padding: 4px 8px;
+  font-size: 12px;
+}
+.health-badge.ok {
+  color: var(--up-red);
+  background: rgba(239, 68, 68, 0.10);
+}
+.health-badge.warning {
+  color: #eab308;
+  background: rgba(234, 179, 8, 0.12);
+}
+.health-badge.danger {
+  color: var(--down-green);
+  background: rgba(34, 197, 94, 0.12);
+}
+.link-button {
+  color: var(--accent);
+}
 .query-panel {
   display: grid;
   grid-template-columns: 1.2fr 1fr 1fr 120px auto;
@@ -359,7 +591,8 @@ th {
 }
 @media (max-width: 1100px) {
   .summary-grid,
-  .query-panel {
+  .query-panel,
+  .health-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
   .summary-card.wide {

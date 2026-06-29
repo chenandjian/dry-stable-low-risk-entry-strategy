@@ -34,6 +34,7 @@ from scanner.single_stock_backtest import (
     DataCoverageError,
     run_single_stock_cuphandle_backtest,
 )
+from scanner.stock_pool import _filter_stocks as filter_stock_pool_for_scan
 from scanner.strategy1_backtest_service import run_strategy1_experiment_from_baseline
 from scanner.daily_data_service import build_cache_freshness_context
 
@@ -1017,6 +1018,262 @@ def _build_kline_history_summary(code: str, meta: dict, context) -> dict:
         "is_fresh": is_fresh,
         "needs_refetch": not is_fresh,
         "reason": reason,
+    }
+
+
+def _ensure_db_initialized_from_config() -> dict:
+    config = load_config()
+    if db.DB_PATH is None:
+        db_path = config.get("data", {}).get("database_path", "data/cuphandle.db")
+        db.init_db(db_path)
+    return config
+
+
+def _source_errors_confirm_no_trade(source_errors: str | None) -> bool:
+    if not source_errors:
+        return False
+    try:
+        parsed = json.loads(source_errors)
+    except (TypeError, json.JSONDecodeError):
+        return False
+    if not isinstance(parsed, dict) or not parsed:
+        return False
+    return all(
+        isinstance(error, str)
+        and (
+            "missing target trade date" in error
+            or "zero-volume target trade date" in error
+        )
+        for error in parsed.values()
+    )
+
+
+def _latest_ohlc_is_zero_volume_flat(row: dict | None, target_trade_date: str) -> bool:
+    if not row or row.get("date") != target_trade_date:
+        return False
+    try:
+        return (
+            float(row.get("volume")) == 0
+            and float(row.get("turnover") or 0) == 0
+            and float(row.get("open")) == float(row.get("high"))
+            and float(row.get("high")) == float(row.get("low"))
+            and float(row.get("low")) == float(row.get("close"))
+        )
+    except (TypeError, ValueError):
+        return False
+
+
+def _invalid_ohlc_reason(row: dict | None) -> str | None:
+    if not row:
+        return None
+    try:
+        open_ = float(row.get("open"))
+        high = float(row.get("high"))
+        low = float(row.get("low"))
+        close = float(row.get("close"))
+        volume = float(row.get("volume"))
+        turnover = row.get("turnover")
+        turnover_value = float(turnover) if turnover is not None else 0
+    except (TypeError, ValueError):
+        return "OHLC字段无法解析"
+    if min(open_, high, low, close) <= 0:
+        return "OHLC价格存在非正数"
+    if volume < 0 or turnover_value < 0:
+        return "成交量或成交额为负数"
+    if high < max(open_, close, low) or low > min(open_, close, high):
+        return "OHLC高低价关系异常"
+    return None
+
+
+def _load_kline_health_inputs(config: dict | None = None) -> tuple[dict[str, dict], dict[str, dict]]:
+    conn = db.get_conn()
+    latest_rows = conn.execute(
+        """SELECT o.code, o.date, o.open, o.high, o.low, o.close, o.volume, o.turnover
+           FROM daily_ohlc o
+           JOIN (
+                SELECT code, MAX(date) AS latest_date
+                FROM daily_ohlc
+                GROUP BY code
+           ) latest
+             ON latest.code = o.code AND latest.latest_date = o.date"""
+    ).fetchall()
+    latest_by_code = {
+        row[0]: {
+            "code": row[0],
+            "date": row[1],
+            "open": row[2],
+            "high": row[3],
+            "low": row[4],
+            "close": row[5],
+            "volume": row[6],
+            "turnover": row[7],
+        }
+        for row in latest_rows
+    }
+
+    task_rows = conn.execute(
+        """SELECT code, name, market, status, status_reason, error_detail,
+                  source_errors, kline_latest_date, kline_fetched_at,
+                  kline_target_trade_date, quote_status, updated_at
+           FROM task_stocks
+           WHERE kline_fetched_at IS NOT NULL
+              OR kline_latest_date IS NOT NULL
+              OR status = 'failed'
+           ORDER BY COALESCE(kline_fetched_at, updated_at) DESC, updated_at DESC"""
+    ).fetchall()
+    task_by_code: dict[str, dict] = {}
+    for row in task_rows:
+        code = row[0]
+        if code in task_by_code:
+            continue
+        task_by_code[code] = {
+            "code": code,
+            "name": row[1],
+            "market": row[2],
+            "task_status": row[3],
+            "status_reason": row[4],
+            "error_detail": row[5],
+            "source_errors": row[6],
+            "kline_latest_date": row[7],
+            "kline_fetched_at": row[8],
+            "kline_target_trade_date": row[9],
+            "quote_status": row[10] or "not_requested",
+        }
+
+    pool_rows = conn.execute("SELECT code, name, market FROM stock_pool").fetchall()
+    pool_stocks = [
+        {"code": row[0], "name": row[1] or "", "market": row[2] or ""}
+        for row in pool_rows
+    ]
+    if config is not None:
+        # Match the scan universe without refreshing the external stock pool.
+        pool_stocks = filter_stock_pool_for_scan([stock.copy() for stock in pool_stocks], config)
+    for stock in pool_stocks:
+        code = stock["code"]
+        meta = task_by_code.setdefault(
+            code,
+            {
+                "code": code,
+                "name": stock.get("name") or "",
+                "market": stock.get("market") or "",
+                "task_status": None,
+                "status_reason": None,
+                "error_detail": None,
+                "source_errors": None,
+                "kline_latest_date": None,
+                "kline_fetched_at": None,
+                "kline_target_trade_date": None,
+                "quote_status": "not_requested",
+            },
+        )
+        if not meta.get("name"):
+            meta["name"] = stock.get("name") or ""
+        if not meta.get("market"):
+            meta["market"] = stock.get("market") or ""
+    return latest_by_code, task_by_code
+
+
+def _classify_kline_health_item(
+    code: str,
+    latest_row: dict | None,
+    meta: dict,
+    context,
+) -> dict:
+    latest_date = latest_row.get("date") if latest_row else None
+    latest_fetch_time = meta.get("kline_fetched_at")
+    quote_status = meta.get("quote_status") or "not_requested"
+    task_status = meta.get("task_status")
+    fetched_after_close = bool(
+        context.min_fetch_time
+        and latest_fetch_time
+        and latest_fetch_time >= context.min_fetch_time
+    )
+    base = {
+        "code": code,
+        "name": meta.get("name") or "",
+        "market": meta.get("market") or "",
+        "latest_kline_date": latest_date,
+        "latest_fetch_time": latest_fetch_time,
+        "target_trade_date": context.target_trade_date,
+        "min_fetch_time": context.min_fetch_time,
+        "quote_status": quote_status,
+        "task_status": task_status,
+        "status_reason": meta.get("status_reason"),
+        "source_errors": meta.get("source_errors"),
+    }
+
+    invalid_reason = _invalid_ohlc_reason(latest_row)
+    if invalid_reason:
+        return {**base, "health_status": "anomaly", "severity": "danger", "needs_refetch": True, "reason": invalid_reason}
+    if _latest_ohlc_is_zero_volume_flat(latest_row, context.target_trade_date):
+        return {**base, "health_status": "anomaly", "severity": "danger", "needs_refetch": True, "reason": "目标交易日存在零成交量平盘K线，需要重新拉取确认"}
+    if task_status == "failed":
+        reason = meta.get("status_reason") or meta.get("error_detail") or "最近扫描拉取失败"
+        return {**base, "health_status": "failed", "severity": "danger", "needs_refetch": True, "reason": reason}
+    if not latest_row:
+        return {**base, "health_status": "missing", "severity": "danger", "needs_refetch": True, "reason": "本地没有K线数据"}
+    if latest_date >= context.target_trade_date and fetched_after_close:
+        return {**base, "health_status": "fresh", "severity": "ok", "needs_refetch": False, "reason": "数据已覆盖目标完整交易日"}
+    if latest_date < context.target_trade_date:
+        no_trade = quote_status in {"suspended", "no_trade"} and fetched_after_close
+        if no_trade and (not meta.get("source_errors") or _source_errors_confirm_no_trade(meta.get("source_errors"))):
+            return {**base, "health_status": "no_trade", "severity": "warning", "needs_refetch": False, "reason": "股票停牌或无交易，已在目标交易日收盘后确认"}
+        return {**base, "health_status": "stale", "severity": "danger", "needs_refetch": True, "reason": "K线未覆盖目标完整交易日，且未确认停牌/无交易"}
+    if not latest_fetch_time:
+        reason = "缺少最近拉取时间，需要重新拉取确认"
+    else:
+        reason = "最近拉取时间早于目标交易日收盘时间，需要重新拉取"
+    return {**base, "health_status": "stale", "severity": "danger", "needs_refetch": True, "reason": reason}
+
+
+@app.get("/api/kline-health")
+async def get_kline_health(status: str = "problem", page: int = 1, page_size: int = 100):
+    """Return market-wide local K-line freshness and anomaly diagnostics."""
+    config = _ensure_db_initialized_from_config()
+    context = build_cache_freshness_context(now=_now())
+    latest_by_code, task_by_code = _load_kline_health_inputs(config)
+    codes = sorted(set(latest_by_code) | set(task_by_code))
+    items = [
+        _classify_kline_health_item(
+            code,
+            latest_by_code.get(code),
+            task_by_code.get(code, {"code": code}),
+            context,
+        )
+        for code in codes
+    ]
+    summary = {
+        "target_trade_date": context.target_trade_date,
+        "min_fetch_time": context.min_fetch_time,
+        "total": len(items),
+        "fresh": sum(1 for item in items if item["health_status"] == "fresh"),
+        "no_trade": sum(1 for item in items if item["health_status"] == "no_trade"),
+        "anomaly": sum(1 for item in items if item["severity"] == "danger"),
+        "failed": sum(1 for item in items if item["health_status"] == "failed"),
+        "needs_refetch": sum(1 for item in items if item["needs_refetch"]),
+    }
+    if status == "problem":
+        filtered = [item for item in items if item["health_status"] != "fresh"]
+    elif status == "anomaly":
+        filtered = [item for item in items if item["severity"] == "danger"]
+    elif status == "failed":
+        filtered = [item for item in items if item["health_status"] == "failed"]
+    elif status == "no_trade":
+        filtered = [item for item in items if item["health_status"] == "no_trade"]
+    elif status == "fresh":
+        filtered = [item for item in items if item["health_status"] == "fresh"]
+    else:
+        filtered = items
+
+    page = max(1, int(page or 1))
+    page_size = min(500, max(1, int(page_size or 100)))
+    offset = (page - 1) * page_size
+    return {
+        "summary": summary,
+        "items": filtered[offset:offset + page_size],
+        "total": len(filtered),
+        "page": page,
+        "page_size": page_size,
     }
 
 

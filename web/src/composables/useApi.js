@@ -143,6 +143,13 @@ export function useApi() {
     return { ...body, ok: res.ok, statusCode: res.status }
   }
 
+  async function getKlineHealth(params = {}) {
+    const qs = new URLSearchParams(params).toString()
+    const res = await fetch(`${API_BASE}/kline-health${qs ? '?' + qs : ''}`)
+    const body = await res.json().catch(() => ({}))
+    return { ...body, ok: res.ok, statusCode: res.status }
+  }
+
   async function getStrategy3ScanStatus() {
     const res = await fetch(`${API_BASE}/strategy3/scans/status`)
     return res.json()
@@ -294,7 +301,7 @@ export function useApi() {
 
   return {
     startScan, getScanStatus, getCandidates, getCandidate, getScanTasks,
-    getSchedulerLogs, getKlineHistory,
+    getSchedulerLogs, getKlineHistory, getKlineHealth,
     getTaskStocks, retryFailedStocks, reEvaluateTask, getConfig, updateConfig,
     runCupHandleBacktest,
     startStrategy2Scan, getStrategy2ScanStatus, getStrategy2Tasks,
