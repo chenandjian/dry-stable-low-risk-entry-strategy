@@ -1,6 +1,6 @@
 """策略3本地 DB 回测任务服务。
 
-只读取本地 stock_pool / daily_ohlc，不访问外部行情源。
+读取本地 stock_pool / daily_ohlc，并使用真实指数本地缓存。
 """
 from __future__ import annotations
 
@@ -11,11 +11,14 @@ import logging
 import time
 
 import scanner.db as db
+from scanner.index_source import fetch_market_index_daily
 from strategy3.backtester import run_strategy3_stock_backtest
-from strategy3.market_index import resolve_strategy3_market_index
+from strategy3.market_index import DEFAULT_INDEX_SYMBOLS, resolve_strategy3_market_index
 
 logger = logging.getLogger(__name__)
 MARKET_DATA_MODE_LOCAL_PROXY = "local_equal_weight_proxy"
+MARKET_DATA_MODE_REAL_INDEX_CACHE = "real_index_cache"
+REQUIRED_REAL_INDEX_SYMBOLS = ("sh000001", "sz399001", "sz399006")
 
 
 def _now_local() -> str:
@@ -99,6 +102,43 @@ def _build_equal_weight_proxy(rows) -> list[dict]:
     return market_data
 
 
+def refresh_strategy3_market_index_cache(snapshot_date: str, days: int = 900) -> dict[str, dict]:
+    """Fetch and cache real market indices for Strategy3 analysis."""
+    refreshed: dict[str, dict] = {}
+    fetched_at = _now_local()
+    for symbol in DEFAULT_INDEX_SYMBOLS:
+        try:
+            rows = fetch_market_index_daily(symbol, days=days) or []
+        except Exception as exc:
+            logger.warning("Strategy3 market index refresh failed for %s: %s", symbol, exc)
+            rows = []
+        rows = [row for row in rows if row.get("date") and row["date"] <= snapshot_date[:10]]
+        if rows:
+            db.save_market_index_ohlc(symbol, rows, source="sina", fetched_at=fetched_at)
+        refreshed[symbol] = db.get_market_index_coverage(symbol)
+    return refreshed
+
+
+def build_real_market_index_data_by_symbol(snapshot_date: str) -> dict[str, list[dict]]:
+    """Load cached real market indices; no proxy fallback."""
+    market_data_by_symbol = {
+        symbol: db.get_market_index_ohlc(symbol, end_date=snapshot_date[:10])
+        for symbol in DEFAULT_INDEX_SYMBOLS
+    }
+    missing = [
+        symbol
+        for symbol in REQUIRED_REAL_INDEX_SYMBOLS
+        if not market_data_by_symbol.get(symbol)
+    ]
+    if missing:
+        raise RuntimeError(f"MISSING_REAL_MARKET_INDEX_CACHE: {','.join(missing)}")
+    return {
+        symbol: rows
+        for symbol, rows in market_data_by_symbol.items()
+        if rows
+    }
+
+
 def run_strategy3_backtest_task(
     task_id: str,
     target_stocks: list[dict],
@@ -125,7 +165,7 @@ def run_strategy3_backtest_task(
 
     snap_date = data_snapshot_date[:10]
     try:
-        market_data_by_symbol = build_local_equal_weight_market_data_by_symbol(data_snapshot_date)
+        market_data_by_symbol = None
         for stock in target_stocks:
             if cancel_event is not None and cancel_event.is_set():
                 break
@@ -165,6 +205,10 @@ def run_strategy3_backtest_task(
                     )
                     continue
 
+                if market_data_by_symbol is None:
+                    refresh_strategy3_market_index_cache(data_snapshot_date)
+                    market_data_by_symbol = build_real_market_index_data_by_symbol(data_snapshot_date)
+
                 result = run_strategy3_stock_backtest(
                     code,
                     name,
@@ -173,7 +217,7 @@ def run_strategy3_backtest_task(
                     payload_snapshot.get("startDate", ""),
                     payload_snapshot.get("endDate", ""),
                     market_data_by_symbol=market_data_by_symbol,
-                    market_data_mode=MARKET_DATA_MODE_LOCAL_PROXY,
+                    market_data_mode=MARKET_DATA_MODE_REAL_INDEX_CACHE,
                 )
                 if result.get("insufficient"):
                     insufficient = result["insufficient"]
@@ -222,7 +266,7 @@ def run_strategy3_backtest_task(
             task_id,
             time.monotonic() - started,
             cancel_event,
-            market_data_mode=MARKET_DATA_MODE_LOCAL_PROXY,
+            market_data_mode=MARKET_DATA_MODE_REAL_INDEX_CACHE,
         )
     except Exception as exc:
         db.update_strategy3_backtest_task(

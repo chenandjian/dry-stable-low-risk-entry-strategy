@@ -51,6 +51,22 @@ def init_db(path: str = "data/cuphandle.db"):
             CREATE INDEX IF NOT EXISTS idx_ohlc_code ON daily_ohlc(code);
             CREATE INDEX IF NOT EXISTS idx_ohlc_date ON daily_ohlc(date);
 
+            CREATE TABLE IF NOT EXISTS market_index_ohlc (
+                symbol     TEXT NOT NULL,
+                date       TEXT NOT NULL,
+                open       REAL,
+                high       REAL,
+                low        REAL,
+                close      REAL,
+                volume     REAL,
+                turnover   REAL,
+                source     TEXT,
+                fetched_at TEXT,
+                PRIMARY KEY (symbol, date)
+            );
+            CREATE INDEX IF NOT EXISTS idx_market_index_ohlc_symbol ON market_index_ohlc(symbol);
+            CREATE INDEX IF NOT EXISTS idx_market_index_ohlc_date ON market_index_ohlc(date);
+
             CREATE TABLE IF NOT EXISTS scan_tasks (
                 id               TEXT PRIMARY KEY,
                 started_at       TEXT,
@@ -331,6 +347,94 @@ def get_ohlc(code: str, max_rows: int = 0) -> list[dict] | None:
          "close": r[4], "volume": r[5], "turnover": r[6]}
         for r in rows
     ]
+
+
+# ====== Market Index OHLC Cache ======
+
+def save_market_index_ohlc(
+    symbol: str,
+    data: list[dict],
+    *,
+    source: str = "sina",
+    fetched_at: str | None = None,
+):
+    """Insert or replace cached OHLC rows for a market index."""
+    conn = get_conn()
+    fetched_at = fetched_at or datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    conn.execute("DELETE FROM market_index_ohlc WHERE symbol = ?", (symbol,))
+    conn.executemany(
+        """INSERT INTO market_index_ohlc
+           (symbol, date, open, high, low, close, volume, turnover, source, fetched_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        [
+            (
+                symbol,
+                d["date"],
+                d.get("open"),
+                d.get("high"),
+                d.get("low"),
+                d.get("close"),
+                d.get("volume"),
+                d.get("turnover", 0.0),
+                source,
+                fetched_at,
+            )
+            for d in data
+        ],
+    )
+    conn.commit()
+
+
+def get_market_index_ohlc(
+    symbol: str,
+    *,
+    end_date: str | None = None,
+    max_rows: int = 0,
+) -> list[dict]:
+    """Get cached market index OHLC rows sorted by date."""
+    conn = get_conn()
+    params: list = [symbol]
+    query = (
+        "SELECT date, open, high, low, close, volume, turnover "
+        "FROM market_index_ohlc WHERE symbol=?"
+    )
+    if end_date:
+        query += " AND date<=?"
+        params.append(end_date[:10])
+    query += " ORDER BY date"
+    rows = conn.execute(query, params).fetchall()
+    if max_rows and len(rows) > max_rows:
+        rows = rows[-max_rows:]
+    return [
+        {
+            "date": r[0],
+            "open": r[1],
+            "high": r[2],
+            "low": r[3],
+            "close": r[4],
+            "volume": r[5],
+            "turnover": r[6],
+        }
+        for r in rows
+    ]
+
+
+def get_market_index_coverage(symbol: str) -> dict:
+    """Return row count and date coverage for a cached market index."""
+    conn = get_conn()
+    row = conn.execute(
+        """SELECT COUNT(*), MIN(date), MAX(date), MAX(source), MAX(fetched_at)
+           FROM market_index_ohlc WHERE symbol=?""",
+        (symbol,),
+    ).fetchone()
+    return {
+        "symbol": symbol,
+        "rows": row[0] or 0,
+        "min_date": row[1],
+        "max_date": row[2],
+        "source": row[3],
+        "fetched_at": row[4],
+    }
 
 
 def get_ohlc_latest_date(code: str) -> str | None:

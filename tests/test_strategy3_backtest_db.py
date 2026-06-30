@@ -130,7 +130,57 @@ def test_strategy3_backtest_tables_are_created(tmp_path):
         "strategy3_backtest_signals",
         "strategy3_backtest_opportunities",
         "strategy3_backtest_insufficient_stocks",
+        "market_index_ohlc",
     }.issubset(tables)
+
+
+def test_market_index_ohlc_cache_roundtrip(tmp_path):
+    _init_tmp_db(tmp_path)
+
+    db.save_market_index_ohlc(
+        "sz399001",
+        [
+            {
+                "date": "2026-01-01",
+                "open": 100.0,
+                "high": 103.0,
+                "low": 99.0,
+                "close": 102.0,
+                "volume": 123,
+                "turnover": 0.0,
+            },
+            {
+                "date": "2026-01-02",
+                "open": 102.0,
+                "high": 104.0,
+                "low": 101.0,
+                "close": 103.0,
+                "volume": 456,
+                "turnover": 0.0,
+            },
+        ],
+        source="sina",
+        fetched_at="2026-01-02 16:00:00",
+    )
+
+    rows = db.get_market_index_ohlc("sz399001", end_date="2026-01-01")
+    coverage = db.get_market_index_coverage("sz399001")
+
+    assert rows == [
+        {
+            "date": "2026-01-01",
+            "open": 100.0,
+            "high": 103.0,
+            "low": 99.0,
+            "close": 102.0,
+            "volume": 123.0,
+            "turnover": 0.0,
+        }
+    ]
+    assert coverage["rows"] == 2
+    assert coverage["min_date"] == "2026-01-01"
+    assert coverage["max_date"] == "2026-01-02"
+    assert coverage["source"] == "sina"
 
 
 def test_replace_strategy3_stock_backtest_result_is_atomic_and_idempotent(tmp_path):
