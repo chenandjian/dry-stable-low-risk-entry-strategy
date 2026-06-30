@@ -113,6 +113,18 @@ class StrongPullbackSecondBreakoutEngine:
             score_reasons=score_reasons,
             config=self.config,
         )
+        data_driven_rejects = _data_driven_entry_rejects(
+            score.total_score,
+            risk,
+            trade_quality,
+            self.config,
+            pullback_pct=ind.pullback_pct,
+            market_return_60=ind.market_return_60,
+            has_market_data=ind.has_market_data,
+        )
+        if data_driven_rejects:
+            _sync_trade_quality_with_entry_filter_rejects(trade_quality, data_driven_rejects)
+            reject_reasons.extend(data_driven_rejects)
         status_reason = determine_status_reason(reject_reasons, score.total_score, self.config)
         passed = (
             status_reason is None
@@ -162,5 +174,52 @@ def _sync_trade_quality_with_upstream_rejects(
             trade_quality.reject_reasons.append(invalid_condition)
     if "risk:upstream_strategy_rejected" not in trade_quality.risk_warnings:
         trade_quality.risk_warnings.append("risk:upstream_strategy_rejected")
+    trade_quality.trade_state = "AVOID"
+    trade_quality.trade_state_label = "回避"
+
+
+def _data_driven_entry_rejects(
+    total_score,
+    risk,
+    trade_quality,
+    config: dict,
+    *,
+    pullback_pct: float,
+    market_return_60: float = 0.0,
+    has_market_data: bool = False,
+) -> list[str]:
+    """Return data-backed formal entry rejects for strategy3 candidates."""
+    rejects: list[str] = []
+    if total_score < config.get("trade_candidate_min_score", config["candidate_min_score"]):
+        rejects.append("TRADE_SCORE_BELOW_DATA_FILTER")
+    if risk.risk_ratio > config.get("trade_max_risk_ratio", config["max_risk_ratio"]):
+        rejects.append("TRADE_RISK_ABOVE_DATA_FILTER")
+    if pullback_pct > config.get("trade_max_pullback_pct", config["max_pullback_from_high"]):
+        rejects.append("TRADE_PULLBACK_ABOVE_DATA_FILTER")
+    if has_market_data and not (
+        config["trade_market_return_60_min"]
+        <= market_return_60
+        <= config["trade_market_return_60_max"]
+    ):
+        rejects.append("TRADE_MARKET_REGIME_NOT_FAVORABLE")
+    if (
+        trade_quality.trade_state == "WAIT_BREAKOUT"
+        and not config.get("trade_allow_wait_breakout", False)
+    ):
+        rejects.append("WAIT_BREAKOUT_NOT_ACTIONABLE")
+    return rejects
+
+
+def _sync_trade_quality_with_entry_filter_rejects(
+    trade_quality: Strategy3TradeQuality,
+    rejects: list[str],
+) -> None:
+    for reason in rejects:
+        if reason not in trade_quality.invalid_conditions:
+            trade_quality.invalid_conditions.append(reason)
+        if reason not in trade_quality.reject_reasons:
+            trade_quality.reject_reasons.append(reason)
+    if "risk:data_driven_entry_filter" not in trade_quality.risk_warnings:
+        trade_quality.risk_warnings.append("risk:data_driven_entry_filter")
     trade_quality.trade_state = "AVOID"
     trade_quality.trade_state_label = "回避"

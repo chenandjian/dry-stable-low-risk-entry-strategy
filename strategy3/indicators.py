@@ -14,7 +14,8 @@ def compute_indicators(
     recent_high = _max(data[-pullback_lookback_days:], "high")
     high_120 = _max(data[-120:], "high")
     return_60 = _return(data, 60)
-    index_return_60 = _return(market_data, 60) if market_data else 0.0
+    has_market_data = bool(market_data and len(market_data) > 60)
+    index_return_60 = _return(market_data, 60) if has_market_data else 0.0
     ma20 = _ma(data, 20)
     ma60 = _ma(data, 60)
     ma120 = _ma(data, 120)
@@ -79,6 +80,8 @@ def compute_indicators(
         high_120=high_120,
         drawdown_from_high_120=(high_120 - close) / high_120 if high_120 > 0 else 0.0,
         relative_strength_60=return_60 - index_return_60,
+        market_return_60=index_return_60,
+        has_market_data=has_market_data,
         ma60_slope_20=(ma60 / ma60_20_days_ago - 1) if ma60_20_days_ago > 0 else 0.0,
         recent_high=recent_high,
         pullback_pct=(recent_high - close) / recent_high if recent_high > 0 else 0.0,

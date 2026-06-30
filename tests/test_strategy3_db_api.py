@@ -404,7 +404,12 @@ def test_re_evaluate_strategy3_task_uses_cached_ohlc(tmp_path, monkeypatch):
             "min_latest_turnover": 0,
             "min_stock_price": 0,
         },
-        "strategy3": {"strategy_window_days": 250, "minimum_required_days": 180},
+        "strategy3": {
+            "strategy_window_days": 250,
+            "minimum_required_days": 180,
+            "trade_candidate_min_score": 75,
+            "trade_max_risk_ratio": 0.08,
+        },
     }, "s3-task")
 
     assert result["status"] == "completed"
@@ -450,7 +455,12 @@ def test_scan_strategy3_all_writes_trade_quality_candidate_once(monkeypatch, tmp
         {
             "data": {"database_path": db_path, "daily_sources": ["cache"], "worker_count": 1},
             "liquidity": {"enabled": False, "min_listing_days": 350},
-            "strategy3": {"strategy_window_days": 250, "minimum_required_days": 180},
+            "strategy3": {
+                "strategy_window_days": 250,
+                "minimum_required_days": 180,
+                "trade_candidate_min_score": 75,
+                "trade_max_risk_ratio": 0.08,
+            },
         },
         task_id="s3-task",
         stocks=stocks,

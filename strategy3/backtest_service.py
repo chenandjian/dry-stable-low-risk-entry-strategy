@@ -1,0 +1,268 @@
+"""策略3本地 DB 回测任务服务。
+
+只读取本地 stock_pool / daily_ohlc，不访问外部行情源。
+"""
+from __future__ import annotations
+
+import datetime
+import hashlib
+import json
+import logging
+import time
+
+import scanner.db as db
+from strategy3.backtester import run_strategy3_stock_backtest
+
+logger = logging.getLogger(__name__)
+
+
+def _now_local() -> str:
+    return datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+
+def calculate_daily_ohlc_revision(snapshot_date: str, codes: list[str] | None = None) -> str:
+    """计算本地 OHLC 在指定快照日之前的稳定内容指纹。"""
+    params = [snapshot_date[:10]]
+    query = (
+        "SELECT code,date,open,high,low,close,volume,turnover FROM daily_ohlc "
+        "WHERE date<=?"
+    )
+    if codes:
+        placeholders = ",".join("?" for _ in codes)
+        query += f" AND code IN ({placeholders})"
+        params.extend(codes)
+    query += " ORDER BY code,date"
+    digest = hashlib.sha256()
+    for row in db.get_conn().execute(query, params):
+        digest.update(json.dumps(row, ensure_ascii=True, separators=(",", ":")).encode("ascii"))
+        digest.update(b"\n")
+    return digest.hexdigest()
+
+
+def build_local_equal_weight_market_data(snapshot_date: str) -> list[dict]:
+    """Build a local equal-weight market proxy from daily_ohlc only."""
+    rows = db.get_conn().execute(
+        "SELECT code,date,close FROM daily_ohlc WHERE date<=? ORDER BY code,date",
+        (snapshot_date[:10],),
+    )
+    previous_close_by_code = {}
+    returns_by_date: dict[str, list[float]] = {}
+    for code, date, close in rows:
+        previous = previous_close_by_code.get(code)
+        if previous and previous > 0 and close and close > 0:
+            daily_return = close / previous - 1.0
+            if -0.3 < daily_return < 0.3:
+                returns_by_date.setdefault(date, []).append(daily_return)
+        previous_close_by_code[code] = close
+
+    level = 1000.0
+    market_data: list[dict] = []
+    for date in sorted(returns_by_date):
+        values = returns_by_date[date]
+        if not values:
+            continue
+        open_ = level
+        level = level * (1.0 + sum(values) / len(values))
+        high = max(open_, level)
+        low = min(open_, level)
+        market_data.append({
+            "date": date,
+            "open": open_,
+            "high": high,
+            "low": low,
+            "close": level,
+            "volume": len(values),
+            "turnover": 0.0,
+        })
+    return market_data
+
+
+def run_strategy3_backtest_task(
+    task_id: str,
+    target_stocks: list[dict],
+    config_snapshot: dict,
+    payload_snapshot: dict,
+    data_snapshot_date: str,
+    cancel_event=None,
+    running_state: dict | None = None,
+) -> None:
+    """同步执行策略3本地 DB 回测任务。"""
+    started = time.monotonic()
+    running_state = running_state if running_state is not None else {}
+    stats = running_state.setdefault("stats", {})
+    stats["total_stocks"] = len(target_stocks)
+    db.update_strategy3_backtest_task(
+        task_id,
+        total_stocks=len(target_stocks),
+        data_snapshot_date=data_snapshot_date,
+        data_revision_id=calculate_daily_ohlc_revision(
+            data_snapshot_date,
+            [stock["code"] for stock in target_stocks],
+        ),
+    )
+
+    snap_date = data_snapshot_date[:10]
+    try:
+        market_data = build_local_equal_weight_market_data(data_snapshot_date)
+        for stock in target_stocks:
+            if cancel_event is not None and cancel_event.is_set():
+                break
+            code = stock["code"]
+            name = stock.get("name", "")
+            stock_started_at = _now_local()
+            stats["current_code"] = code
+            stats["current_name"] = name
+            db.save_strategy3_backtest_task_stock(
+                task_id,
+                code,
+                name=name,
+                status="RUNNING",
+                started_at=stock_started_at,
+                finished_at=None,
+                error_code=None,
+                error_detail=None,
+            )
+            try:
+                ohlc = db.get_ohlc(code)
+                if snap_date and ohlc:
+                    ohlc = [row for row in ohlc if row["date"] <= snap_date]
+                if not ohlc:
+                    required_days = config_snapshot.get("strategy3", {}).get("minimum_required_days", 180)
+                    db.save_strategy3_backtest_task_stock(
+                        task_id,
+                        code,
+                        name=name,
+                        status="INSUFFICIENT",
+                        error_code="NO_LOCAL_DATA",
+                        available_days=0,
+                        required_days=required_days,
+                        earliest_date="",
+                        latest_date="",
+                        started_at=stock_started_at,
+                        finished_at=_now_local(),
+                    )
+                    continue
+
+                result = run_strategy3_stock_backtest(
+                    code,
+                    name,
+                    ohlc,
+                    config_snapshot,
+                    payload_snapshot.get("startDate", ""),
+                    payload_snapshot.get("endDate", ""),
+                    market_data=market_data,
+                )
+                if result.get("insufficient"):
+                    insufficient = result["insufficient"]
+                    db.save_strategy3_backtest_task_stock(
+                        task_id,
+                        code,
+                        name=name,
+                        status="INSUFFICIENT",
+                        error_code=insufficient.get("reason_code", "INSUFFICIENT_HISTORY_DATA"),
+                        available_days=insufficient.get("available_days", 0),
+                        required_days=insufficient.get("required_days", 0),
+                        earliest_date=insufficient.get("earliest_date", ""),
+                        latest_date=insufficient.get("latest_date", ""),
+                        started_at=stock_started_at,
+                        finished_at=_now_local(),
+                    )
+                    continue
+
+                result["started_at"] = stock_started_at
+                result["finished_at"] = _now_local()
+                db.replace_strategy3_stock_backtest_result(task_id, code, name, result)
+            except Exception as exc:
+                db.save_strategy3_backtest_task_stock(
+                    task_id,
+                    code,
+                    name=name,
+                    status="FAILED",
+                    error_code=type(exc).__name__,
+                    error_detail=str(exc)[:500],
+                    started_at=stock_started_at,
+                    finished_at=_now_local(),
+                )
+                logger.warning("Strategy3 backtest stock %s failed: %s", code, exc)
+            finally:
+                stats["processed_stocks"] = db.get_conn().execute(
+                    "SELECT COUNT(*) FROM strategy3_backtest_task_stocks "
+                    "WHERE task_id=? AND status IN ('COMPLETED','INSUFFICIENT','FAILED')",
+                    (task_id,),
+                ).fetchone()[0]
+                stats["opportunities_count"] = db.get_conn().execute(
+                    "SELECT COUNT(*) FROM strategy3_backtest_opportunities WHERE task_id=?",
+                    (task_id,),
+                ).fetchone()[0]
+
+        _finalize_strategy3_backtest_task(task_id, time.monotonic() - started, cancel_event)
+    except Exception as exc:
+        db.update_strategy3_backtest_task(
+            task_id,
+            status="failed",
+            credibility_status="PHASE1_INCOMPLETE",
+            error=str(exc),
+            finished_at=_now_local(),
+        )
+        raise
+
+
+def _finalize_strategy3_backtest_task(task_id: str, elapsed: float, cancel_event=None) -> None:
+    conn = db.get_conn()
+    counts = conn.execute(
+        "SELECT "
+        "SUM(CASE WHEN status IN ('COMPLETED','INSUFFICIENT','FAILED') THEN 1 ELSE 0 END), "
+        "SUM(CASE WHEN status='FAILED' THEN 1 ELSE 0 END), "
+        "SUM(CASE WHEN status='INSUFFICIENT' THEN 1 ELSE 0 END), "
+        "SUM(CASE WHEN status IN ('PENDING','RUNNING') THEN 1 ELSE 0 END), "
+        "SUM(evaluation_days), SUM(evaluation_error_days), SUM(raw_signals_count), "
+        "MIN(actual_eval_start_date), MAX(actual_eval_end_date), MAX(observation_data_end_date) "
+        "FROM strategy3_backtest_task_stocks WHERE task_id=?",
+        (task_id,),
+    ).fetchone()
+    processed, failed, insufficient, unfinished = (value or 0 for value in counts[:4])
+    evaluations, evaluation_errors, raw_signals = (value or 0 for value in counts[4:7])
+    actual_start, actual_end, observation_end = counts[7:10]
+    opportunities = conn.execute(
+        "SELECT COUNT(*) FROM strategy3_backtest_opportunities WHERE task_id=?",
+        (task_id,),
+    ).fetchone()[0]
+    stocks_with_opportunities = conn.execute(
+        "SELECT COUNT(DISTINCT code) FROM strategy3_backtest_opportunities WHERE task_id=?",
+        (task_id,),
+    ).fetchone()[0]
+
+    if cancel_event is not None and cancel_event.is_set():
+        status = "CANCELED"
+    elif unfinished:
+        status = "INTERRUPTED"
+    elif failed:
+        status = "completed_with_errors"
+    else:
+        status = "completed"
+
+    summary = db.build_strategy3_backtest_summary(task_id)
+    summary["dateRange"] = {
+        "actual_evaluation_start_date": actual_start,
+        "actual_evaluation_end_date": actual_end,
+        "observation_data_end_date": observation_end,
+    }
+    db.update_strategy3_backtest_task(
+        task_id,
+        status=status,
+        credibility_status="TRUSTED_BASELINE" if status == "completed" and evaluation_errors == 0 else "PHASE1_INCOMPLETE",
+        processed_stocks=processed,
+        stocks_with_opportunities=stocks_with_opportunities,
+        opportunities_count=opportunities,
+        insufficient_stocks_count=insufficient,
+        failed_stocks_count=failed,
+        finished_at=_now_local(),
+        elapsed_seconds=round(elapsed, 1),
+        actual_evaluation_start_date=actual_start,
+        actual_evaluation_end_date=actual_end,
+        observation_data_end_date=observation_end,
+        completed_evaluations=evaluations,
+        raw_signals_count=raw_signals,
+        evaluation_error_days=evaluation_errors,
+        summary_json=json.dumps(summary, ensure_ascii=False),
+    )

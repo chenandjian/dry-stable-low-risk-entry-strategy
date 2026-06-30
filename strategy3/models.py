@@ -17,6 +17,8 @@ class Strategy3Indicators:
     high_120: float = 0.0
     drawdown_from_high_120: float = 0.0
     relative_strength_60: float = 0.0
+    market_return_60: float = 0.0
+    has_market_data: bool = False
     ma60_slope_20: float = 0.0
     recent_high: float = 0.0
     pullback_pct: float = 0.0

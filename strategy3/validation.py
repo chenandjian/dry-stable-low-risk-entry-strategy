@@ -14,6 +14,12 @@ DEFAULT_STRATEGY3_CONFIG = {
     "candidate_min_score": 75,
     "core_min_score": 85,
     "max_risk_ratio": 0.08,
+    "trade_candidate_min_score": 88,
+    "trade_max_risk_ratio": 0.04,
+    "trade_max_pullback_pct": 0.15,
+    "trade_market_return_60_min": 0.0,
+    "trade_market_return_60_max": 0.05,
+    "trade_allow_wait_breakout": False,
     "max_pullback_from_high": 0.25,
     "min_pullback_from_high": 0.12,
     "max_recent_range_5": 0.12,
@@ -84,8 +90,20 @@ def resolve_strategy3_config(config: dict | None) -> dict:
     if raw["core_min_score"] < raw["candidate_min_score"]:
         raise ValueError("core_min_score must be >= candidate_min_score")
     _validate_number_range(raw, "max_risk_ratio", 0.01, 0.5)
+    _validate_number_range(raw, "trade_candidate_min_score", raw["candidate_min_score"], 100)
+    _validate_number_range(raw, "trade_max_risk_ratio", 0.01, raw["max_risk_ratio"])
+    _validate_number_range(raw, "trade_market_return_60_min", -0.5, 0.5)
+    _validate_number_range(raw, "trade_market_return_60_max", raw["trade_market_return_60_min"], 0.5)
+    if not isinstance(raw.get("trade_allow_wait_breakout"), bool):
+        raise ValueError("trade_allow_wait_breakout must be a boolean")
     _validate_number_range(raw, "min_pullback_from_high", 0.0, 0.5)
     _validate_number_range(raw, "max_pullback_from_high", raw["min_pullback_from_high"], 0.8)
+    _validate_number_range(
+        raw,
+        "trade_max_pullback_pct",
+        raw["min_pullback_from_high"],
+        raw["max_pullback_from_high"],
+    )
     _validate_number_range(raw, "max_recent_range_5", 0.01, 0.5)
     _validate_number_range(raw, "max_recent_surge_3", 0.01, 0.5)
     _validate_number_range(raw, "min_relative_strength_60", -0.5, 0.5)

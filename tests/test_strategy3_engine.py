@@ -2,7 +2,7 @@ from datetime import date, timedelta
 
 from strategy3.engine import StrongPullbackSecondBreakoutEngine
 from strategy3.indicators import compute_indicators
-from strategy3.models import Strategy3Indicators, Strategy3Risk
+from strategy3.models import Strategy3Indicators, Strategy3Risk, Strategy3TradeQuality
 from strategy3.risk import compute_strategy3_risk
 from strategy3.validation import resolve_strategy3_config
 from strategy3.volume_stability import evaluate_volume_stability
@@ -223,7 +223,10 @@ def _quality_config(**overrides):
 
 
 def test_engine_keeps_legacy_candidate_fields_and_adds_trade_quality():
-    result = StrongPullbackSecondBreakoutEngine({"liquidity": {"min_listing_days": 350}}).evaluate_at(
+    result = StrongPullbackSecondBreakoutEngine({
+        "liquidity": {"min_listing_days": 350},
+        "strategy3": {"trade_candidate_min_score": 75},
+    }).evaluate_at(
         make_strategy3_candidate_bars(),
         code="000030",
         name="兼容样本",
@@ -324,6 +327,67 @@ def test_engine_rejects_downtrend_dry_stable_as_avoid():
     assert "BELOW_MA60_AND_WEAK_TREND" in result.reject_reasons
     assert result.trade_quality.trade_state == "AVOID"
     assert "TREND_REJECTED" in result.trade_quality.invalid_conditions
+
+
+def test_data_driven_entry_filter_rejects_low_score_high_risk_and_wait_breakout():
+    from strategy3.engine import _data_driven_entry_rejects
+
+    cfg = resolve_strategy3_config({"liquidity": {"min_listing_days": 350}})
+    risk = Strategy3Risk(risk_ratio=0.03, rr1=3.0)
+    quality = Strategy3TradeQuality(trade_state="WATCH")
+
+    assert _data_driven_entry_rejects(87, risk, quality, cfg, pullback_pct=0.13) == [
+        "TRADE_SCORE_BELOW_DATA_FILTER"
+    ]
+    assert _data_driven_entry_rejects(88, Strategy3Risk(risk_ratio=0.061, rr1=3.0), quality, cfg, pullback_pct=0.13) == [
+        "TRADE_RISK_ABOVE_DATA_FILTER"
+    ]
+    assert _data_driven_entry_rejects(
+        88,
+        risk,
+        Strategy3TradeQuality(trade_state="WAIT_BREAKOUT"),
+        cfg,
+        pullback_pct=0.13,
+    ) == ["WAIT_BREAKOUT_NOT_ACTIONABLE"]
+    assert _data_driven_entry_rejects(88, risk, quality, cfg, pullback_pct=0.151) == [
+        "TRADE_PULLBACK_ABOVE_DATA_FILTER"
+    ]
+    assert _data_driven_entry_rejects(
+        88,
+        risk,
+        quality,
+        cfg,
+        pullback_pct=0.13,
+        market_return_60=0.051,
+        has_market_data=True,
+    ) == ["TRADE_MARKET_REGIME_NOT_FAVORABLE"]
+    assert _data_driven_entry_rejects(
+        88,
+        risk,
+        quality,
+        cfg,
+        pullback_pct=0.13,
+        market_return_60=-0.001,
+        has_market_data=True,
+    ) == ["TRADE_MARKET_REGIME_NOT_FAVORABLE"]
+    assert _data_driven_entry_rejects(
+        88,
+        risk,
+        quality,
+        cfg,
+        pullback_pct=0.13,
+        market_return_60=0.20,
+        has_market_data=False,
+    ) == []
+    assert _data_driven_entry_rejects(
+        88,
+        risk,
+        quality,
+        cfg,
+        pullback_pct=0.13,
+        market_return_60=0.03,
+        has_market_data=True,
+    ) == []
 
 
 def test_trade_quality_avoids_extreme_dry_when_price_is_not_stable():
@@ -461,7 +525,10 @@ def test_volume_stability_rewards_support_tests_only_within_approved_range():
 
 
 def test_engine_passes_healthy_strong_pullback():
-    engine = StrongPullbackSecondBreakoutEngine({"liquidity": {"min_listing_days": 350}})
+    engine = StrongPullbackSecondBreakoutEngine({
+        "liquidity": {"min_listing_days": 350},
+        "strategy3": {"trade_candidate_min_score": 75},
+    })
     result = engine.evaluate_at(make_strategy3_candidate_bars(), code="000001", name="样本")
 
     assert result.passed is True
@@ -638,6 +705,8 @@ def test_relative_strength_60_subtracts_market_index_return():
     )
 
     assert abs(ind.relative_strength_60 - (ind.return_60 - 0.10)) < 1e-9
+    assert ind.has_market_data is True
+    assert abs(ind.market_return_60 - 0.10) < 1e-9
 
 
 def test_risk_model_uses_tactical_support_but_keeps_structural_risk_visible():
@@ -690,7 +759,10 @@ def test_risk_model_uses_tactical_support_but_keeps_structural_risk_visible():
 
 
 def test_risk_model_exposes_key_support_zone_and_status():
-    result = StrongPullbackSecondBreakoutEngine({"liquidity": {"min_listing_days": 350}}).evaluate_at(
+    result = StrongPullbackSecondBreakoutEngine({
+        "liquidity": {"min_listing_days": 350},
+        "strategy3": {"trade_candidate_min_score": 75},
+    }).evaluate_at(
         make_strategy3_candidate_bars(),
         code="000020",
     )
