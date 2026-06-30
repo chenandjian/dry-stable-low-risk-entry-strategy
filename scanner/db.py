@@ -3027,6 +3027,12 @@ def build_strategy3_backtest_summary(task_id: str) -> dict:
 
     entered_opps = [opp for opp in opps if opp.get("entry_price") and opp["entry_price"] > 0]
     realized_returns = [opp.get("realized_return") or 0 for opp in entered_opps]
+    wins = [value for value in realized_returns if value > 0]
+    losses = [value for value in realized_returns if value < 0]
+    avg_win = _st.mean(wins) if wins else 0
+    avg_loss = _st.mean(losses) if losses else 0
+    gross_profit = sum(wins)
+    gross_loss = abs(sum(losses))
     holding_days = [opp.get("holding_days") or 0 for opp in entered_opps if opp.get("holding_days")]
     target = sum(1 for opp in opps if opp.get("exit_reason") == "TARGET")
     stop = sum(1 for opp in opps if opp.get("exit_reason") == "STOP")
@@ -3065,6 +3071,10 @@ def build_strategy3_backtest_summary(task_id: str) -> dict:
         "by_rr1": _strategy3_group_by(opps, lambda row: _strategy3_rr_bucket(row.get("rr1") or 0)),
         "by_month": _strategy3_group_by(opps, lambda row: (row.get("first_detected_date") or "")[:7] or "UNKNOWN"),
         "by_trade_state": _strategy3_group_by(opps, lambda row: row.get("trade_state") or "UNKNOWN"),
+        "by_market_index": _strategy3_group_by(opps, lambda row: _strategy3_snapshot_value(row, "market_index_symbol") or "UNKNOWN"),
+        "by_market_return_20": _strategy3_group_by(opps, lambda row: _strategy3_market_return_bucket(_strategy3_snapshot_value(row, "market_return_20"))),
+        "by_market_return_60": _strategy3_group_by(opps, lambda row: _strategy3_market_return_bucket(_strategy3_snapshot_value(row, "market_return_60"))),
+        "by_market_ma_state": _strategy3_group_by(opps, _strategy3_market_ma_state),
     }
 
     return {
@@ -3080,11 +3090,18 @@ def build_strategy3_backtest_summary(task_id: str) -> dict:
             "stop_hit_rate": round(stop / len(entered_opps) * 100, 2) if entered_opps else 0,
             "avg_realized_return": round(_st.mean(realized_returns), 6) if realized_returns else 0,
             "median_realized_return": round(_st.median(realized_returns), 6) if realized_returns else 0,
+            "avg_win": round(avg_win, 6),
+            "avg_loss": round(avg_loss, 6),
+            "payoff_ratio": round(avg_win / abs(avg_loss), 4) if avg_loss else 0,
+            "profit_factor": round(gross_profit / gross_loss, 4) if gross_loss else 0,
+            "expectancy": round(_st.mean(realized_returns), 6) if realized_returns else 0,
+            "max_consecutive_losses": _strategy3_max_consecutive_losses(entered_opps),
             "positive_rate": round(positive / len(entered_opps) * 100, 2) if entered_opps else 0,
             "avg_holding_days": round(_st.mean(holding_days), 1) if holding_days else 0,
         },
         "funnel": funnel,
         "groups": groups,
+        "marketDataMode": _strategy3_market_data_mode(opps),
     }
 
 
@@ -3221,6 +3238,14 @@ def _json_loads(value) -> dict:
         return {}
 
 
+def _strategy3_snapshot(row: dict) -> dict:
+    return _json_loads(row.get("evaluation_snapshot"))
+
+
+def _strategy3_snapshot_value(row: dict, key: str):
+    return _strategy3_snapshot(row).get(key)
+
+
 def _strategy3_group_by(rows: list[dict], key_fn) -> dict:
     import statistics as _st
     groups = {}
@@ -3230,6 +3255,12 @@ def _strategy3_group_by(rows: list[dict], key_fn) -> dict:
     for key, items in sorted(groups.items()):
         entered = [row for row in items if row.get("entry_price") and row["entry_price"] > 0]
         returns = [row.get("realized_return") or 0 for row in entered]
+        wins = [value for value in returns if value > 0]
+        losses = [value for value in returns if value < 0]
+        avg_win = _st.mean(wins) if wins else 0
+        avg_loss = _st.mean(losses) if losses else 0
+        gross_profit = sum(wins)
+        gross_loss = abs(sum(losses))
         target = sum(1 for row in items if row.get("exit_reason") == "TARGET")
         stop = sum(1 for row in items if row.get("exit_reason") == "STOP")
         result[key] = {
@@ -3242,8 +3273,67 @@ def _strategy3_group_by(rows: list[dict], key_fn) -> dict:
             "stop_hit_rate": round(stop / len(entered) * 100, 2) if entered else 0,
             "average_realized_return": round(_st.mean(returns), 6) if returns else 0,
             "median_realized_return": round(_st.median(returns), 6) if returns else 0,
+            "avg_win": round(avg_win, 6),
+            "avg_loss": round(avg_loss, 6),
+            "payoff_ratio": round(avg_win / abs(avg_loss), 4) if avg_loss else 0,
+            "profit_factor": round(gross_profit / gross_loss, 4) if gross_loss else 0,
+            "expectancy": round(_st.mean(returns), 6) if returns else 0,
         }
     return result
+
+
+def _strategy3_max_consecutive_losses(rows: list[dict]) -> int:
+    max_streak = 0
+    streak = 0
+    for row in sorted(rows, key=lambda item: (item.get("first_detected_date") or "", item.get("code") or "")):
+        if (row.get("realized_return") or 0) < 0:
+            streak += 1
+            max_streak = max(max_streak, streak)
+        else:
+            streak = 0
+    return max_streak
+
+
+def _strategy3_market_return_bucket(value) -> str:
+    try:
+        numeric = float(value)
+    except Exception:
+        return "UNKNOWN"
+    if numeric < 0:
+        return "negative"
+    if numeric < 0.03:
+        return "0-3%"
+    if numeric <= 0.05:
+        return "3-5%"
+    return ">5%"
+
+
+def _strategy3_market_ma_state(row: dict) -> str:
+    snapshot = _strategy3_snapshot(row)
+    if "market_above_ma20" not in snapshot or "market_above_ma60" not in snapshot:
+        return "UNKNOWN"
+    above20 = bool(snapshot.get("market_above_ma20"))
+    above60 = bool(snapshot.get("market_above_ma60"))
+    if above20 and above60:
+        return "above_ma20_above_ma60"
+    if above20 and not above60:
+        return "above_ma20_below_ma60"
+    if not above20 and above60:
+        return "below_ma20_above_ma60"
+    return "below_ma20_below_ma60"
+
+
+def _strategy3_market_data_mode(rows: list[dict]) -> str:
+    modes = {
+        _strategy3_snapshot_value(row, "market_data_mode")
+        for row in rows
+        if _strategy3_snapshot_value(row, "market_data_mode")
+    }
+    if not modes:
+        return ""
+    if len(modes) == 1:
+        return next(iter(modes))
+    return "mixed"
 
 
 def _strategy3_score_band(value) -> str:

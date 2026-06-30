@@ -16,6 +16,7 @@ from strategy3.backtest_models import (
     Strategy3BacktestSummary,
 )
 from strategy3.engine import StrongPullbackSecondBreakoutEngine
+from strategy3.market_index import resolve_strategy3_market_index
 
 HORIZONS = [5, 10, 20]
 
@@ -182,6 +183,8 @@ def run_strategy3_stock_backtest(
     *,
     engine_factory=None,
     market_data: list[dict] | None = None,
+    market_data_by_symbol: dict[str, list[dict]] | None = None,
+    market_data_mode: str = "",
 ) -> dict:
     """对单只股票执行策略3本地历史逐日回放。"""
     strategy_cfg = config_snapshot.get("strategy3", {})
@@ -208,6 +211,9 @@ def run_strategy3_stock_backtest(
 
     engine_cls = engine_factory or StrongPullbackSecondBreakoutEngine
     engine = engine_cls(config_snapshot)
+    market_data_mode = market_data_mode or ("local_equal_weight_proxy" if market_data_by_symbol else "")
+    market_selection = _resolve_backtest_market_selection(code, market_data_by_symbol)
+    market_metadata = market_selection.to_metadata(market_data_mode)
     date_to_index = {row["date"]: i for i, row in enumerate(ohlc_data)}
     signals: list[Strategy3BacktestSignal] = []
     eval_results: dict[int, str] = {}
@@ -236,8 +242,22 @@ def run_strategy3_stock_backtest(
             eval_results[i - 1] = "LIQUIDITY_FILTERED"
             continue
         try:
-            market_window = _select_market_window(market_data, eval_day)
-            evaluation = engine.evaluate_at(history, code=code, name=name, market_data=market_window)
+            full_market_data = _market_data_for_selection(market_selection.symbol, market_data_by_symbol, market_data)
+            market_window = _select_market_window(full_market_data, eval_day)
+            current_market_metadata = dict(market_metadata)
+            if not market_window:
+                current_market_metadata["market_index_fallback"] = True
+                current_market_metadata["market_index_fallback_reason"] = (
+                    current_market_metadata.get("market_index_fallback_reason")
+                    or "NO_MARKET_DATA_RELATIVE_STRENGTH_FALLBACK"
+                )
+            evaluation = engine.evaluate_at(
+                history,
+                code=code,
+                name=name,
+                market_data=market_window,
+                market_metadata=current_market_metadata,
+            )
         except Exception as exc:
             eval_results[i - 1] = "EVALUATION_ERROR"
             evaluation_errors.append({
@@ -296,6 +316,27 @@ def run_strategy3_stock_backtest(
         "latest_date": ohlc_data[-1]["date"] if ohlc_data else "",
         "insufficient": None,
     }
+
+
+def _resolve_backtest_market_selection(code: str, market_data_by_symbol: dict[str, list[dict]] | None):
+    available_symbols = None
+    if market_data_by_symbol is not None:
+        available_symbols = {
+            symbol
+            for symbol, rows in market_data_by_symbol.items()
+            if rows
+        }
+    return resolve_strategy3_market_index(code, available_symbols=available_symbols)
+
+
+def _market_data_for_selection(
+    symbol: str,
+    market_data_by_symbol: dict[str, list[dict]] | None,
+    fallback_market_data: list[dict] | None,
+) -> list[dict]:
+    if market_data_by_symbol is not None:
+        return market_data_by_symbol.get(symbol) or []
+    return fallback_market_data or []
 
 
 def aggregate_strategy3_backtest_summary(
@@ -405,7 +446,17 @@ def _signal_from_evaluation(evaluation, evaluation_index: int) -> Strategy3Backt
         "target_price": quality.target_price or risk.target_1,
         "risk_ratio": risk.risk_ratio,
         "rr1": risk.rr1,
+        "market_index_symbol": ind.market_index_symbol,
+        "market_index_name": ind.market_index_name,
+        "market_return_20": ind.market_return_20,
         "market_return_60": ind.market_return_60,
+        "market_above_ma20": ind.market_above_ma20,
+        "market_above_ma60": ind.market_above_ma60,
+        "market_volatility_20": ind.market_volatility_20,
+        "market_drawdown_60": ind.market_drawdown_60,
+        "market_data_mode": ind.market_data_mode,
+        "market_index_fallback": ind.market_index_fallback,
+        "market_index_fallback_reason": ind.market_index_fallback_reason,
         "has_market_data": ind.has_market_data,
         "score_reasons": evaluation.score_reasons,
         "reject_reasons": evaluation.reject_reasons,

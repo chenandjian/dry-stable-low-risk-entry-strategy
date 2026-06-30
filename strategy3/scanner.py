@@ -21,6 +21,7 @@ from scanner.data_source import DataSourceManager
 from scanner.index_source import fetch_market_index_daily
 from scanner.liquidity_filter import passes_liquidity_filter
 from strategy3.engine import StrongPullbackSecondBreakoutEngine
+from strategy3.market_index import DEFAULT_INDEX_SYMBOLS, resolve_strategy3_market_index
 
 logger = logging.getLogger(__name__)
 
@@ -63,7 +64,7 @@ def scan_strategy3_all(
 
     mgr = DataSourceManager()
     engine = StrongPullbackSecondBreakoutEngine(config)
-    market_data_full, market_fallback_reason = _load_market_data(config)
+    market_data_by_symbol, market_fallback_reasons = _load_market_data_by_symbol(config)
     candidate_by_code = {}
     candidate_lock = threading.Lock()
     busy_retries_by_code: dict[str, int] = {}
@@ -179,8 +180,19 @@ def scan_strategy3_all(
                                   fetch_result=fetch_result)
                     continue
 
-                market_window = _select_market_window(market_data_full, latest_trade_date)
-                evaluation = engine.evaluate_at(data, code=code, name=name, market_data=market_window)
+                market_window, market_metadata, market_fallback_reason = _market_context_for_code(
+                    code,
+                    market_data_by_symbol,
+                    market_fallback_reasons,
+                    latest_trade_date,
+                )
+                evaluation = engine.evaluate_at(
+                    data,
+                    code=code,
+                    name=name,
+                    market_data=market_window,
+                    market_metadata=market_metadata,
+                )
                 _mark_market_fallback(evaluation, market_fallback_reason, market_window)
                 if evaluation.passed:
                     discovery = _build_strategy3_discovery(evaluation, fetch_result)
@@ -360,7 +372,7 @@ def re_evaluate_strategy3_task(config: dict, task_id: str, progress_callback=Non
     liquidity_cfg = config.get("liquidity", {})
     kline_days = liquidity_cfg.get("min_listing_days", 350)
     engine = StrongPullbackSecondBreakoutEngine(config)
-    market_data_full, market_fallback_reason = _load_market_data(config)
+    market_data_by_symbol, market_fallback_reasons = _load_market_data_by_symbol(config)
     old_candidates = {c["code"] for c in db.get_strategy3_candidates(task_id=task_id)}
     total = len(stocks)
     new_codes = set()
@@ -392,8 +404,19 @@ def re_evaluate_strategy3_task(config: dict, task_id: str, progress_callback=Non
                     finished_at=time.strftime("%Y-%m-%d %H:%M:%S"),
                 )
                 continue
-            market_window = _select_market_window(market_data_full, latest_trade_date)
-            evaluation = engine.evaluate_at(data, code=code, name=name, market_data=market_window)
+            market_window, market_metadata, market_fallback_reason = _market_context_for_code(
+                code,
+                market_data_by_symbol,
+                market_fallback_reasons,
+                latest_trade_date,
+            )
+            evaluation = engine.evaluate_at(
+                data,
+                code=code,
+                name=name,
+                market_data=market_window,
+                market_metadata=market_metadata,
+            )
             _mark_market_fallback(evaluation, market_fallback_reason, market_window)
             if evaluation.passed:
                 discovery = _build_strategy3_discovery(evaluation)
@@ -491,6 +514,17 @@ def _evaluation_debug_json(evaluation) -> str:
         "estimatedRr": evaluation.trade_quality.estimated_rr,
         "tradeState": evaluation.trade_quality.trade_state,
         "tradeStateLabel": evaluation.trade_quality.trade_state_label,
+        "marketIndexSymbol": evaluation.indicators.market_index_symbol,
+        "marketIndexName": evaluation.indicators.market_index_name,
+        "marketReturn20": evaluation.indicators.market_return_20,
+        "marketReturn60": evaluation.indicators.market_return_60,
+        "marketAboveMa20": evaluation.indicators.market_above_ma20,
+        "marketAboveMa60": evaluation.indicators.market_above_ma60,
+        "marketVolatility20": evaluation.indicators.market_volatility_20,
+        "marketDrawdown60": evaluation.indicators.market_drawdown_60,
+        "marketDataMode": evaluation.indicators.market_data_mode,
+        "marketIndexFallback": evaluation.indicators.market_index_fallback,
+        "marketIndexFallbackReason": evaluation.indicators.market_index_fallback_reason,
         "triggerReasons": evaluation.trade_quality.trigger_reasons,
         "riskWarnings": evaluation.trade_quality.risk_warnings,
         "invalidConditions": evaluation.trade_quality.invalid_conditions,
@@ -509,6 +543,50 @@ def _load_market_data(config: dict) -> tuple[list[dict], str | None]:
         logger.warning("Strategy3 market index unavailable, relative strength falls back to stock return")
         return [], "NO_MARKET_DATA_RELATIVE_STRENGTH_FALLBACK"
     return market_data, None
+
+
+def _load_market_data_by_symbol(config: dict) -> tuple[dict[str, list[dict]], dict[str, str]]:
+    """Preload Strategy3 market indices once per scan."""
+    market_cfg = config.get("market_environment", {}) or {}
+    extra_symbol = market_cfg.get("index_symbol")
+    symbols = list(DEFAULT_INDEX_SYMBOLS)
+    if extra_symbol and extra_symbol not in symbols:
+        symbols.append(extra_symbol)
+    market_data_by_symbol: dict[str, list[dict]] = {}
+    fallback_reasons: dict[str, str] = {}
+    for symbol in symbols:
+        try:
+            market_data = fetch_market_index_daily(symbol) or []
+        except Exception as exc:
+            logger.warning("Strategy3 market index fetch failed for %s: %s", symbol, exc)
+            market_data = []
+        if market_data:
+            market_data_by_symbol[symbol] = market_data
+        else:
+            fallback_reasons[symbol] = "NO_MARKET_DATA_RELATIVE_STRENGTH_FALLBACK"
+    if not market_data_by_symbol:
+        logger.warning("Strategy3 market indices unavailable, relative strength falls back to stock return")
+    return market_data_by_symbol, fallback_reasons
+
+
+def _market_context_for_code(
+    code: str,
+    market_data_by_symbol: dict[str, list[dict]],
+    fallback_reasons: dict[str, str],
+    decision_date: str | None,
+) -> tuple[list[dict], dict, str | None]:
+    available_symbols = {symbol for symbol, rows in market_data_by_symbol.items() if rows}
+    selection = resolve_strategy3_market_index(code, available_symbols=available_symbols)
+    market_full = market_data_by_symbol.get(selection.symbol) or []
+    market_window = _select_market_window(market_full, decision_date)
+    fallback_reason = selection.fallback_reason or fallback_reasons.get(selection.symbol)
+    if not market_window:
+        fallback_reason = fallback_reason or "NO_MARKET_DATA_RELATIVE_STRENGTH_FALLBACK"
+    metadata = selection.to_metadata("real_index")
+    if fallback_reason:
+        metadata["market_index_fallback"] = True
+        metadata["market_index_fallback_reason"] = fallback_reason
+    return market_window, metadata, fallback_reason
 
 
 def _select_market_window(market_data: list[dict], decision_date: str | None) -> list[dict]:

@@ -12,8 +12,10 @@ import time
 
 import scanner.db as db
 from strategy3.backtester import run_strategy3_stock_backtest
+from strategy3.market_index import resolve_strategy3_market_index
 
 logger = logging.getLogger(__name__)
+MARKET_DATA_MODE_LOCAL_PROXY = "local_equal_weight_proxy"
 
 
 def _now_local() -> str:
@@ -45,6 +47,26 @@ def build_local_equal_weight_market_data(snapshot_date: str) -> list[dict]:
         "SELECT code,date,close FROM daily_ohlc WHERE date<=? ORDER BY code,date",
         (snapshot_date[:10],),
     )
+    return _build_equal_weight_proxy(rows)
+
+
+def build_local_equal_weight_market_data_by_symbol(snapshot_date: str) -> dict[str, list[dict]]:
+    """Build per-index local equal-weight proxies from daily_ohlc only."""
+    rows = db.get_conn().execute(
+        "SELECT code,date,close FROM daily_ohlc WHERE date<=? ORDER BY code,date",
+        (snapshot_date[:10],),
+    )
+    grouped_rows: dict[str, list[tuple[str, str, float]]] = {}
+    for code, date, close in rows:
+        selection = resolve_strategy3_market_index(code)
+        grouped_rows.setdefault(selection.symbol, []).append((code, date, close))
+    return {
+        symbol: _build_equal_weight_proxy(symbol_rows)
+        for symbol, symbol_rows in grouped_rows.items()
+    }
+
+
+def _build_equal_weight_proxy(rows) -> list[dict]:
     previous_close_by_code = {}
     returns_by_date: dict[str, list[float]] = {}
     for code, date, close in rows:
@@ -103,7 +125,7 @@ def run_strategy3_backtest_task(
 
     snap_date = data_snapshot_date[:10]
     try:
-        market_data = build_local_equal_weight_market_data(data_snapshot_date)
+        market_data_by_symbol = build_local_equal_weight_market_data_by_symbol(data_snapshot_date)
         for stock in target_stocks:
             if cancel_event is not None and cancel_event.is_set():
                 break
@@ -150,7 +172,8 @@ def run_strategy3_backtest_task(
                     config_snapshot,
                     payload_snapshot.get("startDate", ""),
                     payload_snapshot.get("endDate", ""),
-                    market_data=market_data,
+                    market_data_by_symbol=market_data_by_symbol,
+                    market_data_mode=MARKET_DATA_MODE_LOCAL_PROXY,
                 )
                 if result.get("insufficient"):
                     insufficient = result["insufficient"]
@@ -195,7 +218,12 @@ def run_strategy3_backtest_task(
                     (task_id,),
                 ).fetchone()[0]
 
-        _finalize_strategy3_backtest_task(task_id, time.monotonic() - started, cancel_event)
+        _finalize_strategy3_backtest_task(
+            task_id,
+            time.monotonic() - started,
+            cancel_event,
+            market_data_mode=MARKET_DATA_MODE_LOCAL_PROXY,
+        )
     except Exception as exc:
         db.update_strategy3_backtest_task(
             task_id,
@@ -207,7 +235,13 @@ def run_strategy3_backtest_task(
         raise
 
 
-def _finalize_strategy3_backtest_task(task_id: str, elapsed: float, cancel_event=None) -> None:
+def _finalize_strategy3_backtest_task(
+    task_id: str,
+    elapsed: float,
+    cancel_event=None,
+    *,
+    market_data_mode: str = "",
+) -> None:
     conn = db.get_conn()
     counts = conn.execute(
         "SELECT "
@@ -242,6 +276,7 @@ def _finalize_strategy3_backtest_task(task_id: str, elapsed: float, cancel_event
         status = "completed"
 
     summary = db.build_strategy3_backtest_summary(task_id)
+    summary["marketDataMode"] = summary.get("marketDataMode") or market_data_mode
     summary["dateRange"] = {
         "actual_evaluation_start_date": actual_start,
         "actual_evaluation_end_date": actual_end,

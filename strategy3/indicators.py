@@ -1,6 +1,10 @@
 """策略3指标计算。"""
 from __future__ import annotations
 
+from strategy3.market_index import (
+    Strategy3MarketIndexSelection,
+    compute_strategy3_market_context,
+)
 from strategy3.models import Strategy3Indicators
 
 
@@ -8,14 +12,33 @@ def compute_indicators(
     data: list[dict],
     config: dict,
     market_data: list[dict] | None = None,
+    market_metadata: dict | None = None,
 ) -> Strategy3Indicators:
     close = float(data[-1]["close"])
     pullback_lookback_days = int(config.get("pullback_lookback_days", 60))
     recent_high = _max(data[-pullback_lookback_days:], "high")
     high_120 = _max(data[-120:], "high")
     return_60 = _return(data, 60)
-    has_market_data = bool(market_data and len(market_data) > 60)
-    index_return_60 = _return(market_data, 60) if has_market_data else 0.0
+    selection = Strategy3MarketIndexSelection("sh000001", "上证指数")
+    market_context = compute_strategy3_market_context(
+        market_data,
+        selection=selection,
+        market_data_mode=(market_metadata or {}).get("market_data_mode", ""),
+    )
+    if market_metadata:
+        market_context.update({
+            key: market_metadata[key]
+            for key in (
+                "market_index_symbol",
+                "market_index_name",
+                "market_data_mode",
+                "market_index_fallback",
+                "market_index_fallback_reason",
+            )
+            if key in market_metadata
+        })
+    has_market_data = bool(market_context["has_market_data"])
+    index_return_60 = market_context["market_return_60"] if has_market_data else 0.0
     ma20 = _ma(data, 20)
     ma60 = _ma(data, 60)
     ma120 = _ma(data, 120)
@@ -80,7 +103,19 @@ def compute_indicators(
         high_120=high_120,
         drawdown_from_high_120=(high_120 - close) / high_120 if high_120 > 0 else 0.0,
         relative_strength_60=return_60 - index_return_60,
+        market_index_symbol=market_context["market_index_symbol"],
+        market_index_name=market_context["market_index_name"],
+        market_return_20=market_context["market_return_20"],
         market_return_60=index_return_60,
+        market_ma20=market_context["market_ma20"],
+        market_ma60=market_context["market_ma60"],
+        market_above_ma20=market_context["market_above_ma20"],
+        market_above_ma60=market_context["market_above_ma60"],
+        market_volatility_20=market_context["market_volatility_20"],
+        market_drawdown_60=market_context["market_drawdown_60"],
+        market_data_mode=market_context["market_data_mode"],
+        market_index_fallback=market_context["market_index_fallback"],
+        market_index_fallback_reason=market_context["market_index_fallback_reason"],
         has_market_data=has_market_data,
         ma60_slope_20=(ma60 / ma60_20_days_ago - 1) if ma60_20_days_ago > 0 else 0.0,
         recent_high=recent_high,

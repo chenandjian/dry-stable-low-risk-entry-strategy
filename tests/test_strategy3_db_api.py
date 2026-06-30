@@ -563,6 +563,7 @@ def test_scan_strategy3_all_passes_truncated_market_data(monkeypatch, tmp_path):
         {"date": "2026-06-26", "open": 10, "high": 10, "low": 10, "close": 99, "volume": 1},
     ]
     calls = []
+    metadata_calls = []
 
     monkeypatch.setattr(
         s3_scanner,
@@ -580,8 +581,9 @@ def test_scan_strategy3_all_passes_truncated_market_data(monkeypatch, tmp_path):
         def __init__(self, config):
             pass
 
-        def evaluate_at(self, rows, *, code="", name="", market_data=None):
+        def evaluate_at(self, rows, *, code="", name="", market_data=None, market_metadata=None):
             calls.append([row["date"] for row in (market_data or [])])
+            metadata_calls.append(dict(market_metadata or {}))
             return Strategy3Evaluation(
                 False,
                 code=code,
@@ -605,6 +607,8 @@ def test_scan_strategy3_all_passes_truncated_market_data(monkeypatch, tmp_path):
     )
 
     assert calls == [["2026-06-24", "2026-06-25"]]
+    assert metadata_calls[0]["market_index_symbol"] == "sz399001"
+    assert metadata_calls[0]["market_data_mode"] == "real_index"
 
 
 def test_scan_strategy3_all_marks_fallback_when_market_data_misses_evaluation_date(monkeypatch, tmp_path):
@@ -646,8 +650,9 @@ def test_scan_strategy3_all_marks_fallback_when_market_data_misses_evaluation_da
         def __init__(self, config):
             pass
 
-        def evaluate_at(self, rows, *, code="", name="", market_data=None):
+        def evaluate_at(self, rows, *, code="", name="", market_data=None, market_metadata=None):
             assert market_data == []
+            assert market_metadata["market_index_symbol"] == "sz399001"
             return Strategy3Evaluation(
                 False,
                 code=code,

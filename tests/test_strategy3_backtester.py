@@ -43,7 +43,17 @@ def _passed_eval(code="000001", name="样本", evaluation_date="2026-01-05"):
             current_close=10.0,
             pullback_pct=0.15,
             volume_ratio_5_20=0.55,
+            market_index_symbol="sz399001",
+            market_index_name="深证成指",
+            market_return_20=0.02,
             market_return_60=0.03,
+            market_above_ma20=True,
+            market_above_ma60=True,
+            market_volatility_20=0.012,
+            market_drawdown_60=0.04,
+            market_data_mode="injected_test_index",
+            market_index_fallback=False,
+            market_index_fallback_reason="",
             has_market_data=True,
         ),
         risk=Strategy3Risk(
@@ -213,7 +223,7 @@ def test_strategy3_stock_backtest_does_not_pass_future_rows_to_engine():
         def __init__(self, config):
             pass
 
-        def evaluate_at(self, history, *, code="", name="", market_data=None):
+        def evaluate_at(self, history, *, code="", name="", market_data=None, market_metadata=None):
             seen_windows.append([row["date"] for row in history])
             seen_market_windows.append([row["date"] for row in market_data or []])
             return _passed_eval(code=code, name=name, evaluation_date=history[-1]["date"])
@@ -241,6 +251,45 @@ def test_strategy3_stock_backtest_does_not_pass_future_rows_to_engine():
     assert result["raw_signals_count"] == 3
 
 
+def test_strategy3_stock_backtest_selects_market_index_by_stock_code_without_future_rows():
+    rows = [_row(f"2026-01-0{i}", close=10.0 + i * 0.1) for i in range(1, 8)]
+    sh_rows = [_row(f"2026-01-0{i}", close=100.0 + i) for i in range(1, 8)]
+    cyb_rows = [_row(f"2026-01-0{i}", close=200.0 + i) for i in range(1, 8)]
+    seen_market_closes = []
+    seen_metadata = []
+
+    class FakeEngine:
+        def __init__(self, config):
+            pass
+
+        def evaluate_at(self, history, *, code="", name="", market_data=None, market_metadata=None):
+            seen_market_closes.append([row["close"] for row in market_data or []])
+            seen_metadata.append(dict(market_metadata or {}))
+            return _passed_eval(code=code, name=name, evaluation_date=history[-1]["date"])
+
+    result = run_strategy3_stock_backtest(
+        "300001",
+        "创业板样本",
+        rows,
+        {
+            "strategy3": {"minimum_required_days": 3, "strategy_window_days": 4},
+            "liquidity": {"enabled": False, "min_listing_days": 4},
+        },
+        "2026-01-03",
+        "2026-01-05",
+        engine_factory=FakeEngine,
+        market_data_by_symbol={"sh000001": sh_rows, "sz399006": cyb_rows},
+        market_data_mode="injected_test_index",
+    )
+
+    assert result["raw_signals_count"] == 3
+    assert seen_market_closes
+    assert all(window and window[-1] <= 205.0 for window in seen_market_closes)
+    assert all(106.0 not in window and 107.0 not in window for window in seen_market_closes)
+    assert {metadata["market_index_symbol"] for metadata in seen_metadata} == {"sz399006"}
+    assert {metadata["market_data_mode"] for metadata in seen_metadata} == {"injected_test_index"}
+
+
 def test_strategy3_stock_backtest_records_signal_snapshot_and_execution():
     rows = [
         _row("2026-01-01", close=9.8),
@@ -254,7 +303,7 @@ def test_strategy3_stock_backtest_records_signal_snapshot_and_execution():
         def __init__(self, config):
             pass
 
-        def evaluate_at(self, history, *, code="", name="", market_data=None):
+        def evaluate_at(self, history, *, code="", name="", market_data=None, market_metadata=None):
             if history[-1]["date"] == "2026-01-04":
                 return _passed_eval(code=code, name=name, evaluation_date="2026-01-04")
             return Strategy3Evaluation(
@@ -284,7 +333,17 @@ def test_strategy3_stock_backtest_records_signal_snapshot_and_execution():
     assert signal.trade_state == "LOW_ABSORB"
     assert signal.trade_quality_score == 82
     assert signal.evaluation_snapshot["trade_state"] == "LOW_ABSORB"
+    assert signal.evaluation_snapshot["market_index_symbol"] == "sz399001"
+    assert signal.evaluation_snapshot["market_index_name"] == "深证成指"
+    assert signal.evaluation_snapshot["market_return_20"] == 0.02
     assert signal.evaluation_snapshot["market_return_60"] == 0.03
+    assert signal.evaluation_snapshot["market_above_ma20"] is True
+    assert signal.evaluation_snapshot["market_above_ma60"] is True
+    assert signal.evaluation_snapshot["market_volatility_20"] == 0.012
+    assert signal.evaluation_snapshot["market_drawdown_60"] == 0.04
+    assert signal.evaluation_snapshot["market_data_mode"] == "injected_test_index"
+    assert signal.evaluation_snapshot["market_index_fallback"] is False
+    assert signal.evaluation_snapshot["market_index_fallback_reason"] == ""
     assert signal.evaluation_snapshot["has_market_data"] is True
     opp = result["opportunities"][0]
     assert opp["entry_date"] == "2026-01-05"

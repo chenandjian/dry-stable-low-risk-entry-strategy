@@ -48,9 +48,23 @@ def test_strategy3_backtest_service_uses_local_ohlc_snapshot_only(tmp_path, monk
     ])
     seen = {}
 
-    def fake_stock_backtest(code, name, ohlc, config_snapshot, start_date, end_date, market_data=None):
+    def fake_stock_backtest(
+        code,
+        name,
+        ohlc,
+        config_snapshot,
+        start_date,
+        end_date,
+        market_data=None,
+        market_data_by_symbol=None,
+        market_data_mode="",
+    ):
         seen["dates"] = [row["date"] for row in ohlc]
-        seen["market_dates"] = [row["date"] for row in market_data or []]
+        seen["market_symbols"] = sorted((market_data_by_symbol or {}).keys())
+        seen["market_dates"] = [
+            row["date"] for row in (market_data_by_symbol or {}).get("sz399001", [])
+        ]
+        seen["market_data_mode"] = market_data_mode
         return {
             "signals": [],
             "opportunities": [],
@@ -78,12 +92,16 @@ def test_strategy3_backtest_service_uses_local_ohlc_snapshot_only(tmp_path, monk
     )
 
     assert seen["dates"] == ["2026-01-01", "2026-01-02"]
+    assert "sz399001" in seen["market_symbols"]
     assert seen["market_dates"] == ["2026-01-02"]
+    assert seen["market_data_mode"] == "local_equal_weight_proxy"
     stock = db.get_strategy3_backtest_task_stocks("s3bt-service")[0]
     assert stock["status"] == "COMPLETED"
     task = db.get_strategy3_backtest_task("s3bt-service")
     assert task["status"] == "completed"
-    assert json.loads(task["summary_json"])["funnel"]["evaluation_days"] == 2
+    summary = json.loads(task["summary_json"])
+    assert summary["funnel"]["evaluation_days"] == 2
+    assert summary["marketDataMode"] == "local_equal_weight_proxy"
 
 
 def test_strategy3_backtest_service_marks_missing_local_ohlc_insufficient(tmp_path):

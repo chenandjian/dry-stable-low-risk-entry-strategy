@@ -57,6 +57,7 @@ class StrongPullbackSecondBreakoutEngine:
         code: str = "",
         name: str = "",
         market_data: list[dict] | None = None,
+        market_metadata: dict | None = None,
     ) -> Strategy3Evaluation:
         struct_error = validate_ohlc_structure(data)
         if struct_error:
@@ -76,7 +77,12 @@ class StrongPullbackSecondBreakoutEngine:
             )
 
         evaluation_date = strategy_data[-1]["date"]
-        ind = compute_indicators(strategy_data, self.config, market_data=market_data)
+        ind = compute_indicators(
+            strategy_data,
+            self.config,
+            market_data=market_data,
+            market_metadata=market_metadata,
+        )
 
         reject_reasons: list[str] = []
         score_reasons: list[str] = []
