@@ -100,7 +100,7 @@ scheduler:
   webhook_url: null
   serial_dual_scan:
     enabled: true
-    cron: 20 15 * * 1-5
+    cron: 34 16 * * 1-5
     strategy1_failed_retry_rounds: 3
 strategy2:
   enabled: true
