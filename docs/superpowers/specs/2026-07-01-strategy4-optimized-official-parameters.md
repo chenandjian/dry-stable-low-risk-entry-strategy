@@ -52,6 +52,7 @@ strategy4:
 
 - `daily_ohlc`：约 245 万行，4998 只股票，覆盖 2024-03-25 至 2026-07-01。
 - `market_index_ohlc`：3600 行，覆盖上证、深成指、创业板指、科创50，至 2026-06-30。
+- `topic_index_ohlc`：0 行；当前没有行业/题材指数历史缓存，按 `UNOBSERVED_TOPIC_INDEX` 处理。
 - `strategy4_hot_topics`：135 行，但全部来自 2026-07-01 当天。
 - `strategy4_leaders`：116 行，但全部来自 2026-07-01 当天。
 - `strategy4_candidates`：0 行。
@@ -74,8 +75,11 @@ strategy4:
 | 实验 | 主要变化 | 结果 |
 |---|---|---|
 | baseline | 当前默认参数 | 0 机会 |
+| top15 | 热点正式 Top N 8→15 | 0 机会 |
 | hot80_leader80 | 热点分 85→80，龙头分 88→80 | 0 机会 |
 | hot75_leader75 | 热点分 85→75，龙头分 88→75 | 0 机会 |
+| first_wave_20_30 | 第一波 10日涨幅 25%→20%，20日涨幅 35%→30% | 0 机会 |
+| locked_attention12 | 锁仓关注度实验阈值 18→12 | 0 机会 |
 | rr18_risk20 | RR 2.0→1.8，风险上限 15%→20% | 0 机会 |
 | pullback_05_30 | 回踩区间 8%-25% → 5%-30% | 0 机会 |
 
@@ -124,6 +128,7 @@ strategy4:
 - 不使用未来热点快照。
 - 不用当前热点倒推历史。
 - 缺少历史题材快照时标记 `UNOBSERVED_TOPIC_SNAPSHOT`。
+- 缺少行业/题材指数历史缓存时标记 `UNOBSERVED_TOPIC_INDEX`，不伪造板块指数走势。
 - 指数数据只截断到评估日及之前。
 - 执行模型使用 `NEXT_OPEN`。
 - 次日一字涨停不可成交时标记 `NO_ENTRY_LIMIT_UP_UNBUYABLE`。

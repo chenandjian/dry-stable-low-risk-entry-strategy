@@ -450,6 +450,7 @@ def _render_report(
         f"- 数据库：`{db_path}`",
         f"- daily_ohlc：{coverage['daily_rows']} 行，{coverage['daily_stocks']} 只，{coverage['daily_min']} 至 {coverage['daily_max']}",
         f"- market_index_ohlc：{coverage['index_rows']} 行，{coverage['index_min']} 至 {coverage['index_max']}",
+        f"- topic_index_ohlc：{coverage['topic_index_rows']} 行（{coverage['topic_index_note']}）",
         f"- strategy4_hot_topics：{coverage['topic_rows']} 行，{coverage['topic_min']} 至 {coverage['topic_max']}",
         f"- strategy4_leaders：{coverage['leader_rows']} 行",
         "",
@@ -476,11 +477,13 @@ def _render_report(
         "## 结论",
         "",
         "当前本地库仅存在 2026-07-01 当天的策略4热点/龙头快照，且这些快照没有产生可交易二波候选。",
+        "行业/题材指数历史缓存当前不可观察，报告按 `UNOBSERVED_TOPIC_INDEX` 处理，不使用当前题材指数倒推历史。",
         "因此本次只能验证回测框架、不可观察标记和参数实验流程；证据不足以把任何参数组升级为生产正式推荐参数。",
         "",
         "## 失效场景",
         "",
         "- 缺少历史热点题材快照时，回测日标记为 `UNOBSERVED_TOPIC_SNAPSHOT`。",
+        "- 缺少行业/题材指数历史缓存时，报告标记为 `UNOBSERVED_TOPIC_INDEX`，不伪造板块指数走势。",
         "- 次日一字涨停不可成交时，机会标记为 `NO_ENTRY_LIMIT_UP_UNBUYABLE`。",
         "- 次日 T 字涨停或开盘涨停回封时，机会标记为 `NO_ENTRY_OPEN_LIMIT_UNOBSERVED`，不假设能按开盘价成交。",
         "- 历史快照未覆盖完整热点周期时，参数实验可能只反映单日市场状态。",
@@ -505,6 +508,12 @@ def _coverage(db_path: str) -> dict:
         "SELECT COUNT(*) rows, MIN(snapshot_time) min_date, MAX(snapshot_time) max_date FROM strategy4_hot_topics"
     ).fetchone()
     leaders = con.execute("SELECT COUNT(*) rows FROM strategy4_leaders").fetchone()
+    topic_index_rows = 0
+    topic_index_note = "UNOBSERVED_TOPIC_INDEX: no topic/industry index history table found"
+    if _table_exists(con, "topic_index_ohlc"):
+        topic_index = con.execute("SELECT COUNT(*) rows FROM topic_index_ohlc").fetchone()
+        topic_index_rows = topic_index["rows"]
+        topic_index_note = "observable" if topic_index_rows else "UNOBSERVED_TOPIC_INDEX: empty topic index cache"
     return {
         "daily_rows": daily["rows"],
         "daily_stocks": daily["stocks"],
@@ -517,14 +526,26 @@ def _coverage(db_path: str) -> dict:
         "topic_min": topics["min_date"],
         "topic_max": topics["max_date"],
         "leader_rows": leaders["rows"],
+        "topic_index_rows": topic_index_rows,
+        "topic_index_note": topic_index_note,
     }
+
+
+def _table_exists(con: sqlite3.Connection, table_name: str) -> bool:
+    return bool(con.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
+        (table_name,),
+    ).fetchone())
 
 
 def _default_experiments() -> list[dict]:
     return [
         {"name": "baseline"},
+        {"name": "top15", "hot_topic_top_n": 15},
         {"name": "hot80_leader80", "min_hot_topic_score": 80, "min_leader_strength_score": 80},
         {"name": "hot75_leader75", "min_hot_topic_score": 75, "min_leader_strength_score": 75},
+        {"name": "first_wave_20_30", "min_first_wave_return_10d": 0.20, "min_first_wave_return_20d": 0.30},
+        {"name": "locked_attention12", "min_locked_attention_score": 12},
         {"name": "rr18_risk20", "min_reward_risk_ratio": 1.8, "max_risk_ratio": 0.20},
         {"name": "pullback_05_30", "pullback_min_pct": 0.05, "pullback_max_pct": 0.30},
     ]
