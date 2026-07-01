@@ -55,6 +55,36 @@ def test_strategy4_execution_rejects_one_word_limit_up_entry(tmp_path):
     assert opp.entry_price == 0
 
 
+def test_strategy4_execution_rejects_t_limit_up_open_entry(tmp_path):
+    db_path = str(tmp_path / "test.db")
+    db.init_db(db_path)
+    rows = _bars_for_buyable_second_wave()
+    previous_close = rows[-1]["close"]
+    limit_price = round(previous_close * 1.20, 2)
+    rows.append({
+        "date": "2026-06-23",
+        "open": limit_price,
+        "high": limit_price,
+        "low": round(limit_price * 0.96, 2),
+        "close": limit_price,
+        "volume": 2_000_000,
+        "turnover": limit_price * 2_000_000,
+    })
+    db.save_ohlc("300750", rows)
+    _seed_strategy4_snapshot(db_path, task_id="s4-snap", date="2026-06-20", code="300750")
+
+    result = run_strategy4_snapshot_backtest(
+        db_path=db_path,
+        start_date="2026-06-20",
+        end_date="2026-06-20",
+        config_snapshot={"strategy4": {"min_leader_strength_score": 60}},
+    )
+
+    opp = result.opportunities[0]
+    assert opp.exit_reason == "NO_ENTRY_OPEN_LIMIT_UNOBSERVED"
+    assert opp.entry_price == 0
+
+
 def test_strategy4_parameter_experiments_filter_observed_snapshots_only(tmp_path):
     db_path = str(tmp_path / "test.db")
     db.init_db(db_path)

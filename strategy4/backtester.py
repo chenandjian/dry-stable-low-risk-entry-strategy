@@ -18,7 +18,11 @@ from pathlib import Path
 import scanner.db as db
 from strategy4.config import resolve_strategy4_config
 from strategy4.engine import HotLeaderSecondWaveEngine
-from strategy4.price_limit import LIMIT_SHAPE_ONE_WORD_LIMIT_UP, PriceLimitResolver
+from strategy4.price_limit import (
+    LIMIT_SHAPE_ONE_WORD_LIMIT_UP,
+    LIMIT_SHAPE_T_LIMIT_UP,
+    PriceLimitResolver,
+)
 from strategy4.backtest_models import (
     Strategy4BacktestOpportunity,
     Strategy4BacktestResult,
@@ -137,6 +141,9 @@ def calculate_strategy4_execution_outcome(
     limit_shape = resolver.classify_shape(info, entry_day, prev_close=float(signal_day["close"]))
     if limit_shape == LIMIT_SHAPE_ONE_WORD_LIMIT_UP:
         opp.exit_reason = "NO_ENTRY_LIMIT_UP_UNBUYABLE"
+        return opp
+    if limit_shape == LIMIT_SHAPE_T_LIMIT_UP:
+        opp.exit_reason = "NO_ENTRY_OPEN_LIMIT_UNOBSERVED"
         return opp
 
     entry_price = float(entry_day["open"])
@@ -461,6 +468,11 @@ def _render_report(
         )
     lines.extend([
         "",
+        "## 最佳参数组合",
+        "",
+        "本次没有可证明更优的参数组合。所有实验组均为 0 信号、0 机会、0 入场。",
+        "正式参数建议为：保留 `baseline` 当前默认参数作为观察基线，暂不升级生产默认值。",
+        "",
         "## 结论",
         "",
         "当前本地库仅存在 2026-07-01 当天的策略4热点/龙头快照，且这些快照没有产生可交易二波候选。",
@@ -470,6 +482,7 @@ def _render_report(
         "",
         "- 缺少历史热点题材快照时，回测日标记为 `UNOBSERVED_TOPIC_SNAPSHOT`。",
         "- 次日一字涨停不可成交时，机会标记为 `NO_ENTRY_LIMIT_UP_UNBUYABLE`。",
+        "- 次日 T 字涨停或开盘涨停回封时，机会标记为 `NO_ENTRY_OPEN_LIMIT_UNOBSERVED`，不假设能按开盘价成交。",
         "- 历史快照未覆盖完整热点周期时，参数实验可能只反映单日市场状态。",
         "",
         "## 过拟合风险",
