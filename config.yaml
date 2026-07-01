@@ -122,6 +122,9 @@ strategy3:
   candidate_min_score: 75
   core_min_score: 85
   max_risk_ratio: 0.08
+  trade_candidate_min_score: 88
+  trade_max_risk_ratio: 0.04
+  trade_max_pullback_pct: 0.16
   max_pullback_from_high: 0.25
   min_pullback_from_high: 0.12
   max_recent_range_5: 0.12

@@ -16,7 +16,7 @@ DEFAULT_STRATEGY3_CONFIG = {
     "max_risk_ratio": 0.08,
     "trade_candidate_min_score": 88,
     "trade_max_risk_ratio": 0.04,
-    "trade_max_pullback_pct": 0.15,
+    "trade_max_pullback_pct": 0.16,
     "trade_market_return_60_min": 0.0,
     "trade_market_return_60_max": 0.05,
     "trade_allow_wait_breakout": False,

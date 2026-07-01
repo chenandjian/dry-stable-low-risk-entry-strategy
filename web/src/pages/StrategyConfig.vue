@@ -409,6 +409,28 @@
         </div>
       </div>
 
+      <h4 class="sub-group-title">正式候选过滤</h4>
+      <div class="param-grid">
+        <div class="param">
+          <label title="总分达到此值后才进入策略3正式候选；低于此值仅保留为诊断或审计">正式候选分数</label>
+          <input data-test="strategy3-trade-score" type="number"
+            v-model.number="config.strategy3.trade_candidate_min_score" @input="markDirty" min="0" max="100" />
+          <span class="default">优化后 88 · ≥ 候选最低分</span>
+        </div>
+        <div class="param">
+          <label title="正式候选风险比上限，风险比 = (当前价 - 止损价) / 当前价">正式最大风险 <span class="unit">%</span></label>
+          <input data-test="strategy3-trade-risk" type="range" min="1" max="15" step="0.5"
+            v-model.number="strategy3TradeMaxRiskPct" @input="markDirty" />
+          <div class="range-val">{{ strategy3TradeMaxRiskPct }}%</div>
+        </div>
+        <div class="param">
+          <label title="正式候选允许的最大回踩幅度；本轮回测采用 16%，避免 16.2% 以上连续亏损扩张">正式最大回撤 <span class="unit">%</span></label>
+          <input data-test="strategy3-trade-pullback" type="range" min="10" max="50" step="0.5"
+            v-model.number="strategy3TradeMaxPullbackPct" @input="markDirty" />
+          <div class="range-val">{{ strategy3TradeMaxPullbackPct }}%</div>
+        </div>
+      </div>
+
       <div class="info-msg strategy3-info">
         ⓘ 日线拉取天数使用全局配置 ({{ config.liquidity?.min_listing_days || '--' }} 天) · 低优先级观察只进入审计/诊断，不进入正式候选列表
       </div>
@@ -443,6 +465,9 @@ const defaultStrategy3Config = {
   candidate_min_score: 75,
   core_min_score: 85,
   max_risk_ratio: 0.08,
+  trade_candidate_min_score: 88,
+  trade_max_risk_ratio: 0.04,
+  trade_max_pullback_pct: 0.16,
   max_pullback_from_high: 0.25,
   min_pullback_from_high: 0.12,
   max_recent_range_5: 0.12,
@@ -544,6 +569,14 @@ const stopLossBufferPct = computed({
 const strategy3MaxRiskPct = computed({
   get: () => Number(((config.strategy3?.max_risk_ratio ?? 0.08) * 100).toFixed(1)),
   set: (v) => { ensureStrategy3Config(); config.strategy3.max_risk_ratio = v / 100 },
+})
+const strategy3TradeMaxRiskPct = computed({
+  get: () => Number(((config.strategy3?.trade_max_risk_ratio ?? 0.04) * 100).toFixed(1)),
+  set: (v) => { ensureStrategy3Config(); config.strategy3.trade_max_risk_ratio = v / 100 },
+})
+const strategy3TradeMaxPullbackPct = computed({
+  get: () => Number(((config.strategy3?.trade_max_pullback_pct ?? 0.16) * 100).toFixed(1)),
+  set: (v) => { ensureStrategy3Config(); config.strategy3.trade_max_pullback_pct = v / 100 },
 })
 const strategy3MinPullbackPct = computed({
   get: () => Number(((config.strategy3?.min_pullback_from_high ?? 0.12) * 100).toFixed(1)),
@@ -748,8 +781,11 @@ function validate() {
   if (s3.core_min_score < s3.candidate_min_score) errors.push('策略3: 核心候选最低分不能低于候选最低分')
   if (s3.core_min_score < 0 || s3.core_min_score > 100) errors.push('策略3: 核心候选最低分需在 0-100')
   if (s3.max_risk_ratio <= 0 || s3.max_risk_ratio > 0.5) errors.push('策略3: 最大风险比需在 (0, 50%] 之间')
+  if (s3.trade_candidate_min_score < s3.candidate_min_score || s3.trade_candidate_min_score > 100) errors.push('策略3: 正式候选分数需 ≥ 候选最低分且 ≤ 100')
+  if (s3.trade_max_risk_ratio <= 0 || s3.trade_max_risk_ratio > s3.max_risk_ratio) errors.push('策略3: 正式最大风险需在 (0, 最大风险比] 之间')
   if (s3.min_pullback_from_high < 0 || s3.min_pullback_from_high > 0.5) errors.push('策略3: 最小回踩幅度需在 0-50%')
   if (s3.max_pullback_from_high < s3.min_pullback_from_high || s3.max_pullback_from_high > 0.8) errors.push('策略3: 最大回踩幅度需大于最小回踩且不超过 80%')
+  if (s3.trade_max_pullback_pct < s3.min_pullback_from_high || s3.trade_max_pullback_pct > s3.max_pullback_from_high) errors.push('策略3: 正式最大回撤需在最小回踩和最大回踩之间')
   if (s3.max_recent_range_5 <= 0 || s3.max_recent_range_5 > 0.5) errors.push('策略3: 最大5日振幅需在 (0, 50%] 之间')
   if (s3.max_recent_surge_3 <= 0 || s3.max_recent_surge_3 > 0.5) errors.push('策略3: 最大3日涨幅需在 (0, 50%] 之间')
   if (s3.min_relative_strength_60 < -0.5 || s3.min_relative_strength_60 > 0.5) errors.push('策略3: 最低60日相对强度需在 -50%-50%')

@@ -223,10 +223,12 @@ def run_strategy3_stock_backtest(
     actual_eval_start = None
     actual_eval_end = None
     observation_data_end = None
+    start_bound = start_date or "0000-00-00"
+    end_bound = end_date or "9999-12-31"
 
     for i in range(min_required, len(ohlc_data) + 1):
         eval_day = ohlc_data[i - 1]["date"]
-        if eval_day < start_date or eval_day > end_date:
+        if eval_day < start_bound or eval_day > end_bound:
             continue
         eval_days += 1
         actual_eval_start = actual_eval_start or eval_day

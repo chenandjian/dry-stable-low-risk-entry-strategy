@@ -19,7 +19,7 @@ def test_resolve_strategy3_config_defaults():
     assert cfg["max_risk_ratio"] == 0.08
     assert cfg["trade_candidate_min_score"] == 88
     assert cfg["trade_max_risk_ratio"] == 0.04
-    assert cfg["trade_max_pullback_pct"] == 0.15
+    assert cfg["trade_max_pullback_pct"] == 0.16
     assert cfg["trade_market_return_60_min"] == 0.0
     assert cfg["trade_market_return_60_max"] == 0.05
     assert cfg["trade_allow_wait_breakout"] is False
@@ -64,6 +64,20 @@ def test_resolve_strategy3_config_accepts_nested_overrides():
     assert cfg["minimum_required_days"] == 200
     assert cfg["candidate_min_score"] == 78
     assert cfg["core_min_score"] == 90
+
+
+def test_resolve_strategy3_config_accepts_formal_trade_filter_overrides():
+    cfg = resolve_strategy3_config({
+        "liquidity": {"min_listing_days": 500},
+        "strategy3": {
+            "trade_candidate_min_score": 86,
+            "trade_max_risk_ratio": 0.05,
+            "trade_max_pullback_pct": 0.18,
+        },
+    })
+    assert cfg["trade_candidate_min_score"] == 86
+    assert cfg["trade_max_risk_ratio"] == 0.05
+    assert cfg["trade_max_pullback_pct"] == 0.18
 
 
 def test_rejects_window_larger_than_listing_days():

@@ -251,6 +251,41 @@ def test_strategy3_stock_backtest_does_not_pass_future_rows_to_engine():
     assert result["raw_signals_count"] == 3
 
 
+def test_strategy3_stock_backtest_empty_date_bounds_evaluates_full_available_range():
+    rows = [_row(f"2026-01-0{i}", close=10.0 + i * 0.1) for i in range(1, 8)]
+    seen_eval_dates = []
+
+    class FakeEngine:
+        def __init__(self, config):
+            pass
+
+        def evaluate_at(self, history, *, code="", name="", market_data=None, market_metadata=None):
+            seen_eval_dates.append(history[-1]["date"])
+            return _passed_eval(code=code, name=name, evaluation_date=history[-1]["date"])
+
+    result = run_strategy3_stock_backtest(
+        "000001",
+        "样本",
+        rows,
+        {
+            "strategy3": {"minimum_required_days": 3, "strategy_window_days": 4},
+            "liquidity": {"enabled": False, "min_listing_days": 4},
+        },
+        "",
+        "",
+        engine_factory=FakeEngine,
+    )
+
+    assert seen_eval_dates == [
+        "2026-01-03",
+        "2026-01-04",
+        "2026-01-05",
+        "2026-01-06",
+        "2026-01-07",
+    ]
+    assert result["raw_signals_count"] == 5
+
+
 def test_strategy3_stock_backtest_selects_market_index_by_stock_code_without_future_rows():
     rows = [_row(f"2026-01-0{i}", close=10.0 + i * 0.1) for i in range(1, 8)]
     sh_rows = [_row(f"2026-01-0{i}", close=100.0 + i) for i in range(1, 8)]

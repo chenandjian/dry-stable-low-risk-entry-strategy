@@ -349,7 +349,8 @@ def test_data_driven_entry_filter_rejects_low_score_high_risk_and_wait_breakout(
         cfg,
         pullback_pct=0.13,
     ) == ["WAIT_BREAKOUT_NOT_ACTIONABLE"]
-    assert _data_driven_entry_rejects(88, risk, quality, cfg, pullback_pct=0.151) == [
+    assert _data_driven_entry_rejects(88, risk, quality, cfg, pullback_pct=0.151) == []
+    assert _data_driven_entry_rejects(88, risk, quality, cfg, pullback_pct=0.161) == [
         "TRADE_PULLBACK_ABOVE_DATA_FILTER"
     ]
     assert _data_driven_entry_rejects(
