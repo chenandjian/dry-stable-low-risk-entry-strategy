@@ -1,0 +1,1 @@
+STRATEGY4_STRATEGY_ENGINE_VERSION = "strategy4-engine-v1"

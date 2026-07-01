@@ -22,6 +22,8 @@ from strategy2.scanner import scan_strategy2_all
 from strategy2.validation import resolve_strategy2_config
 from strategy3.scanner import STRATEGY3_TYPE, scan_strategy3_all
 from strategy3.validation import resolve_strategy3_config
+from strategy4.scanner import STRATEGY4_TYPE, scan_strategy4_all
+from strategy4.config import resolve_strategy4_config
 from scanner.strategy_engine import (
     CupHandleStrategyEngine,
     resolve_strategy_windows,
@@ -1735,6 +1737,14 @@ async def update_config(data: dict):
                 {"status": "error", "message": f"Invalid strategy2 config: {e}"},
                 status_code=400,
             )
+    if config.get("strategy4", {}).get("enabled", True):
+        try:
+            resolve_strategy4_config(config)
+        except ValueError as e:
+            return JSONResponse(
+                {"status": "error", "message": f"Invalid strategy4 config: {e}"},
+                status_code=400,
+            )
 
     # Write back to config.yaml
     with open("config.yaml", "w", encoding="utf-8") as f:
@@ -1774,6 +1784,132 @@ async def scan_ws(websocket: WebSocket):
             })
     except WebSocketDisconnect:
         pass
+
+
+# ====== Strategy4 API ======
+
+@app.post("/api/strategy4/scans")
+async def start_strategy4_scan():
+    """启动策略4热点龙头二波扫描。"""
+    config = _ensure_db_initialized_from_config()
+    strategy4_cfg = config.get("strategy4", {})
+    if not strategy4_cfg.get("enabled", True):
+        return JSONResponse(
+            {"error": "STRATEGY4_DISABLED", "message": "策略4未启用"},
+            status_code=400,
+        )
+    try:
+        resolve_strategy4_config(config)
+    except ValueError as exc:
+        return JSONResponse(
+            {"error": "INVALID_CONFIG", "message": f"策略4配置无效: {exc}"},
+            status_code=400,
+        )
+
+    conflict = _scan_conflict_response()
+    if conflict:
+        return conflict
+
+    started = _now()
+    started_at = started.strftime("%Y-%m-%d %H:%M:%S")
+    task_id = f"s4-{started.strftime('%Y%m%d-%H%M%S')}"
+    db.create_scan_task(task_id, started_at, total_stocks=0, retry_mode="full", strategy_type=STRATEGY4_TYPE)
+    _set_running(task_id, "full", strategy_type=STRATEGY4_TYPE)
+    _running["started_at"] = started_at
+    _running["stats"] = {"total_stocks": 0, "current_code": "--", "current_name": "策略4热点题材识别中…"}
+
+    try:
+        result = scan_strategy4_all(config, task_id=task_id)
+        stats = result.get("stats", {})
+        _running["stats"] = stats
+        finished_at = _now().strftime("%Y-%m-%d %H:%M:%S")
+        if stats.get("error"):
+            conn = db.get_conn()
+            conn.execute(
+                "UPDATE scan_tasks SET status='failed', finished_at=?, error=? WHERE id=?",
+                (finished_at, stats.get("error"), task_id),
+            )
+            conn.commit()
+        else:
+            db.finish_scan_task(
+                task_id,
+                finished_at=finished_at,
+                candidates_count=stats.get("candidates_found", 0),
+                elapsed_seconds=stats.get("elapsed_seconds", 0),
+                scanned=stats.get("scanned", 0),
+                skipped=stats.get("skipped", 0),
+            )
+        db.refresh_scan_task_counts(task_id)
+    except Exception as exc:
+        logger.exception("Strategy4 scan failed")
+        conn = db.get_conn()
+        conn.execute(
+            "UPDATE scan_tasks SET status='failed', finished_at=?, error=? WHERE id=?",
+            (_now().strftime("%Y-%m-%d %H:%M:%S"), str(exc), task_id),
+        )
+        conn.commit()
+        return JSONResponse({"error": "STRATEGY4_SCAN_FAILED", "message": str(exc)}, status_code=500)
+    finally:
+        _clear_running()
+
+    return {"ok": True, "taskId": task_id, "status": "completed", "strategyType": STRATEGY4_TYPE}
+
+
+@app.get("/api/strategy4/scans/status")
+async def strategy4_scan_status():
+    if _running["running"] and _running.get("strategy_type") == STRATEGY4_TYPE:
+        return {
+            "running": True,
+            "taskId": _running.get("task_id"),
+            "strategyType": STRATEGY4_TYPE,
+            "stats": _running.get("stats", {}),
+        }
+    conn = db.get_conn()
+    row = conn.execute(
+        "SELECT id FROM scan_tasks WHERE status='running' AND strategy_type=? ORDER BY started_at DESC LIMIT 1",
+        (STRATEGY4_TYPE,),
+    ).fetchone()
+    return {"running": bool(row), "taskId": row[0] if row else None, "strategyType": STRATEGY4_TYPE}
+
+
+@app.get("/api/strategy4/tasks")
+async def strategy4_tasks():
+    return {"tasks": db.get_scan_tasks(strategy_type=STRATEGY4_TYPE)}
+
+
+@app.get("/api/strategy4/tasks/{task_id}/topics")
+async def strategy4_topics(task_id: str):
+    _, err = _require_task_strategy(task_id, STRATEGY4_TYPE)
+    if err:
+        return err
+    return {"taskId": task_id, "topics": db.get_strategy4_hot_topics(task_id)}
+
+
+@app.get("/api/strategy4/tasks/{task_id}/leaders")
+async def strategy4_leaders(task_id: str):
+    _, err = _require_task_strategy(task_id, STRATEGY4_TYPE)
+    if err:
+        return err
+    return {"taskId": task_id, "leaders": db.get_strategy4_leaders(task_id)}
+
+
+@app.get("/api/strategy4/tasks/{task_id}/candidates")
+async def strategy4_candidates(task_id: str):
+    _, err = _require_task_strategy(task_id, STRATEGY4_TYPE)
+    if err:
+        return err
+    return {"taskId": task_id, "candidates": db.get_strategy4_candidates(task_id)}
+
+
+@app.get("/api/strategy4/tasks/{task_id}/candidates/{code}")
+async def strategy4_candidate_detail(task_id: str, code: str):
+    _, err = _require_task_strategy(task_id, STRATEGY4_TYPE)
+    if err:
+        return err
+    candidate = db.get_strategy4_candidate(code, task_id=task_id)
+    if not candidate:
+        return JSONResponse({"error": "NOT_FOUND", "taskId": task_id, "code": code}, status_code=404)
+    return {"taskId": task_id, "candidate": candidate}
 
 
 # ====== Strategy2 API ======

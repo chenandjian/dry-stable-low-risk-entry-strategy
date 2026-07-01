@@ -201,6 +201,44 @@ export function useApi() {
     return res.json()
   }
 
+  // Strategy4 API
+  async function startStrategy4Scan() {
+    const res = await fetch(`${API_BASE}/strategy4/scans`, { method: 'POST' })
+    const body = await res.json()
+    return { ...body, ok: res.ok, statusCode: res.status }
+  }
+
+  async function getStrategy4ScanStatus() {
+    const res = await fetch(`${API_BASE}/strategy4/scans/status`)
+    return res.json()
+  }
+
+  async function getStrategy4Tasks() {
+    const res = await fetch(`${API_BASE}/strategy4/tasks`)
+    return res.json()
+  }
+
+  async function getStrategy4Topics(taskId) {
+    const res = await fetch(`${API_BASE}/strategy4/tasks/${encodeURIComponent(taskId)}/topics`)
+    return res.json().catch(() => ({ topics: [] }))
+  }
+
+  async function getStrategy4Leaders(taskId) {
+    const res = await fetch(`${API_BASE}/strategy4/tasks/${encodeURIComponent(taskId)}/leaders`)
+    return res.json().catch(() => ({ leaders: [] }))
+  }
+
+  async function getStrategy4Candidates(taskId) {
+    const res = await fetch(`${API_BASE}/strategy4/tasks/${encodeURIComponent(taskId)}/candidates`)
+    return res.json().catch(() => ({ candidates: [] }))
+  }
+
+  async function getStrategy4Candidate(taskId, code) {
+    const res = await fetch(`${API_BASE}/strategy4/tasks/${encodeURIComponent(taskId)}/candidates/${encodeURIComponent(code)}`)
+    if (!res.ok) return null
+    return res.json()
+  }
+
   // Strategy2 Backtest API
   async function startStrategy2Backtest(payload) {
     const res = await fetch(`${API_BASE}/strategy2/backtests`, {
@@ -326,6 +364,9 @@ export function useApi() {
     startStrategy3Scan, getStrategy3ScanStatus, getStrategy3Tasks,
     retryStrategy3FailedStocks, reEvaluateStrategy3Task,
     getStrategy3Candidates, getStrategy3Candidate,
+    startStrategy4Scan, getStrategy4ScanStatus, getStrategy4Tasks,
+    getStrategy4Topics, getStrategy4Leaders, getStrategy4Candidates,
+    getStrategy4Candidate,
     startStrategy2Backtest, getStrategy2BacktestStatus,
     getStrategy2BacktestTasks, getStrategy2BacktestTask,
     getStrategy2BacktestOpportunities, getStrategy2BacktestInsufficientStocks,

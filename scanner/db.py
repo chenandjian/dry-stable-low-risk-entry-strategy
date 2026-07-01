@@ -136,6 +136,7 @@ def init_db(path: str = "data/cuphandle.db"):
         conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_candidates_task_code ON candidates(task_id, code)")
         _ensure_strategy2_candidates_table(conn)
         _ensure_strategy3_candidates_table(conn)
+        _ensure_strategy4_tables(conn)
         _ensure_strategy2_backtest_tables(conn)
         _ensure_strategy3_backtest_tables(conn)
         _ensure_strategy1_backtest_tables(conn)
@@ -1389,6 +1390,114 @@ def _ensure_strategy3_candidates_table(conn: sqlite3.Connection):
     _ensure_column(conn, "strategy3_candidates", "invalid_conditions", "TEXT")
 
 
+def _ensure_strategy4_tables(conn: sqlite3.Connection):
+    """Create strategy4 snapshot/candidate tables if not exists."""
+    conn.execute('''
+        CREATE TABLE IF NOT EXISTS strategy4_hot_topics (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            task_id TEXT NOT NULL,
+            topic_id TEXT NOT NULL,
+            topic_name TEXT NOT NULL,
+            topic_type TEXT NOT NULL,
+            source TEXT NOT NULL,
+            snapshot_time TEXT NOT NULL,
+            status TEXT NOT NULL,
+            hot_topic_score REAL NOT NULL,
+            price_strength_score REAL DEFAULT 0,
+            amount_strength_score REAL DEFAULT 0,
+            fund_flow_score REAL DEFAULT 0,
+            breadth_score REAL DEFAULT 0,
+            leader_limit_score REAL DEFAULT 0,
+            breakout_score REAL DEFAULT 0,
+            signal_count INTEGER DEFAULT 0,
+            noise_reason TEXT,
+            leading_stock_code TEXT,
+            leading_stock_name TEXT,
+            raw_snapshot TEXT,
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+        )
+    ''')
+    conn.execute('''
+        CREATE TABLE IF NOT EXISTS strategy4_leaders (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            task_id TEXT NOT NULL,
+            topic_id TEXT NOT NULL,
+            topic_name TEXT NOT NULL,
+            code TEXT NOT NULL,
+            name TEXT NOT NULL,
+            leader_type TEXT NOT NULL,
+            leader_strength_score REAL NOT NULL,
+            tradability_score REAL NOT NULL,
+            price_limit_rule TEXT,
+            limit_shape TEXT,
+            limit_pct REAL,
+            return_1d REAL,
+            return_5d REAL,
+            return_10d REAL,
+            return_20d REAL,
+            amount_1d REAL,
+            avg_amount_5d REAL,
+            avg_amount_10d REAL,
+            first_wave_max_amount REAL,
+            last_non_limit_amount REAL,
+            consecutive_limit_count INTEGER DEFAULT 0,
+            relative_strength_vs_topic REAL,
+            membership_source TEXT,
+            status TEXT NOT NULL,
+            raw_snapshot TEXT,
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+        )
+    ''')
+    conn.execute('''
+        CREATE TABLE IF NOT EXISTS strategy4_candidates (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            task_id TEXT NOT NULL,
+            topic_id TEXT NOT NULL,
+            topic_name TEXT NOT NULL,
+            code TEXT NOT NULL,
+            name TEXT NOT NULL,
+            evaluation_date TEXT NOT NULL,
+            status TEXT NOT NULL,
+            strategy4_score REAL NOT NULL,
+            hot_topic_score REAL NOT NULL,
+            leader_strength_score REAL NOT NULL,
+            tradability_score REAL NOT NULL,
+            first_wave_score REAL DEFAULT 0,
+            pullback_score REAL DEFAULT 0,
+            second_wave_score REAL DEFAULT 0,
+            reward_risk_score REAL DEFAULT 0,
+            leader_type TEXT,
+            price_limit_rule TEXT,
+            limit_shape TEXT,
+            first_wave_return REAL,
+            pullback_pct REAL,
+            pullback_days INTEGER,
+            current_close REAL,
+            support_price REAL,
+            stop_loss REAL,
+            target_price REAL,
+            risk_ratio REAL,
+            reward_risk_ratio REAL,
+            entry_note TEXT,
+            reject_reason TEXT,
+            evaluation_snapshot TEXT,
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+            UNIQUE(task_id, code, topic_id)
+        )
+    ''')
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_strategy4_hot_topics_task ON strategy4_hot_topics(task_id)")
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_strategy4_hot_topics_score "
+        "ON strategy4_hot_topics(task_id, hot_topic_score DESC)"
+    )
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_strategy4_leaders_task ON strategy4_leaders(task_id)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_strategy4_leaders_code ON strategy4_leaders(code)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_strategy4_candidates_task ON strategy4_candidates(task_id)")
+
+
 def _ensure_column(conn: sqlite3.Connection, table: str, column: str, col_type: str):
     """Compatible add-column-if-not-exists helper."""
     existing = [d[1] for d in conn.execute(f"PRAGMA table_info({table})").fetchall()]
@@ -1716,6 +1825,215 @@ def _deserialize_strategy3_candidate(row: dict) -> dict:
                 row[field] = []
         elif not value:
             row[field] = []
+    return row
+
+
+def replace_strategy4_hot_topics(task_id: str, topics: list[dict]):
+    """Replace Strategy4 hot-topic snapshots for one task."""
+    conn = get_conn()
+    columns = [
+        "task_id", "topic_id", "topic_name", "topic_type", "source", "snapshot_time",
+        "status", "hot_topic_score", "price_strength_score", "amount_strength_score",
+        "fund_flow_score", "breadth_score", "leader_limit_score", "breakout_score",
+        "signal_count", "noise_reason", "leading_stock_code", "leading_stock_name",
+        "raw_snapshot",
+    ]
+    with conn:
+        conn.execute("DELETE FROM strategy4_hot_topics WHERE task_id=?", (task_id,))
+        for item in topics:
+            values = [
+                task_id,
+                item.get("topic_id", ""),
+                item.get("topic_name", ""),
+                item.get("topic_type", ""),
+                item.get("source", ""),
+                item.get("snapshot_time", ""),
+                item.get("status", ""),
+                item.get("hot_topic_score", 0.0),
+                item.get("price_strength_score", 0.0),
+                item.get("amount_strength_score", 0.0),
+                item.get("fund_flow_score", 0.0),
+                item.get("breadth_score", 0.0),
+                item.get("leader_limit_score", 0.0),
+                item.get("breakout_score", 0.0),
+                item.get("signal_count", 0),
+                item.get("noise_reason", ""),
+                item.get("leading_stock_code", ""),
+                item.get("leading_stock_name", ""),
+                _json_any(item.get("raw_snapshot")),
+            ]
+            conn.execute(
+                f"INSERT INTO strategy4_hot_topics ({', '.join(columns)}) VALUES ({', '.join('?' for _ in columns)})",
+                values,
+            )
+
+
+def replace_strategy4_leaders(task_id: str, leaders: list[dict]):
+    """Replace Strategy4 leader snapshots for one task."""
+    conn = get_conn()
+    columns = [
+        "task_id", "topic_id", "topic_name", "code", "name", "leader_type",
+        "leader_strength_score", "tradability_score", "price_limit_rule", "limit_shape",
+        "limit_pct", "return_1d", "return_5d", "return_10d", "return_20d",
+        "amount_1d", "avg_amount_5d", "avg_amount_10d", "first_wave_max_amount",
+        "last_non_limit_amount", "consecutive_limit_count", "relative_strength_vs_topic",
+        "membership_source", "status", "raw_snapshot",
+    ]
+    with conn:
+        conn.execute("DELETE FROM strategy4_leaders WHERE task_id=?", (task_id,))
+        for item in leaders:
+            values = [
+                task_id,
+                item.get("topic_id", ""),
+                item.get("topic_name", ""),
+                item.get("code", ""),
+                item.get("name", ""),
+                item.get("leader_type", ""),
+                item.get("leader_strength_score", 0.0),
+                item.get("tradability_score", 0.0),
+                item.get("price_limit_rule", ""),
+                item.get("limit_shape", ""),
+                item.get("limit_pct"),
+                item.get("return_1d"),
+                item.get("return_5d"),
+                item.get("return_10d"),
+                item.get("return_20d"),
+                item.get("amount_1d"),
+                item.get("avg_amount_5d"),
+                item.get("avg_amount_10d"),
+                item.get("first_wave_max_amount"),
+                item.get("last_non_limit_amount"),
+                item.get("consecutive_limit_count", 0),
+                item.get("relative_strength_vs_topic"),
+                item.get("membership_source", ""),
+                item.get("status", ""),
+                _json_any(item.get("raw_snapshot")),
+            ]
+            conn.execute(
+                f"INSERT INTO strategy4_leaders ({', '.join(columns)}) VALUES ({', '.join('?' for _ in columns)})",
+                values,
+            )
+
+
+def upsert_strategy4_candidate(task_id: str, d: dict):
+    """Insert or update one Strategy4 candidate snapshot."""
+    conn = get_conn()
+    columns = [
+        "task_id", "topic_id", "topic_name", "code", "name", "evaluation_date",
+        "status", "strategy4_score", "hot_topic_score", "leader_strength_score",
+        "tradability_score", "first_wave_score", "pullback_score", "second_wave_score",
+        "reward_risk_score", "leader_type", "price_limit_rule", "limit_shape",
+        "first_wave_return", "pullback_pct", "pullback_days", "current_close",
+        "support_price", "stop_loss", "target_price", "risk_ratio",
+        "reward_risk_ratio", "entry_note", "reject_reason", "evaluation_snapshot",
+    ]
+    values = [
+        task_id,
+        d.get("topic_id", ""),
+        d.get("topic_name", ""),
+        d.get("code", ""),
+        d.get("name", ""),
+        d.get("evaluation_date", ""),
+        d.get("status", ""),
+        d.get("strategy4_score", 0.0),
+        d.get("hot_topic_score", 0.0),
+        d.get("leader_strength_score", 0.0),
+        d.get("tradability_score", 0.0),
+        d.get("first_wave_score", 0.0),
+        d.get("pullback_score", 0.0),
+        d.get("second_wave_score", 0.0),
+        d.get("reward_risk_score", 0.0),
+        d.get("leader_type", ""),
+        d.get("price_limit_rule", ""),
+        d.get("limit_shape", ""),
+        d.get("first_wave_return"),
+        d.get("pullback_pct"),
+        d.get("pullback_days"),
+        d.get("current_close"),
+        d.get("support_price"),
+        d.get("stop_loss"),
+        d.get("target_price"),
+        d.get("risk_ratio"),
+        d.get("reward_risk_ratio"),
+        d.get("entry_note", ""),
+        d.get("reject_reason", ""),
+        _json_any(d.get("evaluation_snapshot")),
+    ]
+    updates = ", ".join(
+        f"{c}=excluded.{c}" for c in columns if c not in ("task_id", "topic_id", "code")
+    )
+    conn.execute(
+        f"""INSERT INTO strategy4_candidates ({', '.join(columns)}) VALUES ({', '.join('?' for _ in columns)})
+            ON CONFLICT(task_id, code, topic_id) DO UPDATE SET {updates}, updated_at=datetime('now')""",
+        values,
+    )
+    conn.commit()
+
+
+def get_strategy4_hot_topics(task_id: str) -> list[dict]:
+    conn = get_conn()
+    rows = conn.execute(
+        "SELECT * FROM strategy4_hot_topics WHERE task_id=? ORDER BY hot_topic_score DESC, topic_name ASC",
+        (task_id,),
+    ).fetchall()
+    cols = [d[1] for d in conn.execute("PRAGMA table_info(strategy4_hot_topics)").fetchall()]
+    return [_deserialize_strategy4_row(dict(zip(cols, row))) for row in rows]
+
+
+def get_strategy4_leaders(task_id: str) -> list[dict]:
+    conn = get_conn()
+    rows = conn.execute(
+        "SELECT * FROM strategy4_leaders WHERE task_id=? ORDER BY leader_strength_score DESC, tradability_score DESC, code ASC",
+        (task_id,),
+    ).fetchall()
+    cols = [d[1] for d in conn.execute("PRAGMA table_info(strategy4_leaders)").fetchall()]
+    return [_deserialize_strategy4_row(dict(zip(cols, row))) for row in rows]
+
+
+def get_strategy4_candidates(task_id: str) -> list[dict]:
+    conn = get_conn()
+    rows = conn.execute(
+        "SELECT * FROM strategy4_candidates WHERE task_id=? ORDER BY strategy4_score DESC, reward_risk_ratio DESC, code ASC",
+        (task_id,),
+    ).fetchall()
+    cols = [d[1] for d in conn.execute("PRAGMA table_info(strategy4_candidates)").fetchall()]
+    return [_deserialize_strategy4_row(dict(zip(cols, row))) for row in rows]
+
+
+def get_strategy4_candidate(code: str, task_id: str = None) -> dict | None:
+    conn = get_conn()
+    if task_id:
+        row = conn.execute(
+            "SELECT * FROM strategy4_candidates WHERE code=? AND task_id=? ORDER BY id DESC LIMIT 1",
+            (code, task_id),
+        ).fetchone()
+    else:
+        row = conn.execute(
+            "SELECT * FROM strategy4_candidates WHERE code=? ORDER BY id DESC LIMIT 1",
+            (code,),
+        ).fetchone()
+    if not row:
+        return None
+    cols = [d[1] for d in conn.execute("PRAGMA table_info(strategy4_candidates)").fetchall()]
+    return _deserialize_strategy4_row(dict(zip(cols, row)))
+
+
+def _json_any(value):
+    if value is None or value == "":
+        return ""
+    return json.dumps(value, ensure_ascii=False)
+
+
+def _deserialize_strategy4_row(row: dict) -> dict:
+    for field in ("raw_snapshot", "evaluation_snapshot"):
+        value = row.get(field)
+        if isinstance(value, str) and value:
+            try:
+                row[field] = json.loads(value)
+            except (json.JSONDecodeError, TypeError):
+                row[field] = {}
+        elif not value:
+            row[field] = {}
     return row
 
 

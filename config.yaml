@@ -155,3 +155,27 @@ strategy3:
   support_big_down_return: -0.04
   support_big_down_volume_ratio: 1.3
   support_stop_buffer_pct: 0.01
+strategy4:
+  enabled: true
+  hot_topic_top_n: 8
+  watch_hot_topic_top_n: 15
+  min_hot_topic_score: 85
+  min_hot_topic_signal_count: 2
+  core_leaders_per_topic: 1
+  backup_leaders_per_topic: 2
+  max_total_leaders_per_topic: 3
+  min_leader_strength_score: 88
+  core_leader_strength_score: 93
+  first_wave_lookback_short: 10
+  first_wave_lookback_long: 20
+  min_first_wave_return_10d: 0.25
+  min_first_wave_return_20d: 0.35
+  min_strong_day_count_10d: 2
+  pullback_min_pct: 0.08
+  pullback_max_pct: 0.25
+  pullback_min_days: 2
+  pullback_max_days: 8
+  max_risk_ratio: 0.15
+  aggressive_max_risk_ratio: 0.20
+  min_reward_risk_ratio: 2.0
+  core_leader_min_reward_risk_ratio: 1.8
