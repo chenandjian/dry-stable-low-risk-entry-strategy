@@ -21,23 +21,38 @@ class TopicSourceService:
             raise TopicSourceError(f"AKSHARE_IMPORT_FAILED: {exc}") from exc
 
         sources = [
-            ("concept", "stock_board_concept_name_ths"),
-            ("industry", "stock_board_industry_name_ths"),
+            ("concept", "stock_board_concept_summary_ths", "stock_board_concept_name_ths"),
+            ("industry", "stock_board_industry_summary_ths", "stock_board_industry_name_ths"),
         ]
         topics: list[dict] = []
         errors: list[str] = []
-        for topic_type, func_name in sources:
-            func = getattr(ak, func_name, None)
-            if func is None:
-                errors.append(f"{func_name}: missing")
+        for topic_type, summary_func_name, name_func_name in sources:
+            loaded_summary = False
+            summary_func = getattr(ak, summary_func_name, None)
+            if summary_func is None:
+                errors.append(f"{summary_func_name}: missing")
+            else:
+                try:
+                    rows = _rows_from_frame(summary_func())
+                    for idx, row in enumerate(rows):
+                        topics.append(_normalize_ths_row(row, topic_type, idx))
+                    loaded_summary = bool(rows)
+                except Exception as exc:
+                    errors.append(f"{summary_func_name}: {exc}")
+
+            if loaded_summary:
+                continue
+
+            name_func = getattr(ak, name_func_name, None)
+            if name_func is None:
+                errors.append(f"{name_func_name}: missing")
                 continue
             try:
-                frame = func()
-                rows = frame.to_dict("records") if hasattr(frame, "to_dict") else list(frame or [])
+                rows = _rows_from_frame(name_func())
                 for idx, row in enumerate(rows):
                     topics.append(_normalize_ths_row(row, topic_type, idx))
             except Exception as exc:
-                errors.append(f"{func_name}: {exc}")
+                errors.append(f"{name_func_name}: {exc}")
 
         if not topics:
             raise TopicSourceError("; ".join(errors) or "AKSHARE_THS_EMPTY")
@@ -57,16 +72,23 @@ class TopicSourceService:
             frame = func(symbol=topic_name)
         except TypeError:
             frame = func(topic_name)
-        rows = frame.to_dict("records") if hasattr(frame, "to_dict") else list(frame or [])
+        rows = _rows_from_frame(frame)
         members = [_normalize_member_row(row) for row in rows]
         return [m for m in members if m["code"]]
 
 
 def _normalize_ths_row(row: dict, topic_type: str, idx: int) -> dict:
-    name = _pick(row, "板块", "概念名称", "行业名称", "名称", default=f"{topic_type}-{idx}")
+    name = _pick(row, "板块", "概念名称", "行业名称", "名称", "name", default=f"{topic_type}-{idx}")
     up = _to_float(_pick(row, "上涨家数", "上涨数", default=0))
     down = _to_float(_pick(row, "下跌家数", "下跌数", default=0))
     breadth = up / (up + down) if up + down > 0 else 0.0
+    amount = _money_yuan(_pick(row, "总成交额", "成交额", "金额", default=0))
+    amount_ratio = _pick(row, "成交额放大倍数", "量比", default=None)
+    leader_change = _pct(_pick(row, "领涨股-涨跌幅", "领涨股涨跌幅", default=0))
+    limit_count = int(_to_float(_pick(row, "涨停家数", "涨停数", default=0)))
+    if limit_count == 0 and leader_change >= 0.095:
+        limit_count = 1
+    leading_stock_code = _pick(row, "领涨股代码", "领涨股票代码", default="")
     return {
         "topic_id": f"{topic_type}:{name}",
         "topic_name": str(name),
@@ -75,12 +97,12 @@ def _normalize_ths_row(row: dict, topic_type: str, idx: int) -> dict:
         "return_1d": _pct(_pick(row, "涨跌幅", "涨幅", "最新涨跌幅", default=0)),
         "return_3d": _pct(_pick(row, "3日涨幅", "三日涨幅", default=0)),
         "return_5d": _pct(_pick(row, "5日涨幅", "五日涨幅", default=0)),
-        "amount_ratio": max(1.0, _to_float(_pick(row, "成交额放大倍数", "量比", default=1))),
-        "net_inflow": _to_float(_pick(row, "净流入", "主力净流入", "资金净流入", default=0)),
+        "amount_ratio": _normalize_amount_ratio(amount_ratio, amount),
+        "net_inflow": _money_yuan(_pick(row, "净流入", "主力净流入", "资金净流入", default=0)),
         "breadth_ratio": breadth,
-        "leader_limit_count": int(_to_float(_pick(row, "涨停家数", "涨停数", default=0))),
+        "leader_limit_count": limit_count,
         "breakout": bool(_pick(row, "突破", default=False)),
-        "leading_stock_code": str(_pick(row, "领涨股代码", "领涨股票代码", "代码", default="")).zfill(6)[-6:] if _pick(row, "领涨股代码", "领涨股票代码", "代码", default="") else "",
+        "leading_stock_code": str(leading_stock_code).zfill(6)[-6:] if leading_stock_code else "",
         "leading_stock_name": str(_pick(row, "领涨股票", "领涨股", "领涨股名称", default="")),
         "raw_snapshot": dict(row),
     }
@@ -105,6 +127,25 @@ def _pick(row: dict, *keys, default=None):
         if key in row and row[key] not in (None, ""):
             return row[key]
     return default
+
+
+def _rows_from_frame(frame) -> list[dict]:
+    if hasattr(frame, "to_dict"):
+        return frame.to_dict("records")
+    return list(frame or [])
+
+
+def _normalize_amount_ratio(value, amount_yuan: float) -> float:
+    if value not in (None, ""):
+        return max(1.0, _to_float(value))
+    return max(1.0, amount_yuan / 10_000_000_000)
+
+
+def _money_yuan(value) -> float:
+    number = _to_float(value)
+    if number and abs(number) < 10000:
+        return number * 100_000_000
+    return number
 
 
 def _pct(value) -> float:

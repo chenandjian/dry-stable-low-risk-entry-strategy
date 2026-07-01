@@ -29,6 +29,53 @@ def test_topic_source_reads_akshare_ths_concept_and_industry(monkeypatch):
     assert topics[0]["breadth_ratio"] > 0.8
 
 
+def test_topic_source_handles_ths_name_code_rows_without_default_names(monkeypatch):
+    fake_ak = types.SimpleNamespace()
+    fake_ak.stock_board_concept_name_ths = lambda: _fake_frame([
+        {"name": "AI PC", "code": "309121"},
+    ])
+    fake_ak.stock_board_industry_name_ths = lambda: _fake_frame([
+        {"name": "半导体", "code": "881121"},
+    ])
+    monkeypatch.setitem(sys.modules, "akshare", fake_ak)
+
+    topics = TopicSourceService().fetch_topics()
+
+    assert topics[0]["topic_name"] == "AI PC"
+    assert topics[0]["topic_id"] == "concept:AI PC"
+    assert topics[0]["raw_snapshot"] == {"name": "AI PC", "code": "309121"}
+    assert topics[1]["topic_name"] == "半导体"
+
+
+def test_topic_source_prefers_ths_summary_rows_for_scored_topics(monkeypatch):
+    fake_ak = types.SimpleNamespace()
+    fake_ak.stock_board_concept_summary_ths = lambda: _fake_frame([])
+    fake_ak.stock_board_industry_summary_ths = lambda: _fake_frame([
+        {
+            "板块": "保险",
+            "涨跌幅": 6.89,
+            "总成交额": 175.8,
+            "净流入": 32.76,
+            "上涨家数": 5,
+            "下跌家数": 0,
+            "领涨股": "新华保险",
+            "领涨股-涨跌幅": 9.81,
+        },
+    ])
+    fake_ak.stock_board_concept_name_ths = lambda: _fake_frame([])
+    fake_ak.stock_board_industry_name_ths = lambda: _fake_frame([])
+    monkeypatch.setitem(sys.modules, "akshare", fake_ak)
+
+    topics = TopicSourceService().fetch_topics()
+
+    assert topics[0]["topic_name"] == "保险"
+    assert topics[0]["return_1d"] == 0.0689
+    assert topics[0]["amount_ratio"] > 1.0
+    assert topics[0]["net_inflow"] > 3_000_000_000
+    assert topics[0]["breadth_ratio"] == 1.0
+    assert topics[0]["leading_stock_name"] == "新华保险"
+
+
 def test_topic_source_reads_ths_topic_members(monkeypatch):
     fake_ak = types.SimpleNamespace()
     fake_ak.stock_board_concept_cons_ths = lambda symbol: _fake_frame([
