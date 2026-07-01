@@ -220,6 +220,37 @@ def test_strategy4_scan_resolves_leading_stock_code_from_local_stock_pool(tmp_pa
     assert db.get_strategy4_leaders("s4-name-resolve")[0]["code"] == "300750"
 
 
+def test_strategy4_default_scan_recalls_multiple_leaders_from_topic_members(tmp_path, monkeypatch):
+    import types
+    from strategy4.scanner import scan_strategy4_all
+
+    db_path = str(tmp_path / "test.db")
+    db.init_db(db_path)
+    fake_ak = types.SimpleNamespace()
+    fake_ak.stock_board_concept_name_ths = lambda: _fake_frame([{
+        "板块": "AI算力",
+        "涨跌幅": 5.0,
+        "净流入": 600000000,
+        "上涨家数": 80,
+        "下跌家数": 10,
+        "涨停家数": 2,
+    }])
+    fake_ak.stock_board_industry_name_ths = lambda: _fake_frame([])
+    fake_ak.stock_board_concept_cons_ths = lambda symbol: _fake_frame([
+        {"代码": "300750", "名称": "宁德时代", "涨跌幅": 20.0, "成交额": 2000000000},
+        {"代码": "688981", "名称": "中芯国际", "涨跌幅": 12.0, "成交额": 1500000000},
+    ])
+    monkeypatch.setitem(__import__("sys").modules, "akshare", fake_ak)
+
+    result = scan_strategy4_all(
+        {"data": {"database_path": db_path}, "strategy4": {"max_total_leaders_per_topic": 2, "core_leaders_per_topic": 1, "backup_leaders_per_topic": 1}},
+        task_id="s4-members",
+    )
+
+    assert [l["code"] for l in result["leaders"]] == ["300750", "688981"]
+    assert len(db.get_strategy4_leaders("s4-members")) == 2
+
+
 class _fake_frame:
     def __init__(self, rows):
         self._rows = rows

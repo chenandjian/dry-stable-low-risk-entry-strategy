@@ -29,6 +29,21 @@ def test_topic_source_reads_akshare_ths_concept_and_industry(monkeypatch):
     assert topics[0]["breadth_ratio"] > 0.8
 
 
+def test_topic_source_reads_ths_topic_members(monkeypatch):
+    fake_ak = types.SimpleNamespace()
+    fake_ak.stock_board_concept_cons_ths = lambda symbol: _fake_frame([
+        {"代码": "300750", "名称": "宁德时代", "涨跌幅": 20.0, "成交额": 2000000000},
+        {"代码": "688981", "名称": "中芯国际", "涨跌幅": 12.0, "成交额": 1500000000},
+    ])
+    monkeypatch.setitem(sys.modules, "akshare", fake_ak)
+
+    members = TopicSourceService().fetch_topic_members("AI算力", "concept")
+
+    assert [m["code"] for m in members] == ["300750", "688981"]
+    assert members[0]["return_1d"] == 0.20
+    assert members[0]["amount"] == 2000000000
+
+
 class _fake_frame:
     def __init__(self, rows):
         self._rows = rows

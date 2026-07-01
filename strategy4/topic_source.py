@@ -43,6 +43,24 @@ class TopicSourceService:
             raise TopicSourceError("; ".join(errors) or "AKSHARE_THS_EMPTY")
         return topics
 
+    def fetch_topic_members(self, topic_name: str, topic_type: str) -> list[dict]:
+        try:
+            import akshare as ak
+        except Exception as exc:  # pragma: no cover
+            raise TopicSourceError(f"AKSHARE_IMPORT_FAILED: {exc}") from exc
+
+        func_name = "stock_board_concept_cons_ths" if topic_type == "concept" else "stock_board_industry_cons_ths"
+        func = getattr(ak, func_name, None)
+        if func is None:
+            raise TopicSourceError(f"{func_name}: missing")
+        try:
+            frame = func(symbol=topic_name)
+        except TypeError:
+            frame = func(topic_name)
+        rows = frame.to_dict("records") if hasattr(frame, "to_dict") else list(frame or [])
+        members = [_normalize_member_row(row) for row in rows]
+        return [m for m in members if m["code"]]
+
 
 def _normalize_ths_row(row: dict, topic_type: str, idx: int) -> dict:
     name = _pick(row, "板块", "概念名称", "行业名称", "名称", default=f"{topic_type}-{idx}")
@@ -64,6 +82,19 @@ def _normalize_ths_row(row: dict, topic_type: str, idx: int) -> dict:
         "breakout": bool(_pick(row, "突破", default=False)),
         "leading_stock_code": str(_pick(row, "领涨股代码", "领涨股票代码", "代码", default="")).zfill(6)[-6:] if _pick(row, "领涨股代码", "领涨股票代码", "代码", default="") else "",
         "leading_stock_name": str(_pick(row, "领涨股票", "领涨股", "领涨股名称", default="")),
+        "raw_snapshot": dict(row),
+    }
+
+
+def _normalize_member_row(row: dict) -> dict:
+    code = str(_pick(row, "代码", "股票代码", default="")).strip()
+    if code:
+        code = code.zfill(6)[-6:]
+    return {
+        "code": code,
+        "name": str(_pick(row, "名称", "股票简称", "股票名称", default="")),
+        "return_1d": _pct(_pick(row, "涨跌幅", "涨幅", default=0)),
+        "amount": _to_float(_pick(row, "成交额", "金额", default=0)),
         "raw_snapshot": dict(row),
     }
 
