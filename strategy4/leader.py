@@ -35,10 +35,11 @@ def score_leader_candidate(snapshot: dict) -> LeaderScore:
 
     reasons: list[str] = []
     status = "HOT_TOPIC_NO_BUY_POINT"
+    min_strength = float(snapshot.get("min_leader_strength_score") or 88)
     if limit_shape == "ONE_WORD_LIMIT_UP" or (consecutive >= 2 and limit_shape in LOCKED_LIMIT_SHAPES):
         status = "LOCKED_LEADER_WATCH"
         reasons.append("LOCKED_ATTENTION")
-    elif strength >= 88 and tradability >= 70:
+    elif strength >= min_strength and tradability >= 70:
         status = "LEADER_CONFIRMED"
 
     leader_type = "SPACE_LEADER" if int(snapshot.get("rank_in_topic") or 99) == 1 else "VOLUME_LEADER"
@@ -53,4 +54,3 @@ def score_leader_candidate(snapshot: dict) -> LeaderScore:
         status=status,
         reasons=reasons,
     )
-

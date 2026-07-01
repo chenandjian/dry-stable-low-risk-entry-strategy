@@ -446,6 +446,25 @@ def _strategy3_discovery_from_candidate(candidate: dict) -> dict:
     }
 
 
+def _strategy4_discovery_from_candidate(candidate: dict) -> dict:
+    return {
+        "code": candidate.get("code", ""),
+        "name": candidate.get("name", ""),
+        "evaluation_date": candidate.get("evaluation_date", ""),
+        "strategy4_score": candidate.get("strategy4_score") or 0,
+        "status": candidate.get("status", ""),
+        "topic_id": candidate.get("topic_id", ""),
+        "topic_name": candidate.get("topic_name", ""),
+        "leader_strength_score": candidate.get("leader_strength_score", 0),
+        "tradability_score": candidate.get("tradability_score", 0),
+        "pullback_pct": candidate.get("pullback_pct", 0),
+        "risk_ratio": candidate.get("risk_ratio", 0),
+        "reward_risk_ratio": candidate.get("reward_risk_ratio", 0),
+        "price_limit_rule": candidate.get("price_limit_rule", ""),
+        "limit_shape": candidate.get("limit_shape", ""),
+    }
+
+
 def _db_running_scan_status(running_task: dict) -> dict:
     """Build live scan status from persisted DB rows for scheduler-owned scans."""
     task_id = running_task["id"]
@@ -453,7 +472,12 @@ def _db_running_scan_status(running_task: dict) -> dict:
     summary = db.refresh_scan_task_counts(task_id)
     current = _first_current_task_stock(task_id) or {}
 
-    if strategy_type == STRATEGY3_TYPE:
+    if strategy_type == STRATEGY4_TYPE:
+        discoveries = [
+            _strategy4_discovery_from_candidate(c)
+            for c in db.get_strategy4_candidates(task_id=task_id)[:20]
+        ]
+    elif strategy_type == STRATEGY3_TYPE:
         discoveries = [
             _strategy3_discovery_from_candidate(c)
             for c in db.get_strategy3_candidates(task_id=task_id)[:20]
@@ -1818,19 +1842,51 @@ async def start_strategy4_scan():
     _running["started_at"] = started_at
     _running["stats"] = {"total_stocks": 0, "current_code": "--", "current_name": "策略4热点题材识别中…"}
 
-    try:
-        result = scan_strategy4_all(config, task_id=task_id)
-        stats = result.get("stats", {})
-        _running["stats"] = stats
-        finished_at = _now().strftime("%Y-%m-%d %H:%M:%S")
-        if stats.get("error"):
-            conn = db.get_conn()
-            conn.execute(
-                "UPDATE scan_tasks SET status='failed', finished_at=?, error=? WHERE id=?",
-                (finished_at, stats.get("error"), task_id),
-            )
-            conn.commit()
-        else:
+    def run():
+        try:
+            def on_progress(stage, current, total, detail, discovery=None):
+                stats = _running.get("stats", {})
+                if stage == "discovery" and discovery:
+                    discoveries = list(stats.get("discoveries") or [])
+                    discoveries.insert(0, _strategy4_discovery_from_candidate(discovery))
+                    _running["stats"] = {
+                        **stats,
+                        "discoveries": discoveries[:20],
+                        "candidates_found": stats.get("candidates_found", 0) + 1,
+                    }
+                else:
+                    code = detail.split()[0] if detail else ""
+                    s = stats.copy()
+                    s.update({
+                        "scanned": current,
+                        "processed": current,
+                        "total_stocks": total,
+                        "current_code": code or "--",
+                        "current_name": detail[len(code):].strip() if code and len(detail) > len(code) else detail,
+                    })
+                    s.setdefault("candidates_found", 0)
+                    s.setdefault("skipped", 0)
+                    s.setdefault("failed", 0)
+                    _running["stats"] = s
+                db.update_scan_progress(
+                    task_id,
+                    scanned=_running["stats"].get("scanned", 0),
+                    skipped=_running["stats"].get("skipped", 0),
+                    candidates_count=_running["stats"].get("candidates_found", 0),
+                )
+
+            result = scan_strategy4_all(config, task_id=task_id, progress_callback=on_progress)
+            stats = result.get("stats", {})
+            _running["stats"] = {**_running.get("stats", {}), **stats}
+            finished_at = _now().strftime("%Y-%m-%d %H:%M:%S")
+            if stats.get("error"):
+                conn = db.get_conn()
+                conn.execute(
+                    "UPDATE scan_tasks SET status='failed', finished_at=?, error=? WHERE id=?",
+                    (finished_at, stats.get("error"), task_id),
+                )
+                conn.commit()
+                return
             db.finish_scan_task(
                 task_id,
                 finished_at=finished_at,
@@ -1839,30 +1895,40 @@ async def start_strategy4_scan():
                 scanned=stats.get("scanned", 0),
                 skipped=stats.get("skipped", 0),
             )
-        db.refresh_scan_task_counts(task_id)
-    except Exception as exc:
-        logger.exception("Strategy4 scan failed")
-        conn = db.get_conn()
-        conn.execute(
-            "UPDATE scan_tasks SET status='failed', finished_at=?, error=? WHERE id=?",
-            (_now().strftime("%Y-%m-%d %H:%M:%S"), str(exc), task_id),
-        )
-        conn.commit()
-        return JSONResponse({"error": "STRATEGY4_SCAN_FAILED", "message": str(exc)}, status_code=500)
-    finally:
-        _clear_running()
+            db.refresh_scan_task_counts(task_id)
+        except Exception as exc:
+            logger.exception("Strategy4 scan failed")
+            _running["stats"] = {"error": str(exc)}
+            conn = db.get_conn()
+            conn.execute(
+                "UPDATE scan_tasks SET status='failed', finished_at=?, error=? WHERE id=?",
+                (_now().strftime("%Y-%m-%d %H:%M:%S"), str(exc), task_id),
+            )
+            conn.commit()
+        finally:
+            _clear_running()
 
-    return {"ok": True, "taskId": task_id, "status": "completed", "strategyType": STRATEGY4_TYPE}
+    thread = threading.Thread(target=run, daemon=True)
+    thread.start()
+
+    return {
+        "ok": True,
+        "taskId": task_id,
+        "task_id": task_id,
+        "status": "started",
+        "strategyType": STRATEGY4_TYPE,
+    }
 
 
 @app.get("/api/strategy4/scans/status")
 async def strategy4_scan_status():
     if _running["running"] and _running.get("strategy_type") == STRATEGY4_TYPE:
+        summary = db.refresh_scan_task_counts(_running["task_id"]) if _running.get("task_id") else {}
         return {
             "running": True,
             "taskId": _running.get("task_id"),
             "strategyType": STRATEGY4_TYPE,
-            "stats": _running.get("stats", {}),
+            "stats": {**_running.get("stats", {}), **summary},
         }
     conn = db.get_conn()
     row = conn.execute(

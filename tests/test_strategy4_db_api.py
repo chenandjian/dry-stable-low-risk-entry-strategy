@@ -181,6 +181,15 @@ def test_start_strategy4_scan_uses_strategy4_type_and_persists_result(tmp_path, 
         }
 
     monkeypatch.setattr(server_mod, "scan_strategy4_all", fake_scan)
+    class ImmediateThread:
+        def __init__(self, target, daemon=False):
+            self.target = target
+            self.daemon = daemon
+
+        def start(self):
+            self.target()
+
+    monkeypatch.setattr(server_mod.threading, "Thread", ImmediateThread)
 
     res = TestClient(server_mod.app).post("/api/strategy4/scans")
     body = res.json()
@@ -230,6 +239,9 @@ def test_strategy4_default_scan_recalls_multiple_leaders_from_topic_members(tmp_
     fake_ak.stock_board_concept_name_ths = lambda: _fake_frame([{
         "板块": "AI算力",
         "涨跌幅": 5.0,
+        "3日涨幅": 10.0,
+        "5日涨幅": 16.0,
+        "量比": 1.8,
         "净流入": 600000000,
         "上涨家数": 80,
         "下跌家数": 10,
@@ -251,6 +263,235 @@ def test_strategy4_default_scan_recalls_multiple_leaders_from_topic_members(tmp_
     assert len(db.get_strategy4_leaders("s4-members")) == 2
 
 
+def test_strategy4_scan_does_not_create_candidates_from_noise_topics(tmp_path, monkeypatch):
+    import types
+    from strategy4.scanner import scan_strategy4_all
+
+    db_path = str(tmp_path / "test.db")
+    task_id = "s4-noise-topic"
+    db.init_db(db_path)
+    db.create_scan_task(task_id, "2026-07-01 15:30:00", strategy_type=STRATEGY4_TYPE)
+    db.save_ohlc("300750", _bars_for_buyable_second_wave())
+    fake_ak = types.SimpleNamespace()
+    fake_ak.stock_board_concept_name_ths = lambda: _fake_frame([{
+        "板块": "伪热点",
+        "涨跌幅": 0.5,
+        "净流入": 0,
+        "上涨家数": 1,
+        "下跌家数": 80,
+    }])
+    fake_ak.stock_board_industry_name_ths = lambda: _fake_frame([])
+    fake_ak.stock_board_concept_cons_ths = lambda symbol: _fake_frame([
+        {"代码": "300750", "名称": "宁德时代", "涨跌幅": 20.0, "成交额": 2000000000},
+    ])
+    monkeypatch.setitem(__import__("sys").modules, "akshare", fake_ak)
+
+    result = scan_strategy4_all(
+        {"data": {"database_path": db_path}, "strategy4": {}},
+        task_id=task_id,
+    )
+
+    assert result["topics"][0]["status"] == "NOISE_TOPIC"
+    assert result["candidates"] == []
+    assert db.get_strategy4_candidates(task_id) == []
+
+
+def test_strategy4_scan_requires_confirmed_leader_before_candidate(tmp_path, monkeypatch):
+    import types
+    from strategy4.scanner import scan_strategy4_all
+
+    db_path = str(tmp_path / "test.db")
+    task_id = "s4-weak-leader"
+    db.init_db(db_path)
+    db.create_scan_task(task_id, "2026-07-01 15:30:00", strategy_type=STRATEGY4_TYPE)
+    db.save_ohlc("300750", _bars_for_buyable_second_wave())
+    fake_ak = types.SimpleNamespace()
+    fake_ak.stock_board_concept_name_ths = lambda: _fake_frame([{
+        "板块": "AI算力",
+        "涨跌幅": 5.0,
+        "3日涨幅": 10.0,
+        "5日涨幅": 16.0,
+        "量比": 1.8,
+        "净流入": 600000000,
+        "上涨家数": 80,
+        "下跌家数": 10,
+        "涨停家数": 2,
+    }])
+    fake_ak.stock_board_industry_name_ths = lambda: _fake_frame([])
+    fake_ak.stock_board_concept_cons_ths = lambda symbol: _fake_frame([
+        {"代码": "300750", "名称": "宁德时代", "涨跌幅": 20.0, "成交额": 2000000000},
+    ])
+    monkeypatch.setitem(__import__("sys").modules, "akshare", fake_ak)
+
+    result = scan_strategy4_all(
+        {"data": {"database_path": db_path}, "strategy4": {"min_leader_strength_score": 88}},
+        task_id=task_id,
+    )
+
+    assert result["leaders"][0]["leader_strength_score"] < 88
+    assert result["candidates"] == []
+    assert db.get_strategy4_candidates(task_id) == []
+
+
+def test_strategy4_scan_tracks_failed_daily_fetch_in_task_stocks(tmp_path, monkeypatch):
+    import types
+    from scanner.daily_data_service import FetchResult
+    from strategy4.scanner import scan_strategy4_all
+
+    db_path = str(tmp_path / "test.db")
+    task_id = "s4-daily-failed"
+    db.init_db(db_path)
+    db.create_scan_task(task_id, "2026-07-01 15:30:00", strategy_type=STRATEGY4_TYPE)
+    fake_ak = types.SimpleNamespace()
+    fake_ak.stock_board_concept_name_ths = lambda: _fake_frame([{
+        "板块": "AI算力",
+        "涨跌幅": 5.0,
+        "3日涨幅": 10.0,
+        "5日涨幅": 16.0,
+        "量比": 1.8,
+        "净流入": 600000000,
+        "上涨家数": 80,
+        "下跌家数": 10,
+        "涨停家数": 2,
+    }])
+    fake_ak.stock_board_industry_name_ths = lambda: _fake_frame([])
+    fake_ak.stock_board_concept_cons_ths = lambda symbol: _fake_frame([
+        {"代码": "300750", "名称": "宁德时代", "涨跌幅": 20.0, "成交额": 2000000000},
+    ])
+    monkeypatch.setitem(__import__("sys").modules, "akshare", fake_ak)
+
+    result = scan_strategy4_all(
+        {"data": {"database_path": db_path}, "strategy4": {}},
+        task_id=task_id,
+        fetch_daily_fn=lambda *args, **kwargs: FetchResult(
+            data=None,
+            primary_source="baidu",
+            fallback_source="tencent",
+            source_errors={"baidu": "empty response", "sina": "empty response", "tencent": "empty response"},
+        ),
+    )
+    summary = db.refresh_scan_task_counts(task_id)
+    failed = db.get_task_stocks(task_id, status="failed", limit=10)
+
+    assert result["stats"]["failed"] == 1
+    assert summary["failed"] == 1
+    assert failed[0]["code"] == "300750"
+    assert failed[0]["status_reason"] == "策略4龙头日线数据拉取失败"
+
+
+def test_strategy4_scan_classifies_limit_shape_from_real_ohlc(tmp_path, monkeypatch):
+    import types
+    from strategy4.scanner import scan_strategy4_all
+
+    db_path = str(tmp_path / "test.db")
+    task_id = "s4-limit-shape"
+    db.init_db(db_path)
+    db.create_scan_task(task_id, "2026-07-01 15:30:00", strategy_type=STRATEGY4_TYPE)
+    bars = _bars_for_buyable_second_wave()
+    bars[-2]["close"] = 10.00
+    bars[-1].update({"open": 10.80, "high": 12.00, "low": 10.60, "close": 12.00})
+    db.save_ohlc("300750", bars)
+    fake_ak = types.SimpleNamespace()
+    fake_ak.stock_board_concept_name_ths = lambda: _fake_frame([{
+        "板块": "AI算力",
+        "涨跌幅": 5.0,
+        "3日涨幅": 10.0,
+        "5日涨幅": 16.0,
+        "量比": 1.8,
+        "净流入": 600000000,
+        "上涨家数": 80,
+        "下跌家数": 10,
+        "涨停家数": 2,
+    }])
+    fake_ak.stock_board_industry_name_ths = lambda: _fake_frame([])
+    fake_ak.stock_board_concept_cons_ths = lambda symbol: _fake_frame([
+        {"代码": "300750", "名称": "宁德时代", "涨跌幅": 20.0, "成交额": 2000000000},
+    ])
+    monkeypatch.setitem(__import__("sys").modules, "akshare", fake_ak)
+
+    scan_strategy4_all(
+        {"data": {"database_path": db_path}, "strategy4": {}},
+        task_id=task_id,
+    )
+
+    assert db.get_strategy4_leaders(task_id)[0]["limit_shape"] == "LIMIT_UP_CLOSE"
+
+
+def test_strategy4_scan_counts_survive_refresh_when_candidate_found(tmp_path, monkeypatch):
+    import types
+    from strategy4.scanner import scan_strategy4_all
+
+    db_path = str(tmp_path / "test.db")
+    task_id = "s4-counts"
+    db.init_db(db_path)
+    db.create_scan_task(task_id, "2026-07-01 15:30:00", strategy_type=STRATEGY4_TYPE)
+    db.save_ohlc("300750", _bars_for_buyable_second_wave())
+    fake_ak = types.SimpleNamespace()
+    fake_ak.stock_board_concept_name_ths = lambda: _fake_frame([{
+        "板块": "AI算力",
+        "涨跌幅": 5.0,
+        "3日涨幅": 10.0,
+        "5日涨幅": 16.0,
+        "量比": 1.8,
+        "净流入": 600000000,
+        "上涨家数": 80,
+        "下跌家数": 10,
+        "涨停家数": 2,
+    }])
+    fake_ak.stock_board_industry_name_ths = lambda: _fake_frame([])
+    fake_ak.stock_board_concept_cons_ths = lambda symbol: _fake_frame([
+        {"代码": "300750", "名称": "宁德时代", "涨跌幅": 20.0, "成交额": 2000000000},
+    ])
+    monkeypatch.setitem(__import__("sys").modules, "akshare", fake_ak)
+
+    result = scan_strategy4_all(
+        {
+            "data": {"database_path": db_path},
+            "strategy4": {"min_leader_strength_score": 60},
+        },
+        task_id=task_id,
+    )
+    summary = db.refresh_scan_task_counts(task_id)
+
+    assert result["stats"]["candidates_found"] == 1
+    assert summary["total_stocks"] == 1
+    assert summary["candidate"] == 1
+    assert summary["candidates_count"] == 1
+
+
+def test_start_strategy4_scan_returns_started_without_running_scan_synchronously(tmp_path, monkeypatch):
+    db_path = str(tmp_path / "test.db")
+    db.init_db(db_path)
+    monkeypatch.setattr(server_mod, "load_config", lambda: {"data": {"database_path": db_path}, "strategy4": {}})
+    server_mod._running.update({"running": False, "task_id": None, "strategy_type": None, "stats": {}})
+    called = {"scan": False, "thread_started": False}
+
+    def fake_scan(*args, **kwargs):
+        called["scan"] = True
+        return {"topics": [], "leaders": [], "candidates": [], "stats": {}}
+
+    class FakeThread:
+        def __init__(self, target, daemon=False):
+            self.target = target
+            self.daemon = daemon
+
+        def start(self):
+            called["thread_started"] = True
+
+    monkeypatch.setattr(server_mod, "scan_strategy4_all", fake_scan)
+    monkeypatch.setattr(server_mod.threading, "Thread", FakeThread)
+
+    res = TestClient(server_mod.app).post("/api/strategy4/scans")
+    body = res.json()
+
+    assert res.status_code == 200
+    assert body["status"] == "started"
+    assert body["strategyType"] == STRATEGY4_TYPE
+    assert called["thread_started"] is True
+    assert called["scan"] is False
+    server_mod._clear_running()
+
+
 class _fake_frame:
     def __init__(self, rows):
         self._rows = rows
@@ -258,3 +499,31 @@ class _fake_frame:
     def to_dict(self, orient):
         assert orient == "records"
         return list(self._rows)
+
+
+def _bars_for_buyable_second_wave():
+    closes = [
+        10.0, 10.2, 10.4, 10.6, 10.8,
+        11.2, 12.4, 13.8, 15.2, 17.0,
+        16.5, 15.8, 15.3, 15.2, 15.6,
+        15.9, 16.1, 16.0, 16.2, 16.4,
+    ]
+    rows = []
+    for idx, close in enumerate(closes):
+        previous = closes[idx - 1] if idx else close
+        open_ = previous * 0.995
+        rows.append({
+            "date": f"2026-06-{idx + 1:02d}",
+            "open": round(open_, 2),
+            "high": round(max(open_, close) * 1.02, 2),
+            "low": round(min(open_, close) * 0.98, 2),
+            "close": round(close, 2),
+            "volume": 6_000_000 if idx < 10 else 3_000_000,
+            "turnover": close * (6_000_000 if idx < 10 else 3_000_000),
+        })
+    rows[-1]["volume"] = 4_000_000
+    rows[-1]["open"] = 15.9
+    rows[-1]["low"] = 15.6
+    rows[-1]["high"] = 16.6
+    rows[9]["high"] = 24.0
+    return rows

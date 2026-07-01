@@ -59,7 +59,7 @@
       <table v-else>
         <thead><tr><th>股票</th><th>题材</th><th>总分</th><th>第一波</th><th>回踩</th><th>风险</th><th>RR</th><th>说明</th></tr></thead>
         <tbody>
-          <tr v-for="c in buyableCandidates" :key="`${c.topic_id}-${c.code}`">
+          <tr v-for="c in buyableCandidates" :key="`${c.topic_id}-${c.code}`" class="clickable" @click="openCandidate(c)">
             <td>{{ c.code }} {{ c.name }}</td>
             <td>{{ c.topic_name }}</td>
             <td>{{ fmt(c.strategy4_score) }}</td>
@@ -71,6 +71,20 @@
           </tr>
         </tbody>
       </table>
+    </section>
+
+    <section v-if="selectedCandidate" class="panel">
+      <div class="panel-header">候选详情</div>
+      <div class="detail-grid">
+        <div><span>股票</span><strong>{{ selectedCandidate.code }} {{ selectedCandidate.name }}</strong></div>
+        <div><span>题材</span><strong>{{ selectedCandidate.topic_name || '--' }}</strong></div>
+        <div><span>状态</span><strong>{{ selectedCandidate.status || '--' }}</strong></div>
+        <div><span>支撑 / 止损 / 目标</span><strong>{{ fmt(selectedCandidate.support_price) }} / {{ fmt(selectedCandidate.stop_loss) }} / {{ fmt(selectedCandidate.target_price) }}</strong></div>
+        <div><span>风险比</span><strong>{{ pct(selectedCandidate.risk_ratio) }}</strong></div>
+        <div><span>收益风险比</span><strong>{{ fmt(selectedCandidate.reward_risk_ratio) }}</strong></div>
+        <div><span>涨停制度 / 形态</span><strong>{{ selectedCandidate.price_limit_rule || '--' }} / {{ selectedCandidate.limit_shape || '--' }}</strong></div>
+        <div><span>说明</span><strong>{{ selectedCandidate.entry_note || '--' }}</strong></div>
+      </div>
     </section>
 
     <section class="panel">
@@ -104,6 +118,7 @@ const {
   getStrategy4Topics,
   getStrategy4Leaders,
   getStrategy4Candidates,
+  getStrategy4Candidate,
 } = useApi()
 
 const tasks = ref([])
@@ -111,7 +126,9 @@ const selectedTaskId = ref('')
 const topics = ref([])
 const leaders = ref([])
 const candidates = ref([])
+const selectedCandidate = ref(null)
 const error = ref('')
+let loadSeq = 0
 
 const buyableCandidates = computed(() => candidates.value.filter(c => c.status === 'BUYABLE_SECOND_WAVE'))
 const lockedLeaders = computed(() => leaders.value.filter(l => l.status === 'LOCKED_LEADER_WATCH'))
@@ -134,7 +151,9 @@ async function loadTasks() {
 }
 
 async function loadTask() {
+  const seq = ++loadSeq
   error.value = ''
+  selectedCandidate.value = null
   const taskId = selectedTaskId.value
   if (!taskId) return
   try {
@@ -144,6 +163,7 @@ async function loadTask() {
       getStrategy4Leaders(taskId),
       getStrategy4Candidates(taskId),
     ])
+    if (seq !== loadSeq || taskId !== selectedTaskId.value) return
     if (topicRes.error || leaderRes.error || candidateRes.error) {
       error.value = topicRes.message || leaderRes.message || candidateRes.message || topicRes.error || leaderRes.error || candidateRes.error
     }
@@ -153,6 +173,21 @@ async function loadTask() {
   } catch (e) {
     error.value = '策略4结果加载失败'
     console.error(e)
+  }
+}
+
+async function openCandidate(candidate) {
+  const seq = loadSeq
+  const taskId = selectedTaskId.value
+  selectedCandidate.value = candidate
+  try {
+    const res = await getStrategy4Candidate(taskId, candidate.code)
+    if (seq !== loadSeq || taskId !== selectedTaskId.value) return
+    selectedCandidate.value = res?.candidate || candidate
+  } catch (e) {
+    if (seq === loadSeq) {
+      selectedCandidate.value = candidate
+    }
   }
 }
 
@@ -184,4 +219,9 @@ table { width: 100%; border-collapse: collapse; font-size: 12px; }
 th, td { padding: 10px 12px; border-bottom: 1px solid var(--border); text-align: left; }
 th { color: var(--text-secondary); font-weight: 600; }
 .error-banner { margin-bottom: 12px; padding: 10px 12px; border: 1px solid rgba(239,68,68,0.4); color: var(--up-red); border-radius: 4px; }
+.clickable { cursor: pointer; }
+.clickable:hover { background: rgba(249, 115, 22, 0.08); }
+.detail-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; padding: 16px; font-size: 12px; }
+.detail-grid span { display: block; color: var(--text-secondary); margin-bottom: 4px; }
+.detail-grid strong { color: var(--text-primary); font-weight: 600; }
 </style>

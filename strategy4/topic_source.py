@@ -95,6 +95,7 @@ def _normalize_member_row(row: dict) -> dict:
         "name": str(_pick(row, "名称", "股票简称", "股票名称", default="")),
         "return_1d": _pct(_pick(row, "涨跌幅", "涨幅", default=0)),
         "amount": _to_float(_pick(row, "成交额", "金额", default=0)),
+        "limit_shape": str(_pick(row, "limit_shape", "涨停形态", default="")),
         "raw_snapshot": dict(row),
     }
 
