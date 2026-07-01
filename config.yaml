@@ -26,7 +26,7 @@ liquidity:
   min_avg_turnover: 100000000
   min_avg_volume: 5000000
   min_latest_turnover: 80000000
-  min_stock_price: 10
+  min_stock_price: 5
   min_listing_days: 500
 cup:
   min_duration: 35
@@ -94,14 +94,14 @@ server:
   host: 127.0.0.1
   port: 8080
 scheduler:
-  enabled: false
+  enabled: true
   cron: 30 15 * * 1-5
   skip_if_running: true
   on_complete: log
   webhook_url: null
   serial_dual_scan:
     enabled: true
-    cron: 15 15 * * 1-5
+    cron: 34 16 * * 1-5
     strategy1_failed_retry_rounds: 3
 strategy2:
   enabled: true
