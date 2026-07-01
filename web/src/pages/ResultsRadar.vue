@@ -33,7 +33,7 @@
           >{{ f.label }}</button>
         </div>
         <div class="toolbar-right">
-          <button class="btn-secondary" @click="exportCSV">导出 CSV</button>
+          <button data-test="export-candidates" class="btn-secondary" @click="exportCSV">一键导出列表</button>
         </div>
       </div>
     </div>
@@ -124,6 +124,7 @@ import { useRouter, useRoute } from 'vue-router'
 import { useApi } from '../composables/useApi.js'
 import MetricCard from '../components/MetricCard.vue'
 import SignalBadge from '../components/SignalBadge.vue'
+import { downloadCsv } from '../utils/csvExport.js'
 
 const router = useRouter()
 const route = useRoute()
@@ -210,30 +211,30 @@ function distClass(c) {
   return d > 0 ? 'red' : d > -0.05 ? 'orange' : 'muted'
 }
 function exportCSV() {
-  const header = '代码,名称,评分,形态,干稳结论,量干,价稳,RR,仓位,大盘,突破,放量,最新价,Pivot,杯体深度,柄部回撤,杯体天数,放量倍数'
-  const rows = candidates.value.map(c => [
-    c.code, c.name, c.score,
-    c.pattern_type || '',
-    c.dry_stable_verdict || '',
-    c.volume_dry_score ?? '',
-    c.price_stable_score ?? '',
-    c.rr1 ?? '',
-    c.position_advice || '',
-    c.market_status || '',
-    c.is_breakout ? '是' : '否',
-    c.is_volume_breakout ? '是' : '否',
-    c.latest_close?.toFixed(2) || '',
-    (c.pivot || c.breakout_price)?.toFixed?.(2) || '',
-    c.cup_depth_pct?.toFixed(1) || '',
-    c.handle_depth_pct?.toFixed(1) || '',
-    c.cup_duration || '',
-    c.vol_multiplier?.toFixed(1) || '',
-  ].join(','))
-  const blob = new Blob(['﻿' + [header, ...rows].join('\n')], { type: 'text/csv;charset=utf-8' })
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url; a.download = 'candidates.csv'; a.click()
-  URL.revokeObjectURL(url)
+  downloadCsv({
+    filename: `strategy1-candidates-${selectedTaskId.value || 'latest'}.csv`,
+    columns: [
+      { header: '代码', value: c => c.code },
+      { header: '名称', value: c => c.name },
+      { header: '评分', value: c => c.score },
+      { header: '形态', value: c => c.pattern_type || '' },
+      { header: '干稳结论', value: c => c.dry_stable_verdict || '' },
+      { header: '量干', value: c => c.volume_dry_score ?? '' },
+      { header: '价稳', value: c => c.price_stable_score ?? '' },
+      { header: 'RR', value: c => c.rr1 ?? '' },
+      { header: '仓位', value: c => c.position_advice || '' },
+      { header: '大盘', value: c => c.market_status || '' },
+      { header: '突破', value: c => c.is_breakout ? '是' : '否' },
+      { header: '放量', value: c => c.is_volume_breakout ? '是' : '否' },
+      { header: '最新价', value: c => c.latest_close?.toFixed(2) || '' },
+      { header: 'Pivot', value: c => (c.pivot || c.breakout_price)?.toFixed?.(2) || '' },
+      { header: '杯体深度', value: c => c.cup_depth_pct?.toFixed(1) || '' },
+      { header: '柄部回撤', value: c => c.handle_depth_pct?.toFixed(1) || '' },
+      { header: '杯体天数', value: c => c.cup_duration || '' },
+      { header: '放量倍数', value: c => c.vol_multiplier?.toFixed(1) || '' },
+    ],
+    rows: filteredCandidates.value,
+  })
 }
 
 // 加载任务列表

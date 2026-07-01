@@ -17,7 +17,6 @@ class DataSourceManager:
             "baidu": threading.Lock(),
             "sina": threading.Lock(),
             "tencent": threading.Lock(),
-            "yfinance": threading.Lock(),
         }
 
     def acquire(self, ds_name: str) -> bool:

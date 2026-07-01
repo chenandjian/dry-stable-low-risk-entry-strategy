@@ -77,7 +77,7 @@ python main.py schedule
 ## 数据与缓存
 
 - 股票池：AKShare 获取，失败时可回退本地缓存。
-- 日线行情：默认 `baidu → sina → tencent → yfinance`。
+- 日线行情：默认 `baidu → sina → tencent`，yfinance 已从生产数据源剔除。
 - 数据存储：SQLite，默认 `data/cuphandle.db`。
 - 日线表：`daily_ohlc`。
 - 扫描任务：`scan_tasks`。
@@ -108,7 +108,7 @@ python main.py schedule
 后端常规验证：
 
 ```bash
-python -m pytest tests/ -q --ignore=tests/test_akshare_hist.py --ignore=tests/test_tushare_hist.py --ignore=tests/test_yfinance_hist.py
+python -m pytest tests/ -q --ignore=tests/test_akshare_hist.py --ignore=tests/test_tushare_hist.py
 python -m compileall scanner strategy2 server.py -q
 ```
 
@@ -125,5 +125,4 @@ npm --prefix web run build
 ```bash
 python -m pytest tests/test_akshare_hist.py -v
 python -m pytest tests/test_tushare_hist.py -v
-python -m pytest tests/test_yfinance_hist.py -v
 ```

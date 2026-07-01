@@ -13,7 +13,6 @@ data:
   - baidu
   - sina
   - tencent
-  - yfinance
   start_date: '2025-01-01'
   end_date: null
   use_fq: true
@@ -101,7 +100,7 @@ scheduler:
   webhook_url: null
   serial_dual_scan:
     enabled: true
-    cron: 15 15 * * 1-5
+    cron: 20 15 * * 1-5
     strategy1_failed_retry_rounds: 3
 strategy2:
   enabled: true
@@ -114,3 +113,45 @@ strategy2:
   support_lookback_days: 10
   buy_zone_max_premium: 0.03
   stop_loss_buffer: 0.03
+strategy3:
+  enabled: true
+  strategy_window_days: 250
+  minimum_required_days: 180
+  pullback_lookback_days: 60
+  support_lookback_days: 20
+  candidate_min_score: 75
+  core_min_score: 85
+  max_risk_ratio: 0.08
+  trade_candidate_min_score: 88
+  trade_max_risk_ratio: 0.04
+  trade_max_pullback_pct: 0.16
+  max_pullback_from_high: 0.25
+  min_pullback_from_high: 0.12
+  max_recent_range_5: 0.12
+  max_recent_surge_3: 0.1
+  min_relative_strength_60: 0.05
+  volume_shrink_ratio: 0.70
+  dry_volume_ratio: 0.6
+  dry_extreme_volume_ratio: 0.5
+  dry_return_5_floor: 0.02
+  dry_return_5_reject: -0.05
+  dry_support_lookback_days: 10
+  dry_support_min_test_count: 2
+  dry_support_max_test_count: 2
+  dry_support_test_tolerance: 0.02
+  dry_support_break_tolerance: 0.98
+  dry_lower_shadow_threshold: 0.4
+  dry_lower_shadow_min_count: 2
+  dry_down_volume_ratio_max: 0.6
+  dry_big_down_return: -0.04
+  dry_big_down_volume_ratio: 1.3
+  dry_atr_contract_ratio: 0.75
+  dry_atr_extreme_contract_ratio: 0.6
+  dry_atr_expand_reject_ratio: 1.2
+  dry_no_new_low_tolerance: 0.995
+  support_zone_pct: 0.01
+  support_zone_atr_ratio: 0.3
+  support_effective_break_days: 2
+  support_big_down_return: -0.04
+  support_big_down_volume_ratio: 1.3
+  support_stop_buffer_pct: 0.01

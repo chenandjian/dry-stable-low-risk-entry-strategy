@@ -8,8 +8,10 @@ vi.mock('vue-router', () => ({ useRouter: () => mockRouter }))
 const api = {
   getScanTasks: vi.fn(),
   getStrategy2Tasks: vi.fn(),
+  getStrategy3Tasks: vi.fn(),
   reEvaluateTask: vi.fn(),
   reEvaluateStrategy2Task: vi.fn(),
+  reEvaluateStrategy3Task: vi.fn(),
   getSchedulerLogs: vi.fn(),
 }
 vi.mock('../../composables/useApi.js', () => ({ useApi: () => api }))
@@ -28,6 +30,7 @@ describe('TaskCenter scheduler logs', () => {
     vi.clearAllMocks()
     api.getScanTasks.mockResolvedValue({ tasks: [] })
     api.getStrategy2Tasks.mockResolvedValue({ tasks: [] })
+    api.getStrategy3Tasks.mockResolvedValue({ tasks: [] })
     api.getSchedulerLogs.mockResolvedValue({
       scheduler: {
         enabled: true,
@@ -75,6 +78,7 @@ describe('TaskCenter scheduler logs', () => {
     expect(wrapper.text()).toContain('定时任务日志')
     expect(wrapper.text()).toContain('配置已启用')
     expect(wrapper.text()).toContain('实际运行中')
+    expect(wrapper.text()).toContain('串行三策略：开启')
     expect(wrapper.text()).toContain('50 15 * * 1-5')
     expect(wrapper.text()).toContain('下次 2026-06-17 15:50:00')
     expect(wrapper.text()).toContain('重试 3 轮')

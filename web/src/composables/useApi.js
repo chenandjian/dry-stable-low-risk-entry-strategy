@@ -136,6 +136,71 @@ export function useApi() {
     return res.json()
   }
 
+  // Strategy3 API
+  async function startStrategy3Scan() {
+    const res = await fetch(`${API_BASE}/strategy3/scans`, { method: 'POST' })
+    const body = await res.json()
+    return { ...body, ok: res.ok, statusCode: res.status }
+  }
+
+  async function getKlineHealth(params = {}) {
+    const qs = new URLSearchParams(params).toString()
+    const res = await fetch(`${API_BASE}/kline-health${qs ? '?' + qs : ''}`)
+    const body = await res.json().catch(() => ({}))
+    return { ...body, ok: res.ok, statusCode: res.status }
+  }
+
+  async function refreshKlineData(code) {
+    const res = await fetch(`${API_BASE}/stock/${encodeURIComponent(code)}/kline-refresh`, { method: 'POST' })
+    const body = await res.json().catch(() => ({}))
+    return { ...body, ok: res.ok, statusCode: res.status }
+  }
+
+  async function refreshKlineHealth(params = {}) {
+    const res = await fetch(`${API_BASE}/kline-health/refresh`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(params),
+    })
+    const body = await res.json().catch(() => ({}))
+    return { ...body, ok: res.ok, statusCode: res.status }
+  }
+
+  async function getStrategy3ScanStatus() {
+    const res = await fetch(`${API_BASE}/strategy3/scans/status`)
+    return res.json()
+  }
+
+  async function getStrategy3Tasks() {
+    const res = await fetch(`${API_BASE}/strategy3/tasks`)
+    return res.json()
+  }
+
+  async function retryStrategy3FailedStocks(taskId) {
+    const res = await fetch(`${API_BASE}/strategy3/tasks/${encodeURIComponent(taskId)}/retry-failed`, { method: 'POST' })
+    const body = await res.json().catch(() => ({}))
+    return { ...body, ok: res.ok, statusCode: res.status }
+  }
+
+  async function reEvaluateStrategy3Task(taskId) {
+    const res = await fetch(`${API_BASE}/strategy3/tasks/${encodeURIComponent(taskId)}/re-evaluate`, { method: 'POST' })
+    const body = await res.json().catch(() => ({}))
+    return { ...body, ok: res.ok, statusCode: res.status }
+  }
+
+  async function getStrategy3Candidates(taskId) {
+    const qs = taskId ? `?task_id=${taskId}` : ''
+    const res = await fetch(`${API_BASE}/strategy3/candidates${qs}`)
+    return res.json()
+  }
+
+  async function getStrategy3Candidate(code, taskId) {
+    const qs = taskId ? `?task_id=${taskId}` : ''
+    const res = await fetch(`${API_BASE}/strategy3/candidates/${code}${qs}`)
+    if (!res.ok) return null
+    return res.json()
+  }
+
   // Strategy2 Backtest API
   async function startStrategy2Backtest(payload) {
     const res = await fetch(`${API_BASE}/strategy2/backtests`, {
@@ -252,12 +317,15 @@ export function useApi() {
 
   return {
     startScan, getScanStatus, getCandidates, getCandidate, getScanTasks,
-    getSchedulerLogs, getKlineHistory,
+    getSchedulerLogs, getKlineHistory, getKlineHealth, refreshKlineData, refreshKlineHealth,
     getTaskStocks, retryFailedStocks, reEvaluateTask, getConfig, updateConfig,
     runCupHandleBacktest,
     startStrategy2Scan, getStrategy2ScanStatus, getStrategy2Tasks,
     retryStrategy2FailedStocks, reEvaluateStrategy2Task,
     getStrategy2Candidates, getStrategy2Candidate,
+    startStrategy3Scan, getStrategy3ScanStatus, getStrategy3Tasks,
+    retryStrategy3FailedStocks, reEvaluateStrategy3Task,
+    getStrategy3Candidates, getStrategy3Candidate,
     startStrategy2Backtest, getStrategy2BacktestStatus,
     getStrategy2BacktestTasks, getStrategy2BacktestTask,
     getStrategy2BacktestOpportunities, getStrategy2BacktestInsufficientStocks,

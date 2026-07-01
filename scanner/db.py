@@ -51,6 +51,22 @@ def init_db(path: str = "data/cuphandle.db"):
             CREATE INDEX IF NOT EXISTS idx_ohlc_code ON daily_ohlc(code);
             CREATE INDEX IF NOT EXISTS idx_ohlc_date ON daily_ohlc(date);
 
+            CREATE TABLE IF NOT EXISTS market_index_ohlc (
+                symbol     TEXT NOT NULL,
+                date       TEXT NOT NULL,
+                open       REAL,
+                high       REAL,
+                low        REAL,
+                close      REAL,
+                volume     REAL,
+                turnover   REAL,
+                source     TEXT,
+                fetched_at TEXT,
+                PRIMARY KEY (symbol, date)
+            );
+            CREATE INDEX IF NOT EXISTS idx_market_index_ohlc_symbol ON market_index_ohlc(symbol);
+            CREATE INDEX IF NOT EXISTS idx_market_index_ohlc_date ON market_index_ohlc(date);
+
             CREATE TABLE IF NOT EXISTS scan_tasks (
                 id               TEXT PRIMARY KEY,
                 started_at       TEXT,
@@ -119,7 +135,9 @@ def init_db(path: str = "data/cuphandle.db"):
         _dedupe_candidates_before_unique_index(conn)
         conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_candidates_task_code ON candidates(task_id, code)")
         _ensure_strategy2_candidates_table(conn)
+        _ensure_strategy3_candidates_table(conn)
         _ensure_strategy2_backtest_tables(conn)
+        _ensure_strategy3_backtest_tables(conn)
         _ensure_strategy1_backtest_tables(conn)
         conn.commit()
 
@@ -331,6 +349,94 @@ def get_ohlc(code: str, max_rows: int = 0) -> list[dict] | None:
     ]
 
 
+# ====== Market Index OHLC Cache ======
+
+def save_market_index_ohlc(
+    symbol: str,
+    data: list[dict],
+    *,
+    source: str = "sina",
+    fetched_at: str | None = None,
+):
+    """Insert or replace cached OHLC rows for a market index."""
+    conn = get_conn()
+    fetched_at = fetched_at or datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    conn.execute("DELETE FROM market_index_ohlc WHERE symbol = ?", (symbol,))
+    conn.executemany(
+        """INSERT INTO market_index_ohlc
+           (symbol, date, open, high, low, close, volume, turnover, source, fetched_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        [
+            (
+                symbol,
+                d["date"],
+                d.get("open"),
+                d.get("high"),
+                d.get("low"),
+                d.get("close"),
+                d.get("volume"),
+                d.get("turnover", 0.0),
+                source,
+                fetched_at,
+            )
+            for d in data
+        ],
+    )
+    conn.commit()
+
+
+def get_market_index_ohlc(
+    symbol: str,
+    *,
+    end_date: str | None = None,
+    max_rows: int = 0,
+) -> list[dict]:
+    """Get cached market index OHLC rows sorted by date."""
+    conn = get_conn()
+    params: list = [symbol]
+    query = (
+        "SELECT date, open, high, low, close, volume, turnover "
+        "FROM market_index_ohlc WHERE symbol=?"
+    )
+    if end_date:
+        query += " AND date<=?"
+        params.append(end_date[:10])
+    query += " ORDER BY date"
+    rows = conn.execute(query, params).fetchall()
+    if max_rows and len(rows) > max_rows:
+        rows = rows[-max_rows:]
+    return [
+        {
+            "date": r[0],
+            "open": r[1],
+            "high": r[2],
+            "low": r[3],
+            "close": r[4],
+            "volume": r[5],
+            "turnover": r[6],
+        }
+        for r in rows
+    ]
+
+
+def get_market_index_coverage(symbol: str) -> dict:
+    """Return row count and date coverage for a cached market index."""
+    conn = get_conn()
+    row = conn.execute(
+        """SELECT COUNT(*), MIN(date), MAX(date), MAX(source), MAX(fetched_at)
+           FROM market_index_ohlc WHERE symbol=?""",
+        (symbol,),
+    ).fetchone()
+    return {
+        "symbol": symbol,
+        "rows": row[0] or 0,
+        "min_date": row[1],
+        "max_date": row[2],
+        "source": row[3],
+        "fetched_at": row[4],
+    }
+
+
 def get_ohlc_latest_date(code: str) -> str | None:
     """Get the latest date in cached OHLC data."""
     conn = get_conn()
@@ -440,9 +546,10 @@ def get_reusable_task_stock_kline_context(
     if exclude_task_id:
         exclude_clause = "AND ts.task_id != ?"
         params.append(exclude_task_id)
-    row = conn.execute(
+    rows = conn.execute(
         f"""SELECT ts.kline_latest_date, ts.kline_fetched_at,
-                  ts.kline_target_trade_date, ts.quote_status
+                  ts.kline_target_trade_date, ts.quote_status,
+                  ts.source_errors
             FROM task_stocks ts
             WHERE ts.code = ?
               AND ts.kline_target_trade_date = ?
@@ -456,17 +563,44 @@ def get_reusable_task_stock_kline_context(
                   )
               {exclude_clause}
             ORDER BY ts.kline_fetched_at DESC, ts.updated_at DESC
-            LIMIT 1""",
+            LIMIT 20""",
         params,
-    ).fetchone()
-    if not row:
-        return None
-    return {
-        "kline_latest_date": row[0],
-        "kline_fetched_at": row[1],
-        "kline_target_trade_date": row[2],
-        "quote_status": row[3] or "not_requested",
-    }
+    ).fetchall()
+    for row in rows:
+        latest_date = row[0]
+        quote_status = row[3] or "not_requested"
+        if latest_date >= target_trade_date or (
+            quote_status in {"suspended", "no_trade"}
+            and _source_errors_confirm_no_trade(row[4])
+        ):
+            return {
+                "kline_latest_date": latest_date,
+                "kline_fetched_at": row[1],
+                "kline_target_trade_date": row[2],
+                "quote_status": quote_status,
+            }
+    return None
+
+
+def _source_errors_confirm_no_trade(source_errors: str | None) -> bool:
+    if not source_errors:
+        return False
+    try:
+        parsed = json.loads(source_errors)
+    except (TypeError, json.JSONDecodeError):
+        return False
+    if not isinstance(parsed, dict) or not parsed:
+        return False
+    return all(_source_error_confirms_no_trade(error) for error in parsed.values())
+
+
+def _source_error_confirms_no_trade(error: str | None) -> bool:
+    if not isinstance(error, str):
+        return False
+    return (
+        "missing target trade date" in error
+        or "zero-volume target trade date" in error
+    )
 
 
 def get_today_task_stock_latest_date(code: str, today: str, exclude_task_id: str | None = None) -> str | None:
@@ -1128,6 +1262,133 @@ def _ensure_strategy2_candidates_table(conn: sqlite3.Connection):
     _ensure_column(conn, "strategy2_candidates", "short_term_time_exit_days", "INTEGER DEFAULT 0")
 
 
+def _ensure_strategy3_candidates_table(conn: sqlite3.Connection):
+    """Create strategy3_candidates table if not exists (compatible migration)."""
+    conn.execute('''
+        CREATE TABLE IF NOT EXISTS strategy3_candidates (
+            id                         INTEGER PRIMARY KEY AUTOINCREMENT,
+            task_id                    TEXT NOT NULL,
+            code                       TEXT NOT NULL,
+            name                       TEXT NOT NULL,
+            evaluation_date            TEXT NOT NULL,
+            total_score                INTEGER NOT NULL,
+            level                      TEXT NOT NULL,
+            trend_score                INTEGER DEFAULT 0,
+            pullback_score             INTEGER DEFAULT 0,
+            volume_stability_score     INTEGER DEFAULT 0,
+            second_breakout_score      INTEGER DEFAULT 0,
+            risk_reward_score          INTEGER DEFAULT 0,
+            current_close              REAL DEFAULT 0,
+            ma5                        REAL,
+            ma10                       REAL,
+            ma20                       REAL,
+            ma60                       REAL,
+            ma120                      REAL,
+            recent_high                REAL,
+            pullback_pct               REAL,
+            relative_strength_60       REAL,
+            volume_ratio_5_20          REAL,
+            range_5                    REAL,
+            range_10                   REAL,
+            range_20                   REAL,
+            range_compression_ok       INTEGER DEFAULT 0,
+            close_range_5              REAL,
+            direction_efficiency_5     REAL,
+            max_up_5                   REAL,
+            max_down_5                 REAL,
+            avg_close_position_5       REAL,
+            support_price              REAL,
+            stop_loss                  REAL,
+            target_1                   REAL,
+            risk_ratio                 REAL,
+            rr1                        REAL,
+            structural_support         REAL,
+            structural_stop_loss       REAL,
+            structural_risk_ratio      REAL,
+            structural_rr1             REAL,
+            tactical_support           REAL,
+            tactical_stop_loss         REAL,
+            tactical_risk_ratio        REAL,
+            tactical_rr1               REAL,
+            support_quality            TEXT,
+            score_reasons              TEXT,
+            reject_reasons             TEXT,
+            data_source                TEXT,
+            created_at                 TEXT DEFAULT (datetime('now')),
+            FOREIGN KEY (task_id) REFERENCES scan_tasks(id),
+            UNIQUE (task_id, code)
+        )
+    ''')
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_strategy3_candidates_task_score "
+        "ON strategy3_candidates(task_id, total_score DESC)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_strategy3_candidates_task_risk "
+        "ON strategy3_candidates(task_id, risk_ratio ASC)"
+    )
+    _ensure_column(conn, "strategy3_candidates", "structural_support", "REAL")
+    _ensure_column(conn, "strategy3_candidates", "structural_stop_loss", "REAL")
+    _ensure_column(conn, "strategy3_candidates", "structural_risk_ratio", "REAL")
+    _ensure_column(conn, "strategy3_candidates", "structural_rr1", "REAL")
+    _ensure_column(conn, "strategy3_candidates", "tactical_support", "REAL")
+    _ensure_column(conn, "strategy3_candidates", "tactical_stop_loss", "REAL")
+    _ensure_column(conn, "strategy3_candidates", "tactical_risk_ratio", "REAL")
+    _ensure_column(conn, "strategy3_candidates", "tactical_rr1", "REAL")
+    _ensure_column(conn, "strategy3_candidates", "support_quality", "TEXT")
+    _ensure_column(conn, "strategy3_candidates", "v3", "REAL")
+    _ensure_column(conn, "strategy3_candidates", "v5", "REAL")
+    _ensure_column(conn, "strategy3_candidates", "v10", "REAL")
+    _ensure_column(conn, "strategy3_candidates", "v20", "REAL")
+    _ensure_column(conn, "strategy3_candidates", "return_5", "REAL")
+    _ensure_column(conn, "strategy3_candidates", "min_close_5", "REAL")
+    _ensure_column(conn, "strategy3_candidates", "min_close_10", "REAL")
+    _ensure_column(conn, "strategy3_candidates", "no_new_low", "INTEGER DEFAULT 0")
+    _ensure_column(conn, "strategy3_candidates", "support_price_10", "REAL")
+    _ensure_column(conn, "strategy3_candidates", "support_test_count", "INTEGER DEFAULT 0")
+    _ensure_column(conn, "strategy3_candidates", "support_valid", "INTEGER DEFAULT 0")
+    _ensure_column(conn, "strategy3_candidates", "bear_body_shrink", "INTEGER DEFAULT 0")
+    _ensure_column(conn, "strategy3_candidates", "lower_shadow_count", "INTEGER DEFAULT 0")
+    _ensure_column(conn, "strategy3_candidates", "down_volume_ratio_5", "REAL")
+    _ensure_column(conn, "strategy3_candidates", "atr_ratio_5_20", "REAL")
+    _ensure_column(conn, "strategy3_candidates", "has_big_down_volume", "INTEGER DEFAULT 0")
+    _ensure_column(conn, "strategy3_candidates", "range_10", "REAL")
+    _ensure_column(conn, "strategy3_candidates", "range_20", "REAL")
+    _ensure_column(conn, "strategy3_candidates", "range_compression_ok", "INTEGER DEFAULT 0")
+    _ensure_column(conn, "strategy3_candidates", "direction_efficiency_5", "REAL")
+    _ensure_column(conn, "strategy3_candidates", "max_up_5", "REAL")
+    _ensure_column(conn, "strategy3_candidates", "max_down_5", "REAL")
+    _ensure_column(conn, "strategy3_candidates", "avg_close_position_5", "REAL")
+    _ensure_column(conn, "strategy3_candidates", "short_support", "REAL")
+    _ensure_column(conn, "strategy3_candidates", "short_support_zone_low", "REAL")
+    _ensure_column(conn, "strategy3_candidates", "short_support_zone_high", "REAL")
+    _ensure_column(conn, "strategy3_candidates", "key_support", "REAL")
+    _ensure_column(conn, "strategy3_candidates", "key_support_zone_low", "REAL")
+    _ensure_column(conn, "strategy3_candidates", "key_support_zone_high", "REAL")
+    _ensure_column(conn, "strategy3_candidates", "strong_support", "REAL")
+    _ensure_column(conn, "strategy3_candidates", "strong_support_zone_low", "REAL")
+    _ensure_column(conn, "strategy3_candidates", "strong_support_zone_high", "REAL")
+    _ensure_column(conn, "strategy3_candidates", "support_status", "TEXT")
+    _ensure_column(conn, "strategy3_candidates", "break_status", "TEXT")
+    _ensure_column(conn, "strategy3_candidates", "nearest_support_distance", "REAL")
+    _ensure_column(conn, "strategy3_candidates", "support_sources", "TEXT")
+    _ensure_column(conn, "strategy3_candidates", "trade_quality_score", "INTEGER DEFAULT 0")
+    _ensure_column(conn, "strategy3_candidates", "volume_dry_score", "INTEGER DEFAULT 0")
+    _ensure_column(conn, "strategy3_candidates", "price_stability_score", "INTEGER DEFAULT 0")
+    _ensure_column(conn, "strategy3_candidates", "cannot_fall_score", "INTEGER DEFAULT 0")
+    _ensure_column(conn, "strategy3_candidates", "balance_powerless_score", "INTEGER DEFAULT 0")
+    _ensure_column(conn, "strategy3_candidates", "support_distance_pct", "REAL")
+    _ensure_column(conn, "strategy3_candidates", "key_support_distance_pct", "REAL")
+    _ensure_column(conn, "strategy3_candidates", "target_price", "REAL")
+    _ensure_column(conn, "strategy3_candidates", "target_room_pct", "REAL")
+    _ensure_column(conn, "strategy3_candidates", "estimated_rr", "REAL")
+    _ensure_column(conn, "strategy3_candidates", "trade_state", "TEXT")
+    _ensure_column(conn, "strategy3_candidates", "trade_state_label", "TEXT")
+    _ensure_column(conn, "strategy3_candidates", "trigger_reasons", "TEXT")
+    _ensure_column(conn, "strategy3_candidates", "risk_warnings", "TEXT")
+    _ensure_column(conn, "strategy3_candidates", "invalid_conditions", "TEXT")
+
+
 def _ensure_column(conn: sqlite3.Connection, table: str, column: str, col_type: str):
     """Compatible add-column-if-not-exists helper."""
     existing = [d[1] for d in conn.execute(f"PRAGMA table_info({table})").fetchall()]
@@ -1254,6 +1515,202 @@ def _deserialize_strategy2_candidate(row: dict) -> dict:
         if isinstance(value, str) and value:
             try:
                 import json
+                row[field] = json.loads(value)
+            except (json.JSONDecodeError, TypeError):
+                row[field] = []
+        elif not value:
+            row[field] = []
+    return row
+
+
+def upsert_strategy3_candidate(task_id: str, d: dict):
+    """Insert or update a single strategy3 candidate."""
+    conn = get_conn()
+    columns = [
+        "task_id", "code", "name", "evaluation_date", "total_score", "level",
+        "trend_score", "pullback_score", "volume_stability_score",
+        "second_breakout_score", "risk_reward_score", "current_close",
+        "ma5", "ma10", "ma20", "ma60", "ma120", "recent_high",
+        "pullback_pct", "relative_strength_60", "volume_ratio_5_20",
+        "v3", "v5", "v10", "v20", "return_5", "min_close_5", "min_close_10",
+        "no_new_low", "support_price_10", "support_test_count", "support_valid",
+        "bear_body_shrink", "lower_shadow_count", "down_volume_ratio_5",
+        "atr_ratio_5_20", "has_big_down_volume",
+        "range_5", "range_10", "range_20", "range_compression_ok",
+        "close_range_5", "direction_efficiency_5", "max_up_5", "max_down_5",
+        "avg_close_position_5", "support_price", "stop_loss",
+        "target_1", "risk_ratio", "rr1",
+        "structural_support", "structural_stop_loss", "structural_risk_ratio",
+        "structural_rr1", "tactical_support", "tactical_stop_loss",
+        "tactical_risk_ratio", "tactical_rr1", "support_quality",
+        "short_support", "short_support_zone_low", "short_support_zone_high",
+        "key_support", "key_support_zone_low", "key_support_zone_high",
+        "strong_support", "strong_support_zone_low", "strong_support_zone_high",
+        "support_status", "break_status", "nearest_support_distance", "support_sources",
+        "trade_quality_score", "volume_dry_score", "price_stability_score",
+        "cannot_fall_score", "balance_powerless_score", "support_distance_pct",
+        "key_support_distance_pct", "target_price", "target_room_pct",
+        "estimated_rr", "trade_state", "trade_state_label", "trigger_reasons",
+        "risk_warnings", "invalid_conditions",
+        "score_reasons", "reject_reasons", "data_source",
+    ]
+    values = (
+        task_id,
+        d["code"],
+        d.get("name", ""),
+        d.get("evaluation_date", ""),
+        d.get("total_score", 0),
+        d.get("level", ""),
+        d.get("trend_score", 0),
+        d.get("pullback_score", 0),
+        d.get("volume_stability_score", 0),
+        d.get("second_breakout_score", 0),
+        d.get("risk_reward_score", 0),
+        d.get("current_close", 0.0),
+        d.get("ma5"),
+        d.get("ma10"),
+        d.get("ma20"),
+        d.get("ma60"),
+        d.get("ma120"),
+        d.get("recent_high"),
+        d.get("pullback_pct"),
+        d.get("relative_strength_60"),
+        d.get("volume_ratio_5_20"),
+        d.get("v3"),
+        d.get("v5"),
+        d.get("v10"),
+        d.get("v20"),
+        d.get("return_5"),
+        d.get("min_close_5"),
+        d.get("min_close_10"),
+        int(bool(d.get("no_new_low"))),
+        d.get("support_price_10"),
+        d.get("support_test_count", 0),
+        int(bool(d.get("support_valid"))),
+        int(bool(d.get("bear_body_shrink"))),
+        d.get("lower_shadow_count", 0),
+        d.get("down_volume_ratio_5"),
+        d.get("atr_ratio_5_20"),
+        int(bool(d.get("has_big_down_volume"))),
+        d.get("range_5"),
+        d.get("range_10"),
+        d.get("range_20"),
+        int(bool(d.get("range_compression_ok"))),
+        d.get("close_range_5"),
+        d.get("direction_efficiency_5"),
+        d.get("max_up_5"),
+        d.get("max_down_5"),
+        d.get("avg_close_position_5"),
+        d.get("support_price"),
+        d.get("stop_loss"),
+        d.get("target_1"),
+        d.get("risk_ratio"),
+        d.get("rr1"),
+        d.get("structural_support"),
+        d.get("structural_stop_loss"),
+        d.get("structural_risk_ratio"),
+        d.get("structural_rr1"),
+        d.get("tactical_support"),
+        d.get("tactical_stop_loss"),
+        d.get("tactical_risk_ratio"),
+        d.get("tactical_rr1"),
+        d.get("support_quality", ""),
+        d.get("short_support"),
+        d.get("short_support_zone_low"),
+        d.get("short_support_zone_high"),
+        d.get("key_support"),
+        d.get("key_support_zone_low"),
+        d.get("key_support_zone_high"),
+        d.get("strong_support"),
+        d.get("strong_support_zone_low"),
+        d.get("strong_support_zone_high"),
+        d.get("support_status", ""),
+        d.get("break_status", ""),
+        d.get("nearest_support_distance"),
+        _json_dumps(d.get("support_sources")),
+        d.get("trade_quality_score", 0),
+        d.get("volume_dry_score", 0),
+        d.get("price_stability_score", 0),
+        d.get("cannot_fall_score", 0),
+        d.get("balance_powerless_score", 0),
+        d.get("support_distance_pct"),
+        d.get("key_support_distance_pct"),
+        d.get("target_price"),
+        d.get("target_room_pct"),
+        d.get("estimated_rr"),
+        d.get("trade_state", ""),
+        d.get("trade_state_label", ""),
+        _json_dumps(d.get("trigger_reasons")),
+        _json_dumps(d.get("risk_warnings")),
+        _json_dumps(d.get("invalid_conditions")),
+        _json_dumps(d.get("score_reasons")),
+        _json_dumps(d.get("reject_reasons")),
+        d.get("data_source", ""),
+    )
+    marks = ", ".join("?" for _ in columns)
+    updates = ", ".join(f"{c}=excluded.{c}" for c in columns if c not in ("task_id", "code"))
+    conn.execute(
+        f"""INSERT INTO strategy3_candidates ({', '.join(columns)}) VALUES ({marks})
+            ON CONFLICT(task_id, code) DO UPDATE SET {updates}""",
+        values,
+    )
+    conn.commit()
+
+
+def get_strategy3_candidates(task_id: str = None) -> list[dict]:
+    """Get strategy3 candidates, optionally filtered by task_id."""
+    conn = get_conn()
+    if task_id:
+        rows = conn.execute(
+            "SELECT * FROM strategy3_candidates WHERE task_id=? "
+            "ORDER BY total_score DESC, risk_ratio ASC, code ASC",
+            (task_id,),
+        ).fetchall()
+    else:
+        latest = conn.execute(
+            "SELECT id FROM scan_tasks WHERE status='completed' "
+            "AND strategy_type='STRATEGY_3_STRONG_PULLBACK_SECOND_BREAKOUT' "
+            "ORDER BY started_at DESC LIMIT 1"
+        ).fetchone()
+        if not latest:
+            return []
+        rows = conn.execute(
+            "SELECT * FROM strategy3_candidates WHERE task_id=? "
+            "ORDER BY total_score DESC, risk_ratio ASC, code ASC",
+            (latest[0],),
+        ).fetchall()
+    cols = [d[1] for d in conn.execute("PRAGMA table_info(strategy3_candidates)").fetchall()]
+    return [_deserialize_strategy3_candidate(dict(zip(cols, row))) for row in rows]
+
+
+def get_strategy3_candidate(code: str, task_id: str = None) -> dict | None:
+    """Get single strategy3 candidate detail."""
+    conn = get_conn()
+    if task_id:
+        row = conn.execute(
+            "SELECT * FROM strategy3_candidates WHERE code=? AND task_id=?",
+            (code, task_id),
+        ).fetchone()
+    else:
+        row = conn.execute(
+            "SELECT * FROM strategy3_candidates WHERE code=? ORDER BY id DESC LIMIT 1",
+            (code,),
+        ).fetchone()
+    if not row:
+        return None
+    cols = [d[1] for d in conn.execute("PRAGMA table_info(strategy3_candidates)").fetchall()]
+    return _deserialize_strategy3_candidate(dict(zip(cols, row)))
+
+
+def _deserialize_strategy3_candidate(row: dict) -> dict:
+    """Convert strategy3 JSON string fields to Python lists."""
+    for field in (
+        "score_reasons", "reject_reasons", "support_sources",
+        "trigger_reasons", "risk_warnings", "invalid_conditions",
+    ):
+        value = row.get(field)
+        if isinstance(value, str) and value:
+            try:
                 row[field] = json.loads(value)
             except (json.JSONDecodeError, TypeError):
                 row[field] = []
@@ -1514,6 +1971,193 @@ def _ensure_strategy2_backtest_tables(conn: sqlite3.Connection):
             STRATEGY2_STRATEGY_ENGINE_VERSION,
         ),
     )
+
+
+def _ensure_strategy3_backtest_tables(conn: sqlite3.Connection):
+    """Create strategy3 local DB backtest tables with compatible schema."""
+    conn.execute('''
+        CREATE TABLE IF NOT EXISTS strategy3_backtest_tasks (
+            id                           TEXT PRIMARY KEY,
+            status                       TEXT NOT NULL DEFAULT 'running',
+            requested_start_date          TEXT,
+            requested_end_date            TEXT,
+            scope_type                    TEXT,
+            requested_codes               TEXT,
+            max_stocks                    INTEGER DEFAULT 0,
+            config_snapshot               TEXT NOT NULL,
+            total_stocks                  INTEGER DEFAULT 0,
+            processed_stocks              INTEGER DEFAULT 0,
+            stocks_with_opportunities      INTEGER DEFAULT 0,
+            opportunities_count            INTEGER DEFAULT 0,
+            insufficient_stocks_count      INTEGER DEFAULT 0,
+            failed_stocks_count           INTEGER DEFAULT 0,
+            started_at                    TEXT,
+            finished_at                   TEXT,
+            elapsed_seconds                REAL,
+            error                         TEXT,
+            backtest_engine_version       TEXT,
+            strategy_engine_version       TEXT,
+            credibility_status            TEXT,
+            execution_model               TEXT,
+            sampling_method               TEXT,
+            sampling_seed                 INTEGER,
+            data_snapshot_date            TEXT,
+            data_revision_id              TEXT,
+            data_revision_version         TEXT,
+            actual_evaluation_start_date  TEXT,
+            actual_evaluation_end_date    TEXT,
+            observation_data_end_date      TEXT,
+            estimated_evaluations         INTEGER DEFAULT 0,
+            completed_evaluations         INTEGER DEFAULT 0,
+            raw_signals_count             INTEGER DEFAULT 0,
+            evaluation_error_days         INTEGER DEFAULT 0,
+            summary_json                  TEXT
+        )
+    ''')
+    conn.execute('''
+        CREATE TABLE IF NOT EXISTS strategy3_backtest_signals (
+            id                         INTEGER PRIMARY KEY AUTOINCREMENT,
+            task_id                    TEXT NOT NULL,
+            code                       TEXT NOT NULL,
+            name                       TEXT,
+            evaluation_date            TEXT NOT NULL,
+            evaluation_index           INTEGER NOT NULL,
+            total_score                INTEGER DEFAULT 0,
+            level                      TEXT,
+            current_close              REAL,
+            trend_score                INTEGER DEFAULT 0,
+            pullback_score             INTEGER DEFAULT 0,
+            volume_stability_score     INTEGER DEFAULT 0,
+            second_breakout_score      INTEGER DEFAULT 0,
+            risk_reward_score          INTEGER DEFAULT 0,
+            trade_state                TEXT,
+            trade_state_label          TEXT,
+            trade_quality_score        INTEGER DEFAULT 0,
+            volume_dry_score           INTEGER DEFAULT 0,
+            price_stability_score      INTEGER DEFAULT 0,
+            cannot_fall_score          INTEGER DEFAULT 0,
+            balance_powerless_score    INTEGER DEFAULT 0,
+            support_price              REAL,
+            stop_loss                  REAL,
+            target_price               REAL,
+            risk_ratio                 REAL,
+            rr1                        REAL,
+            pullback_pct               REAL,
+            volume_ratio_5_20          REAL,
+            evaluation_snapshot        TEXT NOT NULL,
+            FOREIGN KEY (task_id) REFERENCES strategy3_backtest_tasks(id),
+            UNIQUE (task_id, code, evaluation_date)
+        )
+    ''')
+    conn.execute('''
+        CREATE TABLE IF NOT EXISTS strategy3_backtest_opportunities (
+            id                         INTEGER PRIMARY KEY AUTOINCREMENT,
+            task_id                    TEXT NOT NULL,
+            code                       TEXT NOT NULL,
+            name                       TEXT,
+            first_detected_date        TEXT NOT NULL,
+            last_detected_date         TEXT NOT NULL,
+            consecutive_hit_days       INTEGER DEFAULT 0,
+            first_score                INTEGER DEFAULT 0,
+            max_score                  INTEGER DEFAULT 0,
+            level                      TEXT,
+            trade_state                TEXT,
+            trade_state_label          TEXT,
+            trade_quality_score        INTEGER DEFAULT 0,
+            entry_close                REAL,
+            support_price              REAL,
+            stop_loss                  REAL,
+            target_price               REAL,
+            risk_ratio                 REAL,
+            rr1                        REAL,
+            trend_score                INTEGER DEFAULT 0,
+            pullback_score             INTEGER DEFAULT 0,
+            volume_stability_score     INTEGER DEFAULT 0,
+            second_breakout_score      INTEGER DEFAULT 0,
+            risk_reward_score          INTEGER DEFAULT 0,
+            volume_dry_score           INTEGER DEFAULT 0,
+            price_stability_score      INTEGER DEFAULT 0,
+            cannot_fall_score          INTEGER DEFAULT 0,
+            balance_powerless_score    INTEGER DEFAULT 0,
+            pullback_pct               REAL,
+            volume_ratio_5_20          REAL,
+            evaluation_snapshot        TEXT NOT NULL,
+            horizon_5                  TEXT,
+            horizon_10                 TEXT,
+            horizon_20                 TEXT,
+            signal_count               INTEGER DEFAULT 0,
+            execution_model            TEXT,
+            entry_date                 TEXT,
+            entry_price                REAL,
+            exit_date                  TEXT,
+            exit_price                 REAL,
+            exit_reason                TEXT,
+            realized_return            REAL,
+            mark_to_market_end_return  REAL,
+            holding_days               INTEGER DEFAULT 0,
+            available_forward_days     INTEGER DEFAULT 0,
+            first_signal_id            INTEGER,
+            last_signal_id             INTEGER,
+            FOREIGN KEY (task_id) REFERENCES strategy3_backtest_tasks(id),
+            UNIQUE (task_id, code, first_detected_date)
+        )
+    ''')
+    conn.execute('''
+        CREATE TABLE IF NOT EXISTS strategy3_backtest_insufficient_stocks (
+            id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+            task_id            TEXT NOT NULL,
+            code               TEXT NOT NULL,
+            name               TEXT,
+            reason_code        TEXT NOT NULL,
+            available_days     INTEGER DEFAULT 0,
+            required_days      INTEGER DEFAULT 0,
+            earliest_date      TEXT,
+            latest_date        TEXT,
+            actual_start_date  TEXT,
+            actual_end_date    TEXT,
+            detail             TEXT,
+            FOREIGN KEY (task_id) REFERENCES strategy3_backtest_tasks(id)
+        )
+    ''')
+    conn.execute('''
+        CREATE TABLE IF NOT EXISTS strategy3_backtest_task_stocks (
+            task_id                       TEXT NOT NULL,
+            code                          TEXT NOT NULL,
+            name                          TEXT,
+            status                        TEXT NOT NULL DEFAULT 'PENDING',
+            available_days                INTEGER DEFAULT 0,
+            required_days                 INTEGER DEFAULT 0,
+            earliest_date                 TEXT,
+            latest_date                   TEXT,
+            actual_eval_start_date        TEXT,
+            actual_eval_end_date          TEXT,
+            observation_data_end_date      TEXT,
+            evaluation_days               INTEGER DEFAULT 0,
+            liquidity_filtered_days       INTEGER DEFAULT 0,
+            trend_filtered_days           INTEGER DEFAULT 0,
+            setup_failed_days             INTEGER DEFAULT 0,
+            volume_failed_days            INTEGER DEFAULT 0,
+            second_breakout_failed_days   INTEGER DEFAULT 0,
+            risk_failed_days              INTEGER DEFAULT 0,
+            trade_quality_failed_days     INTEGER DEFAULT 0,
+            score_failed_days             INTEGER DEFAULT 0,
+            invalid_data_days             INTEGER DEFAULT 0,
+            evaluation_error_days         INTEGER DEFAULT 0,
+            raw_signals_count             INTEGER DEFAULT 0,
+            opportunities_count           INTEGER DEFAULT 0,
+            error_code                    TEXT,
+            error_detail                  TEXT,
+            started_at                    TEXT,
+            finished_at                   TEXT,
+            PRIMARY KEY (task_id, code)
+        )
+    ''')
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_s3_bt_task_status ON strategy3_backtest_tasks(status, started_at DESC)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_s3_bt_opp_task ON strategy3_backtest_opportunities(task_id, first_detected_date)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_s3_bt_opp_stock ON strategy3_backtest_opportunities(task_id, code, first_detected_date)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_s3_bt_insuf_task ON strategy3_backtest_insufficient_stocks(task_id, reason_code)")
+    conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS uq_s3_bt_signal ON strategy3_backtest_signals(task_id, code, evaluation_date)")
+    conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS uq_s3_bt_opp ON strategy3_backtest_opportunities(task_id, code, first_detected_date)")
 
 
 def mark_running_strategy2_backtests_interrupted() -> list[str]:
@@ -2169,6 +2813,674 @@ def get_strategy2_backtest_opportunities(
         "PRAGMA table_info(strategy2_backtest_opportunities)"
     )]
     return [dict(zip(cols, r)) for r in rows]
+
+
+def create_strategy3_backtest_task(task_id: str, payload: dict, config_snapshot: str):
+    """Create a strategy3 local DB backtest task."""
+    from strategy3.version import (
+        STRATEGY3_BACKTEST_ENGINE_VERSION,
+        STRATEGY3_DATA_REVISION_VERSION,
+        STRATEGY3_STRATEGY_ENGINE_VERSION,
+    )
+    conn = get_conn()
+    codes = payload.get("codes") or []
+    conn.execute(
+        """INSERT INTO strategy3_backtest_tasks
+           (id, status, requested_start_date, requested_end_date,
+            scope_type, requested_codes, max_stocks, config_snapshot,
+            total_stocks, started_at, backtest_engine_version,
+            strategy_engine_version, credibility_status, execution_model,
+            data_revision_version)
+           VALUES (?, 'running', ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, 'NEXT_OPEN', ?)""",
+        (
+            task_id,
+            payload.get("startDate", ""),
+            payload.get("endDate", ""),
+            "single" if codes else "market",
+            ",".join(codes),
+            payload.get("maxStocks", 0),
+            config_snapshot,
+            datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            STRATEGY3_BACKTEST_ENGINE_VERSION,
+            STRATEGY3_STRATEGY_ENGINE_VERSION,
+            "PHASE1_INCOMPLETE",
+            STRATEGY3_DATA_REVISION_VERSION,
+        ),
+    )
+    conn.commit()
+
+
+def update_strategy3_backtest_task(task_id: str, **kwargs):
+    if not kwargs:
+        return
+    conn = get_conn()
+    sets = ", ".join(f"{k}=?" for k in kwargs)
+    conn.execute(
+        f"UPDATE strategy3_backtest_tasks SET {sets} WHERE id=?",
+        list(kwargs.values()) + [task_id],
+    )
+    conn.commit()
+
+
+def get_strategy3_backtest_task(task_id: str) -> dict | None:
+    conn = get_conn()
+    row = conn.execute(
+        "SELECT * FROM strategy3_backtest_tasks WHERE id=?", (task_id,)
+    ).fetchone()
+    if not row:
+        return None
+    cols = [d[1] for d in conn.execute("PRAGMA table_info(strategy3_backtest_tasks)")]
+    return dict(zip(cols, row))
+
+
+def save_strategy3_backtest_task_stock(task_id: str, code: str, **kwargs):
+    conn = get_conn()
+    _upsert_strategy3_backtest_task_stock_conn(conn, task_id, code, kwargs)
+    conn.commit()
+
+
+def get_strategy3_backtest_task_stocks(task_id: str, status: str = None) -> list[dict]:
+    conn = get_conn()
+    if status:
+        rows = conn.execute(
+            "SELECT * FROM strategy3_backtest_task_stocks WHERE task_id=? AND status=? ORDER BY code",
+            (task_id, status),
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            "SELECT * FROM strategy3_backtest_task_stocks WHERE task_id=? ORDER BY code",
+            (task_id,),
+        ).fetchall()
+    cols = [d[1] for d in conn.execute("PRAGMA table_info(strategy3_backtest_task_stocks)")]
+    return [dict(zip(cols, r)) for r in rows]
+
+
+def replace_strategy3_stock_backtest_result(
+    task_id: str, code: str, name: str, result: dict,
+) -> None:
+    """Atomically replace one stock's strategy3 backtest details."""
+    conn = get_conn()
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        conn.execute("DELETE FROM strategy3_backtest_opportunities WHERE task_id=? AND code=?", (task_id, code))
+        conn.execute("DELETE FROM strategy3_backtest_signals WHERE task_id=? AND code=?", (task_id, code))
+
+        signal_id_by_date = {}
+        for sig in (result.get("signals") or []):
+            row = _strategy3_signal_row(sig, code, name)
+            c = conn.execute(
+                """INSERT INTO strategy3_backtest_signals
+                   (task_id, code, name, evaluation_date, evaluation_index,
+                    total_score, level, current_close, trend_score, pullback_score,
+                    volume_stability_score, second_breakout_score, risk_reward_score,
+                    trade_state, trade_state_label, trade_quality_score,
+                    volume_dry_score, price_stability_score, cannot_fall_score,
+                    balance_powerless_score, support_price, stop_loss, target_price,
+                    risk_ratio, rr1, pullback_pct, volume_ratio_5_20,
+                    evaluation_snapshot)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                (
+                    task_id,
+                    row["code"],
+                    row["name"],
+                    row["evaluation_date"],
+                    row["evaluation_index"],
+                    row["total_score"],
+                    row["level"],
+                    row["current_close"],
+                    row["trend_score"],
+                    row["pullback_score"],
+                    row["volume_stability_score"],
+                    row["second_breakout_score"],
+                    row["risk_reward_score"],
+                    row["trade_state"],
+                    row["trade_state_label"],
+                    row["trade_quality_score"],
+                    row["volume_dry_score"],
+                    row["price_stability_score"],
+                    row["cannot_fall_score"],
+                    row["balance_powerless_score"],
+                    row["support_price"],
+                    row["stop_loss"],
+                    row["target_price"],
+                    row["risk_ratio"],
+                    row["rr1"],
+                    row["pullback_pct"],
+                    row["volume_ratio_5_20"],
+                    row["evaluation_snapshot"],
+                ),
+            )
+            signal_id_by_date[row["evaluation_date"]] = c.lastrowid
+
+        for opp in (result.get("opportunities") or []):
+            first_sid = signal_id_by_date.get(opp.get("first_detected_date"))
+            last_sid = signal_id_by_date.get(opp.get("last_detected_date"))
+            conn.execute(
+                """INSERT INTO strategy3_backtest_opportunities
+                   (task_id, code, name, first_detected_date, last_detected_date,
+                    consecutive_hit_days, first_score, max_score, level,
+                    trade_state, trade_state_label, trade_quality_score,
+                    entry_close, support_price, stop_loss, target_price,
+                    risk_ratio, rr1, trend_score, pullback_score,
+                    volume_stability_score, second_breakout_score, risk_reward_score,
+                    volume_dry_score, price_stability_score, cannot_fall_score,
+                    balance_powerless_score, pullback_pct, volume_ratio_5_20,
+                    evaluation_snapshot, horizon_5, horizon_10, horizon_20,
+                    signal_count, execution_model, entry_date, entry_price,
+                    exit_date, exit_price, exit_reason, realized_return,
+                    mark_to_market_end_return, holding_days, available_forward_days,
+                    first_signal_id, last_signal_id)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                (
+                    task_id,
+                    opp.get("code", code),
+                    opp.get("name", name),
+                    opp["first_detected_date"],
+                    opp["last_detected_date"],
+                    opp.get("consecutive_hit_days", 0),
+                    opp.get("first_score", 0),
+                    opp.get("max_score", 0),
+                    opp.get("level", ""),
+                    opp.get("trade_state", ""),
+                    opp.get("trade_state_label", ""),
+                    opp.get("trade_quality_score", 0),
+                    opp.get("entry_close", 0),
+                    opp.get("support_price", 0),
+                    opp.get("stop_loss", 0),
+                    opp.get("target_price", 0),
+                    opp.get("risk_ratio", 0),
+                    opp.get("rr1", 0),
+                    opp.get("trend_score", 0),
+                    opp.get("pullback_score", 0),
+                    opp.get("volume_stability_score", 0),
+                    opp.get("second_breakout_score", 0),
+                    opp.get("risk_reward_score", 0),
+                    opp.get("volume_dry_score", 0),
+                    opp.get("price_stability_score", 0),
+                    opp.get("cannot_fall_score", 0),
+                    opp.get("balance_powerless_score", 0),
+                    opp.get("pullback_pct", 0),
+                    opp.get("volume_ratio_5_20", 0),
+                    _json_text(opp.get("evaluation_snapshot", "{}")),
+                    _json_text(opp.get("horizon_5", "{}")),
+                    _json_text(opp.get("horizon_10", "{}")),
+                    _json_text(opp.get("horizon_20", "{}")),
+                    opp.get("signal_count", 0),
+                    opp.get("execution_model", ""),
+                    opp.get("entry_date", ""),
+                    opp.get("entry_price", 0),
+                    opp.get("exit_date", ""),
+                    opp.get("exit_price", 0),
+                    opp.get("exit_reason", ""),
+                    opp.get("realized_return", 0),
+                    opp.get("mark_to_market_end_return", 0),
+                    opp.get("holding_days", 0),
+                    opp.get("available_forward_days", 0),
+                    first_sid,
+                    last_sid,
+                ),
+            )
+
+        counters = _strategy3_eval_result_counters(result.get("eval_results") or {})
+        update_kwargs = {k: v for k, v in {
+            "status": "COMPLETED",
+            "name": name,
+            "evaluation_days": result.get("eval_days", 0),
+            "liquidity_filtered_days": result.get("liquidity_filtered_days", 0),
+            "trend_filtered_days": counters["trend_filtered_days"],
+            "setup_failed_days": counters["setup_failed_days"],
+            "volume_failed_days": counters["volume_failed_days"],
+            "second_breakout_failed_days": counters["second_breakout_failed_days"],
+            "risk_failed_days": counters["risk_failed_days"],
+            "trade_quality_failed_days": counters["trade_quality_failed_days"],
+            "score_failed_days": counters["score_failed_days"],
+            "invalid_data_days": counters["invalid_data_days"],
+            "evaluation_error_days": result.get("evaluation_error_days", 0),
+            "raw_signals_count": result.get("raw_signals_count", 0),
+            "opportunities_count": result.get("opportunities_count", 0),
+            "actual_eval_start_date": result.get("actual_eval_start_date"),
+            "actual_eval_end_date": result.get("actual_eval_end_date"),
+            "observation_data_end_date": result.get("observation_data_end_date"),
+            "available_days": result.get("available_days", 0),
+            "required_days": result.get("required_days", 0),
+            "earliest_date": result.get("earliest_date"),
+            "latest_date": result.get("latest_date"),
+            "error_code": result.get("error_code"),
+            "error_detail": result.get("error_detail"),
+            "started_at": result.get("started_at"),
+            "finished_at": result.get("finished_at"),
+        }.items() if v is not None}
+        _upsert_strategy3_backtest_task_stock_conn(conn, task_id, code, update_kwargs)
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+
+
+def get_strategy3_backtest_opportunities(
+    task_id: str, code: str = None, limit: int = 500, offset: int = 0,
+) -> list[dict]:
+    conn = get_conn()
+    if code:
+        rows = conn.execute(
+            "SELECT * FROM strategy3_backtest_opportunities "
+            "WHERE task_id=? AND code=? ORDER BY first_detected_date LIMIT ? OFFSET ?",
+            (task_id, code, limit, offset),
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            "SELECT * FROM strategy3_backtest_opportunities "
+            "WHERE task_id=? ORDER BY first_detected_date LIMIT ? OFFSET ?",
+            (task_id, limit, offset),
+        ).fetchall()
+    cols = [d[1] for d in conn.execute("PRAGMA table_info(strategy3_backtest_opportunities)")]
+    return [dict(zip(cols, r)) for r in rows]
+
+
+def build_strategy3_backtest_summary(task_id: str) -> dict:
+    """Build strategy3 backtest summary from persisted details only."""
+    import statistics as _st
+    conn = get_conn()
+    rows = conn.execute(
+        "SELECT * FROM strategy3_backtest_opportunities WHERE task_id=?",
+        (task_id,),
+    ).fetchall()
+    cols = [d[1] for d in conn.execute("PRAGMA table_info(strategy3_backtest_opportunities)")]
+    opps = [dict(zip(cols, row)) for row in rows]
+
+    horizon_stats = {}
+    for h in ["5", "10", "20"]:
+        observed = success = failed = unresolved = unobserved = 0
+        end_returns, max_upsides, max_drawdowns = [], [], []
+        days_to_target, days_to_stop = [], []
+        for opp in opps:
+            data = _json_loads(opp.get(f"horizon_{h}"))
+            result = data.get("result", "UNOBSERVED")
+            if result == "UNOBSERVED":
+                unobserved += 1
+                continue
+            observed += 1
+            end_returns.append(data.get("end_return", 0) or 0)
+            max_upsides.append(data.get("max_upside", 0) or 0)
+            max_drawdowns.append(data.get("max_drawdown", 0) or 0)
+            if result == "SUCCESS":
+                success += 1
+                if data.get("days_to_target") is not None:
+                    days_to_target.append(data["days_to_target"])
+            elif result == "FAILED":
+                failed += 1
+                if data.get("days_to_stop") is not None:
+                    days_to_stop.append(data["days_to_stop"])
+            elif result == "UNRESOLVED":
+                unresolved += 1
+        horizon_stats[h] = {
+            "observed": observed,
+            "unobserved": unobserved,
+            "success": success,
+            "failed": failed,
+            "unresolved": unresolved,
+            "success_rate": round(success / observed * 100, 2) if observed else 0,
+            "failed_rate": round(failed / observed * 100, 2) if observed else 0,
+            "avg_end_return": round(_st.mean(end_returns), 6) if end_returns else 0,
+            "median_end_return": round(_st.median(end_returns), 6) if end_returns else 0,
+            "avg_max_upside": round(_st.mean(max_upsides), 6) if max_upsides else 0,
+            "avg_max_drawdown": round(_st.mean(max_drawdowns), 6) if max_drawdowns else 0,
+            "avg_days_to_target": round(_st.mean(days_to_target), 1) if days_to_target else None,
+            "avg_days_to_stop": round(_st.mean(days_to_stop), 1) if days_to_stop else None,
+        }
+
+    entered_opps = [opp for opp in opps if opp.get("entry_price") and opp["entry_price"] > 0]
+    realized_returns = [opp.get("realized_return") or 0 for opp in entered_opps]
+    wins = [value for value in realized_returns if value > 0]
+    losses = [value for value in realized_returns if value < 0]
+    avg_win = _st.mean(wins) if wins else 0
+    avg_loss = _st.mean(losses) if losses else 0
+    gross_profit = sum(wins)
+    gross_loss = abs(sum(losses))
+    holding_days = [opp.get("holding_days") or 0 for opp in entered_opps if opp.get("holding_days")]
+    target = sum(1 for opp in opps if opp.get("exit_reason") == "TARGET")
+    stop = sum(1 for opp in opps if opp.get("exit_reason") == "STOP")
+    unresolved = sum(1 for opp in opps if opp.get("exit_reason") == "UNRESOLVED")
+    positive = sum(1 for value in realized_returns if value > 0)
+
+    funnel_columns = [
+        "evaluation_days",
+        "liquidity_filtered_days",
+        "trend_filtered_days",
+        "setup_failed_days",
+        "volume_failed_days",
+        "second_breakout_failed_days",
+        "risk_failed_days",
+        "trade_quality_failed_days",
+        "score_failed_days",
+        "invalid_data_days",
+        "evaluation_error_days",
+        "raw_signals_count",
+        "opportunities_count",
+    ]
+    funnel_row = conn.execute(
+        "SELECT " + ", ".join(f"COALESCE(SUM({column}), 0)" for column in funnel_columns)
+        + " FROM strategy3_backtest_task_stocks WHERE task_id=?",
+        (task_id,),
+    ).fetchone()
+    funnel = dict(zip(funnel_columns, funnel_row))
+
+    groups = {
+        "by_total_score_band": _strategy3_group_by(opps, lambda row: _strategy3_score_band(row.get("max_score"))),
+        "by_trend_score_band": _strategy3_group_by(opps, lambda row: _strategy3_score_band(row.get("trend_score"))),
+        "by_pullback": _strategy3_group_by(opps, lambda row: _strategy3_pullback_bucket(row.get("pullback_pct") or 0)),
+        "by_volume_stability_score_band": _strategy3_group_by(opps, lambda row: _strategy3_score_band(row.get("volume_stability_score"))),
+        "by_second_breakout_score_band": _strategy3_group_by(opps, lambda row: _strategy3_score_band(row.get("second_breakout_score"))),
+        "by_risk_ratio": _strategy3_group_by(opps, lambda row: _strategy3_risk_bucket(row.get("risk_ratio") or 0)),
+        "by_rr1": _strategy3_group_by(opps, lambda row: _strategy3_rr_bucket(row.get("rr1") or 0)),
+        "by_month": _strategy3_group_by(opps, lambda row: (row.get("first_detected_date") or "")[:7] or "UNKNOWN"),
+        "by_trade_state": _strategy3_group_by(opps, lambda row: row.get("trade_state") or "UNKNOWN"),
+        "by_market_index": _strategy3_group_by(opps, lambda row: _strategy3_snapshot_value(row, "market_index_symbol") or "UNKNOWN"),
+        "by_market_return_20": _strategy3_group_by(opps, lambda row: _strategy3_market_return_bucket(_strategy3_snapshot_value(row, "market_return_20"))),
+        "by_market_return_60": _strategy3_group_by(opps, lambda row: _strategy3_market_return_bucket(_strategy3_snapshot_value(row, "market_return_60"))),
+        "by_market_ma_state": _strategy3_group_by(opps, _strategy3_market_ma_state),
+    }
+
+    return {
+        "horizon_stats": horizon_stats,
+        "execution_stats": {
+            "opportunities": len(opps),
+            "entered": len(entered_opps),
+            "target": target,
+            "stop": stop,
+            "unresolved": unresolved,
+            "not_entered": len(opps) - len(entered_opps),
+            "target_hit_rate": round(target / len(entered_opps) * 100, 2) if entered_opps else 0,
+            "stop_hit_rate": round(stop / len(entered_opps) * 100, 2) if entered_opps else 0,
+            "avg_realized_return": round(_st.mean(realized_returns), 6) if realized_returns else 0,
+            "median_realized_return": round(_st.median(realized_returns), 6) if realized_returns else 0,
+            "avg_win": round(avg_win, 6),
+            "avg_loss": round(avg_loss, 6),
+            "payoff_ratio": round(avg_win / abs(avg_loss), 4) if avg_loss else 0,
+            "profit_factor": round(gross_profit / gross_loss, 4) if gross_loss else 0,
+            "expectancy": round(_st.mean(realized_returns), 6) if realized_returns else 0,
+            "max_consecutive_losses": _strategy3_max_consecutive_losses(entered_opps),
+            "positive_rate": round(positive / len(entered_opps) * 100, 2) if entered_opps else 0,
+            "avg_holding_days": round(_st.mean(holding_days), 1) if holding_days else 0,
+        },
+        "funnel": funnel,
+        "groups": groups,
+        "marketDataMode": _strategy3_market_data_mode(opps),
+    }
+
+
+def _upsert_strategy3_backtest_task_stock_conn(conn, task_id: str, code: str, values: dict):
+    existing = conn.execute(
+        "SELECT 1 FROM strategy3_backtest_task_stocks WHERE task_id=? AND code=?",
+        (task_id, code),
+    ).fetchone()
+    if existing:
+        if not values:
+            return
+        sets = ", ".join(f"{key}=?" for key in values)
+        conn.execute(
+            f"UPDATE strategy3_backtest_task_stocks SET {sets} WHERE task_id=? AND code=?",
+            list(values.values()) + [task_id, code],
+        )
+        return
+    cols = ["task_id", "code"] + list(values.keys())
+    placeholders = ", ".join("?" for _ in cols)
+    conn.execute(
+        f"INSERT INTO strategy3_backtest_task_stocks ({', '.join(cols)}) VALUES ({placeholders})",
+        [task_id, code] + list(values.values()),
+    )
+
+
+def _strategy3_signal_row(signal, code: str, name: str) -> dict:
+    if hasattr(signal, "evaluation_date"):
+        return {
+            "code": getattr(signal, "code", code) or code,
+            "name": getattr(signal, "name", name) or name,
+            "evaluation_date": signal.evaluation_date,
+            "evaluation_index": signal.evaluation_index,
+            "total_score": signal.total_score,
+            "level": signal.level,
+            "current_close": signal.current_close,
+            "trend_score": signal.trend_score,
+            "pullback_score": signal.pullback_score,
+            "volume_stability_score": signal.volume_stability_score,
+            "second_breakout_score": signal.second_breakout_score,
+            "risk_reward_score": signal.risk_reward_score,
+            "trade_state": signal.trade_state,
+            "trade_state_label": signal.trade_state_label,
+            "trade_quality_score": signal.trade_quality_score,
+            "volume_dry_score": signal.volume_dry_score,
+            "price_stability_score": signal.price_stability_score,
+            "cannot_fall_score": signal.cannot_fall_score,
+            "balance_powerless_score": signal.balance_powerless_score,
+            "support_price": signal.support_price,
+            "stop_loss": signal.stop_loss,
+            "target_price": signal.target_price,
+            "risk_ratio": signal.risk_ratio,
+            "rr1": signal.rr1,
+            "pullback_pct": signal.pullback_pct,
+            "volume_ratio_5_20": signal.volume_ratio_5_20,
+            "evaluation_snapshot": _json_text(signal.evaluation_snapshot),
+        }
+    return {
+        "code": signal.get("code", code),
+        "name": signal.get("name", name),
+        "evaluation_date": signal.get("evaluation_date", ""),
+        "evaluation_index": signal.get("evaluation_index", 0),
+        "total_score": signal.get("total_score", 0),
+        "level": signal.get("level", ""),
+        "current_close": signal.get("current_close", 0),
+        "trend_score": signal.get("trend_score", 0),
+        "pullback_score": signal.get("pullback_score", 0),
+        "volume_stability_score": signal.get("volume_stability_score", 0),
+        "second_breakout_score": signal.get("second_breakout_score", 0),
+        "risk_reward_score": signal.get("risk_reward_score", 0),
+        "trade_state": signal.get("trade_state", ""),
+        "trade_state_label": signal.get("trade_state_label", ""),
+        "trade_quality_score": signal.get("trade_quality_score", 0),
+        "volume_dry_score": signal.get("volume_dry_score", 0),
+        "price_stability_score": signal.get("price_stability_score", 0),
+        "cannot_fall_score": signal.get("cannot_fall_score", 0),
+        "balance_powerless_score": signal.get("balance_powerless_score", 0),
+        "support_price": signal.get("support_price", 0),
+        "stop_loss": signal.get("stop_loss", 0),
+        "target_price": signal.get("target_price", 0),
+        "risk_ratio": signal.get("risk_ratio", 0),
+        "rr1": signal.get("rr1", 0),
+        "pullback_pct": signal.get("pullback_pct", 0),
+        "volume_ratio_5_20": signal.get("volume_ratio_5_20", 0),
+        "evaluation_snapshot": _json_text(signal.get("evaluation_snapshot", {})),
+    }
+
+
+def _strategy3_eval_result_counters(eval_results: dict) -> dict:
+    counter = {
+        "trend_filtered_days": 0,
+        "setup_failed_days": 0,
+        "volume_failed_days": 0,
+        "second_breakout_failed_days": 0,
+        "risk_failed_days": 0,
+        "trade_quality_failed_days": 0,
+        "score_failed_days": 0,
+        "invalid_data_days": 0,
+    }
+    mapping = {
+        "TREND_REJECTED": "trend_filtered_days",
+        "SETUP_REJECTED": "setup_failed_days",
+        "VOLUME_REJECTED": "volume_failed_days",
+        "SECOND_BREAKOUT_REJECTED": "second_breakout_failed_days",
+        "RISK_REJECTED": "risk_failed_days",
+        "TRADE_QUALITY_REJECTED": "trade_quality_failed_days",
+        "SCORE_BELOW_THRESHOLD": "score_failed_days",
+        "INSUFFICIENT_DATA": "invalid_data_days",
+        "INVALID_DATA": "invalid_data_days",
+        "EVALUATION_ERROR": "invalid_data_days",
+    }
+    for reason in eval_results.values():
+        key = mapping.get(reason)
+        if key:
+            counter[key] += 1
+    return counter
+
+
+def _json_text(value) -> str:
+    if value is None:
+        return "{}"
+    if isinstance(value, str):
+        return value
+    return json.dumps(value, ensure_ascii=False)
+
+
+def _json_loads(value) -> dict:
+    if not value:
+        return {}
+    if isinstance(value, dict):
+        return value
+    try:
+        return json.loads(value)
+    except Exception:
+        return {}
+
+
+def _strategy3_snapshot(row: dict) -> dict:
+    return _json_loads(row.get("evaluation_snapshot"))
+
+
+def _strategy3_snapshot_value(row: dict, key: str):
+    return _strategy3_snapshot(row).get(key)
+
+
+def _strategy3_group_by(rows: list[dict], key_fn) -> dict:
+    import statistics as _st
+    groups = {}
+    for row in rows:
+        groups.setdefault(key_fn(row), []).append(row)
+    result = {}
+    for key, items in sorted(groups.items()):
+        entered = [row for row in items if row.get("entry_price") and row["entry_price"] > 0]
+        returns = [row.get("realized_return") or 0 for row in entered]
+        wins = [value for value in returns if value > 0]
+        losses = [value for value in returns if value < 0]
+        avg_win = _st.mean(wins) if wins else 0
+        avg_loss = _st.mean(losses) if losses else 0
+        gross_profit = sum(wins)
+        gross_loss = abs(sum(losses))
+        target = sum(1 for row in items if row.get("exit_reason") == "TARGET")
+        stop = sum(1 for row in items if row.get("exit_reason") == "STOP")
+        result[key] = {
+            "opportunities": len(items),
+            "entered": len(entered),
+            "target": target,
+            "stop": stop,
+            "not_entered": len(items) - len(entered),
+            "target_hit_rate": round(target / len(entered) * 100, 2) if entered else 0,
+            "stop_hit_rate": round(stop / len(entered) * 100, 2) if entered else 0,
+            "average_realized_return": round(_st.mean(returns), 6) if returns else 0,
+            "median_realized_return": round(_st.median(returns), 6) if returns else 0,
+            "avg_win": round(avg_win, 6),
+            "avg_loss": round(avg_loss, 6),
+            "payoff_ratio": round(avg_win / abs(avg_loss), 4) if avg_loss else 0,
+            "profit_factor": round(gross_profit / gross_loss, 4) if gross_loss else 0,
+            "expectancy": round(_st.mean(returns), 6) if returns else 0,
+        }
+    return result
+
+
+def _strategy3_max_consecutive_losses(rows: list[dict]) -> int:
+    max_streak = 0
+    streak = 0
+    for row in sorted(rows, key=lambda item: (item.get("first_detected_date") or "", item.get("code") or "")):
+        if (row.get("realized_return") or 0) < 0:
+            streak += 1
+            max_streak = max(max_streak, streak)
+        else:
+            streak = 0
+    return max_streak
+
+
+def _strategy3_market_return_bucket(value) -> str:
+    try:
+        numeric = float(value)
+    except Exception:
+        return "UNKNOWN"
+    if numeric < 0:
+        return "negative"
+    if numeric < 0.03:
+        return "0-3%"
+    if numeric <= 0.05:
+        return "3-5%"
+    return ">5%"
+
+
+def _strategy3_market_ma_state(row: dict) -> str:
+    snapshot = _strategy3_snapshot(row)
+    if "market_above_ma20" not in snapshot or "market_above_ma60" not in snapshot:
+        return "UNKNOWN"
+    above20 = bool(snapshot.get("market_above_ma20"))
+    above60 = bool(snapshot.get("market_above_ma60"))
+    if above20 and above60:
+        return "above_ma20_above_ma60"
+    if above20 and not above60:
+        return "above_ma20_below_ma60"
+    if not above20 and above60:
+        return "below_ma20_above_ma60"
+    return "below_ma20_below_ma60"
+
+
+def _strategy3_market_data_mode(rows: list[dict]) -> str:
+    modes = {
+        _strategy3_snapshot_value(row, "market_data_mode")
+        for row in rows
+        if _strategy3_snapshot_value(row, "market_data_mode")
+    }
+    if not modes:
+        return ""
+    if len(modes) == 1:
+        return next(iter(modes))
+    return "mixed"
+
+
+def _strategy3_score_band(value) -> str:
+    try:
+        score = int(value or 0)
+    except Exception:
+        score = 0
+    lower = max(0, min(100, (score // 10) * 10))
+    if lower == 100:
+        return "100"
+    return f"{lower}-{lower + 9}"
+
+
+def _strategy3_risk_bucket(risk_ratio: float) -> str:
+    if risk_ratio <= 0.04:
+        return "<=4%"
+    if risk_ratio <= 0.06:
+        return "4-6%"
+    if risk_ratio <= 0.08:
+        return "6-8%"
+    return ">8%"
+
+
+def _strategy3_rr_bucket(rr1: float) -> str:
+    if rr1 < 1.5:
+        return "<1.5"
+    if rr1 < 2.0:
+        return "1.5-2"
+    if rr1 < 3.0:
+        return "2-3"
+    return ">=3"
+
+
+def _strategy3_pullback_bucket(pullback_pct: float) -> str:
+    if pullback_pct < 0.10:
+        return "<10%"
+    if pullback_pct < 0.15:
+        return "10-15%"
+    if pullback_pct <= 0.22:
+        return "15-22%"
+    if pullback_pct <= 0.30:
+        return "22-30%"
+    return ">30%"
 
 
 def summarize_strategy2_backtest_for_comparison(task_id: str) -> dict:

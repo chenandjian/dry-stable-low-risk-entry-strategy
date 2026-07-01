@@ -2,7 +2,12 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { nextTick } from 'vue'
 
-const api = { getKlineHistory: vi.fn() }
+const api = {
+  getKlineHistory: vi.fn(),
+  getKlineHealth: vi.fn(),
+  refreshKlineData: vi.fn(),
+  refreshKlineHealth: vi.fn(),
+}
 vi.mock('../../composables/useApi.js', () => ({ useApi: () => api }))
 
 import KlineHistory from '../KlineHistory.vue'
@@ -36,10 +41,62 @@ function freshResponse(overrides = {}) {
   }
 }
 
+function healthResponse(overrides = {}) {
+  return {
+    summary: {
+      target_trade_date: '2026-06-16',
+      min_fetch_time: '2026-06-16 15:00:00',
+      total: 4,
+      fresh: 1,
+      no_trade: 1,
+      anomaly: 2,
+      failed: 1,
+      needs_refetch: 2,
+    },
+    items: [
+      {
+        code: '000002',
+        name: '停牌股份',
+        latest_kline_date: '2026-06-15',
+        latest_fetch_time: '2026-06-16 15:12:00',
+        target_trade_date: '2026-06-16',
+        health_status: 'no_trade',
+        severity: 'warning',
+        needs_refetch: false,
+        reason: '股票停牌或无交易，已在目标交易日收盘后确认',
+      },
+      {
+        code: '000003',
+        name: '异常股份',
+        latest_kline_date: '2026-06-16',
+        latest_fetch_time: '2026-06-16 15:12:00',
+        target_trade_date: '2026-06-16',
+        health_status: 'anomaly',
+        severity: 'danger',
+        needs_refetch: true,
+        reason: '目标交易日存在零成交量平盘K线，需要重新拉取确认',
+      },
+    ],
+    total: 2,
+    page: 1,
+    page_size: 100,
+    ...overrides,
+  }
+}
+
 describe('KlineHistory', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     api.getKlineHistory.mockResolvedValue(freshResponse())
+    api.getKlineHealth.mockResolvedValue(healthResponse())
+    api.refreshKlineData.mockResolvedValue({ ok: true, summary: { health_status: 'fresh' } })
+    api.refreshKlineHealth.mockResolvedValue({
+      ok: true,
+      requested_count: 1,
+      succeeded_count: 1,
+      failed_count: 0,
+      skipped_count: 1,
+    })
   })
 
   it('renders freshness summary and kline rows', async () => {
@@ -58,6 +115,86 @@ describe('KlineHistory', () => {
     expect(wrapper.text()).toContain('最新K线日期')
     expect(wrapper.text()).toContain('2026-06-16')
     expect(wrapper.text()).toContain('10.50')
+  })
+
+  it('renders market-wide data health cards and problem list', async () => {
+    const wrapper = mount(KlineHistory)
+    await flushUi()
+
+    expect(api.getKlineHealth).toHaveBeenCalledWith({ status: 'problem', page: 1, page_size: 100 })
+    expect(wrapper.text()).toContain('全市场数据健康')
+    expect(wrapper.text()).toContain('目标完整交易日')
+    expect(wrapper.text()).toContain('1 / 4')
+    expect(wrapper.text()).toContain('停牌股份')
+    expect(wrapper.text()).toContain('异常股份')
+    expect(wrapper.text()).toContain('零成交量平盘K线')
+  })
+
+  it('renders stock code as a baidu search link', async () => {
+    const wrapper = mount(KlineHistory)
+    await flushUi()
+
+    const link = wrapper.find('[data-test="stock-search-000003"]')
+    expect(link.exists()).toBe(true)
+    expect(link.attributes('href')).toBe('https://www.baidu.com/s?ie=UTF-8&wd=000003')
+    expect(link.attributes('target')).toBe('_blank')
+  })
+
+  it('loads a stock query from a health problem row', async () => {
+    const wrapper = mount(KlineHistory)
+    await flushUi()
+
+    await wrapper.find('[data-test="inspect-health-row-000003"]').trigger('click')
+    await flushUi()
+
+    expect(api.getKlineHistory).toHaveBeenLastCalledWith({
+      code: '000003',
+      start_date: '',
+      end_date: '',
+      page: 1,
+      page_size: 50,
+    })
+  })
+
+  it('loads failed-only health problems from the failed summary card', async () => {
+    const wrapper = mount(KlineHistory)
+    await flushUi()
+
+    const failedCard = wrapper.findAll('button').find((button) => button.text().includes('拉取失败'))
+    await failedCard.trigger('click')
+    await flushUi()
+
+    expect(api.getKlineHealth).toHaveBeenLastCalledWith({ status: 'failed', page: 1, page_size: 100 })
+  })
+
+  it('refreshes one problematic stock from the health row', async () => {
+    const wrapper = mount(KlineHistory)
+    await flushUi()
+
+    await wrapper.find('[data-test="refresh-health-row-000003"]').trigger('click')
+    await flushUi()
+
+    expect(api.refreshKlineData).toHaveBeenCalledWith('000003')
+    expect(api.getKlineHealth).toHaveBeenLastCalledWith({ status: 'problem', page: 1, page_size: 100 })
+    expect(api.getKlineHistory).toHaveBeenLastCalledWith({
+      code: '000003',
+      start_date: '',
+      end_date: '',
+      page: 1,
+      page_size: 50,
+    })
+  })
+
+  it('bulk refreshes all refetchable stocks in the current health filter', async () => {
+    const wrapper = mount(KlineHistory)
+    await flushUi()
+
+    await wrapper.find('[data-test="bulk-refresh-health"]').trigger('click')
+    await flushUi()
+
+    expect(api.refreshKlineHealth).toHaveBeenCalledWith({ status: 'problem' })
+    expect(wrapper.text()).toContain('批量重拉完成：成功 1，失败 0，跳过 1')
+    expect(api.getKlineHealth).toHaveBeenLastCalledWith({ status: 'problem', page: 1, page_size: 100 })
   })
 
   it('loads the next page with the current query', async () => {

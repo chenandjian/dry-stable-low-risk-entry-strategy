@@ -30,7 +30,7 @@ CupHandleScan 是 Python 3.10+ 的 A 股扫描系统，当前 worktree 包含两
 后端常规验证：
 
 ```bash
-python -m pytest tests/ -q --ignore=tests/test_akshare_hist.py --ignore=tests/test_tushare_hist.py --ignore=tests/test_yfinance_hist.py
+python -m pytest tests/ -q --ignore=tests/test_akshare_hist.py --ignore=tests/test_tushare_hist.py
 python -m pytest tests/test_strategy2_backtester.py -v
 python -m compileall scanner strategy2 server.py -q
 ```
@@ -48,7 +48,6 @@ npm --prefix web run build
 ```bash
 python -m pytest tests/test_akshare_hist.py -v
 python -m pytest tests/test_tushare_hist.py -v
-python -m pytest tests/test_yfinance_hist.py -v
 ```
 
 ## Architecture
@@ -86,7 +85,8 @@ python -m pytest tests/test_yfinance_hist.py -v
 ## Strategy2 数据与回测规则
 
 - 策略2扫描、实验、正式参数升级、验收分析和回测默认只使用本地 `stock_pool` / `daily_ohlc`。
-- 没有用户明确要求时，不重新拉取 Baidu/Sina/Tencent/yfinance/AKShare/Tushare 数据。
+- 没有用户明确要求时，不重新拉取 Baidu/Sina/Tencent/AKShare/Tushare 数据。
+- 生产日线源只允许 `baidu`、`sina`、`tencent`；yfinance 已因 OHLC 可信度问题从生产源链、默认配置、前端配置和依赖中剔除。
 - 三数据源或多数据源全部在线失败时，不使用旧缓存产出扫描结果；股票应标记为失败并保留失败原因。
 - 回测只读本地 DB，禁止调用任何外部行情源。
 - `NEXT_OPEN` 是可信基线执行模型，不得改回信号日收盘成交。

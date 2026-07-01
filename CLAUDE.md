@@ -44,9 +44,9 @@ npm --prefix web run preview
            strategy2/scanner.py (策略2多线程扫描编排)
            strategy2/engine.py (策略2唯一入口 — ExtremeDryStableStrategyEngine)
 数据层:    scanner/db.py (SQLite 持久化)
-           scanner/data_source.py (互斥锁管理 — baidu/sina/tencent/yfinance)
-           scanner/daily_data_service.py (共享四源拉取 — fetch_with_retry / FetchResult)
-           scanner/sina_source.py / tencent_source.py / baidu_source.py / yfinance_source.py (HTTP抓取)
+           scanner/data_source.py (互斥锁管理 — baidu/sina/tencent)
+           scanner/daily_data_service.py (共享三源拉取 — fetch_with_retry / FetchResult)
+           scanner/sina_source.py / tencent_source.py / baidu_source.py (HTTP抓取)
            scanner/stock_pool.py (股票池)
 算法层:    scanner/pattern_detector.py (杯柄识别 · 仅策略1)
            scanner/liquidity_filter.py (流动性过滤 · 策略1+2共享)
@@ -122,7 +122,6 @@ npm --prefix web run preview
 | `scanner/data_source.py`             | `DataSourceManager` — 新浪+腾讯双源互斥锁                                                                                                                                     |
 | `scanner/sina_source.py`             | `fetch_sina_daily(code, days)` → `list[dict] \| None`                                                                                                                         |
 | `scanner/tencent_source.py`          | `fetch_tencent_daily(code, days)` → `list[dict] \| None`（纯腾讯源，回退由引擎层处理）                                                                                        |
-| `scanner/yfinance_source.py`         | `fetch_yfinance_daily(code, days)` → `list[dict] \| None` — Yahoo Finance A 股日线；auto_adjust=True，turnover=close×volume                                                   |
 | `scanner/pattern_detector.py`        | `detect_cup_handle(data, config)` → `CupHandleResult`；只负责杯柄检测                                                                                                         |
 | `scanner/scorer.py`                  | `score_cup_handle(result)` / `score_cup_handle_advanced(result, data)` → `int` (0-100)                                                                                        |
 | `scanner/engine.py`                  | `scan_all(config)` — 多线程全市场扫描主循环                                                                                                                                   |
@@ -225,7 +224,7 @@ npm --prefix web run preview
 - **回测数据拉取**: `_estimate_fetch_days` 上限 2000 天防 API 超限，数据覆盖不足时返回 partial 模式自动调整可用区间。
 - **量干评分升级**: 总分 10→12，核心维度 A/B/C 各 3 分，D/E 各 1.5 分。决策阈值按比例上调。前端 slider 同步更新。
 - **Baidu API 被限**: 百度 403 封禁，`_parse_payload` 加类型检查优雅降级，日志仅首次 WARNING，后续静默 fallback 到 sina/tencent。
-- **外部数据源测试**: `tests/test_akshare_hist.py` (东财可用/腾讯bug)、`tests/test_tushare_hist.py` (需付费)、`tests/test_yfinance_hist.py` (免费可用)。
+- **外部数据源测试**: `tests/test_akshare_hist.py` (东财可用/腾讯bug)、`tests/test_tushare_hist.py` (需付费)。
 - **安全**: 清理了 tushare 测试文件中的硬编码 token。
 
 ### 扫描 vs 回测一致性
@@ -236,7 +235,7 @@ npm --prefix web run preview
 
 - **`upsert_candidate` 静默失败**: `on_progress` 中 upsert 异常会被 scan worker 吞掉，导致 candidates 表缺失但 task_stocks 有标记。已加 try/except + 扫描完成后自动 re_evaluate 兜底。
 - **`scan_all` candidate_by_code 丢失**: 扫描中进度回调标记了候选但 `scan_all` 返回值可能为空。服务端扫描完成后检测 task_stocks 候选数 > 0 时自动触发 `re_evaluate_task` 同步。
-- **并发 == 串行试源 + 锁自然分摊**: 不是"同一只股票并发拉 4 个源先到先得"，也不是"线程绑源"。每只股票串行试源，不同线程因锁竞争自然使用不同源。默认 4 线程 + 4 源（baidu/sina/tencent/yfinance），worker_count < 源数量时记录警告。
+- **并发 == 串行试源 + 锁自然分摊**: 不是"同一只股票并发拉多个源先到先得"，也不是"线程绑源"。每只股票串行试源，不同线程因锁竞争自然使用不同源。生产源为 baidu/sina/tencent，worker_count < 源数量时记录警告。
 - **单股回测数据独立于扫描**: `ensure_backtest_data` 用默认 `max_rows=0`（不限），回测窗口由用户输入日期决定，不受 `kline_days` 限制。
 - **Baidu API 403**: 百度已于 2026-06-09 封禁该接口。代码保留 baidu 在 source chain 首位，封禁期间快速失败静默跳过，解封即自动恢复。日志首次输出 WARNING，后续静默。
 - **量干评分满分 12**: 历史代码中硬编码的 volume_dry 阈值（如 `>= 7` 表示观察）需注意现在满分是 12 而非 10。决策默认值已同步更新。
@@ -262,22 +261,19 @@ npm --prefix web run preview
 - **回测循环边界**: `range(backtest_window_days, n - min_forward_days + 1)`，`+1` 确保数据长度恰好 `窗口+60` 时仍执行一次判断。
 - **单股回测市场数据**: `run_single_stock_cuphandle_backtest()` 支持 `market_data` 参数注入，未注入时自动拉取并按判断日期截断。
 
-### Gotchas（2026-06-10 yfinance 四源并发）
+### Gotchas（2026-06-26 yfinance 剔除）
 
-- **yfinance 独立锁**: `DataSourceManager` 有 baidu/sina/tencent/yfinance 四把独立互斥锁。yfinance 成功返回统一 OHLC 格式，失败返回 None，限流(429/rate-limit)抛 `ValueError("data source busy")` 供引擎 requeue。
-- **yfinance turnover 估算**: yfinance 无直接成交额字段，使用 `close × volume` 估算。与腾讯实际成交额偏差 <1%，不影响策略计算。
-- **yfinance 复权**: 显式 `auto_adjust=True`，与现有前复权目标一致。已验证与腾讯收盘价 0.00% 偏差。
-- **yfinance 代码映射**: 沪市(600/601/603/605/688)→`.SS`，深市/创业板(000/001/002/003/300/301)→`.SZ`。北交所不支持，返回 None。
-- **四源默认顺序**: baidu → sina → tencent → yfinance。顺序是单只股票回退优先级，四源同时参与依赖多线程+独立锁。
+- **yfinance 已从生产日线源剔除**: 根因是 yfinance 最新日 OHLC 可能与 sina/tencent 明显不一致，曾污染 `daily_ohlc`。生产源链、锁、默认配置、前端配置和依赖均只保留 `baidu`、`sina`、`tencent`。
+- **显式 yfinance 配置应失败**: `_daily_fetch_fn("yfinance")` 必须抛 `Unknown daily data source`，不要为兼容旧配置重新注册 yfinance。
+- **历史污染修复**: `tools/data_repair/repair_invalid_ohlc.py --refetch-yfinance-sourced --apply` 用三源重新拉取 `task_stocks` 中曾由 yfinance 成功写入的股票，并替换本地 `daily_ohlc`。
 - **任务恢复不再限定错误类型**: `get_interrupted_task()` 匹配所有 `finished_at IS NULL` 的 failed/cancelled 任务。`mark_dead_tasks_as_failed()` 额外重置崩溃任务的 fetching 股票。代码 bug 导致的失败也可自动恢复。
-- **外部网络测试分离**: `tests/test_yfinance_hist.py` 手工运行，不纳入常规 CI。常规回归依赖 `tests/test_yfinance_source.py` 的 mock 测试。
 
 ## Recent Changes (2026-06-10 策略2)
 
 ### 策略2「极致量干价稳」
 
 - **独立包 `strategy2/`**: 10 个模块 — models / indicators / scorer / rejection / risk / trend / engine / scanner / backtester / backtest_models。完全不依赖策略1的形态检测/评分/分析/决策。
-- **共享日线服务**: `scanner/daily_data_service.py` 从 engine.py 提取多源拉取/重试/缓存逻辑（默认 baidu/sina/tencent/yfinance），策略1和策略2共用。
+- **共享日线服务**: `scanner/daily_data_service.py` 从 engine.py 提取多源拉取/重试/缓存逻辑（默认 baidu/sina/tencent），策略1、策略2和策略3共用。
 - **数据库扩展**: `scan_tasks.strategy_type` 字段，`strategy2_candidates` 独立表，`strategy2_backtest_tasks/signals/opportunities/task_stocks/insufficient_stocks` 5 张回测表，兼容式迁移。
 - **策略2 API**: 扫描 5 个端点 + 回测 10 个端点（启动/状态/列表/详情/机会/信号/股票状态/恢复/重试/取消）。
 - **前端**: 策略2结果页、配置分区、双策略按钮、回测页（`Strategy2Backtest.vue`）。
@@ -297,9 +293,9 @@ npm --prefix web run preview
 - **策略2 趋势过滤 V2**: `evaluate_trend()` 使用价格路径+120日长期确认。必要条件：`close < MA20 AND MA20 < MA60`。8 项短中期证据 + 3 项长期证据，总分 ≥6 且 short≥4 且 long≥1 → DOWNTREND。禁止使用 RETURN_60/RETURN_120 端点收益。少于 120 日数据返回 `INSUFFICIENT_TREND_DATA` 并排除。趋势过滤在评分/风险/否决之前执行。重新评估后移除不再符合条件的旧候选，同步更新 `task_stocks` 状态。
 - **趋势 V2 数据库字段**: `strategy2_candidates` 表兼容式新增 15 个趋势字段。旧候选空字段兼容显示 `--`。
 - **策略2回测**: `replace_strategy2_stock_backtest_result()` 原子替换单股结果（事务化）。`build_strategy2_backtest_summary()` 从 DB 完整明细生成汇总。`validate_strategy2_backtest_integrity()` 校验任务完整性。两阶段最终化：先写聚合字段→再校验→更新可信度。取消使用 `threading.Event`，工作线程每只股票前检查。
-- **策略2回测数据源**: 回测只读 `db.get_ohlc()` + `db.get_stock_pool()`，禁止调用 AKShare/百度/新浪/腾讯/yfinance。`data_snapshot_date` 精确到秒，过滤 ohlc。
-- **策略2本地数据优先**: 策略2实验、正式参数升级和验收分析默认只使用本地 `stock_pool` / `daily_ohlc`。没有用户明确要求时，不重新拉取百度/新浪/腾讯/yfinance/AKShare/Tushare 数据。
-- **外部数据源测试分离**: `test_akshare_hist.py`、`test_tushare_hist.py`、`test_yfinance_hist.py` 等真实网络测试仅手工按需运行；常规回归使用本地数据库测试和 mock 测试。
+- **策略2回测数据源**: 回测只读 `db.get_ohlc()` + `db.get_stock_pool()`，禁止调用 AKShare/百度/新浪/腾讯。`data_snapshot_date` 精确到秒，过滤 ohlc。
+- **策略2本地数据优先**: 策略2实验、正式参数升级和验收分析默认只使用本地 `stock_pool` / `daily_ohlc`。没有用户明确要求时，不重新拉取百度/新浪/腾讯/AKShare/Tushare 数据。
+- **外部数据源测试分离**: `test_akshare_hist.py`、`test_tushare_hist.py` 等真实网络测试仅手工按需运行；常规回归使用本地数据库测试和 mock 测试。
 - **策略2回测执行模型**: 默认 `NEXT_OPEN`——信号日次日开盘入场，目标=入场价×1.05，止损=前10日最低收盘价×0.97。同日触发按 FAILED。未入场标记 `UNOBSERVED_ENTRY`/`NO_ENTRY_GAP_BELOW_STOP`/`NO_ENTRY_ABOVE_BUY_ZONE`。
 - **策略2回测信号合并**: 使用 `evaluation_index + eval_results` 计算冷却期，10 个计入冷却期的未命中交易日拆分新机会。冷却期计入: LIQUIDITY/DOWNTREND/REJECTION/SCORE/RISK；不计入: INSUFFICIENT_DATA/INVALID_DATA/EVALUATION_ERROR。
 - **策略2 Volume Percentile 窗口弹性**: 日线数据不足 60 天但 ≥ `minimum_required_days` 时，`volume_percentile_days` 取实际可用窗口天数，不强制 60。评分阈值 `≤20%` 不变。
@@ -307,7 +303,7 @@ npm --prefix web run preview
 ### Gotchas（2026-06-11 策略2 验收修复）
 
 - **全源失败不使用缓存**: 三数据源全部在线失败时，`fetch_with_retry()` 直接返回 `data=None`，股票标记 `failed / ALL_DATA_SOURCES_FAILED`。不使用本地缓存继续扫描。在线拉取成功时仍可与数据库历史合并并持久化。
-- **四源收敛**: 生产数据源为 `baidu / sina / tencent / yfinance`（可通过 `config.yaml` 的 `data.daily_sources` 配置）。`mootdx_source.py` 已删除。诊断脚本移至 `tools/data_source_diagnostics/`。
+- **三源收敛**: 生产数据源为 `baidu / sina / tencent`（可通过 `config.yaml` 的 `data.daily_sources` 配置，但不得包含 yfinance）。`mootdx_source.py` 和 yfinance 生产源均已删除。
 - **跨策略执行隔离**: `_require_task_strategy(task_id, expected)` 统一校验。策略2 task_id 进入策略1 retry/re-evaluate/candidates 返回 `TASK_STRATEGY_MISMATCH` (400)。策略1 task_id 进入策略2 同理。
 - **历史任务上下文**: URL `?task=` 参数是历史页面唯一任务上下文。`routeTaskId` / `isHistoricalMode` 两种互斥模式。`watch(route.query.task)` 支持 A→B→A→none 切换。历史任务策略类型从任务 API 返回，不依赖当前运行状态。
 - **viewContext 竞态防护**: `beginViewContext()` 每次导航创建新 context。所有 async 函数在 `await` 后用 `isCurrentViewContext(context)` 校验防止 stale response 覆盖新任务。
@@ -329,7 +325,7 @@ npm --prefix web run preview
 - COMPLETION 复查: `docs/reviews/2026-06-10-scan-window-unified-strategy-completion-recheck.md`
 - ACCEPTANCE 复查: `docs/reviews/2026-06-10-scan-window-unified-strategy-acceptance-recheck.md`
 - FINAL-COMPLETION 验收: `docs/reviews/2026-06-10-scan-window-unified-strategy-final-completion.md`
-- yfinance 四源并发设计: `docs/superpowers/specs/2026-06-10-yfinance-four-source-daily-kline-design.md`
+- yfinance 四源并发设计已作废，仅作为历史背景: `docs/superpowers/specs/2026-06-10-yfinance-four-source-daily-kline-design.md`
 - 策略2趋势过滤V2: `docs/superpowers/specs/2026-06-11-strategy2-path-and-120d-trend-filter-v2.md`
 - 策略2本地数据库短线回测: `docs/superpowers/specs/2026-06-11-strategy2-local-database-backtest-design.md`
 - 策略2回测可信度修复: `docs/superpowers/specs/2026-06-12-strategy2-backtest-correctness-and-strategy-optimization-design.md`

@@ -10,6 +10,7 @@ import scanner.db as db
 from scanner import stock_pool
 from scanner.engine import scan_all
 from strategy2.scanner import scan_strategy2_all
+from strategy3.scanner import STRATEGY3_TYPE, scan_strategy3_all
 
 logger = logging.getLogger(__name__)
 
@@ -153,7 +154,7 @@ def _strategy1_scheduler_progress(task_id: str):
 
 
 def run_serial_dual_strategy_scan(config: dict) -> dict:
-    """Run Strategy1, retry its failed stocks, then run Strategy2 serially."""
+    """Run Strategy1, retry failed stocks, then run Strategy2 and Strategy3 serially."""
     if not _serial_scan_lock.acquire(blocking=False):
         logger.warning("Serial dual strategy scan skipped: previous run is still active")
         record_scheduler_event(
@@ -165,6 +166,7 @@ def run_serial_dual_strategy_scan(config: dict) -> dict:
 
     s1_task_id = None
     s2_task_id = None
+    s3_task_id = None
     started = time.time()
     try:
         db_path = config.get("data", {}).get("database_path", "data/cuphandle.db")
@@ -369,15 +371,61 @@ def run_serial_dual_strategy_scan(config: dict) -> dict:
         record_scheduler_event(
             "info",
             "strategy2_full",
-            "策略2扫描完成",
+            "策略2扫描完成，准备启动策略3",
             task_id=s2_task_id,
             details=s2_summary,
+        )
+
+        s3_task_id = _make_scan_task_id("sched-s3")
+        logger.info(
+            "Serial scan stage=strategy3_full task=%s stocks=%d started after strategy2 task=%s; "
+            "strategy3 should reuse same-day daily_ohlc/task_stocks freshness when available",
+            s3_task_id,
+            len(stocks),
+            s2_task_id,
+        )
+        record_scheduler_event(
+            "info",
+            "strategy3_full",
+            "策略3扫描开始，将复用策略1当天已写入的日线数据",
+            task_id=s3_task_id,
+            details={
+                "stocks": len(stocks),
+                "strategy1_task_id": s1_task_id,
+                "strategy2_task_id": s2_task_id,
+            },
+        )
+        db.create_scan_task(
+            s3_task_id,
+            time.strftime("%Y-%m-%d %H:%M:%S"),
+            total_stocks=len(stocks),
+            retry_mode="full",
+            strategy_type=STRATEGY3_TYPE,
+        )
+        db.save_task_stocks(s3_task_id, stocks)
+        s3_result = scan_strategy3_all(config, task_id=s3_task_id, stocks=stocks)
+        s3_summary = _finish_scan_task_from_summary(
+            s3_task_id,
+            s3_result.get("stats", {}),
+        )
+        logger.info(
+            "Serial scan stage=strategy3_full task=%s completed summary=%s",
+            s3_task_id,
+            s3_summary,
+        )
+        record_scheduler_event(
+            "info",
+            "strategy3_full",
+            "策略3扫描完成",
+            task_id=s3_task_id,
+            details=s3_summary,
         )
 
         return {
             "status": "completed",
             "strategy1_task_id": s1_task_id,
             "strategy2_task_id": s2_task_id,
+            "strategy3_task_id": s3_task_id,
             "strategy1_remaining_failed": remaining_failed,
             "strategy1_retry_history": retry_history,
             "elapsed_seconds": round(time.time() - started, 1),
@@ -388,10 +436,16 @@ def run_serial_dual_strategy_scan(config: dict) -> dict:
             "error",
             "failed",
             f"串行定时扫描失败：{exc}",
-            task_id=s2_task_id or s1_task_id,
-            details={"strategy1_task_id": s1_task_id, "strategy2_task_id": s2_task_id},
+            task_id=s3_task_id or s2_task_id or s1_task_id,
+            details={
+                "strategy1_task_id": s1_task_id,
+                "strategy2_task_id": s2_task_id,
+                "strategy3_task_id": s3_task_id,
+            },
         )
-        if s2_task_id:
+        if s3_task_id:
+            _mark_scan_task_failed(s3_task_id, str(exc))
+        elif s2_task_id:
             _mark_scan_task_failed(s2_task_id, str(exc))
         elif s1_task_id:
             _mark_scan_task_failed(s1_task_id, str(exc))
@@ -400,6 +454,7 @@ def run_serial_dual_strategy_scan(config: dict) -> dict:
             "error": str(exc),
             "strategy1_task_id": s1_task_id,
             "strategy2_task_id": s2_task_id,
+            "strategy3_task_id": s3_task_id,
         }
     finally:
         _serial_scan_lock.release()
@@ -440,7 +495,7 @@ def start_scheduler(config: dict):
         record_scheduler_event(
             "info",
             "scheduler_started",
-            "串行双策略定时任务已启动",
+            "串行三策略定时任务已启动",
             details={"cron": cron, "runtime": get_scheduler_status()},
         )
         return

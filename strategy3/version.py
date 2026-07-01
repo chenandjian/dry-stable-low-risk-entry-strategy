@@ -1,0 +1,5 @@
+"""策略3版本标识。"""
+
+STRATEGY3_BACKTEST_ENGINE_VERSION = "strategy3-backtest-v1"
+STRATEGY3_STRATEGY_ENGINE_VERSION = "strategy3-engine-v1"
+STRATEGY3_DATA_REVISION_VERSION = "daily-ohlc-v2"

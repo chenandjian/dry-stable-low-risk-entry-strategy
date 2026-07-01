@@ -13,13 +13,16 @@ from scanner.data_source import DataSourceManager
 from scanner.baidu_source import fetch_baidu_daily
 from scanner.sina_source import fetch_sina_daily
 from scanner.tencent_source import fetch_tencent_daily
-from scanner.yfinance_source import fetch_yfinance_daily
 from scanner.index_source import fetch_market_index_daily
 from scanner.liquidity_filter import passes_liquidity_filter
 from scanner.daily_data_service import (
     CacheFreshnessContext,
     build_cache_freshness_context,
+    DEFAULT_DAILY_SOURCES,
+    resolve_effective_worker_count,
     select_fresh_cached_ohlc,
+    source_error_confirms_no_trade,
+    strip_zero_volume_target_row,
     trim_ohlc_to_target,
 )
 from scanner.pattern_detector import CupHandleResult
@@ -93,10 +96,12 @@ def scan_all(
         primary_attempts = 2
         fallback_attempts = 2
 
+    daily_sources = config.get("data", {}).get("daily_sources") or DEFAULT_DAILY_SOURCES
     configured_workers = config.get("data", {}).get("worker_count")
-    if configured_workers is not None:
-        worker_count = int(configured_workers)
-    worker_count = max(1, worker_count)
+    worker_count = resolve_effective_worker_count(
+        configured_workers if configured_workers is not None else worker_count,
+        daily_sources,
+    )
 
     stock_queue = Queue()
     for stock in stocks:
@@ -113,10 +118,9 @@ def scan_all(
     busy_retry_lock = threading.Lock()
 
     liquidity_cfg = config.get("liquidity", {})
-    daily_sources = config.get("data", {}).get("daily_sources") or DEFAULT_DAILY_SOURCES
     windows = resolve_strategy_windows(config)
 
-    # 并发不足警告
+    # 并发按启用数据源数量收敛，避免多余线程反复抢同一数据源锁。
     num_sources = len(daily_sources)
     if worker_count < num_sources:
         logger.warning(
@@ -207,6 +211,7 @@ def scan_all(
                             fallback_attempts=fetch_result.fallback_attempts,
                             primary_error=fetch_result.primary_error,
                             fallback_error=fetch_result.fallback_error,
+                            source_errors=_encode_source_errors(fetch_result.source_errors),
                             finished_at=_now(),
                         )
                         db.refresh_scan_task_counts(task_id)
@@ -609,7 +614,7 @@ def re_evaluate_task(
     }
 
 
-DEFAULT_DAILY_SOURCES = ["baidu", "sina", "tencent", "yfinance"]
+DEFAULT_DAILY_SOURCES = ["baidu", "sina", "tencent"]
 
 
 def _daily_fetch_fn(ds_name: str):
@@ -617,7 +622,6 @@ def _daily_fetch_fn(ds_name: str):
         "baidu": fetch_baidu_daily,
         "sina": fetch_sina_daily,
         "tencent": fetch_tencent_daily,
-        "yfinance": fetch_yfinance_daily,
     }
     if ds_name not in fetchers:
         raise ValueError(f"Unknown daily data source: {ds_name}")
@@ -716,6 +720,16 @@ def _fetch_with_retry(
             target_date = freshness_context.target_trade_date if freshness_context else None
             effective_cached = trim_ohlc_to_target(cached or [], target_date)
             effective_data = trim_ohlc_to_target(data, target_date)
+            effective_data, no_trade_error = strip_zero_volume_target_row(effective_data, target_date)
+            if no_trade_error:
+                source_errors[ds_name] = f"attempts={used_attempts} error={no_trade_error}"
+                stale_candidate = effective_data or effective_cached
+                if stale_candidate:
+                    latest_date = stale_candidate[-1].get("date")
+                    if stale_success is None or latest_date > stale_success[0][-1].get("date"):
+                        stale_success = (stale_candidate, ds_name, used_attempts)
+                failed_sources.add(ds_name)
+                continue
             if not effective_data:
                 source_errors[ds_name] = f"attempts={used_attempts} error=missing target trade date"
                 failed_sources.add(ds_name)
@@ -765,7 +779,11 @@ def _fetch_with_retry(
                 selected_source=ds_name, selected_attempts=used_attempts,
             )
 
-    if stale_success is not None:
+    if (
+        stale_success is not None
+        and not saw_busy
+        and _stale_success_is_conclusive_no_trade(chain, source_errors)
+    ):
         stale_data, stale_source, stale_attempts = stale_success
         target_date = freshness_context.target_trade_date if freshness_context else None
         stale_latest_date = stale_data[-1].get("date")
@@ -968,18 +986,26 @@ def _encode_source_errors(source_errors: dict | None) -> str | None:
     return json.dumps(source_errors, ensure_ascii=False, separators=(",", ":"))
 
 
-def _classify_fetch_error(exc: Exception) -> str:
-    text = str(exc)
-    if "456" in text or "429" in text:
-        return "data source busy"
-    return text
-
-
 def _call_fetch_fn(fetch_fn, code: str, days: int) -> list[dict] | None:
     try:
         return fetch_fn(code, days=days)
     except TypeError:
         return fetch_fn(code)
+
+
+def _stale_success_is_conclusive_no_trade(
+    chain: list[str],
+    source_errors: dict[str, str],
+) -> bool:
+    """Only classify stale rows as no-trade when every source has conclusive no-trade evidence."""
+    return all(source_error_confirms_no_trade(source_errors.get(ds_name)) for ds_name in chain)
+
+
+def _classify_fetch_error(exc: Exception) -> str:
+    text = str(exc)
+    if "456" in text or "429" in text:
+        return "data source busy"
+    return text
 
 
 def _merge_data(cached: list[dict], fresh: list[dict], max_rows: int = 0) -> list[dict]:

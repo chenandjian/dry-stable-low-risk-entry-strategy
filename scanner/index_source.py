@@ -22,8 +22,13 @@ def _fetch_sina_index_raw(symbol: str, days: int = 250) -> list[dict] | None:
         })
         resp.raise_for_status()
         text = resp.text
-        if text.startswith("data(") and text.endswith(");"):
-            text = text[5:-2]
+        marker = "data("
+        if marker in text:
+            start = text.index(marker) + len(marker)
+            end = text.rfind(");")
+            if end < start:
+                end = text.rfind(")")
+            text = text[start:end]
         elif "(" in text:
             start = text.index("(") + 1
             end = text.rindex(")")
@@ -37,7 +42,7 @@ def _fetch_sina_index_raw(symbol: str, days: int = 250) -> list[dict] | None:
         return None
 
 
-def fetch_market_index_daily(symbol: str | None = None) -> list[dict] | None:
+def fetch_market_index_daily(symbol: str | None = None, days: int = 250) -> list[dict] | None:
     """Fetch market index daily OHLC data.
 
     Uses dedicated index API (not the stock-oriented fetch_sina_daily),
@@ -45,10 +50,11 @@ def fetch_market_index_daily(symbol: str | None = None) -> list[dict] | None:
 
     Args:
         symbol: Sina index symbol, e.g. "sh000001".  Defaults to 上证指数.
+        days: Number of daily index rows to request.
     """
     if symbol is None:
         symbol = DEFAULT_MARKET_INDEX
-    data = _fetch_sina_index_raw(symbol)
+    data = _fetch_sina_index_raw(symbol, days=days)
     if not data:
         logger.warning("Market index data unavailable for %s, market filter defaults to 一般", symbol)
         return None
@@ -59,10 +65,11 @@ def normalize_index_ohlc(raw: list[dict]) -> list[dict]:
     """Normalize index OHLC rows to the analyzer's expected schema."""
     normalized = []
     for d in raw or []:
-        if not all(k in d for k in ("date", "open", "high", "low", "close")):
+        date_value = d.get("date") or d.get("day")
+        if not date_value or not all(k in d for k in ("open", "high", "low", "close")):
             continue
         normalized.append({
-            "date": d["date"],
+            "date": date_value,
             "open": float(d["open"]),
             "high": float(d["high"]),
             "low": float(d["low"]),

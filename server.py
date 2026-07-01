@@ -20,6 +20,8 @@ import scanner.db as db
 from scanner.engine import scan_all, re_evaluate_task
 from strategy2.scanner import scan_strategy2_all
 from strategy2.validation import resolve_strategy2_config
+from strategy3.scanner import STRATEGY3_TYPE, scan_strategy3_all
+from strategy3.validation import resolve_strategy3_config
 from scanner.strategy_engine import (
     CupHandleStrategyEngine,
     resolve_strategy_windows,
@@ -32,8 +34,14 @@ from scanner.single_stock_backtest import (
     DataCoverageError,
     run_single_stock_cuphandle_backtest,
 )
+from scanner.stock_pool import _filter_stocks as filter_stock_pool_for_scan
 from scanner.strategy1_backtest_service import run_strategy1_experiment_from_baseline
-from scanner.daily_data_service import build_cache_freshness_context
+from scanner.daily_data_service import (
+    build_cache_freshness_context,
+    encode_source_errors,
+    fetch_with_retry,
+)
+from scanner.data_source import DataSourceManager
 
 logger = logging.getLogger(__name__)
 
@@ -63,7 +71,43 @@ async def lifespan(app: FastAPI):
             "current_name": "恢复扫描中",
         }
 
-        if s_type == "STRATEGY_2_EXTREME_DRY_STABLE":
+        if s_type == STRATEGY3_TYPE:
+            def resume_s3():
+                try:
+                    pending = db.get_pending_stocks(interrupted["id"])
+                    def on_progress(stage, current, total, detail, discovery=None):
+                        stats = _running.get("stats", {})
+                        if stage == "discovery" and discovery:
+                            found = stats.get("candidates_found", 0) + 1
+                            discoveries = list(stats.get("discoveries") or [])
+                            discoveries.insert(0, {
+                                "code": discovery["code"], "name": discovery["name"],
+                                "total_score": discovery["total_score"],
+                                "level": discovery["level"],
+                                "pullback_pct": discovery["pullback_pct"],
+                                "risk_ratio": discovery["risk_ratio"],
+                                "rr1": discovery["rr1"],
+                            })
+                            _running["stats"] = {**stats, "discoveries": discoveries[:20], "candidates_found": found}
+                        else:
+                            code = detail.split()[0] if detail else ""
+                            _running["stats"] = {**stats, "scanned": current, "processed": current, "total_stocks": total, "current_code": code, "current_name": detail[len(code):].strip() if len(detail) > len(code) else detail}
+                    result = scan_strategy3_all(config, progress_callback=on_progress, task_id=interrupted["id"], stocks=pending)
+                    _running["stats"] = result["stats"]
+                    s = result["stats"]
+                    db.finish_scan_task(interrupted["id"], finished_at=datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"), candidates_count=s.get("candidates_found", 0), elapsed_seconds=s.get("elapsed_seconds", 0), scanned=s.get("scanned", 0), skipped=s.get("skipped", 0))
+                    db.refresh_scan_task_counts(interrupted["id"])
+                except Exception as e:
+                    import traceback
+                    logger.error(f"Strategy3 resume failed: {e}\n{traceback.format_exc()}")
+                    _running["stats"] = {"error": str(e)}
+                    conn = db.get_conn()
+                    conn.execute("UPDATE scan_tasks SET status='failed', error=? WHERE id=?", (str(e), interrupted["id"]))
+                    conn.commit()
+                finally:
+                    _clear_running()
+            t = threading.Thread(target=resume_s3, daemon=True)
+        elif s_type == "STRATEGY_2_EXTREME_DRY_STABLE":
             # BUG-S2-001: 策略2恢复
             def resume_s2():
                 try:
@@ -287,10 +331,21 @@ def _scan_mode_for_task(task_id: str) -> str:
 
 def _first_current_task_stock(task_id: str) -> dict | None:
     """Return the best current stock hint for a DB-backed running scan."""
-    for status in ("fetching", "pending"):
-        rows = db.get_task_stocks(task_id, status=status, limit=1, offset=0)
-        if rows:
-            return rows[0]
+    conn = db.get_conn()
+    columns = [d[1] for d in conn.execute("PRAGMA table_info(task_stocks)").fetchall()]
+    row = conn.execute(
+        """SELECT * FROM task_stocks
+           WHERE task_id=? AND status='fetching'
+           ORDER BY COALESCE(updated_at, started_at, '') DESC, idx DESC
+           LIMIT 1""",
+        (task_id,),
+    ).fetchone()
+    if row:
+        return dict(zip(columns, row))
+
+    rows = db.get_task_stocks(task_id, status="pending", limit=1, offset=0)
+    if rows:
+        return rows[0]
     return None
 
 
@@ -356,6 +411,39 @@ def _strategy2_discovery_from_candidate(candidate: dict) -> dict:
     }
 
 
+def _strategy3_discovery_from_candidate(candidate: dict) -> dict:
+    return {
+        "code": candidate.get("code", ""),
+        "name": candidate.get("name", ""),
+        "evaluation_date": candidate.get("evaluation_date", ""),
+        "total_score": candidate.get("total_score") or 0,
+        "level": candidate.get("level", ""),
+        "current_close": candidate.get("current_close", 0),
+        "pullback_pct": candidate.get("pullback_pct", 0),
+        "risk_ratio": candidate.get("risk_ratio", 0),
+        "rr1": candidate.get("rr1", 0),
+        "tactical_support": candidate.get("tactical_support") or candidate.get("support_price", 0),
+        "key_support": candidate.get("key_support", 0),
+        "tactical_stop_loss": candidate.get("tactical_stop_loss") or candidate.get("stop_loss", 0),
+        "target_1": candidate.get("target_1", 0),
+        "trade_quality_score": candidate.get("trade_quality_score", 0),
+        "volume_dry_score": candidate.get("volume_dry_score", 0),
+        "price_stability_score": candidate.get("price_stability_score", 0),
+        "cannot_fall_score": candidate.get("cannot_fall_score", 0),
+        "balance_powerless_score": candidate.get("balance_powerless_score", 0),
+        "support_distance_pct": candidate.get("support_distance_pct", 0),
+        "key_support_distance_pct": candidate.get("key_support_distance_pct", 0),
+        "target_price": candidate.get("target_price", 0),
+        "target_room_pct": candidate.get("target_room_pct", 0),
+        "estimated_rr": candidate.get("estimated_rr", 0),
+        "trade_state": candidate.get("trade_state", ""),
+        "trade_state_label": candidate.get("trade_state_label", ""),
+        "trigger_reasons": candidate.get("trigger_reasons", []),
+        "risk_warnings": candidate.get("risk_warnings", []),
+        "invalid_conditions": candidate.get("invalid_conditions", []),
+    }
+
+
 def _db_running_scan_status(running_task: dict) -> dict:
     """Build live scan status from persisted DB rows for scheduler-owned scans."""
     task_id = running_task["id"]
@@ -363,7 +451,12 @@ def _db_running_scan_status(running_task: dict) -> dict:
     summary = db.refresh_scan_task_counts(task_id)
     current = _first_current_task_stock(task_id) or {}
 
-    if strategy_type == "STRATEGY_2_EXTREME_DRY_STABLE":
+    if strategy_type == STRATEGY3_TYPE:
+        discoveries = [
+            _strategy3_discovery_from_candidate(c)
+            for c in db.get_strategy3_candidates(task_id=task_id)[:20]
+        ]
+    elif strategy_type == "STRATEGY_2_EXTREME_DRY_STABLE":
         discoveries = [
             _strategy2_discovery_from_candidate(c)
             for c in db.get_strategy2_candidates(task_id=task_id)[:20]
@@ -945,6 +1038,459 @@ def _build_kline_history_summary(code: str, meta: dict, context) -> dict:
         "is_fresh": is_fresh,
         "needs_refetch": not is_fresh,
         "reason": reason,
+    }
+
+
+def _ensure_db_initialized_from_config() -> dict:
+    config = load_config()
+    if db.DB_PATH is None:
+        db_path = config.get("data", {}).get("database_path", "data/cuphandle.db")
+        db.init_db(db_path)
+    return config
+
+
+def _source_errors_confirm_no_trade(source_errors: str | None) -> bool:
+    if not source_errors:
+        return False
+    try:
+        parsed = json.loads(source_errors)
+    except (TypeError, json.JSONDecodeError):
+        return False
+    if not isinstance(parsed, dict) or not parsed:
+        return False
+    return all(
+        isinstance(error, str)
+        and (
+            "missing target trade date" in error
+            or "zero-volume target trade date" in error
+        )
+        for error in parsed.values()
+    )
+
+
+def _latest_ohlc_is_zero_volume_flat(row: dict | None, target_trade_date: str) -> bool:
+    if not row or row.get("date") != target_trade_date:
+        return False
+    try:
+        return (
+            float(row.get("volume")) == 0
+            and float(row.get("turnover") or 0) == 0
+            and float(row.get("open")) == float(row.get("high"))
+            and float(row.get("high")) == float(row.get("low"))
+            and float(row.get("low")) == float(row.get("close"))
+        )
+    except (TypeError, ValueError):
+        return False
+
+
+def _invalid_ohlc_reason(row: dict | None) -> str | None:
+    if not row:
+        return None
+    try:
+        open_ = float(row.get("open"))
+        high = float(row.get("high"))
+        low = float(row.get("low"))
+        close = float(row.get("close"))
+        volume = float(row.get("volume"))
+        turnover = row.get("turnover")
+        turnover_value = float(turnover) if turnover is not None else 0
+    except (TypeError, ValueError):
+        return "OHLC字段无法解析"
+    if min(open_, high, low, close) <= 0:
+        return "OHLC价格存在非正数"
+    if volume < 0 or turnover_value < 0:
+        return "成交量或成交额为负数"
+    if high < max(open_, close, low) or low > min(open_, close, high):
+        return "OHLC高低价关系异常"
+    return None
+
+
+def _load_kline_health_inputs(config: dict | None = None) -> tuple[dict[str, dict], dict[str, dict]]:
+    conn = db.get_conn()
+    latest_rows = conn.execute(
+        """SELECT o.code, o.date, o.open, o.high, o.low, o.close, o.volume, o.turnover
+           FROM daily_ohlc o
+           JOIN (
+                SELECT code, MAX(date) AS latest_date
+                FROM daily_ohlc
+                GROUP BY code
+           ) latest
+             ON latest.code = o.code AND latest.latest_date = o.date"""
+    ).fetchall()
+    latest_by_code = {
+        row[0]: {
+            "code": row[0],
+            "date": row[1],
+            "open": row[2],
+            "high": row[3],
+            "low": row[4],
+            "close": row[5],
+            "volume": row[6],
+            "turnover": row[7],
+        }
+        for row in latest_rows
+    }
+
+    task_rows = conn.execute(
+        """SELECT code, name, market, status, status_reason, error_detail,
+                  source_errors, kline_latest_date, kline_fetched_at,
+                  kline_target_trade_date, quote_status, updated_at
+           FROM task_stocks
+           WHERE kline_fetched_at IS NOT NULL
+              OR kline_latest_date IS NOT NULL
+              OR status = 'failed'
+           ORDER BY COALESCE(kline_fetched_at, updated_at) DESC, updated_at DESC"""
+    ).fetchall()
+    task_by_code: dict[str, dict] = {}
+    for row in task_rows:
+        code = row[0]
+        if code in task_by_code:
+            continue
+        task_by_code[code] = {
+            "code": code,
+            "name": row[1],
+            "market": row[2],
+            "task_status": row[3],
+            "status_reason": row[4],
+            "error_detail": row[5],
+            "source_errors": row[6],
+            "kline_latest_date": row[7],
+            "kline_fetched_at": row[8],
+            "kline_target_trade_date": row[9],
+            "quote_status": row[10] or "not_requested",
+        }
+
+    pool_rows = conn.execute("SELECT code, name, market FROM stock_pool").fetchall()
+    pool_stocks = [
+        {"code": row[0], "name": row[1] or "", "market": row[2] or ""}
+        for row in pool_rows
+    ]
+    if config is not None:
+        # Match the scan universe without refreshing the external stock pool.
+        pool_stocks = filter_stock_pool_for_scan([stock.copy() for stock in pool_stocks], config)
+    for stock in pool_stocks:
+        code = stock["code"]
+        meta = task_by_code.setdefault(
+            code,
+            {
+                "code": code,
+                "name": stock.get("name") or "",
+                "market": stock.get("market") or "",
+                "task_status": None,
+                "status_reason": None,
+                "error_detail": None,
+                "source_errors": None,
+                "kline_latest_date": None,
+                "kline_fetched_at": None,
+                "kline_target_trade_date": None,
+                "quote_status": "not_requested",
+            },
+        )
+        if not meta.get("name"):
+            meta["name"] = stock.get("name") or ""
+        if not meta.get("market"):
+            meta["market"] = stock.get("market") or ""
+    return latest_by_code, task_by_code
+
+
+def _classify_kline_health_item(
+    code: str,
+    latest_row: dict | None,
+    meta: dict,
+    context,
+) -> dict:
+    latest_date = latest_row.get("date") if latest_row else None
+    latest_fetch_time = meta.get("kline_fetched_at")
+    quote_status = meta.get("quote_status") or "not_requested"
+    task_status = meta.get("task_status")
+    fetched_after_close = bool(
+        context.min_fetch_time
+        and latest_fetch_time
+        and latest_fetch_time >= context.min_fetch_time
+    )
+    base = {
+        "code": code,
+        "name": meta.get("name") or "",
+        "market": meta.get("market") or "",
+        "latest_kline_date": latest_date,
+        "latest_fetch_time": latest_fetch_time,
+        "target_trade_date": context.target_trade_date,
+        "min_fetch_time": context.min_fetch_time,
+        "quote_status": quote_status,
+        "task_status": task_status,
+        "status_reason": meta.get("status_reason"),
+        "source_errors": meta.get("source_errors"),
+    }
+
+    invalid_reason = _invalid_ohlc_reason(latest_row)
+    if invalid_reason:
+        return {**base, "health_status": "anomaly", "severity": "danger", "needs_refetch": True, "reason": invalid_reason}
+    if _latest_ohlc_is_zero_volume_flat(latest_row, context.target_trade_date):
+        return {**base, "health_status": "anomaly", "severity": "danger", "needs_refetch": True, "reason": "目标交易日存在零成交量平盘K线，需要重新拉取确认"}
+    if task_status == "failed":
+        reason = meta.get("status_reason") or meta.get("error_detail") or "最近扫描拉取失败"
+        return {**base, "health_status": "failed", "severity": "danger", "needs_refetch": True, "reason": reason}
+    if not latest_row:
+        return {**base, "health_status": "missing", "severity": "danger", "needs_refetch": True, "reason": "本地没有K线数据"}
+    if latest_date >= context.target_trade_date and fetched_after_close:
+        return {**base, "health_status": "fresh", "severity": "ok", "needs_refetch": False, "reason": "数据已覆盖目标完整交易日"}
+    if latest_date < context.target_trade_date:
+        no_trade = quote_status in {"suspended", "no_trade"} and fetched_after_close
+        if no_trade and (not meta.get("source_errors") or _source_errors_confirm_no_trade(meta.get("source_errors"))):
+            return {**base, "health_status": "no_trade", "severity": "warning", "needs_refetch": False, "reason": "股票停牌或无交易，已在目标交易日收盘后确认"}
+        return {**base, "health_status": "stale", "severity": "danger", "needs_refetch": True, "reason": "K线未覆盖目标完整交易日，且未确认停牌/无交易"}
+    if not latest_fetch_time:
+        reason = "缺少最近拉取时间，需要重新拉取确认"
+    else:
+        reason = "最近拉取时间早于目标交易日收盘时间，需要重新拉取"
+    return {**base, "health_status": "stale", "severity": "danger", "needs_refetch": True, "reason": reason}
+
+
+def _stock_pool_meta_for_code(config: dict, code: str) -> dict:
+    for stock in filter_stock_pool_for_scan([stock.copy() for stock in db.get_stock_pool()], config):
+        if stock["code"] == code:
+            return stock
+    for stock in db.get_stock_pool():
+        if stock["code"] == code:
+            return stock
+    return {"code": code, "name": "", "market": ""}
+
+
+def _filter_kline_health_items(items: list[dict], status: str) -> list[dict]:
+    if status == "problem":
+        return [item for item in items if item["health_status"] != "fresh"]
+    if status == "anomaly":
+        return [item for item in items if item["severity"] == "danger"]
+    if status == "failed":
+        return [item for item in items if item["health_status"] == "failed"]
+    if status == "no_trade":
+        return [item for item in items if item["health_status"] == "no_trade"]
+    if status == "fresh":
+        return [item for item in items if item["health_status"] == "fresh"]
+    return items
+
+
+def _build_kline_health_items(config: dict) -> tuple[dict, list[dict]]:
+    context = build_cache_freshness_context(now=_now())
+    latest_by_code, task_by_code = _load_kline_health_inputs(config)
+    codes = sorted(set(latest_by_code) | set(task_by_code))
+    items = [
+        _classify_kline_health_item(
+            code,
+            latest_by_code.get(code),
+            task_by_code.get(code, {"code": code}),
+            context,
+        )
+        for code in codes
+    ]
+    summary = {
+        "target_trade_date": context.target_trade_date,
+        "min_fetch_time": context.min_fetch_time,
+        "total": len(items),
+        "fresh": sum(1 for item in items if item["health_status"] == "fresh"),
+        "no_trade": sum(1 for item in items if item["health_status"] == "no_trade"),
+        "anomaly": sum(1 for item in items if item["severity"] == "danger"),
+        "failed": sum(1 for item in items if item["health_status"] == "failed"),
+        "needs_refetch": sum(1 for item in items if item["needs_refetch"]),
+    }
+    return summary, items
+
+
+@app.get("/api/kline-health")
+async def get_kline_health(status: str = "problem", page: int = 1, page_size: int = 100):
+    """Return market-wide local K-line freshness and anomaly diagnostics."""
+    config = _ensure_db_initialized_from_config()
+    summary, items = _build_kline_health_items(config)
+    filtered = _filter_kline_health_items(items, status)
+
+    page = max(1, int(page or 1))
+    page_size = min(500, max(1, int(page_size or 100)))
+    offset = (page - 1) * page_size
+    return {
+        "summary": summary,
+        "items": filtered[offset:offset + page_size],
+        "total": len(filtered),
+        "page": page,
+        "page_size": page_size,
+    }
+
+
+@app.post("/api/kline-health/refresh")
+async def refresh_kline_health(payload: dict | None = None):
+    """Force refresh all refetchable stocks in the selected health filter."""
+    payload = payload or {}
+    status = payload.get("status") or "problem"
+    limit = min(500, max(1, int(payload.get("limit") or 200)))
+    config = _ensure_db_initialized_from_config()
+    _, items = _build_kline_health_items(config)
+    filtered = _filter_kline_health_items(items, status)
+    targets = [item for item in filtered if item.get("needs_refetch")][:limit]
+    skipped_count = sum(1 for item in filtered if not item.get("needs_refetch"))
+
+    succeeded = []
+    failed = []
+    for item in targets:
+        code = item["code"]
+        result = await refresh_stock_kline(code)
+        if isinstance(result, JSONResponse):
+            failed.append({"code": code, "status_code": result.status_code, "reason": item.get("reason")})
+        else:
+            succeeded.append({"code": code, "result": result})
+
+    return {
+        "status": "completed",
+        "filter": status,
+        "limit": limit,
+        "requested_count": len(targets),
+        "succeeded_count": len(succeeded),
+        "failed_count": len(failed),
+        "skipped_count": skipped_count,
+        "truncated": len([item for item in filtered if item.get("needs_refetch")]) > len(targets),
+        "succeeded": succeeded,
+        "failed": failed,
+    }
+
+
+@app.post("/api/stock/{code}/kline-refresh")
+async def refresh_stock_kline(code: str):
+    """Force refresh one stock's local K-line data for health diagnostics."""
+    code = code.strip()
+    if not code:
+        return JSONResponse({"error": "Invalid code", "message": "stock code is required"}, status_code=400)
+
+    config = _ensure_db_initialized_from_config()
+    try:
+        windows = resolve_strategy_windows(config)
+    except ValueError as exc:
+        return JSONResponse({"error": "Invalid window config", "message": str(exc)}, status_code=400)
+
+    data_cfg = config.get("data", {}) or {}
+    daily_sources = data_cfg.get("daily_sources") or ["baidu", "sina", "tencent"]
+    if not daily_sources:
+        return JSONResponse({"error": "No data source", "message": "data.daily_sources is empty"}, status_code=400)
+
+    started = _now()
+    started_at = started.strftime("%Y-%m-%d %H:%M:%S")
+    task_id = f"kline-refresh-{started.strftime('%Y%m%d-%H%M%S-%f')}-{code}"
+    stock = _stock_pool_meta_for_code(config, code)
+    db.create_scan_task(
+        task_id,
+        started_at,
+        total_stocks=1,
+        retry_mode="kline_refresh",
+        strategy_type="KLINE_HEALTH_REFRESH",
+    )
+    conn = db.get_conn()
+    conn.execute("UPDATE scan_tasks SET status='refreshing' WHERE id=?", (task_id,))
+    conn.commit()
+    db.save_task_stocks(task_id, [stock])
+    db.update_task_stock(
+        task_id,
+        code,
+        status="fetching",
+        primary_source=daily_sources[0],
+        fallback_source=daily_sources[-1],
+        started_at=started_at,
+    )
+
+    context = build_cache_freshness_context(now=started)
+    fetch_result = fetch_with_retry(
+        code,
+        daily_sources[0],
+        retry_attempts=2,
+        fallback_attempts=2,
+        mgr=DataSourceManager(),
+        source_chain=daily_sources,
+        kline_days=windows.min_listing_days,
+        freshness_context=context,
+        force_refresh=True,
+    )
+    finished_at = _now().strftime("%Y-%m-%d %H:%M:%S")
+    source_errors = encode_source_errors(fetch_result.source_errors)
+    fetched_at = fetch_result.kline_fetched_at or finished_at
+    target_trade_date = fetch_result.kline_target_trade_date or context.target_trade_date
+
+    if fetch_result.data is None:
+        reason = "ALL_DATA_SOURCES_FAILED"
+        db.update_task_stock(
+            task_id,
+            code,
+            status="failed",
+            status_reason=reason,
+            primary_source=fetch_result.primary_source,
+            fallback_source=fetch_result.fallback_source,
+            primary_attempts=fetch_result.primary_attempts,
+            fallback_attempts=fetch_result.fallback_attempts,
+            primary_error=fetch_result.primary_error,
+            fallback_error=fetch_result.fallback_error,
+            source_errors=source_errors,
+            kline_fetched_at=fetched_at,
+            kline_target_trade_date=target_trade_date,
+            quote_status=fetch_result.quote_status,
+            finished_at=finished_at,
+        )
+        conn = db.get_conn()
+        conn.execute(
+            "UPDATE scan_tasks SET status='failed', finished_at=?, error=? WHERE id=?",
+            (finished_at, reason, task_id),
+        )
+        conn.commit()
+        return JSONResponse(
+            {
+                "code": code,
+                "task_id": task_id,
+                "status": "failed",
+                "message": reason,
+                "source_errors": fetch_result.source_errors,
+            },
+            status_code=502,
+        )
+
+    db.save_ohlc(code, fetch_result.data)
+    latest_date = fetch_result.data[-1].get("date") if fetch_result.data else None
+    quote_status = fetch_result.quote_status or "not_requested"
+    no_trade = quote_status in {"suspended", "no_trade"}
+    db.update_task_stock(
+        task_id,
+        code,
+        status="skipped" if no_trade else "scanned",
+        status_reason="SUSPENDED_OR_NO_TRADE_ON_TARGET_DATE" if no_trade else None,
+        primary_source=fetch_result.primary_source,
+        fallback_source=fetch_result.fallback_source,
+        primary_attempts=fetch_result.primary_attempts,
+        fallback_attempts=fetch_result.fallback_attempts,
+        primary_error=fetch_result.primary_error,
+        fallback_error=fetch_result.fallback_error,
+        source_errors=source_errors,
+        kline_latest_date=latest_date,
+        kline_fetched_at=fetched_at,
+        kline_target_trade_date=target_trade_date,
+        quote_status=quote_status,
+        finished_at=finished_at,
+    )
+    db.finish_scan_task(
+        task_id,
+        finished_at=finished_at,
+        candidates_count=0,
+        elapsed_seconds=max(0, (_now() - started).total_seconds()),
+        scanned=1,
+        skipped=1 if no_trade else 0,
+    )
+
+    latest_by_code, task_by_code = _load_kline_health_inputs(config)
+    summary = _classify_kline_health_item(
+        code,
+        latest_by_code.get(code),
+        task_by_code.get(code, stock),
+        build_cache_freshness_context(now=_now()),
+    )
+    return {
+        "code": code,
+        "task_id": task_id,
+        "status": "refetched",
+        "rows": len(fetch_result.data),
+        "source": fetch_result.fallback_source or fetch_result.primary_source,
+        "summary": summary,
     }
 
 
@@ -1564,6 +2110,324 @@ async def strategy2_candidate_detail(code: str, task_id: str = None):
             )
 
     c = db.get_strategy2_candidate(code, task_id=task_id)
+    if not c:
+        return JSONResponse({"error": "Not found"}, status_code=404)
+    return c
+
+
+# ====== Strategy3 API ======
+
+@app.post("/api/strategy3/scans")
+async def start_strategy3_scan():
+    """启动策略3全市场扫描。"""
+    import datetime
+    from scanner.stock_pool import get_a_stock_pool_result
+
+    config = load_config()
+    db_path = config.get("data", {}).get("database_path", "data/cuphandle.db")
+    db.init_db(db_path)
+
+    strategy3_cfg = config.get("strategy3", {})
+    if not strategy3_cfg.get("enabled", True):
+        return JSONResponse(
+            {"error": "STRATEGY3_DISABLED", "message": "策略3未启用"},
+            status_code=400,
+        )
+
+    try:
+        resolve_strategy3_config(config)
+    except ValueError as e:
+        return JSONResponse(
+            {"error": "INVALID_CONFIG", "message": f"策略3配置无效: {e}"},
+            status_code=400,
+        )
+
+    conflict = _scan_conflict_response()
+    if conflict:
+        return conflict
+
+    task_id = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+    started_at = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    db.create_scan_task(task_id, started_at, total_stocks=0, retry_mode="full", strategy_type=STRATEGY3_TYPE)
+    _set_running(task_id, "full", strategy_type=STRATEGY3_TYPE)
+    _running["started_at"] = started_at
+    _running["stats"] = {"total_stocks": 0, "current_code": "--", "current_name": "获取股票池中…"}
+
+    def run():
+        pool_result = get_a_stock_pool_result(config)
+        stocks = pool_result["stocks"]
+        if not stocks:
+            _running["stats"] = {"error": "No stock pool available"}
+            conn = db.get_conn()
+            conn.execute("UPDATE scan_tasks SET status='failed', error=? WHERE id=?", ("No stock pool", task_id))
+            conn.commit()
+            _clear_running()
+            return
+        db.update_scan_task_total(task_id, len(stocks), pool_result["source"])
+        db.save_task_stocks(task_id, stocks)
+        _running["stats"] = {
+            "total_stocks": len(stocks),
+            "stock_pool_source": pool_result["source"],
+            "current_code": "--",
+            "current_name": "初始化中",
+        }
+        try:
+            def on_progress(stage, current, total, detail, discovery=None):
+                stats = _running.get("stats", {})
+                if stage == "discovery" and discovery:
+                    found = stats.get("candidates_found", 0) + 1
+                    discoveries = list(stats.get("discoveries") or [])
+                    discoveries.insert(0, {
+                        "code": discovery["code"],
+                        "name": discovery["name"],
+                        "total_score": discovery["total_score"],
+                        "level": discovery["level"],
+                        "pullback_pct": discovery["pullback_pct"],
+                        "risk_ratio": discovery["risk_ratio"],
+                        "rr1": discovery["rr1"],
+                        "trade_quality_score": discovery.get("trade_quality_score", 0),
+                        "trade_state": discovery.get("trade_state", ""),
+                        "trade_state_label": discovery.get("trade_state_label", ""),
+                        "estimated_rr": discovery.get("estimated_rr", 0),
+                    })
+                    _running["stats"] = {**stats, "discoveries": discoveries[:20], "candidates_found": found}
+                else:
+                    code = detail.split()[0] if detail else ""
+                    s = stats.copy()
+                    s.update({
+                        "scanned": current,
+                        "processed": current,
+                        "total_stocks": total,
+                        "current_code": code,
+                        "current_name": detail[len(code):].strip() if len(detail) > len(code) else detail,
+                    })
+                    s.setdefault("candidates_found", 0)
+                    s.setdefault("skipped", 0)
+                    s.setdefault("failed", 0)
+                    _running["stats"] = s
+                db.update_scan_progress(
+                    task_id,
+                    scanned=_running["stats"].get("scanned", 0),
+                    skipped=_running["stats"].get("skipped", 0),
+                    candidates_count=_running["stats"].get("candidates_found", 0),
+                )
+
+            result = scan_strategy3_all(config, progress_callback=on_progress, task_id=task_id, stocks=stocks)
+            s = result["stats"]
+            _running["stats"] = s
+            db.finish_scan_task(
+                task_id,
+                finished_at=datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                candidates_count=s.get("candidates_found", 0),
+                elapsed_seconds=s.get("elapsed_seconds", 0),
+                scanned=s.get("scanned", 0),
+                skipped=s.get("skipped", 0),
+            )
+            db.refresh_scan_task_counts(task_id)
+        except Exception as e:
+            import traceback
+            logger.error(f"Strategy3 scan failed: {e}\n{traceback.format_exc()}")
+            _running["stats"] = {"error": str(e)}
+            conn = db.get_conn()
+            conn.execute("UPDATE scan_tasks SET status='failed', error=? WHERE id=?", (str(e), task_id))
+            conn.commit()
+        finally:
+            _clear_running()
+
+    threading.Thread(target=run, daemon=True).start()
+    return {"taskId": task_id, "strategyType": STRATEGY3_TYPE, "status": "running"}
+
+
+@app.get("/api/strategy3/scans/status")
+async def strategy3_scan_status():
+    """查询策略3扫描状态。"""
+    if _running["running"] and _running.get("strategy_type") == STRATEGY3_TYPE:
+        summary = db.refresh_scan_task_counts(_running["task_id"]) if _running.get("task_id") else {}
+        return {
+            "running": True,
+            "taskId": _running["task_id"],
+            "strategyType": STRATEGY3_TYPE,
+            "stats": {**_running.get("stats", {}), **summary},
+        }
+    conn = db.get_conn()
+    row = conn.execute(
+        "SELECT id FROM scan_tasks WHERE status='running' AND strategy_type=? ORDER BY started_at DESC LIMIT 1",
+        (STRATEGY3_TYPE,),
+    ).fetchone()
+    if row:
+        return {"running": True, "taskId": row[0], "strategyType": STRATEGY3_TYPE, "stats": {}}
+    return {"running": False, "taskId": None, "strategyType": STRATEGY3_TYPE, "stats": {}}
+
+
+@app.get("/api/strategy3/tasks")
+async def strategy3_tasks():
+    """查询策略3任务列表。"""
+    config = load_config()
+    db.init_db(config.get("data", {}).get("database_path", "data/cuphandle.db"))
+    tasks = []
+    if _running["running"] and _running.get("strategy_type") == STRATEGY3_TYPE:
+        s = _running.get("stats", {})
+        tasks.append({
+            "id": _running.get("task_id", "current"),
+            "date": _running.get("started_at", ""),
+            "scope": f"全市场 · {s.get('total_stocks', '--')}只",
+            "running": True,
+            "status": "running",
+            "candidates": s.get("candidates_found", 0),
+            "total": s.get("total_stocks", 0),
+            "scanned": s.get("scanned", 0),
+            "skipped": s.get("skipped", 0),
+            "failed": s.get("failed", 0),
+            "strategy_type": STRATEGY3_TYPE,
+        })
+
+    running_id = _running.get("task_id") if _running["running"] else None
+    conn = db.get_conn()
+    rows = conn.execute(
+        "SELECT id, started_at, finished_at, status, total_stocks, scanned, skipped, "
+        "candidates_count, elapsed_seconds, failed_count, stock_pool_source, latest_trade_date, strategy_type "
+        "FROM scan_tasks WHERE strategy_type=? ORDER BY started_at DESC",
+        (STRATEGY3_TYPE,),
+    ).fetchall()
+    for r in rows:
+        if r[0] == running_id:
+            continue
+        tasks.append({
+            "id": r[0], "date": r[1] or "", "finished_at": r[2],
+            "running": r[3] == "running", "status": r[3],
+            "total_stocks": r[4], "scanned": r[5], "total": r[4],
+            "skipped": r[6], "candidates": r[7], "elapsed_seconds": r[8],
+            "duration": f"{r[8]:.0f}s" if r[8] is not None else None,
+            "failed": r[9], "stock_pool_source": r[10], "latest_trade_date": r[11],
+            "strategy_type": r[12] or STRATEGY3_TYPE,
+        })
+    return {"tasks": tasks}
+
+
+@app.post("/api/strategy3/tasks/{task_id}/retry-failed")
+async def strategy3_retry_failed_stocks(task_id: str):
+    """重试策略3任务中失败的股票。"""
+    config = load_config()
+    db.init_db(config.get("data", {}).get("database_path", "data/cuphandle.db"))
+
+    _, type_err = _require_task_strategy(task_id, STRATEGY3_TYPE)
+    if type_err is not None:
+        return type_err
+
+    conflict = _scan_conflict_response()
+    if conflict:
+        return conflict
+
+    failed = db.get_failed_task_stocks(task_id)
+    if not failed:
+        return {"task_id": task_id, "status": "no_failed_stocks", "retry_count": 0}
+
+    db.reset_failed_task_stocks(task_id)
+    conn = db.get_conn()
+    conn.execute("UPDATE scan_tasks SET status='running', retry_mode='failed_only' WHERE id=?", (task_id,))
+    conn.commit()
+    _set_running(task_id, "failed_only", strategy_type=STRATEGY3_TYPE)
+    stocks = [{"code": s["code"], "name": s["name"], "market": s.get("market", "")} for s in failed]
+
+    def run_retry():
+        import datetime
+        try:
+            result = scan_strategy3_all(config, task_id=task_id, stocks=stocks, retry_policy="failed_only")
+            s = result["stats"]
+            db.finish_scan_task(
+                task_id,
+                finished_at=datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                candidates_count=s.get("candidates_found", 0),
+                elapsed_seconds=s.get("elapsed_seconds", 0),
+                scanned=s.get("scanned", 0),
+                skipped=s.get("skipped", 0),
+            )
+            db.refresh_scan_task_counts(task_id)
+        except Exception as e:
+            import traceback
+            logger.error(f"Strategy3 retry failed stocks failed: {e}\n{traceback.format_exc()}")
+            conn = db.get_conn()
+            conn.execute("UPDATE scan_tasks SET status='failed', error=? WHERE id=?", (str(e), task_id))
+            conn.commit()
+        finally:
+            _clear_running()
+
+    threading.Thread(target=run_retry, daemon=True).start()
+    return {"task_id": task_id, "status": "retry_started", "retry_count": len(stocks)}
+
+
+@app.post("/api/strategy3/tasks/{task_id}/re-evaluate")
+async def strategy3_re_evaluate(task_id: str):
+    """用已缓存日线数据重跑策略3评估，不重新拉取数据。"""
+    config = load_config()
+    db.init_db(config.get("data", {}).get("database_path", "data/cuphandle.db"))
+
+    _, type_err = _require_task_strategy(task_id, STRATEGY3_TYPE)
+    if type_err is not None:
+        return type_err
+
+    conn = db.get_conn()
+    task = conn.execute("SELECT id FROM scan_tasks WHERE id=?", (task_id,)).fetchone()
+    if not task:
+        return JSONResponse({"error": "Task not found"}, status_code=404)
+
+    conn.execute("UPDATE scan_tasks SET status='re_evaluating' WHERE id=?", (task_id,))
+    conn.commit()
+
+    def run_re_eval():
+        import datetime
+        try:
+            from strategy3.scanner import re_evaluate_strategy3_task
+            result = re_evaluate_strategy3_task(config, task_id)
+            now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            conn2 = db.get_conn()
+            conn2.execute(
+                "UPDATE scan_tasks SET status='completed', candidates_count=?, finished_at=? WHERE id=?",
+                (result["candidates_found"], now, task_id),
+            )
+            conn2.commit()
+        except Exception as e:
+            import traceback
+            logger.error(f"Strategy3 re-evaluate {task_id} failed: {e}\n{traceback.format_exc()}")
+            conn2 = db.get_conn()
+            conn2.execute("UPDATE scan_tasks SET status='completed', error=? WHERE id=?", (str(e), task_id))
+            conn2.commit()
+
+    threading.Thread(target=run_re_eval, daemon=True).start()
+    return {"task_id": task_id, "status": "re_evaluating"}
+
+
+@app.get("/api/strategy3/candidates")
+async def strategy3_candidates(task_id: str = None):
+    """查询策略3候选列表。"""
+    config = load_config()
+    db.init_db(config.get("data", {}).get("database_path", "data/cuphandle.db"))
+
+    if task_id:
+        _, type_err = _require_task_strategy(task_id, STRATEGY3_TYPE)
+        if type_err is not None:
+            return type_err
+
+    if _running["running"] and _running.get("strategy_type") == STRATEGY3_TYPE and not task_id:
+        ds = _running.get("stats", {}).get("discoveries") or []
+        return {"candidates": ds, "total": len(ds)}
+
+    cands = db.get_strategy3_candidates(task_id=task_id)
+    return {"candidates": cands, "total": len(cands)}
+
+
+@app.get("/api/strategy3/candidates/{code}")
+async def strategy3_candidate_detail(code: str, task_id: str = None):
+    """查询策略3候选详情。"""
+    config = load_config()
+    db.init_db(config.get("data", {}).get("database_path", "data/cuphandle.db"))
+
+    if task_id:
+        _, type_err = _require_task_strategy(task_id, STRATEGY3_TYPE)
+        if type_err is not None:
+            return type_err
+
+    c = db.get_strategy3_candidate(code, task_id=task_id)
     if not c:
         return JSONResponse({"error": "Not found"}, status_code=404)
     return c

@@ -11,6 +11,7 @@ const routes = [
   { path: '/stock/:code', name: 'StockDetail', component: () => import('../pages/StockDetail.vue') },
   { path: '/strategy2/results', name: 'Strategy2Results', component: () => import('../pages/Strategy2Results.vue') },
   { path: '/strategy2/backtest', name: 'Strategy2Backtest', component: () => import('../pages/Strategy2Backtest.vue') },
+  { path: '/strategy3/results', name: 'Strategy3Results', component: () => import('../pages/Strategy3Results.vue') },
 ]
 
 const router = createRouter({

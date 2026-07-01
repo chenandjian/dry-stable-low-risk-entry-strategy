@@ -75,6 +75,8 @@ describe('StrategyConfig scheduler controls', () => {
 
     expect(wrapper.text()).toContain('定时任务')
     expect(wrapper.text()).toContain('启用定时任务')
+    expect(wrapper.text()).toContain('启用串行三策略扫描')
+    expect(wrapper.text()).toContain('先执行策略1，完成后再执行策略2和策略3')
     expect(wrapper.text()).toContain('执行时间')
     expect(wrapper.find('[data-test="scheduler-time"]').element.value).toBe('15:15')
 
@@ -113,5 +115,42 @@ describe('StrategyConfig scheduler controls', () => {
     expect(payload.scheduler.enabled).toBe(false)
     expect(payload.scheduler.serial_dual_scan.enabled).toBe(false)
     expect(payload.scheduler.serial_dual_scan.cron).toBe('15 15 * * 1-5')
+  })
+
+  it('renders strategy3 formal candidate filter controls', async () => {
+    const wrapper = mount(StrategyConfig)
+    await flushUi()
+
+    expect(wrapper.text()).toContain('正式候选过滤')
+    expect(wrapper.text()).toContain('正式候选分数')
+    expect(wrapper.text()).toContain('正式最大风险')
+    expect(wrapper.text()).toContain('正式最大回撤')
+    expect(wrapper.find('[data-test="strategy3-trade-score"]').exists()).toBe(true)
+    expect(wrapper.find('[data-test="strategy3-trade-risk"]').exists()).toBe(true)
+    expect(wrapper.find('[data-test="strategy3-trade-pullback"]').exists()).toBe(true)
+  })
+
+  it('saves strategy3 defaults when loading an older config without strategy3 section', async () => {
+    const wrapper = mount(StrategyConfig)
+    await flushUi()
+
+    await wrapper.find('.btn-save').trigger('click')
+    await flushUi()
+
+    const payload = api.updateConfig.mock.calls[0][0]
+    expect(payload.strategy3.enabled).toBe(true)
+    expect(payload.strategy3.strategy_window_days).toBe(250)
+    expect(payload.strategy3.minimum_required_days).toBe(180)
+    expect(payload.strategy3.candidate_min_score).toBe(75)
+    expect(payload.strategy3.core_min_score).toBe(85)
+    expect(payload.strategy3.max_risk_ratio).toBe(0.08)
+    expect(payload.strategy3.trade_candidate_min_score).toBe(88)
+    expect(payload.strategy3.trade_max_risk_ratio).toBe(0.04)
+    expect(payload.strategy3.trade_max_pullback_pct).toBe(0.16)
+    expect(payload.strategy3.min_pullback_from_high).toBe(0.12)
+    expect(payload.strategy3.max_pullback_from_high).toBe(0.25)
+    expect(payload.strategy3.volume_shrink_ratio).toBe(0.70)
+    expect(payload.strategy3.dry_return_5_floor).toBe(0.02)
+    expect(payload.strategy3.dry_support_max_test_count).toBe(2)
   })
 })
