@@ -660,11 +660,12 @@ def _leader_inputs_for_topic(topic: dict, strategy_config: dict, topic_service: 
             fetched_members = topic_service.fetch_topic_members(topic.get("topic_name", ""), topic.get("topic_type", ""))
             inputs.extend(fetched_members)
             if fetched_members:
+                membership_source = str(fetched_members[0].get("source") or "akshare_ths")
                 db.save_strategy4_topic_members(
                     topic_id=str(topic.get("topic_id") or ""),
                     topic_name=str(topic.get("topic_name") or ""),
                     topic_type=str(topic.get("topic_type") or ""),
-                    source="akshare_ths",
+                    source=membership_source,
                     membership_snapshot_date=_now()[:10],
                     membership_mode="current_members_proxy",
                     members=fetched_members,

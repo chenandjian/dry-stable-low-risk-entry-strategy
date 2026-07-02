@@ -91,6 +91,20 @@ def test_topic_source_reads_ths_topic_members(monkeypatch):
     assert members[0]["amount"] == 2000000000
 
 
+def test_topic_source_falls_back_to_em_members_when_ths_members_missing(monkeypatch):
+    fake_ak = types.SimpleNamespace()
+    fake_ak.stock_board_concept_cons_em = lambda symbol: _fake_frame([
+        {"代码": "300750", "名称": "宁德时代", "涨跌幅": 20.0, "成交额": 2000000000},
+    ])
+    monkeypatch.setitem(sys.modules, "akshare", fake_ak)
+
+    members = TopicSourceService().fetch_topic_members("AI算力", "concept")
+
+    assert [m["code"] for m in members] == ["300750"]
+    assert members[0]["source"] == "akshare_eastmoney"
+    assert members[0]["membership_source"] == "akshare_eastmoney_member"
+
+
 class _fake_frame:
     def __init__(self, rows):
         self._rows = rows

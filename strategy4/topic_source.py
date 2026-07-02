@@ -64,17 +64,31 @@ class TopicSourceService:
         except Exception as exc:  # pragma: no cover
             raise TopicSourceError(f"AKSHARE_IMPORT_FAILED: {exc}") from exc
 
-        func_name = "stock_board_concept_cons_ths" if topic_type == "concept" else "stock_board_industry_cons_ths"
-        func = getattr(ak, func_name, None)
-        if func is None:
-            raise TopicSourceError(f"{func_name}: missing")
-        try:
-            frame = func(symbol=topic_name)
-        except TypeError:
-            frame = func(topic_name)
-        rows = _rows_from_frame(frame)
-        members = [_normalize_member_row(row) for row in rows]
-        return [m for m in members if m["code"]]
+        source_chain = (
+            [("akshare_ths", "stock_board_concept_cons_ths"), ("akshare_eastmoney", "stock_board_concept_cons_em")]
+            if topic_type == "concept"
+            else [("akshare_ths", "stock_board_industry_cons_ths"), ("akshare_eastmoney", "stock_board_industry_cons_em")]
+        )
+        errors: list[str] = []
+        for source, func_name in source_chain:
+            func = getattr(ak, func_name, None)
+            if func is None:
+                errors.append(f"{func_name}: missing")
+                continue
+            try:
+                frame = func(symbol=topic_name)
+            except TypeError:
+                frame = func(topic_name)
+            except Exception as exc:
+                errors.append(f"{func_name}: {exc}")
+                continue
+            rows = _rows_from_frame(frame)
+            members = [_normalize_member_row(row, source=source) for row in rows]
+            members = [m for m in members if m["code"]]
+            if members:
+                return members
+            errors.append(f"{func_name}: empty")
+        raise TopicSourceError("; ".join(errors) or "AKSHARE_TOPIC_MEMBERS_EMPTY")
 
 
 def _normalize_ths_row(row: dict, topic_type: str, idx: int) -> dict:
@@ -108,7 +122,7 @@ def _normalize_ths_row(row: dict, topic_type: str, idx: int) -> dict:
     }
 
 
-def _normalize_member_row(row: dict) -> dict:
+def _normalize_member_row(row: dict, *, source: str = "akshare_ths") -> dict:
     code = str(_pick(row, "代码", "股票代码", default="")).strip()
     if code:
         code = code.zfill(6)[-6:]
@@ -118,6 +132,8 @@ def _normalize_member_row(row: dict) -> dict:
         "return_1d": _pct(_pick(row, "涨跌幅", "涨幅", default=0)),
         "amount": _to_float(_pick(row, "成交额", "金额", default=0)),
         "limit_shape": str(_pick(row, "limit_shape", "涨停形态", default="")),
+        "source": source,
+        "membership_source": f"{source}_member",
         "raw_snapshot": dict(row),
     }
 
