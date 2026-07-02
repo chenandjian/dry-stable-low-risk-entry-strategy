@@ -1,10 +1,13 @@
 import scanner.db as db
 
 from strategy4.backtester import (
+    _best_result,
+    _default_experiments,
     generate_strategy4_optimization_report,
     run_strategy4_parameter_experiments,
     run_strategy4_snapshot_backtest,
 )
+from strategy4.backtest_models import Strategy4BacktestResult
 
 
 def test_strategy4_backtest_marks_missing_snapshot_unobserved(tmp_path):
@@ -149,7 +152,10 @@ def test_strategy4_execution_rejects_one_word_limit_up_entry(tmp_path):
         db_path=db_path,
         start_date="2026-06-20",
         end_date="2026-06-20",
-        config_snapshot={"strategy4": {"min_leader_strength_score": 60}},
+        config_snapshot={"strategy4": {
+            "min_leader_strength_score": 60,
+            "source_modes": {"historical_kline_derived_enabled": False},
+        }},
     )
 
     assert len(result.opportunities) == 1
@@ -181,7 +187,10 @@ def test_strategy4_execution_rejects_t_limit_up_open_entry(tmp_path):
         db_path=db_path,
         start_date="2026-06-20",
         end_date="2026-06-20",
-        config_snapshot={"strategy4": {"min_leader_strength_score": 60}},
+        config_snapshot={"strategy4": {
+            "min_leader_strength_score": 60,
+            "source_modes": {"historical_kline_derived_enabled": False},
+        }},
     )
 
     opp = result.opportunities[0]
@@ -220,7 +229,7 @@ def test_strategy4_parameter_experiments_filter_observed_snapshots_only(tmp_path
         db_path=db_path,
         start_date="2026-06-20",
         end_date="2026-06-21",
-        base_config={"strategy4": {}},
+        base_config={"strategy4": {"source_modes": {"historical_kline_derived_enabled": False}}},
         experiment_grid=[
             {"name": "strict", "min_hot_topic_score": 95, "min_leader_strength_score": 95},
             {"name": "baseline", "min_hot_topic_score": 85, "min_leader_strength_score": 88},
@@ -230,6 +239,82 @@ def test_strategy4_parameter_experiments_filter_observed_snapshots_only(tmp_path
     assert experiments["strict"].summary.total_opportunities == 0
     assert experiments["baseline"].summary.total_opportunities == 1
     assert experiments["baseline"].summary.unobserved_snapshot_days == 1
+
+
+def test_strategy4_backtest_does_not_promote_watch_topic_to_opportunity(tmp_path):
+    db_path = str(tmp_path / "test.db")
+    db.init_db(db_path)
+    rows = _bars_for_buyable_second_wave()
+    rows.append({
+        "date": "2026-06-23",
+        "open": 16.5,
+        "high": 17.2,
+        "low": 16.2,
+        "close": 17.0,
+        "volume": 4_500_000,
+        "turnover": 16.8 * 4_500_000,
+    })
+    db.save_ohlc("300750", rows)
+    _seed_strategy4_snapshot(
+        db_path,
+        task_id="s4-snap",
+        date="2026-06-20",
+        code="300750",
+        topic_status="WATCH_HOT",
+    )
+
+    result = run_strategy4_snapshot_backtest(
+        db_path=db_path,
+        start_date="2026-06-20",
+        end_date="2026-06-20",
+        config_snapshot={"strategy4": {"min_leader_strength_score": 60}},
+    )
+
+    assert result.signals == []
+    assert result.opportunities == []
+
+
+def test_strategy4_backtest_respects_topic_index_allowed_phases(tmp_path, monkeypatch):
+    db_path = str(tmp_path / "test.db")
+    db.init_db(db_path)
+    rows = _bars_for_buyable_second_wave()
+    rows.append({
+        "date": "2026-06-23",
+        "open": 16.5,
+        "high": 17.2,
+        "low": 16.2,
+        "close": 17.0,
+        "volume": 4_500_000,
+        "turnover": 16.8 * 4_500_000,
+    })
+    db.save_ohlc("300750", rows)
+    _seed_strategy4_snapshot(db_path, task_id="s4-snap", date="2026-06-20", code="300750")
+
+    monkeypatch.setattr("strategy4.backtester._topic_index_context_for_backtest", lambda topic, cfg, evaluation_date: {
+        "observed": True,
+        "status": "observed",
+        "latest_date": evaluation_date,
+        "rows": 60,
+        "phase": "MAIN_TREND",
+        "topic_index_trend_score": 14,
+        "topic_index_breakout_score": 8,
+        "amount_ratio_5_20": 1.2,
+        "drawdown_from_high_20": -0.02,
+    })
+
+    result = run_strategy4_snapshot_backtest(
+        db_path=db_path,
+        start_date="2026-06-20",
+        end_date="2026-06-20",
+        config_snapshot={"strategy4": {
+            "min_leader_strength_score": 60,
+            "source_modes": {"historical_kline_derived_enabled": False},
+            "topic_index_filters": {"allowed_phases": ["EARLY_ACCELERATION"]},
+        }},
+    )
+
+    assert result.signals == []
+    assert result.opportunities == []
 
 
 def test_strategy4_parameter_experiments_re_evaluate_no_buy_point_leaders(tmp_path):
@@ -260,13 +345,78 @@ def test_strategy4_parameter_experiments_re_evaluate_no_buy_point_leaders(tmp_pa
         db_path=db_path,
         start_date="2026-06-20",
         end_date="2026-06-20",
-        base_config={"strategy4": {}},
+        base_config={"strategy4": {"source_modes": {"historical_kline_derived_enabled": False}}},
         experiment_grid=[
             {"name": "relaxed_leader", "min_hot_topic_score": 85, "min_leader_strength_score": 60},
         ],
     )
 
     assert experiments["relaxed_leader"].summary.total_opportunities == 1
+
+
+def test_strategy4_parameter_experiments_reuse_derived_snapshot_cache(tmp_path, monkeypatch):
+    db_path = str(tmp_path / "test.db")
+    db.init_db(db_path)
+
+    calls = []
+
+    def fake_derived(evaluation_date, cfg):
+        calls.append((evaluation_date, cfg["min_hot_topic_score"]))
+        return [], []
+
+    monkeypatch.setattr("strategy4.backtester._derived_snapshots_for_date", fake_derived)
+
+    run_strategy4_parameter_experiments(
+        db_path=db_path,
+        start_date="2026-06-20",
+        end_date="2026-06-20",
+        base_config={"strategy4": {"source_modes": {"historical_kline_derived_enabled": False}}},
+        experiment_grid=[
+            {"name": "baseline", "min_hot_topic_score": 85},
+            {"name": "relaxed_hot", "min_hot_topic_score": 75},
+        ],
+    )
+
+    assert calls == [("2026-06-20", 85)]
+
+
+def test_strategy4_parameter_experiments_reuse_stock_ohlc_cache(tmp_path, monkeypatch):
+    db_path = str(tmp_path / "test.db")
+    db.init_db(db_path)
+    rows = _bars_for_buyable_second_wave()
+    rows.append({
+        "date": "2026-06-23",
+        "open": 16.5,
+        "high": 17.2,
+        "low": 16.2,
+        "close": 17.0,
+        "volume": 4_500_000,
+        "turnover": 16.8 * 4_500_000,
+    })
+    db.save_ohlc("300750", rows)
+    _seed_strategy4_snapshot(db_path, task_id="s4-snap", date="2026-06-20", code="300750")
+
+    original_get_ohlc = db.get_ohlc
+    calls = []
+
+    def counting_get_ohlc(code, max_rows=0):
+        calls.append(code)
+        return original_get_ohlc(code, max_rows)
+
+    monkeypatch.setattr("strategy4.backtester.db.get_ohlc", counting_get_ohlc)
+
+    run_strategy4_parameter_experiments(
+        db_path=db_path,
+        start_date="2026-06-20",
+        end_date="2026-06-20",
+        base_config={"strategy4": {"source_modes": {"historical_kline_derived_enabled": False}}},
+        experiment_grid=[
+            {"name": "baseline", "min_leader_strength_score": 60},
+            {"name": "same_signal", "min_leader_strength_score": 60},
+        ],
+    )
+
+    assert calls == ["300750"]
 
 
 def test_strategy4_backtest_market_index_metadata_is_truncated_at_evaluation_date(tmp_path):
@@ -294,7 +444,10 @@ def test_strategy4_backtest_market_index_metadata_is_truncated_at_evaluation_dat
         db_path=db_path,
         start_date="2026-06-20",
         end_date="2026-06-20",
-        config_snapshot={"strategy4": {"min_leader_strength_score": 60}},
+        config_snapshot={"strategy4": {
+            "min_leader_strength_score": 60,
+            "source_modes": {"historical_kline_derived_enabled": False},
+        }},
     )
 
     snapshot = result.signals[0].evaluation_snapshot
@@ -382,7 +535,7 @@ def test_strategy4_optimization_report_reflects_nonzero_opportunities(tmp_path):
         db_path=db_path,
         start_date="2026-06-20",
         end_date="2026-06-20",
-        base_config={"strategy4": {}},
+        base_config={"strategy4": {"source_modes": {"historical_kline_derived_enabled": False}}},
         experiment_grid=[{"name": "baseline", "min_leader_strength_score": 60}],
         report_path=report_path,
     )
@@ -396,6 +549,33 @@ def test_strategy4_optimization_report_reflects_nonzero_opportunities(tmp_path):
     assert "板块K线日期" in report
 
 
+def test_strategy4_best_result_prefers_minimum_sample_size_over_tiny_pf():
+    tiny = Strategy4BacktestResult(task_id="tiny")
+    tiny.summary.entered_opportunities = 2
+    tiny.summary.total_opportunities = 2
+    tiny.summary.profit_factor = 9.0
+    tiny.summary.avg_realized_return = 0.12
+
+    sampled = Strategy4BacktestResult(task_id="sampled")
+    sampled.summary.entered_opportunities = 6
+    sampled.summary.total_opportunities = 6
+    sampled.summary.profit_factor = 2.4
+    sampled.summary.avg_realized_return = 0.08
+
+    name, _ = _best_result({"tiny": tiny, "sampled": sampled})
+
+    assert name == "sampled"
+
+
+def test_strategy4_default_experiments_cover_derived_confirmation_threshold():
+    experiments = _default_experiments()
+
+    assert any(
+        (item.get("derived_source") or {}).get("min_confirmed_topic_hot_score") == 60
+        for item in experiments
+    )
+
+
 def _seed_strategy4_snapshot(
     db_path,
     *,
@@ -406,6 +586,7 @@ def _seed_strategy4_snapshot(
     leader_score=91,
     include_topic_index=True,
     leader_status="LEADER_CONFIRMED",
+    topic_status="CONFIRMED_HOT",
 ):
     db.init_db(db_path)
     db.create_scan_task(task_id, f"{date} 15:30:00", strategy_type="STRATEGY_4_HOT_LEADER_SECOND_WAVE")
@@ -416,7 +597,7 @@ def _seed_strategy4_snapshot(
         "topic_type": "concept",
         "source": "fixture",
         "snapshot_time": f"{date} 15:30:00",
-        "status": "CONFIRMED_HOT",
+        "status": topic_status,
         "hot_topic_score": hot_score,
         "price_strength_score": 30,
         "amount_strength_score": 18,

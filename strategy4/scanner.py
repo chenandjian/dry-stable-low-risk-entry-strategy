@@ -21,6 +21,7 @@ from strategy4.engine import HotLeaderSecondWaveEngine
 from strategy4.leader import score_leader_candidate
 from strategy4.price_limit import PriceLimitResolver
 from strategy4.snapshot_merge import merge_topics
+from strategy4.topic_index_filters import topic_index_context_passes_filters
 from strategy4.topic_scoring import score_hot_topic
 from strategy4.topic_index_service import TopicIndexService, _target_trade_date
 from strategy4.topic_source import TopicSourceError, TopicSourceService
@@ -321,6 +322,7 @@ def _build_leaders_and_candidates_from_topics(
 
         if (
             topic.get("status") in BUYABLE_TOPIC_STATUSES
+            and topic_index_context_passes_filters(_topic_index_context(topic), strategy_config)
             and leader_score.status == "LEADER_CONFIRMED"
             and evaluation.get("passed")
             and rr

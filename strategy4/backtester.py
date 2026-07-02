@@ -26,6 +26,7 @@ from strategy4.price_limit import (
     PriceLimitResolver,
 )
 from strategy4.snapshot_merge import merge_leaders, merge_topics
+from strategy4.topic_index_filters import topic_index_context_passes_filters
 from strategy4.topic_index_service import topic_index_context_from_history
 from strategy4.backtest_models import (
     Strategy4BacktestOpportunity,
@@ -36,6 +37,7 @@ from strategy4.backtest_models import (
 )
 
 
+BACKTEST_BUYABLE_TOPIC_STATUSES = {"CONFIRMED_HOT", "LOCKED_HOT_TOPIC"}
 BACKTEST_LEADER_STATUSES = {"LEADER_CONFIRMED", "LOCKED_LEADER_WATCH", "HOT_TOPIC_NO_BUY_POINT"}
 
 
@@ -49,6 +51,8 @@ def run_strategy4_parameter_experiments(
 ) -> dict[str, Strategy4BacktestResult]:
     """Run a set of Strategy4 backtest experiments over observable snapshots."""
     results: dict[str, Strategy4BacktestResult] = {}
+    derived_snapshot_cache: dict[tuple[str, str], tuple[list[dict], list[dict]]] = {}
+    ohlc_cache: dict[str, list[dict] | None] = {}
     for experiment in experiment_grid:
         name = str(experiment.get("name") or f"experiment_{len(results) + 1}")
         cfg = copy.deepcopy(base_config or {})
@@ -79,6 +83,8 @@ def run_strategy4_parameter_experiments(
             end_date=end_date,
             config_snapshot=cfg,
             task_id=name,
+            derived_snapshot_cache=derived_snapshot_cache,
+            ohlc_cache=ohlc_cache,
         )
     return results
 
@@ -90,6 +96,8 @@ def run_strategy4_snapshot_backtest(
     end_date: str,
     config_snapshot: dict,
     task_id: str = "strategy4-backtest",
+    derived_snapshot_cache: dict[tuple[str, str], tuple[list[dict], list[dict]]] | None = None,
+    ohlc_cache: dict[str, list[dict] | None] | None = None,
 ) -> Strategy4BacktestResult:
     """Replay Strategy4 snapshots over a date range using local OHLC only."""
     db.init_db(db_path)
@@ -101,7 +109,11 @@ def run_strategy4_snapshot_backtest(
     for evaluation_date in _evaluation_dates(start_date, end_date):
         result.summary.evaluation_days += 1
         snapshot_task_id = _snapshot_task_for_exact_date(evaluation_date)
-        derived_topics, derived_leaders = _derived_snapshots_for_date(evaluation_date, cfg)
+        derived_topics, derived_leaders = _derived_snapshots_for_date_cached(
+            evaluation_date,
+            cfg,
+            derived_snapshot_cache,
+        )
         if not snapshot_task_id:
             if not derived_topics:
                 result.summary.unobserved_snapshot_days += 1
@@ -151,13 +163,23 @@ def run_strategy4_snapshot_backtest(
                     detail=f"{topic.get('topic_id') or topic.get('topic_name')} has no observable topic index K-line history.",
                 ))
                 continue
+            if not topic_index_context_passes_filters(topic_index_context, cfg):
+                continue
             for leader in leaders_by_topic.get(topic.get("topic_id", ""), []):
-                signal = _evaluate_leader_snapshot(topic, leader, engine, cfg, evaluation_date, topic_index_context=topic_index_context)
+                signal = _evaluate_leader_snapshot(
+                    topic,
+                    leader,
+                    engine,
+                    cfg,
+                    evaluation_date,
+                    topic_index_context=topic_index_context,
+                    ohlc_cache=ohlc_cache,
+                )
                 if signal is None:
                     continue
                 result.signals.append(signal)
                 opp = _opportunity_from_signal(signal)
-                ohlc = db.get_ohlc(signal.code) or []
+                ohlc = _get_ohlc(signal.code, ohlc_cache) or []
                 calculate_strategy4_execution_outcome(opp, ohlc)
                 result.opportunities.append(opp)
 
@@ -265,9 +287,10 @@ def _evaluate_leader_snapshot(
     cfg: dict,
     evaluation_date: str,
     topic_index_context: dict | None = None,
+    ohlc_cache: dict[str, list[dict] | None] | None = None,
 ) -> Strategy4BacktestSignal | None:
     code = str(leader.get("code") or "")
-    ohlc = db.get_ohlc(code) or []
+    ohlc = _get_ohlc(code, ohlc_cache) or []
     history = [row for row in ohlc if str(row.get("date") or "") <= evaluation_date]
     if len(history) < 10:
         return None
@@ -320,6 +343,14 @@ def _evaluate_leader_snapshot(
     )
 
 
+def _get_ohlc(code: str, cache: dict[str, list[dict] | None] | None = None) -> list[dict] | None:
+    if cache is None:
+        return db.get_ohlc(code)
+    if code not in cache:
+        cache[code] = db.get_ohlc(code)
+    return copy.deepcopy(cache[code])
+
+
 def _opportunity_from_signal(signal: Strategy4BacktestSignal) -> Strategy4BacktestOpportunity:
     return Strategy4BacktestOpportunity(
         code=signal.code,
@@ -350,6 +381,8 @@ def _select_topics_for_experiment(topics: list[dict], cfg: dict) -> list[dict]:
     for topic in sorted(topics, key=lambda item: float(item.get("hot_topic_score") or 0), reverse=True):
         if len(selected) >= top_n:
             break
+        if str(topic.get("status") or "") not in BACKTEST_BUYABLE_TOPIC_STATUSES:
+            continue
         score = float(topic.get("hot_topic_score") or 0)
         signals = int(topic.get("signal_count") or 0)
         if score >= min_score and signals >= min_signals:
@@ -441,6 +474,28 @@ def _derived_snapshots_for_date(evaluation_date: str, cfg: dict) -> tuple[list[d
             if isinstance(raw, dict):
                 raw["derived_leaders"] = topic_leaders
     return topics, leaders
+
+
+def _derived_snapshots_for_date_cached(
+    evaluation_date: str,
+    cfg: dict,
+    cache: dict[tuple[str, str], tuple[list[dict], list[dict]]] | None,
+) -> tuple[list[dict], list[dict]]:
+    if cache is None:
+        return _derived_snapshots_for_date(evaluation_date, cfg)
+    key = (evaluation_date[:10], _derived_snapshot_cache_key(cfg))
+    if key not in cache:
+        cache[key] = copy.deepcopy(_derived_snapshots_for_date(evaluation_date, cfg))
+    return copy.deepcopy(cache[key])
+
+
+def _derived_snapshot_cache_key(cfg: dict) -> str:
+    relevant = {
+        "source_modes": cfg.get("source_modes") or {},
+        "topic_index": cfg.get("topic_index") or {},
+        "derived_source": cfg.get("derived_source") or {},
+    }
+    return json.dumps(relevant, sort_keys=True, ensure_ascii=False, default=str)
 
 
 def _source_metadata(topic: dict, leader: dict) -> dict:
@@ -666,8 +721,13 @@ def _best_result(results: dict[str, Strategy4BacktestResult]) -> tuple[str, Stra
         if result.summary.entered_opportunities > 0
     ]
     if entered:
+        minimum_sampled = [
+            item for item in entered
+            if item[1].summary.entered_opportunities >= 5
+        ]
+        pool = minimum_sampled or entered
         return max(
-            entered,
+            pool,
             key=lambda item: (
                 item[1].summary.profit_factor or 0.0,
                 item[1].summary.avg_realized_return,
@@ -781,53 +841,97 @@ def _table_exists(con: sqlite3.Connection, table_name: str) -> bool:
 
 
 def _default_experiments() -> list[dict]:
+    common = {
+        "hot_topic_top_n": 16,
+        "watch_hot_topic_top_n": 16,
+        "min_hot_topic_signal_count": 1,
+        "min_strong_day_count_10d": 1,
+        "pullback_min_days": 1,
+        "pullback_max_days": 40,
+        "core_leader_min_reward_risk_ratio": 1.0,
+        "aggressive_max_risk_ratio": 0.15,
+        "derived_source": {
+            "topic_top_n": 30,
+            "max_topics_per_day": 34,
+            "max_leaders_per_topic": 5,
+            "min_topic_hot_score": 50,
+            "min_confirmed_topic_hot_score": 60,
+            "min_member_count": 5,
+        },
+    }
+
+    def targeted(name: str, **overrides) -> dict:
+        item = copy.deepcopy(common)
+        item["name"] = name
+        derived_confirm = overrides.pop("derived_confirm", None)
+        if derived_confirm is not None:
+            item["derived_source"]["min_confirmed_topic_hot_score"] = derived_confirm
+        phases = overrides.pop("phases", None)
+        if phases is not None:
+            item["topic_index_filters"] = {"allowed_phases": phases}
+        item.update(overrides)
+        return item
+
     return [
         {"name": "baseline"},
-        {"name": "top15", "hot_topic_top_n": 15},
-        {"name": "hot80_leader80", "min_hot_topic_score": 80, "min_leader_strength_score": 80},
-        {"name": "hot75_leader75", "min_hot_topic_score": 75, "min_leader_strength_score": 75},
-        {"name": "watch_hot60_leader60", "min_hot_topic_score": 60, "min_leader_strength_score": 60, "hot_topic_top_n": 16, "watch_hot_topic_top_n": 16},
-        {"name": "watch_hot55_leader50", "min_hot_topic_score": 55, "min_leader_strength_score": 50, "hot_topic_top_n": 16, "watch_hot_topic_top_n": 16},
-        {"name": "first_wave_20_30", "min_first_wave_return_10d": 0.20, "min_first_wave_return_20d": 0.30},
-        {"name": "locked_attention12", "min_locked_attention_score": 12},
-        {"name": "rr18_risk20", "min_reward_risk_ratio": 1.8, "max_risk_ratio": 0.20},
-        {"name": "pullback_05_30", "pullback_min_pct": 0.05, "pullback_max_pct": 0.30},
-        {
-            "name": "pullback60_probe",
-            "min_hot_topic_score": 55,
-            "min_leader_strength_score": 40,
-            "hot_topic_top_n": 16,
-            "watch_hot_topic_top_n": 16,
-            "min_first_wave_return_10d": 0.05,
-            "min_first_wave_return_20d": 0.10,
-            "min_strong_day_count_10d": 1,
-            "pullback_min_pct": 0.0,
-            "pullback_max_pct": 0.60,
-            "pullback_min_days": 1,
-            "pullback_max_days": 60,
-            "min_reward_risk_ratio": 0.8,
-            "core_leader_min_reward_risk_ratio": 0.8,
-            "max_risk_ratio": 0.50,
-            "aggressive_max_risk_ratio": 0.60,
-        },
-        {
-            "name": "pullback60_quality",
-            "min_hot_topic_score": 60,
-            "min_leader_strength_score": 60,
-            "hot_topic_top_n": 16,
-            "watch_hot_topic_top_n": 16,
-            "min_first_wave_return_10d": 0.15,
-            "min_first_wave_return_20d": 0.20,
-            "min_strong_day_count_10d": 1,
-            "pullback_min_pct": 0.05,
-            "pullback_max_pct": 0.50,
-            "pullback_min_days": 1,
-            "pullback_max_days": 60,
-            "min_reward_risk_ratio": 1.5,
-            "core_leader_min_reward_risk_ratio": 1.5,
-            "max_risk_ratio": 0.30,
-            "aggressive_max_risk_ratio": 0.35,
-        },
+        targeted(
+            "confirm60_leader40_fw10_pb35_risk12_rr10",
+            min_hot_topic_score=60,
+            min_leader_strength_score=40,
+            min_first_wave_return_10d=0.05,
+            min_first_wave_return_20d=0.10,
+            pullback_min_pct=0.05,
+            pullback_max_pct=0.35,
+            max_risk_ratio=0.12,
+            min_reward_risk_ratio=1.0,
+        ),
+        targeted(
+            "confirm60_leader40_fw10_pb35_risk10_rr10",
+            min_hot_topic_score=60,
+            min_leader_strength_score=40,
+            min_first_wave_return_10d=0.05,
+            min_first_wave_return_20d=0.10,
+            pullback_min_pct=0.05,
+            pullback_max_pct=0.35,
+            max_risk_ratio=0.10,
+            min_reward_risk_ratio=1.0,
+        ),
+        targeted(
+            "early_only_risk10_pb35",
+            min_hot_topic_score=60,
+            min_leader_strength_score=40,
+            min_first_wave_return_10d=0.05,
+            min_first_wave_return_20d=0.10,
+            pullback_min_pct=0.05,
+            pullback_max_pct=0.35,
+            max_risk_ratio=0.10,
+            min_reward_risk_ratio=1.0,
+            phases=["EARLY_ACCELERATION"],
+        ),
+        targeted(
+            "main_only_pb35_risk12",
+            min_hot_topic_score=60,
+            min_leader_strength_score=40,
+            min_first_wave_return_10d=0.05,
+            min_first_wave_return_20d=0.10,
+            pullback_min_pct=0.05,
+            pullback_max_pct=0.35,
+            max_risk_ratio=0.12,
+            min_reward_risk_ratio=1.0,
+            phases=["MAIN_TREND"],
+        ),
+        targeted(
+            "confirm65_leader50_fw15_pb35_risk12_rr10",
+            derived_confirm=65,
+            min_hot_topic_score=65,
+            min_leader_strength_score=50,
+            min_first_wave_return_10d=0.10,
+            min_first_wave_return_20d=0.15,
+            pullback_min_pct=0.05,
+            pullback_max_pct=0.35,
+            max_risk_ratio=0.12,
+            min_reward_risk_ratio=1.0,
+        ),
     ]
 
 

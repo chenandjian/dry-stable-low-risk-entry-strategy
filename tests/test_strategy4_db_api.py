@@ -567,6 +567,51 @@ def test_strategy4_scan_persists_topic_index_context_and_relative_strength(tmp_p
     assert "leader_rs_10d" in leader["raw_snapshot"]
 
 
+def test_strategy4_scan_respects_topic_index_allowed_phases_for_candidates(tmp_path, monkeypatch):
+    import types
+    from strategy4.scanner import scan_strategy4_all
+
+    db_path = str(tmp_path / "test.db")
+    task_id = "s4-topic-index-phase-filter"
+    db.init_db(db_path)
+    db.create_scan_task(task_id, "2026-07-01 15:30:00", strategy_type=STRATEGY4_TYPE)
+    db.save_ohlc("300750", _bars_for_buyable_second_wave())
+    fake_ak = types.SimpleNamespace()
+    fake_ak.stock_board_concept_name_ths = lambda: _fake_frame([{
+        "板块": "AI算力",
+        "涨跌幅": 5.0,
+        "3日涨幅": 10.0,
+        "5日涨幅": 16.0,
+        "量比": 1.8,
+        "净流入": 600000000,
+        "上涨家数": 80,
+        "下跌家数": 10,
+        "涨停家数": 2,
+    }])
+    fake_ak.stock_board_industry_name_ths = lambda: _fake_frame([])
+    fake_ak.stock_board_concept_index_ths = lambda symbol, start_date, end_date: _fake_frame(_topic_index_rows())
+    fake_ak.stock_board_concept_cons_ths = lambda symbol: _fake_frame([
+        {"代码": "300750", "名称": "宁德时代", "涨跌幅": 20.0, "成交额": 2000000000},
+    ])
+    monkeypatch.setitem(__import__("sys").modules, "akshare", fake_ak)
+
+    result = scan_strategy4_all(
+        {
+            "data": {"database_path": db_path},
+            "strategy4": {
+                "min_leader_strength_score": 60,
+                "topic_index": {"min_required_rows": 20},
+                "topic_index_filters": {"allowed_phases": ["PULLBACK_REPAIR"]},
+            },
+        },
+        task_id=task_id,
+    )
+
+    assert result["topics"][0]["topic_index_phase"] in {"EARLY_ACCELERATION", "MAIN_TREND"}
+    assert result["candidates"] == []
+    assert db.get_strategy4_candidates(task_id) == []
+
+
 def test_strategy4_scan_blocks_buyable_candidate_when_topic_index_unobserved(tmp_path, monkeypatch):
     import types
     from strategy4.scanner import scan_strategy4_all
