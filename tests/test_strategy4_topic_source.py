@@ -1,6 +1,7 @@
 import sys
 import types
 
+import strategy4.topic_source as topic_source
 from strategy4.topic_source import TopicSourceService
 
 
@@ -103,6 +104,46 @@ def test_topic_source_falls_back_to_em_members_when_ths_members_missing(monkeypa
     assert [m["code"] for m in members] == ["300750"]
     assert members[0]["source"] == "akshare_eastmoney"
     assert members[0]["membership_source"] == "akshare_eastmoney_member"
+
+
+def test_topic_source_reads_ths_detail_page_members_when_akshare_member_adapters_fail(monkeypatch):
+    fake_ak = types.SimpleNamespace()
+    fake_ak.stock_board_concept_name_ths = lambda: _fake_frame([
+        {"name": "AI算力", "code": "309999"},
+    ])
+    fake_ak.stock_board_concept_cons_em = lambda symbol: (_ for _ in ()).throw(RuntimeError("eastmoney down"))
+    monkeypatch.setitem(sys.modules, "akshare", fake_ak)
+
+    class Response:
+        text = """
+        <table class="m-table m-pager-table">
+          <tbody>
+            <tr>
+              <td>1</td><td>300750</td><td>宁德时代</td><td>100.00</td>
+              <td>20.00</td><td>1.00</td><td>0.00</td><td>10.00</td>
+              <td>2.00</td><td>20.00</td><td>18.50亿</td>
+            </tr>
+          </tbody>
+        </table>
+        """
+
+    seen = {}
+
+    def fake_get(url, headers=None, timeout=None):
+        seen["url"] = url
+        return Response()
+
+    monkeypatch.setattr(topic_source.requests, "get", fake_get)
+
+    members = TopicSourceService().fetch_topic_members("AI算力", "concept")
+
+    assert seen["url"] == "http://q.10jqka.com.cn/gn/detail/code/309999/"
+    assert members[0]["code"] == "300750"
+    assert members[0]["name"] == "宁德时代"
+    assert members[0]["return_1d"] == 0.20
+    assert members[0]["amount"] == 1_850_000_000
+    assert members[0]["source"] == "ths_detail"
+    assert members[0]["membership_source"] == "ths_detail_member"
 
 
 class _fake_frame:

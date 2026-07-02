@@ -1,6 +1,9 @@
 """Strategy4 topic data-source adapter layer."""
 from __future__ import annotations
 
+import requests
+from bs4 import BeautifulSoup
+
 
 class TopicSourceError(RuntimeError):
     """Raised when all Strategy4 topic sources fail."""
@@ -64,12 +67,20 @@ class TopicSourceService:
         except Exception as exc:  # pragma: no cover
             raise TopicSourceError(f"AKSHARE_IMPORT_FAILED: {exc}") from exc
 
+        errors: list[str] = []
+        try:
+            members = _fetch_ths_detail_members(ak, topic_name, topic_type)
+            if members:
+                return members
+            errors.append("ths_detail: empty")
+        except Exception as exc:
+            errors.append(f"ths_detail: {exc}")
+
         source_chain = (
             [("akshare_ths", "stock_board_concept_cons_ths"), ("akshare_eastmoney", "stock_board_concept_cons_em")]
             if topic_type == "concept"
             else [("akshare_ths", "stock_board_industry_cons_ths"), ("akshare_eastmoney", "stock_board_industry_cons_em")]
         )
-        errors: list[str] = []
         for source, func_name in source_chain:
             func = getattr(ak, func_name, None)
             if func is None:
@@ -89,6 +100,61 @@ class TopicSourceService:
                 return members
             errors.append(f"{func_name}: empty")
         raise TopicSourceError("; ".join(errors) or "AKSHARE_TOPIC_MEMBERS_EMPTY")
+
+
+def _fetch_ths_detail_members(ak, topic_name: str, topic_type: str) -> list[dict]:
+    topic_code = _lookup_ths_topic_code(ak, topic_name, topic_type)
+    base_path = "gn" if topic_type == "concept" else "thshy"
+    url = f"http://q.10jqka.com.cn/{base_path}/detail/code/{topic_code}/"
+    response = requests.get(
+        url,
+        headers={
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36"
+            ),
+            "Referer": f"http://q.10jqka.com.cn/{base_path}/",
+        },
+        timeout=20,
+    )
+    return _parse_ths_detail_members(response.text)
+
+
+def _lookup_ths_topic_code(ak, topic_name: str, topic_type: str) -> str:
+    func_name = "stock_board_concept_name_ths" if topic_type == "concept" else "stock_board_industry_name_ths"
+    func = getattr(ak, func_name, None)
+    if func is None:
+        raise TopicSourceError(f"{func_name}: missing")
+    for row in _rows_from_frame(func()):
+        name = str(_pick(row, "name", "板块", "名称", default=""))
+        if name == topic_name:
+            code = str(_pick(row, "code", "代码", default="")).strip()
+            if code:
+                return code
+    raise TopicSourceError(f"THS_TOPIC_CODE_NOT_FOUND: {topic_name}")
+
+
+def _parse_ths_detail_members(html: str) -> list[dict]:
+    soup = BeautifulSoup(html or "", features="lxml")
+    table = soup.find("table", attrs={"class": lambda value: value and "m-pager-table" in value})
+    if table is None:
+        return []
+    members: list[dict] = []
+    for row in table.find_all("tr"):
+        cells = [cell.get_text(strip=True) for cell in row.find_all("td")]
+        if len(cells) < 5:
+            continue
+        item = {
+            "代码": cells[1],
+            "名称": cells[2],
+            "涨跌幅": cells[4],
+            "成交额": cells[10] if len(cells) > 10 else 0,
+            "raw_cells": cells,
+        }
+        normalized = _normalize_member_row(item, source="ths_detail")
+        if normalized["code"]:
+            members.append(normalized)
+    return members
 
 
 def _normalize_ths_row(row: dict, topic_type: str, idx: int) -> dict:
@@ -130,7 +196,7 @@ def _normalize_member_row(row: dict, *, source: str = "akshare_ths") -> dict:
         "code": code,
         "name": str(_pick(row, "名称", "股票简称", "股票名称", default="")),
         "return_1d": _pct(_pick(row, "涨跌幅", "涨幅", default=0)),
-        "amount": _to_float(_pick(row, "成交额", "金额", default=0)),
+        "amount": _money_yuan(_pick(row, "成交额", "金额", default=0)),
         "limit_shape": str(_pick(row, "limit_shape", "涨停形态", default="")),
         "source": source,
         "membership_source": f"{source}_member",
@@ -158,6 +224,12 @@ def _normalize_amount_ratio(value, amount_yuan: float) -> float:
 
 
 def _money_yuan(value) -> float:
+    if isinstance(value, str):
+        text = value.replace(",", "").strip()
+        if text.endswith("亿"):
+            return _to_float(text[:-1]) * 100_000_000
+        if text.endswith("万"):
+            return _to_float(text[:-1]) * 10_000
     number = _to_float(value)
     if number and abs(number) < 10000:
         return number * 100_000_000
