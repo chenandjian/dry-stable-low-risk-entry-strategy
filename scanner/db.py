@@ -2246,7 +2246,20 @@ def get_latest_strategy4_topic_index_fetch_status(topic_id: str) -> dict | None:
 def _json_any(value):
     if value is None or value == "":
         return ""
-    return json.dumps(value, ensure_ascii=False)
+    return json.dumps(value, ensure_ascii=False, default=_json_default)
+
+
+def _json_default(value):
+    if isinstance(value, (datetime.datetime, datetime.date)):
+        return value.isoformat()
+    if hasattr(value, "item"):
+        try:
+            return value.item()
+        except Exception:
+            pass
+    if isinstance(value, set):
+        return list(value)
+    return str(value)
 
 
 def _deserialize_topic_index_row(row: dict) -> dict:

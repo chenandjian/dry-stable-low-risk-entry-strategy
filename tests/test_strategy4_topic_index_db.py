@@ -1,3 +1,5 @@
+from datetime import date, datetime
+
 import scanner.db as db
 
 
@@ -47,6 +49,33 @@ def test_strategy4_topic_index_ohlc_is_idempotent_per_topic_source_date(tmp_path
 
     assert len(rows) == 1
     assert rows[0]["close"] == 105
+
+
+def test_strategy4_topic_index_ohlc_serializes_date_values_in_raw_snapshot(tmp_path):
+    db.init_db(str(tmp_path / "test.db"))
+
+    db.save_strategy4_topic_index_ohlc(
+        topic_id="industry-component",
+        topic_name="元件",
+        topic_type="industry",
+        source="akshare_ths",
+        rows=[{
+            "date": "2026-07-01",
+            "open": 100,
+            "high": 105,
+            "low": 99,
+            "close": 104,
+            "raw_snapshot": {
+                "日期": date(2026, 7, 1),
+                "更新时间": datetime(2026, 7, 1, 15, 0, 1),
+            },
+        }],
+    )
+
+    rows = db.get_strategy4_topic_index_ohlc("industry-component")
+
+    assert rows[0]["raw_snapshot"]["日期"] == "2026-07-01"
+    assert rows[0]["raw_snapshot"]["更新时间"] == "2026-07-01T15:00:01"
 
 
 def test_strategy4_topic_index_fetch_status_records_failures(tmp_path):
