@@ -33,6 +33,13 @@ def test_resolve_strategy4_config_defaults():
     assert cfg["topic_index"]["history_days"] == 250
     assert cfg["topic_index"]["min_required_rows"] == 60
     assert cfg["topic_index"]["require_for_buyable_candidate"] is True
+    assert cfg["source_modes"]["live_external_enabled"] is True
+    assert cfg["source_modes"]["historical_kline_derived_enabled"] is True
+    assert cfg["source_modes"]["merge_mode"] == "union_with_confidence"
+    assert cfg["derived_source"]["enabled"] is True
+    assert cfg["derived_source"]["min_confirmed_topic_hot_score"] == 75
+    assert cfg["derived_source"]["allow_current_members_proxy"] is True
+    assert cfg["merge_policy"]["block_buyable_on_derived_weak_noise"] is True
 
 
 def test_resolve_strategy4_config_accepts_nested_overrides():
@@ -66,6 +73,35 @@ def test_resolve_strategy4_config_accepts_nested_topic_index_overrides():
     assert cfg["topic_index"]["history_days"] == 120
     assert cfg["topic_index"]["min_required_rows"] == 30
     assert cfg["topic_index"]["require_for_buyable_candidate"] is True
+
+
+def test_resolve_strategy4_config_accepts_derived_source_overrides():
+    cfg = resolve_strategy4_config({
+        "strategy4": {
+            "source_modes": {
+                "historical_kline_derived_enabled": False,
+            },
+            "derived_source": {
+                "topic_top_n": 12,
+                "max_topics_per_day": 20,
+                "max_leaders_per_topic": 4,
+                "min_topic_index_rows": 30,
+                "min_breadth_ratio": 0.4,
+            },
+            "merge_policy": {
+                "allow_derived_only_buyable": False,
+            },
+        },
+    })
+
+    assert cfg["source_modes"]["historical_kline_derived_enabled"] is False
+    assert cfg["source_modes"]["live_external_enabled"] is True
+    assert cfg["derived_source"]["topic_top_n"] == 12
+    assert cfg["derived_source"]["max_topics_per_day"] == 20
+    assert cfg["derived_source"]["max_leaders_per_topic"] == 4
+    assert cfg["derived_source"]["min_topic_index_rows"] == 30
+    assert cfg["derived_source"]["min_breadth_ratio"] == 0.4
+    assert cfg["merge_policy"]["allow_derived_only_buyable"] is False
 
 
 def test_strategy4_config_rejects_invalid_orders():
@@ -111,3 +147,12 @@ def test_strategy4_config_rejects_invalid_orders():
 
     with pytest.raises(ValueError, match="topic_index.history_days must be >= topic_index.min_required_rows"):
         resolve_strategy4_config({"strategy4": {"topic_index": {"history_days": 80, "min_required_rows": 120}}})
+
+    with pytest.raises(ValueError, match="source_modes.merge_mode"):
+        resolve_strategy4_config({"strategy4": {"source_modes": {"merge_mode": "replace_live"}}})
+
+    with pytest.raises(ValueError, match="derived_source.max_topics_per_day"):
+        resolve_strategy4_config({"strategy4": {"derived_source": {"topic_top_n": 20, "max_topics_per_day": 10}}})
+
+    with pytest.raises(ValueError, match="derived_source.min_breadth_ratio"):
+        resolve_strategy4_config({"strategy4": {"derived_source": {"min_breadth_ratio": 1.5}}})

@@ -19,12 +19,17 @@
       <div class="panel-header">热点题材榜</div>
       <div v-if="topics.length === 0" class="empty">暂无热点题材快照</div>
       <table v-else>
-        <thead><tr><th>题材</th><th>状态</th><th>热度</th><th>板块K线</th><th>阶段</th><th>信号数</th><th>领涨股</th><th>来源</th></tr></thead>
+        <thead><tr><th>题材</th><th>状态</th><th>热度</th><th>来源确认</th><th>成员口径</th><th>板块K线</th><th>阶段</th><th>信号数</th><th>领涨股</th></tr></thead>
         <tbody>
           <tr v-for="t in topics" :key="t.topic_id">
             <td>{{ t.topic_name }}</td>
             <td>{{ t.status }}</td>
             <td>{{ fmt(t.hot_topic_score) }}</td>
+            <td>
+              <span :class="sourceClass(t)">{{ sourceLabel(t) }}</span>
+              <small v-if="warningLabel(t)"> · {{ warningLabel(t) }}</small>
+            </td>
+            <td><span :class="membershipClass(t)">{{ membershipLabel(t) }}</span></td>
             <td>
               <span :class="topicIndexClass(t)">{{ topicIndexLabel(t) }}</span>
               <small v-if="t.topic_index_latest_date"> · {{ t.topic_index_latest_date }}</small>
@@ -32,7 +37,6 @@
             <td>{{ t.topic_index_phase || '--' }}</td>
             <td>{{ t.signal_count || 0 }}</td>
             <td>{{ t.leading_stock_code || '--' }} {{ t.leading_stock_name || '' }}</td>
-            <td>{{ t.source || '--' }}</td>
           </tr>
         </tbody>
       </table>
@@ -42,11 +46,13 @@
       <div class="panel-header">龙头股票榜</div>
       <div v-if="leaders.length === 0" class="empty">暂无龙头快照</div>
       <table v-else>
-        <thead><tr><th>股票</th><th>题材</th><th>类型</th><th>龙头强度</th><th>可交易性</th><th>涨停制度</th><th>形态</th><th>状态</th></tr></thead>
+        <thead><tr><th>股票</th><th>题材</th><th>来源</th><th>成员口径</th><th>类型</th><th>龙头强度</th><th>可交易性</th><th>涨停制度</th><th>形态</th><th>状态</th></tr></thead>
         <tbody>
           <tr v-for="l in leaders" :key="`${l.topic_id}-${l.code}`">
             <td>{{ l.code }} {{ l.name }}</td>
             <td>{{ l.topic_name }}</td>
+            <td><span :class="sourceClass(l)">{{ sourceLabel(l) }}</span></td>
+            <td><span :class="membershipClass(l)">{{ membershipLabel(l) }}</span></td>
             <td>{{ l.leader_type }}</td>
             <td>{{ fmt(l.leader_strength_score) }}</td>
             <td>{{ fmt(l.tradability_score) }}</td>
@@ -62,11 +68,12 @@
       <div class="panel-header">二波候选榜</div>
       <div v-if="buyableCandidates.length === 0" class="empty">暂无可交易二波候选，但热点和龙头仍可继续观察</div>
       <table v-else>
-        <thead><tr><th>股票</th><th>题材</th><th>总分</th><th>第一波</th><th>回踩</th><th>风险</th><th>RR</th><th>说明</th></tr></thead>
+        <thead><tr><th>股票</th><th>题材</th><th>来源</th><th>总分</th><th>第一波</th><th>回踩</th><th>风险</th><th>RR</th><th>说明</th></tr></thead>
         <tbody>
           <tr v-for="c in buyableCandidates" :key="`${c.topic_id}-${c.code}`" class="clickable" @click="openCandidate(c)">
             <td>{{ c.code }} {{ c.name }}</td>
             <td>{{ c.topic_name }}</td>
+            <td><span :class="sourceClass(c)">{{ sourceLabel(c) }}</span></td>
             <td>{{ fmt(c.strategy4_score) }}</td>
             <td>{{ pct(c.first_wave_return) }}</td>
             <td>{{ pct(c.pullback_pct) }} / {{ c.pullback_days || 0 }}天</td>
@@ -88,6 +95,9 @@
         <div><span>风险比</span><strong>{{ pct(selectedCandidate.risk_ratio) }}</strong></div>
         <div><span>收益风险比</span><strong>{{ fmt(selectedCandidate.reward_risk_ratio) }}</strong></div>
         <div><span>涨停制度 / 形态</span><strong>{{ selectedCandidate.price_limit_rule || '--' }} / {{ selectedCandidate.limit_shape || '--' }}</strong></div>
+        <div><span>来源确认</span><strong>{{ sourceLabel(selectedCandidate) }}</strong></div>
+        <div><span>成员口径</span><strong>{{ membershipLabel(selectedCandidate) }}</strong></div>
+        <div><span>融合提示</span><strong>{{ warningLabel(selectedCandidate) || '--' }}</strong></div>
         <div><span>板块阶段</span><strong>{{ selectedCandidate.evaluation_snapshot?.topic_index_phase || '--' }}</strong></div>
         <div><span>板块最新K线</span><strong>{{ selectedCandidate.evaluation_snapshot?.topic_index_latest_date || '--' }}</strong></div>
         <div><span>说明</span><strong>{{ selectedCandidate.entry_note || '--' }}</strong></div>
@@ -156,6 +166,46 @@ function topicIndexLabel(topic) {
 }
 function topicIndexClass(topic) {
   return topic.topic_index_observed ? 'topic-index-ok' : 'topic-index-warn'
+}
+function sourceModes(item) {
+  const modes = item?.source_modes || item?.evaluation_snapshot?.source_modes || []
+  return Array.isArray(modes) ? modes : []
+}
+function sourceLabel(item) {
+  const modes = sourceModes(item)
+  if (modes.includes('live_external') && modes.includes('historical_kline_derived')) return '双源确认'
+  if (modes.includes('historical_kline_derived')) return 'K线反推'
+  if (modes.includes('live_external')) return '外部热点'
+  if (item?.snapshot_source === 'historical_kline_derived') return 'K线反推'
+  if (item?.snapshot_source === 'merged') return '双源确认'
+  return item?.source || '--'
+}
+function sourceClass(item) {
+  const label = sourceLabel(item)
+  if (label === '双源确认') return 'source-merged'
+  if (label === 'K线反推') return 'source-derived'
+  return 'source-live'
+}
+function membershipLabel(item) {
+  const mode = item?.membership_mode || item?.evaluation_snapshot?.membership_mode || ''
+  if (mode === 'current_members_proxy') return '成员代理'
+  if (mode === 'historical_members_snapshot') return '历史成员'
+  if (mode === 'unobserved_members') return '成员不可观察'
+  return '--'
+}
+function membershipClass(item) {
+  const mode = item?.membership_mode || item?.evaluation_snapshot?.membership_mode || ''
+  if (mode === 'current_members_proxy') return 'membership-warn'
+  if (mode === 'historical_members_snapshot') return 'membership-ok'
+  return 'membership-muted'
+}
+function warningLabel(item) {
+  const warnings = item?.merge_warnings || item?.evaluation_snapshot?.merge_warnings || []
+  if (!Array.isArray(warnings) || warnings.length === 0) return ''
+  if (warnings.includes('derived_weak_noise')) return 'K线反推偏弱'
+  if (warnings.includes('derived_high_risk_climax')) return '板块高潮风险'
+  if (warnings.includes('current_members_proxy')) return '成员代理'
+  return warnings.join('、')
 }
 
 async function loadTasks() {
@@ -237,6 +287,12 @@ th { color: var(--text-secondary); font-weight: 600; }
 small { color: var(--text-muted); }
 .topic-index-ok { color: var(--down-green); font-weight: 700; }
 .topic-index-warn { color: var(--up-red); font-weight: 700; }
+.source-merged { color: var(--accent); font-weight: 700; }
+.source-derived { color: #60a5fa; font-weight: 700; }
+.source-live { color: var(--text-secondary); font-weight: 700; }
+.membership-ok { color: var(--down-green); font-weight: 700; }
+.membership-warn { color: #f59e0b; font-weight: 700; }
+.membership-muted { color: var(--text-muted); }
 .error-banner { margin-bottom: 12px; padding: 10px 12px; border: 1px solid rgba(239,68,68,0.4); color: var(--up-red); border-radius: 4px; }
 .clickable { cursor: pointer; }
 .clickable:hover { background: rgba(249, 115, 22, 0.08); }

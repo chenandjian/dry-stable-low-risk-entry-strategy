@@ -50,6 +50,32 @@ DEFAULT_STRATEGY4_CONFIG = {
         "min_rs_10d": 0.05,
         "min_rs_20d": 0.08,
     },
+    "source_modes": {
+        "live_external_enabled": True,
+        "historical_kline_derived_enabled": True,
+        "merge_mode": "union_with_confidence",
+    },
+    "derived_source": {
+        "enabled": True,
+        "topic_top_n": 20,
+        "max_topics_per_day": 30,
+        "max_leaders_per_topic": 5,
+        "min_topic_hot_score": 60,
+        "min_confirmed_topic_hot_score": 75,
+        "min_topic_index_rows": 60,
+        "min_amount_ratio_5_20": 1.0,
+        "min_breadth_ratio": 0.55,
+        "min_member_count": 5,
+        "allow_current_members_proxy": True,
+        "current_members_proxy_trust_level": "experimental",
+    },
+    "merge_policy": {
+        "buyable_requires_observed_source": True,
+        "block_buyable_on_derived_weak_noise": True,
+        "block_buyable_on_derived_high_risk_climax": True,
+        "allow_derived_only_watch": True,
+        "allow_derived_only_buyable": True,
+    },
 }
 
 
@@ -91,6 +117,9 @@ def resolve_strategy4_config(config: dict | None) -> dict:
     _validate_number_range(raw, "core_leader_min_reward_risk_ratio", 0.5, raw["min_reward_risk_ratio"])
     _validate_number_range(raw, "min_reward_risk_ratio", raw["core_leader_min_reward_risk_ratio"], 10)
     _validate_topic_index_config(raw)
+    _validate_source_modes(raw)
+    _validate_derived_source(raw)
+    _validate_merge_policy(raw)
     return raw
 
 
@@ -132,6 +161,62 @@ def _validate_topic_index_config(config: dict) -> None:
     config["topic_index"] = topic_index
 
 
+def _validate_source_modes(config: dict) -> None:
+    source_modes = config.get("source_modes") or {}
+    source_modes["live_external_enabled"] = bool(source_modes.get("live_external_enabled", True))
+    source_modes["historical_kline_derived_enabled"] = bool(source_modes.get("historical_kline_derived_enabled", True))
+    merge_mode = str(source_modes.get("merge_mode") or "union_with_confidence")
+    if merge_mode != "union_with_confidence":
+        raise ValueError("source_modes.merge_mode must be union_with_confidence")
+    source_modes["merge_mode"] = merge_mode
+    config["source_modes"] = source_modes
+
+
+def _validate_derived_source(config: dict) -> None:
+    derived = config.get("derived_source") or {}
+    derived["enabled"] = bool(derived.get("enabled", True))
+    derived["allow_current_members_proxy"] = bool(derived.get("allow_current_members_proxy", True))
+    for key, min_v, max_v in (
+        ("topic_top_n", 1, 100),
+        ("max_topics_per_day", 1, 200),
+        ("max_leaders_per_topic", 1, 30),
+        ("min_topic_index_rows", 20, 500),
+        ("min_member_count", 1, 5000),
+    ):
+        value = derived.get(key)
+        if isinstance(value, bool) or not isinstance(value, int):
+            raise ValueError(f"derived_source.{key} must be an integer")
+        if value < min_v or value > max_v:
+            raise ValueError(f"derived_source.{key} must be between {min_v} and {max_v}")
+    if derived["max_topics_per_day"] < derived["topic_top_n"]:
+        raise ValueError("derived_source.max_topics_per_day must be >= derived_source.topic_top_n")
+    for key, min_v, max_v in (
+        ("min_topic_hot_score", 0.0, 100.0),
+        ("min_confirmed_topic_hot_score", 0.0, 100.0),
+        ("min_amount_ratio_5_20", 0.0, 10.0),
+        ("min_breadth_ratio", 0.0, 1.0),
+    ):
+        _validate_prefixed_number_range(derived, key, min_v, max_v, "derived_source")
+    trust = str(derived.get("current_members_proxy_trust_level") or "experimental")
+    if trust not in {"experimental", "trusted"}:
+        raise ValueError("derived_source.current_members_proxy_trust_level must be experimental or trusted")
+    derived["current_members_proxy_trust_level"] = trust
+    config["derived_source"] = derived
+
+
+def _validate_merge_policy(config: dict) -> None:
+    policy = config.get("merge_policy") or {}
+    for key, default in (
+        ("buyable_requires_observed_source", True),
+        ("block_buyable_on_derived_weak_noise", True),
+        ("block_buyable_on_derived_high_risk_climax", True),
+        ("allow_derived_only_watch", True),
+        ("allow_derived_only_buyable", True),
+    ):
+        policy[key] = bool(policy.get(key, default))
+    config["merge_policy"] = policy
+
+
 def _validate_int_range(config: dict, key: str, min_value: int, max_value: int) -> None:
     value = config.get(key)
     if isinstance(value, bool) or not isinstance(value, int):
@@ -147,4 +232,15 @@ def _validate_number_range(config: dict, key: str, min_value: float, max_value: 
     value = float(value)
     if value < min_value or value > max_value:
         raise ValueError(f"{key} must be between {min_value} and {max_value}")
+    config[key] = value
+
+
+def _validate_prefixed_number_range(config: dict, key: str, min_value: float, max_value: float, prefix: str) -> None:
+    value = config.get(key)
+    full_key = f"{prefix}.{key}"
+    if isinstance(value, bool) or not isinstance(value, Real):
+        raise ValueError(f"{full_key} must be a number")
+    value = float(value)
+    if value < min_value or value > max_value:
+        raise ValueError(f"{full_key} must be between {min_value} and {max_value}")
     config[key] = value

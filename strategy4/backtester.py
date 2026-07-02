@@ -1,9 +1,9 @@
 """Strategy4 historical snapshot backtester.
 
-The backtester is intentionally snapshot-driven: it only evaluates hot topics
-and leaders that were already persisted by a Strategy4 scan on the evaluation
-date. Missing snapshots are marked UNOBSERVED instead of being reconstructed
-from future or current data.
+The backtester prefers persisted Strategy4 live snapshots when present. When
+historical_kline_derived is enabled, missing live snapshots may be reconstructed
+only from observable topic index and member stock OHLC rows truncated to the
+evaluation date.
 """
 from __future__ import annotations
 
@@ -17,12 +17,15 @@ from pathlib import Path
 
 import scanner.db as db
 from strategy4.config import resolve_strategy4_config
+from strategy4.derived_leader_detector import derive_leaders_for_topic
+from strategy4.derived_topic_detector import derive_hot_topics_for_date
 from strategy4.engine import HotLeaderSecondWaveEngine
 from strategy4.price_limit import (
     LIMIT_SHAPE_ONE_WORD_LIMIT_UP,
     LIMIT_SHAPE_T_LIMIT_UP,
     PriceLimitResolver,
 )
+from strategy4.snapshot_merge import merge_leaders, merge_topics
 from strategy4.topic_index_service import topic_index_context_from_history
 from strategy4.backtest_models import (
     Strategy4BacktestOpportunity,
@@ -98,22 +101,50 @@ def run_strategy4_snapshot_backtest(
     for evaluation_date in _evaluation_dates(start_date, end_date):
         result.summary.evaluation_days += 1
         snapshot_task_id = _snapshot_task_for_exact_date(evaluation_date)
+        derived_topics, derived_leaders = _derived_snapshots_for_date(evaluation_date, cfg)
         if not snapshot_task_id:
-            result.summary.unobserved_snapshot_days += 1
-            result.unobserved.append(Strategy4UnobservedDay(
-                evaluation_date=evaluation_date,
-                reason_code="UNOBSERVED_TOPIC_SNAPSHOT",
-                detail="No Strategy4 hot-topic snapshot exists for this evaluation date.",
-            ))
-            continue
+            if not derived_topics:
+                result.summary.unobserved_snapshot_days += 1
+                result.unobserved.append(Strategy4UnobservedDay(
+                    evaluation_date=evaluation_date,
+                    reason_code="UNOBSERVED_TOPIC_SNAPSHOT",
+                    detail="No Strategy4 live or derived hot-topic snapshot exists for this evaluation date.",
+                ))
+                continue
+            if not derived_leaders:
+                result.summary.unobserved_snapshot_days += 1
+                result.summary.unobserved_members_days += 1
+                result.unobserved.append(Strategy4UnobservedDay(
+                    evaluation_date=evaluation_date,
+                    reason_code="UNOBSERVED_DERIVED_MEMBERS",
+                    detail="Derived hot topics exist but no observable member leader snapshots are available.",
+                ))
+                continue
+            topics = derived_topics
+            leaders = derived_leaders
+            result.summary.derived_snapshot_days += 1
+            if any(t.get("membership_mode") == "current_members_proxy" for t in derived_topics):
+                result.summary.current_members_proxy_days += 1
+        else:
+            live_topics = db.get_strategy4_hot_topics(snapshot_task_id)
+            live_leaders = db.get_strategy4_leaders(snapshot_task_id)
+            result.summary.live_snapshot_days += 1
+            if derived_topics:
+                topics = merge_topics(live_topics, derived_topics, {"merge_policy": cfg.get("merge_policy", {})})
+                leaders = merge_leaders(live_leaders, derived_leaders)
+                result.summary.merged_snapshot_days += 1
+            else:
+                topics = live_topics
+                leaders = live_leaders
 
-        topics = _select_topics_for_experiment(db.get_strategy4_hot_topics(snapshot_task_id), cfg)
-        leaders_by_topic = _leaders_by_topic(db.get_strategy4_leaders(snapshot_task_id), cfg)
+        topics = _select_topics_for_experiment(topics, cfg)
+        leaders_by_topic = _leaders_by_topic(leaders, cfg)
         result.summary.observed_snapshot_days += 1
 
         for topic in topics:
             topic_index_context = _topic_index_context_for_backtest(topic, cfg, evaluation_date)
             if not topic_index_context.get("observed"):
+                result.summary.unobserved_topic_index_days += 1
                 result.unobserved.append(Strategy4UnobservedDay(
                     evaluation_date=evaluation_date,
                     reason_code="UNOBSERVED_TOPIC_INDEX",
@@ -279,6 +310,7 @@ def _evaluate_leader_snapshot(
         reward_risk_ratio=float(rr.reward_risk_ratio if rr else 0),
         evaluation_snapshot={
             "snapshot_date": evaluation_date,
+            **_source_metadata(topic, leader),
             "topic_status": topic.get("status"),
             "leader_status": leader.get("status"),
             "engine_status": evaluation.get("status"),
@@ -394,6 +426,37 @@ def _topic_index_metadata(context: dict) -> dict:
     }
 
 
+def _derived_snapshots_for_date(evaluation_date: str, cfg: dict) -> tuple[list[dict], list[dict]]:
+    source_modes = cfg.get("source_modes") or {}
+    derived_cfg = cfg.get("derived_source") or {}
+    if not source_modes.get("historical_kline_derived_enabled", True) or not derived_cfg.get("enabled", True):
+        return [], []
+    topics = derive_hot_topics_for_date(evaluation_date, cfg)
+    leaders: list[dict] = []
+    for topic in topics:
+        topic_leaders = derive_leaders_for_topic(topic, evaluation_date=evaluation_date, config=cfg)
+        leaders.extend(topic_leaders)
+        if topic_leaders:
+            raw = topic.setdefault("raw_snapshot", {})
+            if isinstance(raw, dict):
+                raw["derived_leaders"] = topic_leaders
+    return topics, leaders
+
+
+def _source_metadata(topic: dict, leader: dict) -> dict:
+    modes: list[str] = []
+    for value in list(topic.get("source_modes") or []) + list(leader.get("source_modes") or []):
+        if value and value not in modes:
+            modes.append(value)
+    return {
+        "snapshot_source": topic.get("snapshot_source") or leader.get("snapshot_source") or topic.get("source", ""),
+        "source_modes": modes,
+        "merge_confidence": topic.get("merge_confidence") or leader.get("merge_confidence", ""),
+        "merge_warnings": topic.get("merge_warnings") or leader.get("merge_warnings") or [],
+        "membership_mode": topic.get("membership_mode") or leader.get("membership_mode", ""),
+    }
+
+
 def _snapshot_task_for_exact_date(evaluation_date: str) -> str | None:
     conn = db.get_conn()
     row = conn.execute(
@@ -428,8 +491,10 @@ def _cached_observable_dates(start_date: str, end_date: str) -> list[str]:
            SELECT substr(snapshot_time, 1, 10) AS date
            FROM strategy4_hot_topics
            WHERE substr(snapshot_time, 1, 10) BETWEEN ? AND ?
+           UNION
+           SELECT date FROM strategy4_topic_index_ohlc WHERE date BETWEEN ? AND ?
            ORDER BY date""",
-        (start, end, start, end),
+        (start, end, start, end, start, end),
     ).fetchall()
     return [row[0] for row in rows]
 
@@ -470,6 +535,13 @@ def _finalize_summary(
         gross_profit = sum(v for v in returns if v > 0)
         gross_loss = abs(sum(v for v in returns if v < 0))
         summary.profit_factor = gross_profit / gross_loss if gross_loss > 0 else None
+    for opp in opportunities:
+        snapshot = opp.evaluation_snapshot or {}
+        modes = snapshot.get("source_modes") or []
+        if modes == ["historical_kline_derived"]:
+            summary.derived_only_opportunities += 1
+        if "live_external" in modes and "historical_kline_derived" in modes:
+            summary.live_and_derived_confirmed_opportunities += 1
 
 
 def _render_report(

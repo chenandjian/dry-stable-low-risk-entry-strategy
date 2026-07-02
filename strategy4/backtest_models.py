@@ -69,6 +69,14 @@ class Strategy4BacktestSummary:
     evaluation_days: int = 0
     observed_snapshot_days: int = 0
     unobserved_snapshot_days: int = 0
+    live_snapshot_days: int = 0
+    derived_snapshot_days: int = 0
+    merged_snapshot_days: int = 0
+    unobserved_topic_index_days: int = 0
+    unobserved_members_days: int = 0
+    current_members_proxy_days: int = 0
+    derived_only_opportunities: int = 0
+    live_and_derived_confirmed_opportunities: int = 0
     total_signals: int = 0
     total_opportunities: int = 0
     entered_opportunities: int = 0

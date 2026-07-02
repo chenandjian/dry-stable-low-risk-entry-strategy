@@ -24,6 +24,109 @@ def test_strategy4_backtest_marks_missing_snapshot_unobserved(tmp_path):
     assert result.unobserved[0].reason_code == "UNOBSERVED_TOPIC_SNAPSHOT"
 
 
+def test_strategy4_backtest_derives_snapshot_when_live_snapshot_missing(tmp_path):
+    db_path = str(tmp_path / "test.db")
+    db.init_db(db_path)
+    rows = _bars_for_buyable_second_wave()
+    rows.append({
+        "date": "2026-06-23",
+        "open": 16.5,
+        "high": 17.2,
+        "low": 16.2,
+        "close": 17.0,
+        "volume": 4_500_000,
+        "turnover": 16.8 * 4_500_000,
+    })
+    db.save_ohlc("300750", rows)
+    db.save_strategy4_topic_index_ohlc(
+        topic_id="concept-ai",
+        topic_name="AI算力",
+        topic_type="concept",
+        source="fixture",
+        rows=_derived_topic_rows(),
+    )
+    db.save_strategy4_topic_members(
+        topic_id="concept-ai",
+        topic_name="AI算力",
+        topic_type="concept",
+        source="fixture",
+        membership_snapshot_date="2026-07-02",
+        membership_mode="current_members_proxy",
+        members=[{"code": "300750", "name": "宁德时代"}],
+    )
+
+    result = run_strategy4_snapshot_backtest(
+        db_path=db_path,
+        start_date="2026-06-20",
+        end_date="2026-06-20",
+        config_snapshot={
+            "strategy4": {
+                "min_hot_topic_score": 40,
+                "min_hot_topic_signal_count": 1,
+                "min_leader_strength_score": 40,
+                "topic_index": {"min_required_rows": 20, "history_days": 60},
+                "derived_source": {
+                    "topic_top_n": 5,
+                    "max_topics_per_day": 5,
+                    "max_leaders_per_topic": 3,
+                    "min_topic_index_rows": 20,
+                    "min_member_count": 1,
+                    "min_topic_hot_score": 40,
+                    "min_confirmed_topic_hot_score": 40,
+                    "min_breadth_ratio": 0.0,
+                },
+            }
+        },
+    )
+
+    assert result.summary.unobserved_snapshot_days == 0
+    assert result.summary.derived_snapshot_days == 1
+    assert len(result.signals) == 1
+    snapshot = result.signals[0].evaluation_snapshot
+    assert snapshot["snapshot_source"] == "historical_kline_derived"
+    assert snapshot["source_modes"] == ["historical_kline_derived"]
+    assert snapshot["membership_mode"] == "current_members_proxy"
+    assert snapshot["topic_index_latest_date"] == "2026-06-20"
+
+
+def test_strategy4_backtest_marks_missing_derived_members_unobserved(tmp_path):
+    db_path = str(tmp_path / "test.db")
+    db.init_db(db_path)
+    db.save_strategy4_topic_index_ohlc(
+        topic_id="concept-ai",
+        topic_name="AI算力",
+        topic_type="concept",
+        source="fixture",
+        rows=_derived_topic_rows(),
+    )
+
+    result = run_strategy4_snapshot_backtest(
+        db_path=db_path,
+        start_date="2026-06-20",
+        end_date="2026-06-20",
+        config_snapshot={
+            "strategy4": {
+                "min_hot_topic_score": 40,
+                "min_hot_topic_signal_count": 1,
+                "topic_index": {"min_required_rows": 20, "history_days": 60},
+                "derived_source": {
+                    "topic_top_n": 5,
+                    "max_topics_per_day": 5,
+                    "min_topic_index_rows": 20,
+                    "min_member_count": 1,
+                    "min_topic_hot_score": 40,
+                    "min_confirmed_topic_hot_score": 40,
+                    "min_breadth_ratio": 0.0,
+                },
+            }
+        },
+    )
+
+    assert result.signals == []
+    assert result.summary.unobserved_members_days == 1
+    assert result.unobserved[0].reason_code == "UNOBSERVED_DERIVED_MEMBERS"
+
+
 def test_strategy4_execution_rejects_one_word_limit_up_entry(tmp_path):
     db_path = str(tmp_path / "test.db")
     db.init_db(db_path)
@@ -395,4 +498,27 @@ def _bars_for_buyable_second_wave():
     rows[-1]["low"] = 15.6
     rows[-1]["high"] = 16.6
     rows[9]["high"] = 24.0
+    return rows
+
+
+def _derived_topic_rows():
+    rows = []
+    for idx in range(20):
+        close = 100 + idx * 0.8
+        rows.append({
+            "date": f"2026-06-{idx + 1:02d}",
+            "open": close - 0.2,
+            "high": close + 1.0,
+            "low": close - 1.0,
+            "close": close,
+            "amount": 1_000_000_000 + idx * 30_000_000,
+        })
+    rows.append({
+        "date": "2026-06-23",
+        "open": 130,
+        "high": 180,
+        "low": 128,
+        "close": 175,
+        "amount": 30_000_000_000,
+    })
     return rows

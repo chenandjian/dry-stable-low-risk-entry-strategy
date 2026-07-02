@@ -1535,6 +1535,74 @@ def _ensure_strategy4_tables(conn: sqlite3.Connection):
             updated_at TEXT NOT NULL DEFAULT (datetime('now'))
         )
     ''')
+    conn.execute('''
+        CREATE TABLE IF NOT EXISTS strategy4_topic_members (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            topic_id TEXT NOT NULL,
+            topic_name TEXT NOT NULL,
+            topic_type TEXT NOT NULL,
+            code TEXT NOT NULL,
+            name TEXT NOT NULL,
+            source TEXT NOT NULL,
+            membership_snapshot_date TEXT NOT NULL,
+            membership_mode TEXT NOT NULL,
+            raw_snapshot TEXT,
+            first_seen_at TEXT NOT NULL DEFAULT (datetime('now')),
+            last_seen_at TEXT NOT NULL DEFAULT (datetime('now')),
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+            UNIQUE(topic_id, code, membership_snapshot_date, source)
+        )
+    ''')
+    conn.execute('''
+        CREATE TABLE IF NOT EXISTS strategy4_derived_hot_topics (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            task_id TEXT,
+            evaluation_date TEXT NOT NULL,
+            topic_id TEXT NOT NULL,
+            topic_name TEXT NOT NULL,
+            topic_type TEXT NOT NULL,
+            source TEXT NOT NULL,
+            membership_mode TEXT NOT NULL,
+            derived_hot_score REAL NOT NULL,
+            status TEXT NOT NULL,
+            topic_index_latest_date TEXT,
+            topic_index_phase TEXT,
+            topic_index_context TEXT,
+            breadth_snapshot TEXT,
+            reasons TEXT,
+            warnings TEXT,
+            raw_snapshot TEXT,
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+        )
+    ''')
+    conn.execute('''
+        CREATE TABLE IF NOT EXISTS strategy4_derived_leaders (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            task_id TEXT,
+            evaluation_date TEXT NOT NULL,
+            topic_id TEXT NOT NULL,
+            topic_name TEXT NOT NULL,
+            topic_type TEXT NOT NULL,
+            code TEXT NOT NULL,
+            name TEXT NOT NULL,
+            source TEXT NOT NULL,
+            membership_mode TEXT NOT NULL,
+            derived_leader_score REAL NOT NULL,
+            leader_type TEXT,
+            status TEXT NOT NULL,
+            leader_rs_5d REAL,
+            leader_rs_10d REAL,
+            leader_rs_20d REAL,
+            return_rank_in_topic INTEGER,
+            amount_rank_in_topic INTEGER,
+            raw_snapshot TEXT,
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+            UNIQUE(task_id, evaluation_date, topic_id, code)
+        )
+    ''')
     for column, col_type in {
         "topic_index_source": "TEXT",
         "topic_index_latest_date": "TEXT",
@@ -1546,8 +1614,40 @@ def _ensure_strategy4_tables(conn: sqlite3.Connection):
         "topic_index_volume_score": "REAL DEFAULT 0",
         "topic_index_risk_penalty": "REAL DEFAULT 0",
         "topic_index_phase": "TEXT",
+        "snapshot_source": "TEXT",
+        "source_modes_json": "TEXT",
+        "live_hot_score": "REAL",
+        "derived_hot_score": "REAL",
+        "merge_confidence": "TEXT",
+        "merge_warnings": "TEXT",
+        "membership_mode": "TEXT",
+        "derived_evaluation_date": "TEXT",
     }.items():
         _ensure_column(conn, "strategy4_hot_topics", column, col_type)
+    for column, col_type in {
+        "snapshot_source": "TEXT",
+        "source_modes_json": "TEXT",
+        "live_leader_score": "REAL",
+        "derived_leader_score": "REAL",
+        "merge_confidence": "TEXT",
+        "merge_warnings": "TEXT",
+        "membership_mode": "TEXT",
+        "derived_evaluation_date": "TEXT",
+    }.items():
+        _ensure_column(conn, "strategy4_leaders", column, col_type)
+    for column, col_type in {
+        "snapshot_source": "TEXT",
+        "source_modes_json": "TEXT",
+        "live_hot_score": "REAL",
+        "derived_hot_score": "REAL",
+        "live_leader_score": "REAL",
+        "derived_leader_score": "REAL",
+        "merge_confidence": "TEXT",
+        "merge_warnings": "TEXT",
+        "membership_mode": "TEXT",
+        "derived_evaluation_date": "TEXT",
+    }.items():
+        _ensure_column(conn, "strategy4_candidates", column, col_type)
     conn.execute("CREATE INDEX IF NOT EXISTS idx_strategy4_hot_topics_task ON strategy4_hot_topics(task_id)")
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_strategy4_hot_topics_score "
@@ -1558,6 +1658,9 @@ def _ensure_strategy4_tables(conn: sqlite3.Connection):
     conn.execute("CREATE INDEX IF NOT EXISTS idx_strategy4_candidates_task ON strategy4_candidates(task_id)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_s4_topic_index_topic_date ON strategy4_topic_index_ohlc(topic_id, date)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_s4_topic_index_source_name ON strategy4_topic_index_ohlc(source, source_topic_name)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_s4_topic_members_topic ON strategy4_topic_members(topic_id)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_s4_derived_topics_date ON strategy4_derived_hot_topics(evaluation_date)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_s4_derived_leaders_date ON strategy4_derived_leaders(evaluation_date)")
 
 
 def _ensure_column(conn: sqlite3.Connection, table: str, column: str, col_type: str):
@@ -1901,7 +2004,9 @@ def replace_strategy4_hot_topics(task_id: str, topics: list[dict]):
         "raw_snapshot", "topic_index_source", "topic_index_latest_date", "topic_index_rows",
         "topic_index_observed", "topic_index_status", "topic_index_trend_score",
         "topic_index_breakout_score", "topic_index_volume_score", "topic_index_risk_penalty",
-        "topic_index_phase",
+        "topic_index_phase", "snapshot_source", "source_modes_json", "live_hot_score",
+        "derived_hot_score", "merge_confidence", "merge_warnings", "membership_mode",
+        "derived_evaluation_date",
     ]
     with conn:
         conn.execute("DELETE FROM strategy4_hot_topics WHERE task_id=?", (task_id,))
@@ -1936,6 +2041,14 @@ def replace_strategy4_hot_topics(task_id: str, topics: list[dict]):
                 item.get("topic_index_volume_score", 0.0),
                 item.get("topic_index_risk_penalty", 0.0),
                 item.get("topic_index_phase", ""),
+                item.get("snapshot_source", item.get("source", "")),
+                _json_any(item.get("source_modes")),
+                item.get("live_hot_score"),
+                item.get("derived_hot_score"),
+                item.get("merge_confidence", ""),
+                _json_any(item.get("merge_warnings")),
+                item.get("membership_mode", ""),
+                item.get("derived_evaluation_date", ""),
             ]
             conn.execute(
                 f"INSERT INTO strategy4_hot_topics ({', '.join(columns)}) VALUES ({', '.join('?' for _ in columns)})",
@@ -1952,7 +2065,9 @@ def replace_strategy4_leaders(task_id: str, leaders: list[dict]):
         "limit_pct", "return_1d", "return_5d", "return_10d", "return_20d",
         "amount_1d", "avg_amount_5d", "avg_amount_10d", "first_wave_max_amount",
         "last_non_limit_amount", "consecutive_limit_count", "relative_strength_vs_topic",
-        "membership_source", "status", "raw_snapshot",
+        "membership_source", "status", "raw_snapshot", "snapshot_source", "source_modes_json",
+        "live_leader_score", "derived_leader_score", "merge_confidence", "merge_warnings",
+        "membership_mode", "derived_evaluation_date",
     ]
     with conn:
         conn.execute("DELETE FROM strategy4_leaders WHERE task_id=?", (task_id,))
@@ -1983,6 +2098,14 @@ def replace_strategy4_leaders(task_id: str, leaders: list[dict]):
                 item.get("membership_source", ""),
                 item.get("status", ""),
                 _json_any(item.get("raw_snapshot")),
+                item.get("snapshot_source", item.get("source", "")),
+                _json_any(item.get("source_modes")),
+                item.get("live_leader_score"),
+                item.get("derived_leader_score"),
+                item.get("merge_confidence", ""),
+                _json_any(item.get("merge_warnings")),
+                item.get("membership_mode", ""),
+                item.get("derived_evaluation_date", ""),
             ]
             conn.execute(
                 f"INSERT INTO strategy4_leaders ({', '.join(columns)}) VALUES ({', '.join('?' for _ in columns)})",
@@ -2001,6 +2124,9 @@ def upsert_strategy4_candidate(task_id: str, d: dict):
         "first_wave_return", "pullback_pct", "pullback_days", "current_close",
         "support_price", "stop_loss", "target_price", "risk_ratio",
         "reward_risk_ratio", "entry_note", "reject_reason", "evaluation_snapshot",
+        "snapshot_source", "source_modes_json", "live_hot_score", "derived_hot_score",
+        "live_leader_score", "derived_leader_score", "merge_confidence", "merge_warnings",
+        "membership_mode", "derived_evaluation_date",
     ]
     values = [
         task_id,
@@ -2033,6 +2159,16 @@ def upsert_strategy4_candidate(task_id: str, d: dict):
         d.get("entry_note", ""),
         d.get("reject_reason", ""),
         _json_any(d.get("evaluation_snapshot")),
+        d.get("snapshot_source", ""),
+        _json_any(d.get("source_modes")),
+        d.get("live_hot_score"),
+        d.get("derived_hot_score"),
+        d.get("live_leader_score"),
+        d.get("derived_leader_score"),
+        d.get("merge_confidence", ""),
+        _json_any(d.get("merge_warnings")),
+        d.get("membership_mode", ""),
+        d.get("derived_evaluation_date", ""),
     ]
     updates = ", ".join(
         f"{c}=excluded.{c}" for c in columns if c not in ("task_id", "topic_id", "code")
@@ -2243,6 +2379,216 @@ def get_latest_strategy4_topic_index_fetch_status(topic_id: str) -> dict | None:
     return dict(zip(cols, row))
 
 
+def get_strategy4_topic_index_topics(*, end_date: str | None = None) -> list[dict]:
+    """Return distinct Strategy4 topic index identities with rows before end_date."""
+    conn = get_conn()
+    clauses = []
+    params: list = []
+    if end_date:
+        clauses.append("date<=?")
+        params.append(end_date[:10])
+    where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+    rows = conn.execute(
+        f"""SELECT topic_id, topic_name, topic_type, source, MAX(date) AS latest_date, COUNT(*) AS rows
+            FROM strategy4_topic_index_ohlc
+            {where}
+            GROUP BY topic_id
+            ORDER BY latest_date DESC, topic_id ASC""",
+        params,
+    ).fetchall()
+    return [
+        {
+            "topic_id": row[0],
+            "topic_name": row[1],
+            "topic_type": row[2],
+            "source": row[3],
+            "latest_date": row[4],
+            "rows": row[5],
+        }
+        for row in rows
+    ]
+
+
+def save_strategy4_topic_members(
+    *,
+    topic_id: str,
+    topic_name: str,
+    topic_type: str,
+    source: str,
+    membership_snapshot_date: str,
+    membership_mode: str,
+    members: list[dict],
+):
+    """Save Strategy4 topic members idempotently."""
+    conn = get_conn()
+    with conn:
+        for member in members:
+            code = str(member.get("code") or member.get("代码") or "")
+            if not code:
+                continue
+            name = str(member.get("name") or member.get("名称") or "")
+            conn.execute(
+                """INSERT INTO strategy4_topic_members (
+                       topic_id, topic_name, topic_type, code, name, source,
+                       membership_snapshot_date, membership_mode, raw_snapshot, first_seen_at, last_seen_at
+                   ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
+                   ON CONFLICT(topic_id, code, membership_snapshot_date, source) DO UPDATE SET
+                       topic_name=excluded.topic_name,
+                       topic_type=excluded.topic_type,
+                       name=excluded.name,
+                       membership_mode=excluded.membership_mode,
+                       raw_snapshot=excluded.raw_snapshot,
+                       last_seen_at=datetime('now'),
+                       updated_at=datetime('now')""",
+                (
+                    topic_id,
+                    topic_name,
+                    topic_type,
+                    code,
+                    name,
+                    source,
+                    membership_snapshot_date[:10],
+                    membership_mode,
+                    _json_any(member),
+                ),
+            )
+
+
+def get_strategy4_topic_members(topic_id: str, *, evaluation_date: str | None = None) -> list[dict]:
+    """Return latest members for a topic.
+
+    Historical member snapshots on or before evaluation_date are preferred. If
+    none exist, the latest current_members_proxy snapshot is returned and marked
+    by its membership_mode so callers can surface the bias.
+    """
+    conn = get_conn()
+    if evaluation_date:
+        row = conn.execute(
+            """SELECT membership_snapshot_date, source
+               FROM strategy4_topic_members
+               WHERE topic_id=? AND membership_mode!='current_members_proxy'
+                 AND membership_snapshot_date<=?
+               ORDER BY membership_snapshot_date DESC, id DESC LIMIT 1""",
+            (topic_id, evaluation_date[:10]),
+        ).fetchone()
+        if row:
+            return _strategy4_members_for_snapshot(topic_id, row[0], row[1])
+    row = conn.execute(
+        """SELECT membership_snapshot_date, source
+           FROM strategy4_topic_members
+           WHERE topic_id=?
+           ORDER BY CASE WHEN membership_mode='current_members_proxy' THEN 0 ELSE 1 END,
+                    membership_snapshot_date DESC, id DESC
+           LIMIT 1""",
+        (topic_id,),
+    ).fetchone()
+    if not row:
+        return []
+    return _strategy4_members_for_snapshot(topic_id, row[0], row[1])
+
+
+def _strategy4_members_for_snapshot(topic_id: str, snapshot_date: str, source: str) -> list[dict]:
+    conn = get_conn()
+    rows = conn.execute(
+        """SELECT * FROM strategy4_topic_members
+           WHERE topic_id=? AND membership_snapshot_date=? AND source=?
+           ORDER BY code ASC""",
+        (topic_id, snapshot_date, source),
+    ).fetchall()
+    cols = [d[1] for d in conn.execute("PRAGMA table_info(strategy4_topic_members)").fetchall()]
+    result = []
+    for row in rows:
+        item = dict(zip(cols, row))
+        raw = item.get("raw_snapshot")
+        if isinstance(raw, str) and raw:
+            try:
+                item["raw_snapshot"] = json.loads(raw)
+            except (json.JSONDecodeError, TypeError):
+                item["raw_snapshot"] = {}
+        elif not raw:
+            item["raw_snapshot"] = {}
+        result.append(item)
+    return result
+
+
+def replace_strategy4_derived_hot_topics(task_id: str, evaluation_date: str, topics: list[dict]):
+    """Replace derived hot-topic audit rows for one task/date."""
+    conn = get_conn()
+    with conn:
+        conn.execute(
+            "DELETE FROM strategy4_derived_hot_topics WHERE task_id=? AND evaluation_date=?",
+            (task_id, evaluation_date[:10]),
+        )
+        for item in topics:
+            raw = item.get("raw_snapshot") or {}
+            conn.execute(
+                """INSERT INTO strategy4_derived_hot_topics (
+                       task_id, evaluation_date, topic_id, topic_name, topic_type, source,
+                       membership_mode, derived_hot_score, status, topic_index_latest_date,
+                       topic_index_phase, topic_index_context, breadth_snapshot, reasons,
+                       warnings, raw_snapshot
+                   ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    task_id,
+                    evaluation_date[:10],
+                    item.get("topic_id", ""),
+                    item.get("topic_name", ""),
+                    item.get("topic_type", ""),
+                    item.get("source", ""),
+                    item.get("membership_mode", ""),
+                    item.get("derived_hot_score", item.get("hot_topic_score", 0.0)),
+                    item.get("status", ""),
+                    item.get("topic_index_latest_date", ""),
+                    item.get("topic_index_phase", ""),
+                    _json_any(raw.get("topic_index_context")),
+                    _json_any(raw.get("breadth_snapshot")),
+                    _json_any(item.get("reasons")),
+                    _json_any(item.get("merge_warnings")),
+                    _json_any(raw),
+                ),
+            )
+
+
+def replace_strategy4_derived_leaders(task_id: str, evaluation_date: str, leaders: list[dict]):
+    """Replace derived leader audit rows for one task/date."""
+    conn = get_conn()
+    with conn:
+        conn.execute(
+            "DELETE FROM strategy4_derived_leaders WHERE task_id=? AND evaluation_date=?",
+            (task_id, evaluation_date[:10]),
+        )
+        for item in leaders:
+            raw = item.get("raw_snapshot") or {}
+            conn.execute(
+                """INSERT INTO strategy4_derived_leaders (
+                       task_id, evaluation_date, topic_id, topic_name, topic_type, code,
+                       name, source, membership_mode, derived_leader_score, leader_type,
+                       status, leader_rs_5d, leader_rs_10d, leader_rs_20d,
+                       return_rank_in_topic, amount_rank_in_topic, raw_snapshot
+                   ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    task_id,
+                    evaluation_date[:10],
+                    item.get("topic_id", ""),
+                    item.get("topic_name", ""),
+                    item.get("topic_type", ""),
+                    item.get("code", ""),
+                    item.get("name", ""),
+                    item.get("source", ""),
+                    item.get("membership_mode", ""),
+                    item.get("derived_leader_score", item.get("leader_strength_score", 0.0)),
+                    item.get("leader_type", ""),
+                    item.get("status", ""),
+                    raw.get("leader_rs_5d"),
+                    raw.get("leader_rs_10d"),
+                    raw.get("leader_rs_20d"),
+                    item.get("return_rank_in_topic"),
+                    item.get("amount_rank_in_topic"),
+                    _json_any(raw),
+                ),
+            )
+
+
 def _json_any(value):
     if value is None or value == "":
         return ""
@@ -2275,15 +2621,29 @@ def _deserialize_topic_index_row(row: dict) -> dict:
 
 
 def _deserialize_strategy4_row(row: dict) -> dict:
-    for field in ("raw_snapshot", "evaluation_snapshot"):
+    for field in ("raw_snapshot", "evaluation_snapshot", "source_modes_json", "merge_warnings"):
         value = row.get(field)
         if isinstance(value, str) and value:
             try:
-                row[field] = json.loads(value)
+                parsed = json.loads(value)
+                if field == "source_modes_json":
+                    row["source_modes"] = parsed
+                else:
+                    row[field] = parsed
             except (json.JSONDecodeError, TypeError):
-                row[field] = {}
+                if field == "source_modes_json":
+                    row["source_modes"] = []
+                elif field == "merge_warnings":
+                    row[field] = []
+                else:
+                    row[field] = {}
         elif not value:
-            row[field] = {}
+            if field == "source_modes_json":
+                row["source_modes"] = []
+            elif field == "merge_warnings":
+                row[field] = []
+            else:
+                row[field] = {}
     return row
 
 

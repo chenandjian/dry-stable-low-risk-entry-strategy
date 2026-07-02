@@ -258,9 +258,12 @@ def test_strategy4_default_scan_recalls_multiple_leaders_from_topic_members(tmp_
         {"data": {"database_path": db_path}, "strategy4": {"max_total_leaders_per_topic": 2, "core_leaders_per_topic": 1, "backup_leaders_per_topic": 1}},
         task_id="s4-members",
     )
+    cached_members = db.get_strategy4_topic_members("concept:AI算力", evaluation_date="2026-07-01")
 
     assert [l["code"] for l in result["leaders"]] == ["300750", "688981"]
     assert len(db.get_strategy4_leaders("s4-members")) == 2
+    assert [m["code"] for m in cached_members] == ["300750", "688981"]
+    assert cached_members[0]["membership_mode"] == "current_members_proxy"
 
 
 def test_strategy4_scan_does_not_create_candidates_from_noise_topics(tmp_path, monkeypatch):
@@ -460,6 +463,62 @@ def test_strategy4_scan_counts_survive_refresh_when_candidate_found(tmp_path, mo
     assert summary["candidates_count"] == 1
 
 
+def test_strategy4_scan_can_use_historical_kline_derived_source_without_live_external(tmp_path):
+    from strategy4.scanner import scan_strategy4_all
+
+    db_path = str(tmp_path / "test.db")
+    task_id = "s4-derived-scan"
+    db.init_db(db_path)
+    db.create_scan_task(task_id, "2026-06-20 15:30:00", strategy_type=STRATEGY4_TYPE)
+    db.save_strategy4_topic_index_ohlc(
+        topic_id="concept:AI算力",
+        topic_name="AI算力",
+        topic_type="concept",
+        source="fixture",
+        rows=_derived_topic_rows(),
+    )
+    db.save_strategy4_topic_members(
+        topic_id="concept:AI算力",
+        topic_name="AI算力",
+        topic_type="concept",
+        source="fixture",
+        membership_snapshot_date="2026-07-02",
+        membership_mode="current_members_proxy",
+        members=[{"code": "300750", "name": "宁德时代"}],
+    )
+    db.save_ohlc("300750", _bars_for_buyable_second_wave())
+
+    result = scan_strategy4_all(
+        {
+            "data": {"database_path": db_path},
+            "strategy4": {
+                "source_modes": {"live_external_enabled": False},
+                "min_hot_topic_score": 40,
+                "min_hot_topic_signal_count": 1,
+                "min_leader_strength_score": 40,
+                "topic_index": {"min_required_rows": 20, "history_days": 60},
+                "derived_source": {
+                    "topic_top_n": 5,
+                    "max_topics_per_day": 5,
+                    "max_leaders_per_topic": 3,
+                    "min_topic_index_rows": 20,
+                    "min_member_count": 1,
+                    "min_topic_hot_score": 40,
+                    "min_confirmed_topic_hot_score": 40,
+                    "min_breadth_ratio": 0.0,
+                },
+            },
+        },
+        task_id=task_id,
+    )
+
+    assert result["topics"][0]["snapshot_source"] == "historical_kline_derived"
+    assert result["topics"][0]["source_modes"] == ["historical_kline_derived"]
+    assert result["leaders"][0]["membership_mode"] == "current_members_proxy"
+    assert result["leaders"][0]["source_modes"] == ["historical_kline_derived"]
+    assert db.get_strategy4_hot_topics(task_id)[0]["source_modes"] == ["historical_kline_derived"]
+
+
 def test_strategy4_scan_persists_topic_index_context_and_relative_strength(tmp_path, monkeypatch):
     import types
     from strategy4.scanner import scan_strategy4_all
@@ -632,5 +691,20 @@ def _topic_index_rows():
             "收盘价": round(close, 2),
             "成交额": 1_000_000_000 + idx * 50_000_000,
             "涨跌幅": 0.5,
+        })
+    return rows
+
+
+def _derived_topic_rows():
+    rows = []
+    for idx in range(20):
+        close = 100 + idx * 0.8
+        rows.append({
+            "date": f"2026-06-{idx + 1:02d}",
+            "open": close - 0.2,
+            "high": close + 1.0,
+            "low": close - 1.0,
+            "close": close,
+            "amount": 1_000_000_000 + idx * 30_000_000,
         })
     return rows

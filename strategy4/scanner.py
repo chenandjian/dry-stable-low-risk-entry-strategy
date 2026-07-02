@@ -15,11 +15,14 @@ from scanner.daily_data_service import (
 )
 from scanner.data_source import DataSourceManager
 from strategy4.config import resolve_strategy4_config
+from strategy4.derived_leader_detector import derive_leaders_for_topic
+from strategy4.derived_topic_detector import derive_hot_topics_for_date
 from strategy4.engine import HotLeaderSecondWaveEngine
 from strategy4.leader import score_leader_candidate
 from strategy4.price_limit import PriceLimitResolver
+from strategy4.snapshot_merge import merge_topics
 from strategy4.topic_scoring import score_hot_topic
-from strategy4.topic_index_service import TopicIndexService
+from strategy4.topic_index_service import TopicIndexService, _target_trade_date
 from strategy4.topic_source import TopicSourceError, TopicSourceService
 
 logger = logging.getLogger(__name__)
@@ -44,12 +47,59 @@ def scan_strategy4_all(config: dict, progress_callback=None, task_id: str | None
 
     source = kwargs.get("topic_source")
     if source is None:
-        topic_service = TopicSourceService()
-        try:
-            raw_topics = topic_service.fetch_topics()
-        except TopicSourceError as exc:
-            error = f"STRATEGY4_TOPIC_SOURCE_FAILED: {exc}"
-            logger.warning(error)
+        source_modes = cfg.get("source_modes") or {}
+        live_enabled = bool(source_modes.get("live_external_enabled", True))
+        derived_enabled = bool(source_modes.get("historical_kline_derived_enabled", True))
+        topic_service = TopicSourceService() if live_enabled else None
+        live_topics: list[dict] = []
+        live_error = ""
+        if live_enabled and topic_service is not None:
+            try:
+                raw_topics = topic_service.fetch_topics()
+            except TopicSourceError as exc:
+                raw_topics = []
+                live_error = f"STRATEGY4_TOPIC_SOURCE_FAILED: {exc}"
+                logger.warning(live_error)
+            topic_index_service = TopicIndexService(cfg)
+            prelim = sorted([score_hot_topic(t, cfg) for t in raw_topics], key=lambda t: t.hot_topic_score, reverse=True)
+            scored = []
+            topic_index_limit = min(
+                cfg["watch_hot_topic_top_n"],
+                int((cfg.get("topic_index") or {}).get("max_fetch_topics_per_scan", cfg["watch_hot_topic_top_n"])),
+            )
+            for topic_score in prelim[:topic_index_limit]:
+                context = topic_index_service.ensure_topic_index_context(topic_score.raw_snapshot)
+                scored.append(score_hot_topic(topic_score.raw_snapshot, cfg, context))
+            live_topics = [
+                {
+                    **_topic_to_dict(t),
+                    "snapshot_source": "live_external",
+                    "source_modes": ["live_external"],
+                    "live_hot_score": t.hot_topic_score,
+                    "merge_confidence": "live_only",
+                }
+                for t in sorted(scored, key=lambda t: t.hot_topic_score, reverse=True)[: cfg["watch_hot_topic_top_n"]]
+            ]
+
+        derived_topics: list[dict] = []
+        derived_leaders: list[dict] = []
+        if derived_enabled:
+            target_date = kwargs.get("evaluation_date") or _target_trade_date(datetime.now())
+            derived_topics = derive_hot_topics_for_date(target_date, cfg)
+            for topic in derived_topics:
+                leaders_for_topic = derive_leaders_for_topic(topic, evaluation_date=target_date, config=cfg)
+                derived_leaders.extend(leaders_for_topic)
+                if leaders_for_topic:
+                    raw = topic.setdefault("raw_snapshot", {})
+                    if isinstance(raw, dict):
+                        raw["derived_leaders"] = leaders_for_topic
+            db.replace_strategy4_derived_hot_topics(task_id, target_date, derived_topics)
+            db.replace_strategy4_derived_leaders(task_id, target_date, derived_leaders)
+
+        topics = merge_topics(live_topics, derived_topics, {"merge_policy": cfg.get("merge_policy", {})})
+        topics = topics[: cfg["watch_hot_topic_top_n"]]
+        if not topics and live_error:
+            error = live_error
             stats = {
                 "total": 0,
                 "total_stocks": 0,
@@ -62,17 +112,6 @@ def scan_strategy4_all(config: dict, progress_callback=None, task_id: str | None
                 "error": error,
             }
             return {"topics": [], "leaders": [], "candidates": [], "stats": stats, "task_id": task_id, "config": cfg}
-        topic_index_service = TopicIndexService(cfg)
-        prelim = sorted([score_hot_topic(t, cfg) for t in raw_topics], key=lambda t: t.hot_topic_score, reverse=True)
-        scored = []
-        topic_index_limit = min(
-            cfg["watch_hot_topic_top_n"],
-            int((cfg.get("topic_index") or {}).get("max_fetch_topics_per_scan", cfg["watch_hot_topic_top_n"])),
-        )
-        for topic_score in prelim[:topic_index_limit]:
-            context = topic_index_service.ensure_topic_index_context(topic_score.raw_snapshot)
-            scored.append(score_hot_topic(topic_score.raw_snapshot, cfg, context))
-        topics = [_topic_to_dict(t) for t in sorted(scored, key=lambda t: t.hot_topic_score, reverse=True)[: cfg["watch_hot_topic_top_n"]]]
         db.replace_strategy4_hot_topics(task_id, topics)
         leaders, candidates, scan_stats = _build_leaders_and_candidates_from_topics(
             topics,
@@ -317,8 +356,22 @@ def _build_leaders_and_candidates_from_topics(
                 "reward_risk_ratio": rr.reward_risk_ratio,
                 "entry_note": "热点龙头二波",
                 "reject_reason": "",
+                "snapshot_source": topic.get("snapshot_source", ""),
+                "source_modes": topic.get("source_modes", []),
+                "live_hot_score": topic.get("live_hot_score"),
+                "derived_hot_score": topic.get("derived_hot_score"),
+                "derived_leader_score": leader_input.get("derived_leader_score"),
+                "merge_confidence": topic.get("merge_confidence", ""),
+                "merge_warnings": topic.get("merge_warnings", []),
+                "membership_mode": topic.get("membership_mode") or leader_input.get("membership_mode", ""),
+                "derived_evaluation_date": topic.get("derived_evaluation_date", ""),
                 "evaluation_snapshot": {
                     "status": evaluation.get("status"),
+                    "snapshot_source": topic.get("snapshot_source", ""),
+                    "source_modes": topic.get("source_modes", []),
+                    "merge_confidence": topic.get("merge_confidence", ""),
+                    "merge_warnings": topic.get("merge_warnings", []),
+                    "membership_mode": topic.get("membership_mode") or leader_input.get("membership_mode", ""),
                     "first_wave_reasons": first_wave.reasons,
                     "pullback_reasons": pullback.reasons,
                     "second_wave_signals": second_wave.signals if second_wave else [],
@@ -397,6 +450,12 @@ def _leader_snapshot(topic: dict, leader_input: dict, leader_score, info, limit_
         "consecutive_limit_count": int((topic.get("raw_snapshot") or {}).get("leader_limit_count") or 0),
         "relative_strength_vs_topic": max(0.0, leader_rs_10d, leader_rs_20d),
         "membership_source": leader_input.get("membership_source", ""),
+        "membership_mode": leader_input.get("membership_mode", ""),
+        "snapshot_source": leader_input.get("snapshot_source", leader_input.get("source", "")),
+        "source_modes": leader_input.get("source_modes", []),
+        "derived_leader_score": leader_input.get("derived_leader_score"),
+        "merge_confidence": leader_input.get("merge_confidence", ""),
+        "merge_warnings": leader_input.get("merge_warnings", []),
         "status": leader_score.status,
         "raw_snapshot": {
             **leader_input,
@@ -442,6 +501,10 @@ def _leader_snapshot_for_failed_daily(topic: dict, leader_input: dict, rank: int
         "consecutive_limit_count": 0,
         "relative_strength_vs_topic": 0.0,
         "membership_source": leader_input.get("membership_source", ""),
+        "membership_mode": leader_input.get("membership_mode", ""),
+        "snapshot_source": leader_input.get("snapshot_source", leader_input.get("source", "")),
+        "source_modes": leader_input.get("source_modes", []),
+        "derived_leader_score": leader_input.get("derived_leader_score"),
         "status": "DATA_SOURCE_FAILED",
         "raw_snapshot": leader_input,
     }
@@ -583,9 +646,29 @@ def _now() -> str:
 
 def _leader_inputs_for_topic(topic: dict, strategy_config: dict, topic_service: TopicSourceService | None) -> list[dict]:
     inputs: list[dict] = []
+    raw = topic.get("raw_snapshot") or {}
+    if isinstance(raw, dict):
+        for item in raw.get("derived_leaders") or []:
+            if item.get("code"):
+                inputs.append({
+                    **item,
+                    "membership_source": item.get("membership_source") or "historical_kline_derived_member",
+                    "recognition_sources": item.get("recognition_sources") or ["historical_kline_derived"],
+                })
     if topic_service is not None:
         try:
-            inputs.extend(topic_service.fetch_topic_members(topic.get("topic_name", ""), topic.get("topic_type", "")))
+            fetched_members = topic_service.fetch_topic_members(topic.get("topic_name", ""), topic.get("topic_type", ""))
+            inputs.extend(fetched_members)
+            if fetched_members:
+                db.save_strategy4_topic_members(
+                    topic_id=str(topic.get("topic_id") or ""),
+                    topic_name=str(topic.get("topic_name") or ""),
+                    topic_type=str(topic.get("topic_type") or ""),
+                    source="akshare_ths",
+                    membership_snapshot_date=_now()[:10],
+                    membership_mode="current_members_proxy",
+                    members=fetched_members,
+                )
         except TopicSourceError:
             pass
 
@@ -609,6 +692,9 @@ def _leader_inputs_for_topic(topic: dict, strategy_config: dict, topic_service: 
     for item in inputs:
         if item.get("code"):
             item.setdefault("membership_source", "akshare_ths_member")
+            existing = deduped.get(item["code"])
+            if existing and existing.get("source_modes") and not item.get("source_modes"):
+                continue
             deduped[item["code"]] = item
     sorted_items = sorted(
         deduped.values(),
