@@ -19,6 +19,7 @@ from strategy4.engine import HotLeaderSecondWaveEngine
 from strategy4.leader import score_leader_candidate
 from strategy4.price_limit import PriceLimitResolver
 from strategy4.topic_scoring import score_hot_topic
+from strategy4.topic_index_service import TopicIndexService
 from strategy4.topic_source import TopicSourceError, TopicSourceService
 
 logger = logging.getLogger(__name__)
@@ -61,7 +62,16 @@ def scan_strategy4_all(config: dict, progress_callback=None, task_id: str | None
                 "error": error,
             }
             return {"topics": [], "leaders": [], "candidates": [], "stats": stats, "task_id": task_id, "config": cfg}
-        scored = [score_hot_topic(t, cfg) for t in raw_topics]
+        topic_index_service = TopicIndexService(cfg)
+        prelim = sorted([score_hot_topic(t, cfg) for t in raw_topics], key=lambda t: t.hot_topic_score, reverse=True)
+        scored = []
+        topic_index_limit = min(
+            cfg["watch_hot_topic_top_n"],
+            int((cfg.get("topic_index") or {}).get("max_fetch_topics_per_scan", cfg["watch_hot_topic_top_n"])),
+        )
+        for topic_score in prelim[:topic_index_limit]:
+            context = topic_index_service.ensure_topic_index_context(topic_score.raw_snapshot)
+            scored.append(score_hot_topic(topic_score.raw_snapshot, cfg, context))
         topics = [_topic_to_dict(t) for t in sorted(scored, key=lambda t: t.hot_topic_score, reverse=True)[: cfg["watch_hot_topic_top_n"]]]
         db.replace_strategy4_hot_topics(task_id, topics)
         leaders, candidates, scan_stats = _build_leaders_and_candidates_from_topics(
@@ -142,6 +152,16 @@ def _topic_to_dict(topic) -> dict:
         "breadth_score": topic.breadth_score,
         "leader_limit_score": topic.leader_limit_score,
         "breakout_score": topic.breakout_score,
+        "topic_index_source": topic.topic_index_source,
+        "topic_index_latest_date": topic.topic_index_latest_date,
+        "topic_index_rows": topic.topic_index_rows,
+        "topic_index_observed": topic.topic_index_observed,
+        "topic_index_status": topic.topic_index_status,
+        "topic_index_trend_score": topic.topic_index_trend_score,
+        "topic_index_breakout_score": topic.topic_index_breakout_score,
+        "topic_index_volume_score": topic.topic_index_volume_score,
+        "topic_index_risk_penalty": topic.topic_index_risk_penalty,
+        "topic_index_phase": topic.topic_index_phase,
         "signal_count": topic.signal_count,
         "noise_reason": topic.noise_reason,
         "leading_stock_code": topic.leading_stock_code,
@@ -257,7 +277,7 @@ def _build_leaders_and_candidates_from_topics(
         pullback = evaluation.get("pullback")
         first_wave = evaluation.get("first_wave")
         second_wave = evaluation.get("second_wave")
-        leader_score = _score_leader(topic, leader_input, rank, limit_shape, evaluation, strategy_config)
+        leader_score = _score_leader(topic, leader_input, rank, limit_shape, evaluation, strategy_config, data)
         leaders.append(_leader_snapshot(topic, leader_input, leader_score, info, limit_shape, data))
 
         if (
@@ -324,8 +344,11 @@ def _build_leaders_and_candidates_from_topics(
     return leaders, candidates, stats
 
 
-def _score_leader(topic: dict, leader_input: dict, rank: int, limit_shape: str, evaluation: dict, strategy_config: dict):
-    topic_return_1d = float((topic.get("raw_snapshot") or {}).get("return_1d") or 0)
+def _score_leader(topic: dict, leader_input: dict, rank: int, limit_shape: str, evaluation: dict, strategy_config: dict, data: list[dict]):
+    topic_index_context = _topic_index_context(topic)
+    topic_return_1d = float(topic_index_context.get("topic_return_1d") or (topic.get("raw_snapshot") or {}).get("return_1d") or 0)
+    leader_rs_10d = _return_over(data, 10) - float(topic_index_context.get("topic_return_10d") or 0)
+    leader_rs_20d = _return_over(data, 20) - float(topic_index_context.get("topic_return_20d") or 0)
     return score_leader_candidate({
         "code": leader_input.get("code", ""),
         "name": leader_input.get("name", ""),
@@ -336,7 +359,7 @@ def _score_leader(topic: dict, leader_input: dict, rank: int, limit_shape: str, 
         "started_early": True,
         "limit_shape": limit_shape,
         "consecutive_limit_count": int((topic.get("raw_snapshot") or {}).get("leader_limit_count") or 0),
-        "relative_strength_vs_topic": max(0.0, float(leader_input.get("return_1d") or 0) - topic_return_1d),
+        "relative_strength_vs_topic": max(0.0, leader_rs_10d, leader_rs_20d, float(leader_input.get("return_1d") or 0) - topic_return_1d),
         "recognition_sources": leader_input.get("recognition_sources") or ["topic_member"],
         "turnover_rate": float(leader_input.get("turnover_rate") or 0.05),
         "is_climax": bool(leader_input.get("is_climax", False)),
@@ -347,6 +370,10 @@ def _score_leader(topic: dict, leader_input: dict, rank: int, limit_shape: str, 
 
 
 def _leader_snapshot(topic: dict, leader_input: dict, leader_score, info, limit_shape: str, data: list[dict]) -> dict:
+    topic_index_context = _topic_index_context(topic)
+    leader_rs_5d = _return_over(data, 5) - float(topic_index_context.get("topic_return_5d") or 0)
+    leader_rs_10d = _return_over(data, 10) - float(topic_index_context.get("topic_return_10d") or 0)
+    leader_rs_20d = _return_over(data, 20) - float(topic_index_context.get("topic_return_20d") or 0)
     return {
         "topic_id": topic.get("topic_id", ""),
         "topic_name": topic.get("topic_name", ""),
@@ -368,10 +395,22 @@ def _leader_snapshot(topic: dict, leader_input: dict, leader_score, info, limit_
         "first_wave_max_amount": max(_amount(r) for r in data[-20:]),
         "last_non_limit_amount": _last_non_limit_amount(data, limit_shape),
         "consecutive_limit_count": int((topic.get("raw_snapshot") or {}).get("leader_limit_count") or 0),
-        "relative_strength_vs_topic": max(0.0, float(leader_input.get("return_1d") or 0) - float((topic.get("raw_snapshot") or {}).get("return_1d") or 0)),
+        "relative_strength_vs_topic": max(0.0, leader_rs_10d, leader_rs_20d),
         "membership_source": leader_input.get("membership_source", ""),
         "status": leader_score.status,
-        "raw_snapshot": {**leader_input, "leader_reasons": leader_score.reasons},
+        "raw_snapshot": {
+            **leader_input,
+            "leader_reasons": leader_score.reasons,
+            "topic_index_context": topic_index_context,
+            "topic_return_5d": float(topic_index_context.get("topic_return_5d") or 0),
+            "topic_return_10d": float(topic_index_context.get("topic_return_10d") or 0),
+            "topic_return_20d": float(topic_index_context.get("topic_return_20d") or 0),
+            "leader_rs_5d": round(leader_rs_5d, 4),
+            "leader_rs_10d": round(leader_rs_10d, 4),
+            "leader_rs_20d": round(leader_rs_20d, 4),
+            "topic_index_phase": topic_index_context.get("phase", ""),
+            "topic_index_risk_flags": topic_index_context.get("topic_index_risk_flags", []),
+        },
     }
 
 
@@ -508,6 +547,15 @@ def _return_over(data: list[dict], days: int) -> float:
     prev = float(data[-days - 1]["close"])
     close = float(data[-1]["close"])
     return round((close - prev) / prev, 4) if prev > 0 else 0.0
+
+
+def _topic_index_context(topic: dict) -> dict:
+    raw = topic.get("raw_snapshot") or {}
+    if isinstance(raw, dict):
+        context = raw.get("topic_index_context") or {}
+        if isinstance(context, dict):
+            return context
+    return {}
 
 
 def _amount(row: dict) -> float:

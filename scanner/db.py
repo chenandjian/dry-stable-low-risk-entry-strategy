@@ -1488,6 +1488,66 @@ def _ensure_strategy4_tables(conn: sqlite3.Connection):
             UNIQUE(task_id, code, topic_id)
         )
     ''')
+    conn.execute('''
+        CREATE TABLE IF NOT EXISTS strategy4_topic_index_ohlc (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            topic_id TEXT NOT NULL,
+            topic_name TEXT NOT NULL,
+            topic_type TEXT NOT NULL,
+            source TEXT NOT NULL,
+            source_topic_code TEXT,
+            source_topic_name TEXT,
+            date TEXT NOT NULL,
+            open REAL NOT NULL,
+            high REAL NOT NULL,
+            low REAL NOT NULL,
+            close REAL NOT NULL,
+            volume REAL DEFAULT 0,
+            amount REAL DEFAULT 0,
+            turnover REAL DEFAULT 0,
+            change_pct REAL DEFAULT 0,
+            fetched_at TEXT NOT NULL,
+            data_version TEXT DEFAULT 'v1',
+            raw_snapshot TEXT,
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+            UNIQUE(topic_id, source, date)
+        )
+    ''')
+    conn.execute('''
+        CREATE TABLE IF NOT EXISTS strategy4_topic_index_fetch_status (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            topic_id TEXT NOT NULL,
+            topic_name TEXT NOT NULL,
+            topic_type TEXT NOT NULL,
+            source TEXT NOT NULL,
+            source_topic_code TEXT,
+            source_topic_name TEXT,
+            start_date TEXT,
+            end_date TEXT,
+            status TEXT NOT NULL,
+            latest_date TEXT,
+            rows_count INTEGER DEFAULT 0,
+            error_code TEXT,
+            error_message TEXT,
+            fetched_at TEXT NOT NULL,
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+        )
+    ''')
+    for column, col_type in {
+        "topic_index_source": "TEXT",
+        "topic_index_latest_date": "TEXT",
+        "topic_index_rows": "INTEGER DEFAULT 0",
+        "topic_index_observed": "INTEGER DEFAULT 0",
+        "topic_index_status": "TEXT",
+        "topic_index_trend_score": "REAL DEFAULT 0",
+        "topic_index_breakout_score": "REAL DEFAULT 0",
+        "topic_index_volume_score": "REAL DEFAULT 0",
+        "topic_index_risk_penalty": "REAL DEFAULT 0",
+        "topic_index_phase": "TEXT",
+    }.items():
+        _ensure_column(conn, "strategy4_hot_topics", column, col_type)
     conn.execute("CREATE INDEX IF NOT EXISTS idx_strategy4_hot_topics_task ON strategy4_hot_topics(task_id)")
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_strategy4_hot_topics_score "
@@ -1496,6 +1556,8 @@ def _ensure_strategy4_tables(conn: sqlite3.Connection):
     conn.execute("CREATE INDEX IF NOT EXISTS idx_strategy4_leaders_task ON strategy4_leaders(task_id)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_strategy4_leaders_code ON strategy4_leaders(code)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_strategy4_candidates_task ON strategy4_candidates(task_id)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_s4_topic_index_topic_date ON strategy4_topic_index_ohlc(topic_id, date)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_s4_topic_index_source_name ON strategy4_topic_index_ohlc(source, source_topic_name)")
 
 
 def _ensure_column(conn: sqlite3.Connection, table: str, column: str, col_type: str):
@@ -1836,7 +1898,10 @@ def replace_strategy4_hot_topics(task_id: str, topics: list[dict]):
         "status", "hot_topic_score", "price_strength_score", "amount_strength_score",
         "fund_flow_score", "breadth_score", "leader_limit_score", "breakout_score",
         "signal_count", "noise_reason", "leading_stock_code", "leading_stock_name",
-        "raw_snapshot",
+        "raw_snapshot", "topic_index_source", "topic_index_latest_date", "topic_index_rows",
+        "topic_index_observed", "topic_index_status", "topic_index_trend_score",
+        "topic_index_breakout_score", "topic_index_volume_score", "topic_index_risk_penalty",
+        "topic_index_phase",
     ]
     with conn:
         conn.execute("DELETE FROM strategy4_hot_topics WHERE task_id=?", (task_id,))
@@ -1861,6 +1926,16 @@ def replace_strategy4_hot_topics(task_id: str, topics: list[dict]):
                 item.get("leading_stock_code", ""),
                 item.get("leading_stock_name", ""),
                 _json_any(item.get("raw_snapshot")),
+                item.get("topic_index_source", ""),
+                item.get("topic_index_latest_date", ""),
+                item.get("topic_index_rows", 0),
+                1 if item.get("topic_index_observed") else 0,
+                item.get("topic_index_status", ""),
+                item.get("topic_index_trend_score", 0.0),
+                item.get("topic_index_breakout_score", 0.0),
+                item.get("topic_index_volume_score", 0.0),
+                item.get("topic_index_risk_penalty", 0.0),
+                item.get("topic_index_phase", ""),
             ]
             conn.execute(
                 f"INSERT INTO strategy4_hot_topics ({', '.join(columns)}) VALUES ({', '.join('?' for _ in columns)})",
@@ -2018,10 +2093,172 @@ def get_strategy4_candidate(code: str, task_id: str = None) -> dict | None:
     return _deserialize_strategy4_row(dict(zip(cols, row)))
 
 
+def save_strategy4_topic_index_ohlc(
+    *,
+    topic_id: str,
+    topic_name: str,
+    topic_type: str,
+    source: str,
+    rows: list[dict],
+    source_topic_code: str = "",
+    source_topic_name: str = "",
+):
+    """Save normalized Strategy4 topic index OHLC rows idempotently."""
+    conn = get_conn()
+    now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    with conn:
+        for row in rows:
+            conn.execute(
+                """INSERT INTO strategy4_topic_index_ohlc (
+                       topic_id, topic_name, topic_type, source, source_topic_code, source_topic_name,
+                       date, open, high, low, close, volume, amount, turnover, change_pct,
+                       fetched_at, data_version, raw_snapshot
+                   ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                   ON CONFLICT(topic_id, source, date) DO UPDATE SET
+                       topic_name=excluded.topic_name,
+                       topic_type=excluded.topic_type,
+                       source_topic_code=excluded.source_topic_code,
+                       source_topic_name=excluded.source_topic_name,
+                       open=excluded.open,
+                       high=excluded.high,
+                       low=excluded.low,
+                       close=excluded.close,
+                       volume=excluded.volume,
+                       amount=excluded.amount,
+                       turnover=excluded.turnover,
+                       change_pct=excluded.change_pct,
+                       fetched_at=excluded.fetched_at,
+                       data_version=excluded.data_version,
+                       raw_snapshot=excluded.raw_snapshot,
+                       updated_at=datetime('now')""",
+                (
+                    topic_id,
+                    topic_name,
+                    topic_type,
+                    source,
+                    source_topic_code,
+                    source_topic_name or topic_name,
+                    row.get("date", ""),
+                    row.get("open", 0.0),
+                    row.get("high", 0.0),
+                    row.get("low", 0.0),
+                    row.get("close", 0.0),
+                    row.get("volume", 0.0),
+                    row.get("amount", 0.0),
+                    row.get("turnover", 0.0),
+                    row.get("change_pct", 0.0),
+                    row.get("fetched_at") or now,
+                    row.get("data_version", "v1"),
+                    _json_any(row.get("raw_snapshot")),
+                ),
+            )
+
+
+def get_strategy4_topic_index_ohlc(
+    topic_id: str,
+    *,
+    source: str | None = None,
+    end_date: str | None = None,
+    max_rows: int = 0,
+) -> list[dict]:
+    """Return Strategy4 topic index OHLC rows sorted ascending."""
+    conn = get_conn()
+    clauses = ["topic_id=?"]
+    params: list = [topic_id]
+    if source:
+        clauses.append("source=?")
+        params.append(source)
+    if end_date:
+        clauses.append("date<=?")
+        params.append(end_date[:10])
+    limit = ""
+    if max_rows and max_rows > 0:
+        limit = " LIMIT ?"
+        params.append(max_rows)
+    rows = conn.execute(
+        f"""SELECT * FROM (
+                SELECT * FROM strategy4_topic_index_ohlc
+                WHERE {' AND '.join(clauses)}
+                ORDER BY date DESC{limit}
+            ) ORDER BY date ASC""",
+        params,
+    ).fetchall()
+    cols = [d[1] for d in conn.execute("PRAGMA table_info(strategy4_topic_index_ohlc)").fetchall()]
+    return [_deserialize_topic_index_row(dict(zip(cols, row))) for row in rows]
+
+
+def save_strategy4_topic_index_fetch_status(
+    *,
+    topic_id: str,
+    topic_name: str,
+    topic_type: str,
+    source: str,
+    status: str,
+    source_topic_code: str = "",
+    source_topic_name: str = "",
+    start_date: str = "",
+    end_date: str = "",
+    latest_date: str = "",
+    rows_count: int = 0,
+    error_code: str = "",
+    error_message: str = "",
+):
+    """Record Strategy4 topic index fetch status for audit."""
+    conn = get_conn()
+    now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    with conn:
+        conn.execute(
+            """INSERT INTO strategy4_topic_index_fetch_status (
+                   topic_id, topic_name, topic_type, source, source_topic_code, source_topic_name,
+                   start_date, end_date, status, latest_date, rows_count, error_code, error_message, fetched_at
+               ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                topic_id,
+                topic_name,
+                topic_type,
+                source,
+                source_topic_code,
+                source_topic_name or topic_name,
+                start_date,
+                end_date,
+                status,
+                latest_date,
+                rows_count,
+                error_code,
+                error_message,
+                now,
+            ),
+        )
+
+
+def get_latest_strategy4_topic_index_fetch_status(topic_id: str) -> dict | None:
+    conn = get_conn()
+    row = conn.execute(
+        "SELECT * FROM strategy4_topic_index_fetch_status WHERE topic_id=? ORDER BY id DESC LIMIT 1",
+        (topic_id,),
+    ).fetchone()
+    if not row:
+        return None
+    cols = [d[1] for d in conn.execute("PRAGMA table_info(strategy4_topic_index_fetch_status)").fetchall()]
+    return dict(zip(cols, row))
+
+
 def _json_any(value):
     if value is None or value == "":
         return ""
     return json.dumps(value, ensure_ascii=False)
+
+
+def _deserialize_topic_index_row(row: dict) -> dict:
+    value = row.get("raw_snapshot")
+    if isinstance(value, str) and value:
+        try:
+            row["raw_snapshot"] = json.loads(value)
+        except (json.JSONDecodeError, TypeError):
+            row["raw_snapshot"] = {}
+    elif not value:
+        row["raw_snapshot"] = {}
+    return row
 
 
 def _deserialize_strategy4_row(row: dict) -> dict:

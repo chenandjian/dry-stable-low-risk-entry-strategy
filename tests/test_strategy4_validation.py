@@ -28,6 +28,11 @@ def test_resolve_strategy4_config_defaults():
     assert cfg["aggressive_max_risk_ratio"] == 0.20
     assert cfg["min_reward_risk_ratio"] == 2.0
     assert cfg["core_leader_min_reward_risk_ratio"] == 1.8
+    assert cfg["topic_index"]["enabled"] is True
+    assert cfg["topic_index"]["preferred_sources"] == ["akshare_ths", "akshare_eastmoney"]
+    assert cfg["topic_index"]["history_days"] == 250
+    assert cfg["topic_index"]["min_required_rows"] == 60
+    assert cfg["topic_index"]["require_for_buyable_candidate"] is True
 
 
 def test_resolve_strategy4_config_accepts_nested_overrides():
@@ -44,6 +49,23 @@ def test_resolve_strategy4_config_accepts_nested_overrides():
     assert cfg["min_hot_topic_score"] == 80
     assert cfg["max_risk_ratio"] == 0.12
     assert cfg["core_leader_min_reward_risk_ratio"] == 1.6
+
+
+def test_resolve_strategy4_config_accepts_nested_topic_index_overrides():
+    cfg = resolve_strategy4_config({
+        "strategy4": {
+            "topic_index": {
+                "preferred_sources": ["akshare_eastmoney"],
+                "history_days": 120,
+                "min_required_rows": 30,
+            },
+        },
+    })
+
+    assert cfg["topic_index"]["preferred_sources"] == ["akshare_eastmoney"]
+    assert cfg["topic_index"]["history_days"] == 120
+    assert cfg["topic_index"]["min_required_rows"] == 30
+    assert cfg["topic_index"]["require_for_buyable_candidate"] is True
 
 
 def test_strategy4_config_rejects_invalid_orders():
@@ -80,3 +102,12 @@ def test_strategy4_config_rejects_invalid_orders():
                 "core_leader_min_reward_risk_ratio": 2.5,
             },
         })
+
+    with pytest.raises(ValueError, match="topic_index.preferred_sources"):
+        resolve_strategy4_config({"strategy4": {"topic_index": {"preferred_sources": ["fake"]}}})
+
+    with pytest.raises(ValueError, match="topic_index.history_days"):
+        resolve_strategy4_config({"strategy4": {"topic_index": {"history_days": 10}}})
+
+    with pytest.raises(ValueError, match="topic_index.history_days must be >= topic_index.min_required_rows"):
+        resolve_strategy4_config({"strategy4": {"topic_index": {"history_days": 80, "min_required_rows": 120}}})

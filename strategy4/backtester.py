@@ -23,6 +23,7 @@ from strategy4.price_limit import (
     LIMIT_SHAPE_T_LIMIT_UP,
     PriceLimitResolver,
 )
+from strategy4.topic_index_service import topic_index_context_from_history
 from strategy4.backtest_models import (
     Strategy4BacktestOpportunity,
     Strategy4BacktestResult,
@@ -108,8 +109,16 @@ def run_strategy4_snapshot_backtest(
         result.summary.observed_snapshot_days += 1
 
         for topic in topics:
+            topic_index_context = _topic_index_context_for_backtest(topic, cfg, evaluation_date)
+            if not topic_index_context.get("observed"):
+                result.unobserved.append(Strategy4UnobservedDay(
+                    evaluation_date=evaluation_date,
+                    reason_code="UNOBSERVED_TOPIC_INDEX",
+                    detail=f"{topic.get('topic_id') or topic.get('topic_name')} has no observable topic index K-line history.",
+                ))
+                continue
             for leader in leaders_by_topic.get(topic.get("topic_id", ""), []):
-                signal = _evaluate_leader_snapshot(topic, leader, engine, cfg, evaluation_date)
+                signal = _evaluate_leader_snapshot(topic, leader, engine, cfg, evaluation_date, topic_index_context=topic_index_context)
                 if signal is None:
                     continue
                 result.signals.append(signal)
@@ -221,6 +230,7 @@ def _evaluate_leader_snapshot(
     engine: HotLeaderSecondWaveEngine,
     cfg: dict,
     evaluation_date: str,
+    topic_index_context: dict | None = None,
 ) -> Strategy4BacktestSignal | None:
     code = str(leader.get("code") or "")
     ohlc = db.get_ohlc(code) or []
@@ -270,6 +280,7 @@ def _evaluate_leader_snapshot(
             "leader_status": leader.get("status"),
             "engine_status": evaluation.get("status"),
             **_market_index_metadata(code, evaluation_date),
+            **_topic_index_metadata(topic_index_context or {}),
         },
     )
 
@@ -356,6 +367,28 @@ def _market_index_symbol_for_code(code: str) -> str:
     if normalized.startswith(("000", "001", "002", "003")):
         return "sz399001"
     return "sh000001"
+
+
+def _topic_index_context_for_backtest(topic: dict, cfg: dict, evaluation_date: str) -> dict:
+    topic_index_cfg = cfg.get("topic_index") or {}
+    min_rows = int(topic_index_cfg.get("min_required_rows", 60))
+    max_rows = int(topic_index_cfg.get("history_days", 250))
+    return topic_index_context_from_history(topic, evaluation_date=evaluation_date, min_required_rows=min_rows, max_rows=max_rows)
+
+
+def _topic_index_metadata(context: dict) -> dict:
+    return {
+        "topic_index_source": context.get("source", ""),
+        "topic_index_latest_date": context.get("latest_date", ""),
+        "topic_index_rows": int(context.get("rows") or 0),
+        "topic_index_observed": bool(context.get("observed")),
+        "topic_index_status": context.get("status", ""),
+        "topic_index_phase": context.get("phase", ""),
+        "topic_return_1d": context.get("topic_return_1d", 0.0),
+        "topic_return_5d": context.get("topic_return_5d", 0.0),
+        "topic_return_10d": context.get("topic_return_10d", 0.0),
+        "topic_return_20d": context.get("topic_return_20d", 0.0),
+    }
 
 
 def _snapshot_task_for_exact_date(evaluation_date: str) -> str | None:
@@ -450,7 +483,7 @@ def _render_report(
         f"- 数据库：`{db_path}`",
         f"- daily_ohlc：{coverage['daily_rows']} 行，{coverage['daily_stocks']} 只，{coverage['daily_min']} 至 {coverage['daily_max']}",
         f"- market_index_ohlc：{coverage['index_rows']} 行，{coverage['index_min']} 至 {coverage['index_max']}",
-        f"- topic_index_ohlc：{coverage['topic_index_rows']} 行（{coverage['topic_index_note']}）",
+        f"- strategy4_topic_index_ohlc：{coverage['topic_index_rows']} 行（{coverage['topic_index_note']}）",
         f"- strategy4_hot_topics：{coverage['topic_rows']} 行，{coverage['topic_min']} 至 {coverage['topic_max']}",
         f"- strategy4_leaders：{coverage['leader_rows']} 行",
         "",
@@ -510,8 +543,8 @@ def _coverage(db_path: str) -> dict:
     leaders = con.execute("SELECT COUNT(*) rows FROM strategy4_leaders").fetchone()
     topic_index_rows = 0
     topic_index_note = "UNOBSERVED_TOPIC_INDEX: no topic/industry index history table found"
-    if _table_exists(con, "topic_index_ohlc"):
-        topic_index = con.execute("SELECT COUNT(*) rows FROM topic_index_ohlc").fetchone()
+    if _table_exists(con, "strategy4_topic_index_ohlc"):
+        topic_index = con.execute("SELECT COUNT(*) rows FROM strategy4_topic_index_ohlc").fetchone()
         topic_index_rows = topic_index["rows"]
         topic_index_note = "observable" if topic_index_rows else "UNOBSERVED_TOPIC_INDEX: empty topic index cache"
     return {

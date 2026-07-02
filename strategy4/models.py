@@ -18,6 +18,16 @@ class HotTopicScore:
     breadth_score: float = 0.0
     leader_limit_score: float = 0.0
     breakout_score: float = 0.0
+    topic_index_source: str = ""
+    topic_index_latest_date: str = ""
+    topic_index_rows: int = 0
+    topic_index_observed: bool = False
+    topic_index_status: str = ""
+    topic_index_trend_score: float = 0.0
+    topic_index_breakout_score: float = 0.0
+    topic_index_volume_score: float = 0.0
+    topic_index_risk_penalty: float = 0.0
+    topic_index_phase: str = ""
     signal_count: int = 0
     strong_signals: list[str] = field(default_factory=list)
     noise_reason: str = ""
@@ -73,4 +83,3 @@ class RiskRewardResult:
     risk_ratio: float = 0.0
     reward_risk_ratio: float = 0.0
     reject_reasons: list[str] = field(default_factory=list)
-

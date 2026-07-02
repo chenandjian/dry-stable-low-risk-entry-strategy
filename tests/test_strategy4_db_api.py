@@ -438,6 +438,7 @@ def test_strategy4_scan_counts_survive_refresh_when_candidate_found(tmp_path, mo
         "下跌家数": 10,
         "涨停家数": 2,
     }])
+    fake_ak.stock_board_concept_index_ths = lambda symbol, start_date, end_date: _fake_frame(_topic_index_rows())
     fake_ak.stock_board_industry_name_ths = lambda: _fake_frame([])
     fake_ak.stock_board_concept_cons_ths = lambda symbol: _fake_frame([
         {"代码": "300750", "名称": "宁德时代", "涨跌幅": 20.0, "成交额": 2000000000},
@@ -447,7 +448,7 @@ def test_strategy4_scan_counts_survive_refresh_when_candidate_found(tmp_path, mo
     result = scan_strategy4_all(
         {
             "data": {"database_path": db_path},
-            "strategy4": {"min_leader_strength_score": 60},
+            "strategy4": {"min_leader_strength_score": 60, "topic_index": {"min_required_rows": 20}},
         },
         task_id=task_id,
     )
@@ -457,6 +458,96 @@ def test_strategy4_scan_counts_survive_refresh_when_candidate_found(tmp_path, mo
     assert summary["total_stocks"] == 1
     assert summary["candidate"] == 1
     assert summary["candidates_count"] == 1
+
+
+def test_strategy4_scan_persists_topic_index_context_and_relative_strength(tmp_path, monkeypatch):
+    import types
+    from strategy4.scanner import scan_strategy4_all
+
+    db_path = str(tmp_path / "test.db")
+    task_id = "s4-topic-index-observed"
+    db.init_db(db_path)
+    db.create_scan_task(task_id, "2026-07-01 15:30:00", strategy_type=STRATEGY4_TYPE)
+    db.save_ohlc("300750", _bars_for_buyable_second_wave())
+    fake_ak = types.SimpleNamespace()
+    fake_ak.stock_board_concept_name_ths = lambda: _fake_frame([{
+        "板块": "AI算力",
+        "涨跌幅": 5.0,
+        "3日涨幅": 10.0,
+        "5日涨幅": 16.0,
+        "量比": 1.8,
+        "净流入": 600000000,
+        "上涨家数": 80,
+        "下跌家数": 10,
+        "涨停家数": 2,
+    }])
+    fake_ak.stock_board_industry_name_ths = lambda: _fake_frame([])
+    fake_ak.stock_board_concept_index_ths = lambda symbol, start_date, end_date: _fake_frame(_topic_index_rows())
+    fake_ak.stock_board_concept_cons_ths = lambda symbol: _fake_frame([
+        {"代码": "300750", "名称": "宁德时代", "涨跌幅": 20.0, "成交额": 2000000000},
+    ])
+    monkeypatch.setitem(__import__("sys").modules, "akshare", fake_ak)
+
+    result = scan_strategy4_all(
+        {
+            "data": {"database_path": db_path},
+            "strategy4": {"min_leader_strength_score": 60, "topic_index": {"min_required_rows": 20}},
+        },
+        task_id=task_id,
+    )
+
+    topic = result["topics"][0]
+    leader = result["leaders"][0]
+    saved_rows = db.get_strategy4_topic_index_ohlc("concept:AI算力")
+
+    assert topic["topic_index_observed"] is True
+    assert topic["topic_index_latest_date"] == "2099-01-20"
+    assert topic["topic_index_phase"] in {"EARLY_ACCELERATION", "MAIN_TREND"}
+    assert saved_rows[-1]["date"] == "2099-01-20"
+    assert leader["raw_snapshot"]["topic_return_10d"] > 0
+    assert "leader_rs_10d" in leader["raw_snapshot"]
+
+
+def test_strategy4_scan_blocks_buyable_candidate_when_topic_index_unobserved(tmp_path, monkeypatch):
+    import types
+    from strategy4.scanner import scan_strategy4_all
+
+    db_path = str(tmp_path / "test.db")
+    task_id = "s4-topic-index-unobserved"
+    db.init_db(db_path)
+    db.create_scan_task(task_id, "2026-07-01 15:30:00", strategy_type=STRATEGY4_TYPE)
+    db.save_ohlc("300750", _bars_for_buyable_second_wave())
+    fake_ak = types.SimpleNamespace()
+    fake_ak.stock_board_concept_name_ths = lambda: _fake_frame([{
+        "板块": "AI算力",
+        "涨跌幅": 5.0,
+        "3日涨幅": 10.0,
+        "5日涨幅": 16.0,
+        "量比": 1.8,
+        "净流入": 600000000,
+        "上涨家数": 80,
+        "下跌家数": 10,
+        "涨停家数": 2,
+    }])
+    fake_ak.stock_board_industry_name_ths = lambda: _fake_frame([])
+    fake_ak.stock_board_concept_index_ths = lambda symbol, start_date, end_date: (_ for _ in ()).throw(RuntimeError("source down"))
+    fake_ak.stock_board_concept_cons_ths = lambda symbol: _fake_frame([
+        {"代码": "300750", "名称": "宁德时代", "涨跌幅": 20.0, "成交额": 2000000000},
+    ])
+    monkeypatch.setitem(__import__("sys").modules, "akshare", fake_ak)
+
+    result = scan_strategy4_all(
+        {
+            "data": {"database_path": db_path},
+            "strategy4": {"min_leader_strength_score": 60, "topic_index": {"min_required_rows": 20}},
+        },
+        task_id=task_id,
+    )
+
+    assert result["topics"][0]["topic_index_observed"] is False
+    assert result["topics"][0]["topic_index_status"] != "observed"
+    assert result["candidates"] == []
+    assert db.get_strategy4_candidates(task_id) == []
 
 
 def test_start_strategy4_scan_returns_started_without_running_scan_synchronously(tmp_path, monkeypatch):
@@ -526,4 +617,20 @@ def _bars_for_buyable_second_wave():
     rows[-1]["low"] = 15.6
     rows[-1]["high"] = 16.6
     rows[9]["high"] = 24.0
+    return rows
+
+
+def _topic_index_rows():
+    rows = []
+    for idx in range(20):
+        close = 100 + idx * 0.5
+        rows.append({
+            "日期": f"2099-01-{idx + 1:02d}",
+            "开盘价": round(close * 0.99, 2),
+            "最高价": round(close * 1.02, 2),
+            "最低价": round(close * 0.98, 2),
+            "收盘价": round(close, 2),
+            "成交额": 1_000_000_000 + idx * 50_000_000,
+            "涨跌幅": 0.5,
+        })
     return rows

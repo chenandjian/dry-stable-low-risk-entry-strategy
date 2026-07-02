@@ -162,6 +162,64 @@ def test_strategy4_backtest_market_index_metadata_is_truncated_at_evaluation_dat
     assert snapshot["market_index_rows"] == 2
 
 
+def test_strategy4_backtest_marks_missing_topic_index_unobserved(tmp_path):
+    db_path = str(tmp_path / "test.db")
+    db.init_db(db_path)
+    db.save_ohlc("300750", _bars_for_buyable_second_wave())
+    _seed_strategy4_snapshot(db_path, task_id="s4-snap", date="2026-06-20", code="300750", include_topic_index=False)
+
+    result = run_strategy4_snapshot_backtest(
+        db_path=db_path,
+        start_date="2026-06-20",
+        end_date="2026-06-20",
+        config_snapshot={"strategy4": {"min_leader_strength_score": 60}},
+    )
+
+    assert result.signals == []
+    assert result.opportunities == []
+    assert result.unobserved[0].reason_code == "UNOBSERVED_TOPIC_INDEX"
+
+
+def test_strategy4_backtest_topic_index_metadata_is_truncated_at_evaluation_date(tmp_path):
+    db_path = str(tmp_path / "test.db")
+    db.init_db(db_path)
+    rows = _bars_for_buyable_second_wave()
+    rows.append({
+        "date": "2026-06-23",
+        "open": 16.5,
+        "high": 17.2,
+        "low": 16.2,
+        "close": 17.0,
+        "volume": 4_500_000,
+        "turnover": 16.8 * 4_500_000,
+    })
+    db.save_ohlc("300750", rows)
+    db.save_strategy4_topic_index_ohlc(
+        topic_id="concept-ai",
+        topic_name="AI算力",
+        topic_type="concept",
+        source="fixture",
+        rows=[
+            {"date": "2026-06-18", "open": 100, "high": 101, "low": 99, "close": 100, "amount": 1000},
+            {"date": "2026-06-20", "open": 100, "high": 105, "low": 99, "close": 104, "amount": 2000},
+            {"date": "2026-06-23", "open": 104, "high": 130, "low": 104, "close": 128, "amount": 9000},
+        ],
+    )
+    _seed_strategy4_snapshot(db_path, task_id="s4-snap", date="2026-06-20", code="300750", include_topic_index=False)
+
+    result = run_strategy4_snapshot_backtest(
+        db_path=db_path,
+        start_date="2026-06-20",
+        end_date="2026-06-20",
+        config_snapshot={"strategy4": {"min_leader_strength_score": 60, "topic_index": {"min_required_rows": 2}}},
+    )
+
+    snapshot = result.signals[0].evaluation_snapshot
+    assert snapshot["topic_index_latest_date"] == "2026-06-20"
+    assert snapshot["topic_index_rows"] == 2
+    assert snapshot["topic_return_1d"] == 0.04
+
+
 def _seed_strategy4_snapshot(
     db_path,
     *,
@@ -170,6 +228,7 @@ def _seed_strategy4_snapshot(
     code,
     hot_score=92,
     leader_score=91,
+    include_topic_index=True,
 ):
     db.init_db(db_path)
     db.create_scan_task(task_id, f"{date} 15:30:00", strategy_type="STRATEGY_4_HOT_LEADER_SECOND_WAVE")
@@ -217,6 +276,24 @@ def _seed_strategy4_snapshot(
         "membership_source": "fixture",
         "status": "LEADER_CONFIRMED",
     }])
+    if include_topic_index:
+        db.save_strategy4_topic_index_ohlc(
+            topic_id="concept-ai",
+            topic_name="AI算力",
+            topic_type="concept",
+            source="fixture",
+            rows=[
+                {
+                    "date": f"2026-04-{idx + 1:02d}" if idx < 30 else f"2026-05-{idx - 29:02d}",
+                    "open": 100 + idx * 0.1,
+                    "high": 101 + idx * 0.1,
+                    "low": 99 + idx * 0.1,
+                    "close": 100 + idx * 0.1,
+                    "amount": 1000 + idx * 10,
+                }
+                for idx in range(60)
+            ],
+        )
 
 
 def _bars_for_buyable_second_wave():

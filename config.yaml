@@ -179,3 +179,26 @@ strategy4:
   aggressive_max_risk_ratio: 0.20
   min_reward_risk_ratio: 2.0
   core_leader_min_reward_risk_ratio: 1.8
+  topic_index:
+    enabled: true
+    preferred_sources:
+      - akshare_ths
+      - akshare_eastmoney
+    history_days: 250
+    min_required_rows: 60
+    require_for_buyable_candidate: true
+    allow_unobserved_for_watch: true
+    max_fetch_topics_per_scan: 30
+    source_retry_attempts: 2
+  topic_index_filters:
+    min_trend_score: 8.0
+    min_breakout_score: 0.0
+    min_amount_ratio_5_20: 1.0
+    max_drawdown_from_high_20: 0.12
+    allowed_phases:
+      - EARLY_ACCELERATION
+      - MAIN_TREND
+      - PULLBACK_REPAIR
+  leader_relative_strength:
+    min_rs_10d: 0.05
+    min_rs_20d: 0.08

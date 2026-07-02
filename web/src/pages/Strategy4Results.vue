@@ -19,12 +19,17 @@
       <div class="panel-header">热点题材榜</div>
       <div v-if="topics.length === 0" class="empty">暂无热点题材快照</div>
       <table v-else>
-        <thead><tr><th>题材</th><th>状态</th><th>热度</th><th>信号数</th><th>领涨股</th><th>来源</th></tr></thead>
+        <thead><tr><th>题材</th><th>状态</th><th>热度</th><th>板块K线</th><th>阶段</th><th>信号数</th><th>领涨股</th><th>来源</th></tr></thead>
         <tbody>
           <tr v-for="t in topics" :key="t.topic_id">
             <td>{{ t.topic_name }}</td>
             <td>{{ t.status }}</td>
             <td>{{ fmt(t.hot_topic_score) }}</td>
+            <td>
+              <span :class="topicIndexClass(t)">{{ topicIndexLabel(t) }}</span>
+              <small v-if="t.topic_index_latest_date"> · {{ t.topic_index_latest_date }}</small>
+            </td>
+            <td>{{ t.topic_index_phase || '--' }}</td>
             <td>{{ t.signal_count || 0 }}</td>
             <td>{{ t.leading_stock_code || '--' }} {{ t.leading_stock_name || '' }}</td>
             <td>{{ t.source || '--' }}</td>
@@ -83,6 +88,8 @@
         <div><span>风险比</span><strong>{{ pct(selectedCandidate.risk_ratio) }}</strong></div>
         <div><span>收益风险比</span><strong>{{ fmt(selectedCandidate.reward_risk_ratio) }}</strong></div>
         <div><span>涨停制度 / 形态</span><strong>{{ selectedCandidate.price_limit_rule || '--' }} / {{ selectedCandidate.limit_shape || '--' }}</strong></div>
+        <div><span>板块阶段</span><strong>{{ selectedCandidate.evaluation_snapshot?.topic_index_phase || '--' }}</strong></div>
+        <div><span>板块最新K线</span><strong>{{ selectedCandidate.evaluation_snapshot?.topic_index_latest_date || '--' }}</strong></div>
         <div><span>说明</span><strong>{{ selectedCandidate.entry_note || '--' }}</strong></div>
       </div>
     </section>
@@ -140,6 +147,15 @@ function fmt(v) {
 function pct(v) {
   const n = Number(v || 0)
   return Number.isFinite(n) ? `${(n * 100).toFixed(1)}%` : '--'
+}
+function topicIndexLabel(topic) {
+  if (topic.topic_index_observed) return '已观察'
+  if (topic.topic_index_status === 'source_failed') return '拉取失败'
+  if (topic.topic_index_status) return '不可观察'
+  return '未观察'
+}
+function topicIndexClass(topic) {
+  return topic.topic_index_observed ? 'topic-index-ok' : 'topic-index-warn'
 }
 
 async function loadTasks() {
@@ -218,6 +234,9 @@ select { background: var(--bg-panel); color: var(--text-primary); border: 1px so
 table { width: 100%; border-collapse: collapse; font-size: 12px; }
 th, td { padding: 10px 12px; border-bottom: 1px solid var(--border); text-align: left; }
 th { color: var(--text-secondary); font-weight: 600; }
+small { color: var(--text-muted); }
+.topic-index-ok { color: var(--down-green); font-weight: 700; }
+.topic-index-warn { color: var(--up-red); font-weight: 700; }
 .error-banner { margin-bottom: 12px; padding: 10px 12px; border: 1px solid rgba(239,68,68,0.4); color: var(--up-red); border-radius: 4px; }
 .clickable { cursor: pointer; }
 .clickable:hover { background: rgba(249, 115, 22, 0.08); }

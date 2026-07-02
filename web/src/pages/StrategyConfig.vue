@@ -502,10 +502,32 @@
           <input type="number" v-model.number="config.strategy4.min_reward_risk_ratio" @input="markDirty" min="0.5" max="10" step="0.1" />
           <span class="default">默认 2.0</span>
         </div>
+        <div class="param">
+          <label title="启用后策略4会拉取真实行业/概念/板块指数K线，用于确认热点趋势">板块K线确认</label>
+          <button class="toggle" :class="{ active: config.strategy4.topic_index?.enabled !== false }"
+            @click="toggleStrategy4TopicIndex('enabled')">{{ config.strategy4.topic_index?.enabled !== false ? '开' : '关' }}</button>
+          <span class="default">真实同花顺/东方财富板块K线</span>
+        </div>
+        <div class="param">
+          <label title="正式二波候选必须具备可观察板块K线，否则只进入观察，不进入可买候选">正式候选要求板块K线</label>
+          <button class="toggle" :class="{ active: config.strategy4.topic_index?.require_for_buyable_candidate !== false }"
+            @click="toggleStrategy4TopicIndex('require_for_buyable_candidate')">{{ config.strategy4.topic_index?.require_for_buyable_candidate !== false ? '开' : '关' }}</button>
+          <span class="default">默认开启，防止无板块历史仍出买点</span>
+        </div>
+        <div class="param">
+          <label title="每个热点题材拉取的板块指数K线历史长度">板块K线历史 <span class="unit">交易日</span></label>
+          <input type="number" v-model.number="config.strategy4.topic_index.history_days" @input="markDirty" min="60" max="1000" />
+          <span class="default">默认 250</span>
+        </div>
+        <div class="param">
+          <label title="低于该行数时，板块指数视为不可观察，不用于正式候选确认">最低板块K线行数</label>
+          <input type="number" v-model.number="config.strategy4.topic_index.min_required_rows" @input="markDirty" min="2" max="500" />
+          <span class="default">默认 60</span>
+        </div>
       </div>
 
       <div class="info-msg strategy4-info">
-        ⓘ 策略4不从全市场直接找形态，必须先过热点和龙头；涨停判断按 10cm/20cm/30cm/ST 动态识别。
+        ⓘ 策略4不从全市场直接找形态，必须先过热点和龙头；正式候选默认必须有真实板块K线确认，缺失时标记不可观察。
       </div>
     </section>
 
@@ -576,6 +598,27 @@ const defaultStrategy4Config = {
   aggressive_max_risk_ratio: 0.20,
   min_reward_risk_ratio: 2.0,
   core_leader_min_reward_risk_ratio: 1.8,
+  topic_index: {
+    enabled: true,
+    preferred_sources: ['akshare_ths', 'akshare_eastmoney'],
+    history_days: 250,
+    min_required_rows: 60,
+    require_for_buyable_candidate: true,
+    allow_unobserved_for_watch: true,
+    max_fetch_topics_per_scan: 30,
+    source_retry_attempts: 2,
+  },
+  topic_index_filters: {
+    min_trend_score: 8,
+    min_breakout_score: 0,
+    min_amount_ratio_5_20: 1,
+    max_drawdown_from_high_20: 0.12,
+    allowed_phases: ['EARLY_ACCELERATION', 'MAIN_TREND', 'PULLBACK_REPAIR'],
+  },
+  leader_relative_strength: {
+    min_rs_10d: 0.05,
+    min_rs_20d: 0.08,
+  },
 }
 
 const config = reactive({
@@ -746,7 +789,26 @@ function ensureStrategy3Config() {
 }
 
 function ensureStrategy4Config() {
-  config.strategy4 = { ...defaultStrategy4Config, ...(config.strategy4 || {}) }
+  config.strategy4 = mergeStrategy4Config(config.strategy4 || {})
+}
+
+function mergeStrategy4Config(value) {
+  return {
+    ...defaultStrategy4Config,
+    ...value,
+    topic_index: {
+      ...defaultStrategy4Config.topic_index,
+      ...(value.topic_index || {}),
+    },
+    topic_index_filters: {
+      ...defaultStrategy4Config.topic_index_filters,
+      ...(value.topic_index_filters || {}),
+    },
+    leader_relative_strength: {
+      ...defaultStrategy4Config.leader_relative_strength,
+      ...(value.leader_relative_strength || {}),
+    },
+  }
 }
 
 function cronToTime(cron) {
@@ -798,6 +860,12 @@ function toggleStrategy3(key) {
 function toggleStrategy4(key) {
   ensureStrategy4Config()
   config.strategy4[key] = !config.strategy4[key]
+  markDirty()
+}
+
+function toggleStrategy4TopicIndex(key) {
+  ensureStrategy4Config()
+  config.strategy4.topic_index[key] = !config.strategy4.topic_index[key]
   markDirty()
 }
 
@@ -925,6 +993,10 @@ function validate() {
   if (s4.pullback_max_pct < s4.pullback_min_pct) errors.push('策略4: 最大回踩不能小于最小回踩')
   if (s4.aggressive_max_risk_ratio < s4.max_risk_ratio) errors.push('策略4: 激进最大风险不能小于标准最大风险')
   if (s4.core_leader_min_reward_risk_ratio > s4.min_reward_risk_ratio) errors.push('策略4: 核心龙头最低收益比不能高于普通最低收益比')
+  const s4TopicIndex = s4.topic_index || {}
+  if (s4TopicIndex.history_days < 60 || s4TopicIndex.history_days > 1000) errors.push('策略4: 板块K线历史需在 60-1000')
+  if (s4TopicIndex.min_required_rows < 2 || s4TopicIndex.min_required_rows > 500) errors.push('策略4: 最低板块K线行数需在 2-500')
+  if (s4TopicIndex.history_days < s4TopicIndex.min_required_rows) errors.push('策略4: 板块K线历史不能小于最低行数')
 
   return errors
 }
