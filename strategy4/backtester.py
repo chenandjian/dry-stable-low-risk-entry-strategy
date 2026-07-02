@@ -33,6 +33,9 @@ from strategy4.backtest_models import (
 )
 
 
+BACKTEST_LEADER_STATUSES = {"LEADER_CONFIRMED", "LOCKED_LEADER_WATCH", "HOT_TOPIC_NO_BUY_POINT"}
+
+
 def run_strategy4_parameter_experiments(
     *,
     db_path: str,
@@ -331,7 +334,7 @@ def _leaders_by_topic(leaders: list[dict], cfg: dict) -> dict[str, list[dict]]:
     for leader in leaders:
         if float(leader.get("leader_strength_score") or 0) < min_score:
             continue
-        if str(leader.get("status") or "") not in {"LEADER_CONFIRMED", "LOCKED_LEADER_WATCH"}:
+        if str(leader.get("status") or "") not in BACKTEST_LEADER_STATUSES:
             continue
         grouped.setdefault(str(leader.get("topic_id") or ""), []).append(leader)
     for items in grouped.values():
@@ -489,29 +492,39 @@ def _render_report(
         "",
         "## 参数实验结果",
         "",
-        "| 实验 | 可观察日 | 不可观察日 | 信号 | 机会 | 入场 | 未入场 | 目标 | 止损 | 平均收益 | PF |",
-        "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
+        "| 实验 | 可观察日 | 不可观察日 | 不可观察率 | 信号 | 机会 | 入场 | 未入场 | 目标 | 止损 | 平均收益 | PF | 平均盈利 | 平均亏损 | 平均盈亏比 | 月度分布 |",
+        "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|",
     ]
     for name, result in results.items():
         s = result.summary
+        metrics = _result_metrics(result)
         pf = "--" if s.profit_factor is None else f"{s.profit_factor:.2f}"
         lines.append(
-            f"| {name} | {s.observed_snapshot_days} | {s.unobserved_snapshot_days} | "
+            f"| {name} | {s.observed_snapshot_days} | {s.unobserved_snapshot_days} | {metrics['unobserved_rate']} | "
             f"{s.total_signals} | {s.total_opportunities} | {s.entered_opportunities} | "
-            f"{s.no_entry_count} | {s.target_count} | {s.stop_count} | {s.avg_realized_return:.2%} | {pf} |"
+            f"{s.no_entry_count} | {s.target_count} | {s.stop_count} | {s.avg_realized_return:.2%} | {pf} | "
+            f"{metrics['avg_win']} | {metrics['avg_loss']} | {metrics['avg_win_loss_ratio']} | {metrics['monthly_distribution']} |"
         )
+    opportunity_lines = _opportunity_detail_lines(results)
+    if opportunity_lines:
+        lines.extend([
+            "",
+            "## 机会明细",
+            "",
+            "| 实验 | 股票 | 题材 | 发现日 | 入场日 | 退出原因 | 收益 | RR | 风险 | 回踩 | 回踩天数 | 板块源 | 板块K线日期 | 板块阶段 |",
+            "|---|---|---|---|---|---|---:|---:|---:|---:|---:|---|---|---|",
+            *opportunity_lines,
+        ])
+    best_name, best_result = _best_result(results)
     lines.extend([
         "",
         "## 最佳参数组合",
         "",
-        "本次没有可证明更优的参数组合。所有实验组均为 0 信号、0 机会、0 入场。",
-        "正式参数建议为：保留 `baseline` 当前默认参数作为观察基线，暂不升级生产默认值。",
+        *_best_result_lines(best_name, best_result),
         "",
         "## 结论",
         "",
-        "当前本地库仅存在 2026-07-01 当天的策略4热点/龙头快照，且这些快照没有产生可交易二波候选。",
-        "行业/题材指数历史缓存当前不可观察，报告按 `UNOBSERVED_TOPIC_INDEX` 处理，不使用当前题材指数倒推历史。",
-        "因此本次只能验证回测框架、不可观察标记和参数实验流程；证据不足以把任何参数组升级为生产正式推荐参数。",
+        *_conclusion_lines(coverage, results),
         "",
         "## 失效场景",
         "",
@@ -528,6 +541,118 @@ def _render_report(
     return "\n".join(lines) + "\n"
 
 
+def _opportunity_detail_lines(results: dict[str, Strategy4BacktestResult]) -> list[str]:
+    lines: list[str] = []
+    for name, result in results.items():
+        for opp in result.opportunities:
+            snapshot = opp.evaluation_snapshot or {}
+            entry_date = opp.entry_date or "--"
+            realized = "--" if opp.entry_price <= 0 else f"{opp.realized_return:.2%}"
+            lines.append(
+                f"| {name} | {opp.code} {opp.name} | {opp.topic_name} | {opp.first_detected_date} | "
+                f"{entry_date} | {opp.exit_reason or '--'} | {realized} | {opp.reward_risk_ratio:.2f} | "
+                f"{opp.risk_ratio:.2%} | {opp.pullback_pct:.2%} | {opp.pullback_days} | "
+                f"{snapshot.get('topic_index_source', '') or '--'} | {snapshot.get('topic_index_latest_date', '') or '--'} | "
+                f"{snapshot.get('topic_index_phase', '') or '--'} |"
+            )
+    return lines
+
+
+def _result_metrics(result: Strategy4BacktestResult) -> dict:
+    s = result.summary
+    total_days = s.evaluation_days or 0
+    unobserved_rate = s.unobserved_snapshot_days / total_days if total_days else 0.0
+    entered_returns = [
+        opp.realized_return
+        for opp in result.opportunities
+        if opp.entry_price > 0 and opp.exit_reason not in {"UNOBSERVED_ENTRY", "UNOBSERVED_FORWARD"}
+    ]
+    wins = [v for v in entered_returns if v > 0]
+    losses = [v for v in entered_returns if v < 0]
+    avg_win = sum(wins) / len(wins) if wins else None
+    avg_loss = sum(losses) / len(losses) if losses else None
+    avg_win_loss_ratio = abs(avg_win / avg_loss) if avg_win is not None and avg_loss and avg_loss < 0 else None
+    monthly: dict[str, int] = {}
+    for opp in result.opportunities:
+        month = str(opp.first_detected_date or "")[:7] or "unknown"
+        monthly[month] = monthly.get(month, 0) + 1
+    return {
+        "unobserved_rate": f"{unobserved_rate:.1%}",
+        "avg_win": "--" if avg_win is None else f"{avg_win:.2%}",
+        "avg_loss": "--" if avg_loss is None else f"{avg_loss:.2%}",
+        "avg_win_loss_ratio": "--" if avg_win_loss_ratio is None else f"{avg_win_loss_ratio:.2f}",
+        "monthly_distribution": ", ".join(f"{k}:{v}" for k, v in sorted(monthly.items())) or "--",
+    }
+
+
+def _best_result(results: dict[str, Strategy4BacktestResult]) -> tuple[str, Strategy4BacktestResult] | tuple[None, None]:
+    if not results:
+        return None, None
+    entered = [
+        (name, result)
+        for name, result in results.items()
+        if result.summary.entered_opportunities > 0
+    ]
+    if entered:
+        return max(
+            entered,
+            key=lambda item: (
+                item[1].summary.profit_factor or 0.0,
+                item[1].summary.avg_realized_return,
+                item[1].summary.entered_opportunities,
+            ),
+        )
+    opportunities = [
+        (name, result)
+        for name, result in results.items()
+        if result.summary.total_opportunities > 0
+    ]
+    if opportunities:
+        return max(opportunities, key=lambda item: item[1].summary.total_opportunities)
+    return next(iter(results.items()))
+
+
+def _best_result_lines(name: str | None, result: Strategy4BacktestResult | None) -> list[str]:
+    if not name or not result:
+        return ["本次没有可用实验结果。"]
+    s = result.summary
+    if s.entered_opportunities <= 0:
+        if s.total_opportunities > 0:
+            return [
+                f"本次机会数最多的实验是 `{name}`，共产生 {s.total_opportunities} 个信号机会，但没有可观察的 T+1 入场。",
+                "由于缺少可执行入场和后续收益，不能计算可信 PF、平均盈亏比或胜率。",
+                "正式参数建议：暂不升级生产默认值，保留当前参数作为观察基线。",
+            ]
+        return [
+            "本次没有可证明更优的参数组合。所有实验组均为 0 信号、0 机会。",
+            "正式参数建议：保留当前默认参数作为观察基线，暂不升级生产默认值。",
+        ]
+    pf = "--" if s.profit_factor is None else f"{s.profit_factor:.2f}"
+    return [
+        f"当前表现最好的可执行实验是 `{name}`：入场 {s.entered_opportunities}，平均收益 {s.avg_realized_return:.2%}，PF {pf}。",
+        "是否升级正式参数仍需结合样本量、月度集中度和最大连续亏损审查；样本不足时不建议自动升级。",
+    ]
+
+
+def _conclusion_lines(coverage: dict, results: dict[str, Strategy4BacktestResult]) -> list[str]:
+    max_opportunities = max((r.summary.total_opportunities for r in results.values()), default=0)
+    max_entered = max((r.summary.entered_opportunities for r in results.values()), default=0)
+    lines = [
+        f"当前策略4真实快照覆盖 {coverage['topic_snapshot_days']} 个交易日，历史样本仍偏少。",
+        f"行业/题材指数缓存覆盖 {coverage['topic_index_topics']} 个题材、{coverage['topic_index_rows']} 行，日期范围 {coverage['topic_index_min']} 至 {coverage['topic_index_max']}。",
+        "本次回测仅使用历史快照和 evaluation_date 当日及之前的真实板块K线，不使用当前板块数据倒推过去。",
+    ]
+    if max_entered <= 0:
+        lines.append(
+            f"参数实验最多产生 {max_opportunities} 个机会，但没有可观察入场，因此证据不足以升级正式参数。"
+        )
+    else:
+        lines.append(
+            f"参数实验最多产生 {max_opportunities} 个机会、{max_entered} 个可观察入场；正式升级仍需检查样本量和集中度。"
+        )
+    return lines
+
+
 def _coverage(db_path: str) -> dict:
     con = sqlite3.connect(db_path)
     con.row_factory = sqlite3.Row
@@ -538,14 +663,22 @@ def _coverage(db_path: str) -> dict:
         "SELECT COUNT(*) rows, MIN(date) min_date, MAX(date) max_date FROM market_index_ohlc"
     ).fetchone()
     topics = con.execute(
-        "SELECT COUNT(*) rows, MIN(snapshot_time) min_date, MAX(snapshot_time) max_date FROM strategy4_hot_topics"
+        "SELECT COUNT(*) rows, COUNT(DISTINCT substr(snapshot_time, 1, 10)) days, MIN(snapshot_time) min_date, MAX(snapshot_time) max_date FROM strategy4_hot_topics"
     ).fetchone()
     leaders = con.execute("SELECT COUNT(*) rows FROM strategy4_leaders").fetchone()
     topic_index_rows = 0
+    topic_index_topics = 0
+    topic_index_min = ""
+    topic_index_max = ""
     topic_index_note = "UNOBSERVED_TOPIC_INDEX: no topic/industry index history table found"
     if _table_exists(con, "strategy4_topic_index_ohlc"):
-        topic_index = con.execute("SELECT COUNT(*) rows FROM strategy4_topic_index_ohlc").fetchone()
+        topic_index = con.execute(
+            "SELECT COUNT(*) rows, COUNT(DISTINCT topic_id) topics, MIN(date) min_date, MAX(date) max_date FROM strategy4_topic_index_ohlc"
+        ).fetchone()
         topic_index_rows = topic_index["rows"]
+        topic_index_topics = topic_index["topics"]
+        topic_index_min = topic_index["min_date"] or ""
+        topic_index_max = topic_index["max_date"] or ""
         topic_index_note = "observable" if topic_index_rows else "UNOBSERVED_TOPIC_INDEX: empty topic index cache"
     return {
         "daily_rows": daily["rows"],
@@ -556,10 +689,14 @@ def _coverage(db_path: str) -> dict:
         "index_min": index["min_date"],
         "index_max": index["max_date"],
         "topic_rows": topics["rows"],
+        "topic_snapshot_days": topics["days"],
         "topic_min": topics["min_date"],
         "topic_max": topics["max_date"],
         "leader_rows": leaders["rows"],
         "topic_index_rows": topic_index_rows,
+        "topic_index_topics": topic_index_topics,
+        "topic_index_min": topic_index_min,
+        "topic_index_max": topic_index_max,
         "topic_index_note": topic_index_note,
     }
 
@@ -577,10 +714,48 @@ def _default_experiments() -> list[dict]:
         {"name": "top15", "hot_topic_top_n": 15},
         {"name": "hot80_leader80", "min_hot_topic_score": 80, "min_leader_strength_score": 80},
         {"name": "hot75_leader75", "min_hot_topic_score": 75, "min_leader_strength_score": 75},
+        {"name": "watch_hot60_leader60", "min_hot_topic_score": 60, "min_leader_strength_score": 60, "hot_topic_top_n": 16, "watch_hot_topic_top_n": 16},
+        {"name": "watch_hot55_leader50", "min_hot_topic_score": 55, "min_leader_strength_score": 50, "hot_topic_top_n": 16, "watch_hot_topic_top_n": 16},
         {"name": "first_wave_20_30", "min_first_wave_return_10d": 0.20, "min_first_wave_return_20d": 0.30},
         {"name": "locked_attention12", "min_locked_attention_score": 12},
         {"name": "rr18_risk20", "min_reward_risk_ratio": 1.8, "max_risk_ratio": 0.20},
         {"name": "pullback_05_30", "pullback_min_pct": 0.05, "pullback_max_pct": 0.30},
+        {
+            "name": "pullback60_probe",
+            "min_hot_topic_score": 55,
+            "min_leader_strength_score": 40,
+            "hot_topic_top_n": 16,
+            "watch_hot_topic_top_n": 16,
+            "min_first_wave_return_10d": 0.05,
+            "min_first_wave_return_20d": 0.10,
+            "min_strong_day_count_10d": 1,
+            "pullback_min_pct": 0.0,
+            "pullback_max_pct": 0.60,
+            "pullback_min_days": 1,
+            "pullback_max_days": 60,
+            "min_reward_risk_ratio": 0.8,
+            "core_leader_min_reward_risk_ratio": 0.8,
+            "max_risk_ratio": 0.50,
+            "aggressive_max_risk_ratio": 0.60,
+        },
+        {
+            "name": "pullback60_quality",
+            "min_hot_topic_score": 60,
+            "min_leader_strength_score": 60,
+            "hot_topic_top_n": 16,
+            "watch_hot_topic_top_n": 16,
+            "min_first_wave_return_10d": 0.15,
+            "min_first_wave_return_20d": 0.20,
+            "min_strong_day_count_10d": 1,
+            "pullback_min_pct": 0.05,
+            "pullback_max_pct": 0.50,
+            "pullback_min_days": 1,
+            "pullback_max_days": 60,
+            "min_reward_risk_ratio": 1.5,
+            "core_leader_min_reward_risk_ratio": 1.5,
+            "max_risk_ratio": 0.30,
+            "aggressive_max_risk_ratio": 0.35,
+        },
     ]
 
 

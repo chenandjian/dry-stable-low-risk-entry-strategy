@@ -1,6 +1,7 @@
 import scanner.db as db
 
 from strategy4.backtester import (
+    generate_strategy4_optimization_report,
     run_strategy4_parameter_experiments,
     run_strategy4_snapshot_backtest,
 )
@@ -128,6 +129,43 @@ def test_strategy4_parameter_experiments_filter_observed_snapshots_only(tmp_path
     assert experiments["baseline"].summary.unobserved_snapshot_days == 1
 
 
+def test_strategy4_parameter_experiments_re_evaluate_no_buy_point_leaders(tmp_path):
+    db_path = str(tmp_path / "test.db")
+    db.init_db(db_path)
+    rows = _bars_for_buyable_second_wave()
+    rows.append({
+        "date": "2026-06-23",
+        "open": 16.5,
+        "high": 17.2,
+        "low": 16.2,
+        "close": 17.0,
+        "volume": 4_500_000,
+        "turnover": 16.8 * 4_500_000,
+    })
+    db.save_ohlc("300750", rows)
+    _seed_strategy4_snapshot(
+        db_path,
+        task_id="s4-snap",
+        date="2026-06-20",
+        code="300750",
+        hot_score=92,
+        leader_score=81,
+        leader_status="HOT_TOPIC_NO_BUY_POINT",
+    )
+
+    experiments = run_strategy4_parameter_experiments(
+        db_path=db_path,
+        start_date="2026-06-20",
+        end_date="2026-06-20",
+        base_config={"strategy4": {}},
+        experiment_grid=[
+            {"name": "relaxed_leader", "min_hot_topic_score": 85, "min_leader_strength_score": 60},
+        ],
+    )
+
+    assert experiments["relaxed_leader"].summary.total_opportunities == 1
+
+
 def test_strategy4_backtest_market_index_metadata_is_truncated_at_evaluation_date(tmp_path):
     db_path = str(tmp_path / "test.db")
     db.init_db(db_path)
@@ -220,6 +258,41 @@ def test_strategy4_backtest_topic_index_metadata_is_truncated_at_evaluation_date
     assert snapshot["topic_return_1d"] == 0.04
 
 
+def test_strategy4_optimization_report_reflects_nonzero_opportunities(tmp_path):
+    db_path = str(tmp_path / "test.db")
+    report_path = str(tmp_path / "report.md")
+    db.init_db(db_path)
+    rows = _bars_for_buyable_second_wave()
+    rows.append({
+        "date": "2026-06-23",
+        "open": 16.5,
+        "high": 17.2,
+        "low": 16.2,
+        "close": 17.0,
+        "volume": 4_500_000,
+        "turnover": 16.8 * 4_500_000,
+    })
+    db.save_ohlc("300750", rows)
+    _seed_strategy4_snapshot(db_path, task_id="s4-snap", date="2026-06-20", code="300750")
+
+    generate_strategy4_optimization_report(
+        db_path=db_path,
+        start_date="2026-06-20",
+        end_date="2026-06-20",
+        base_config={"strategy4": {}},
+        experiment_grid=[{"name": "baseline", "min_leader_strength_score": 60}],
+        report_path=report_path,
+    )
+
+    report = (tmp_path / "report.md").read_text(encoding="utf-8")
+    assert "所有实验组均为 0 信号、0 机会、0 入场" not in report
+    assert "不可观察率" in report
+    assert "平均盈利" in report
+    assert "月度分布" in report
+    assert "## 机会明细" in report
+    assert "板块K线日期" in report
+
+
 def _seed_strategy4_snapshot(
     db_path,
     *,
@@ -229,6 +302,7 @@ def _seed_strategy4_snapshot(
     hot_score=92,
     leader_score=91,
     include_topic_index=True,
+    leader_status="LEADER_CONFIRMED",
 ):
     db.init_db(db_path)
     db.create_scan_task(task_id, f"{date} 15:30:00", strategy_type="STRATEGY_4_HOT_LEADER_SECOND_WAVE")
@@ -274,7 +348,7 @@ def _seed_strategy4_snapshot(
         "consecutive_limit_count": 1,
         "relative_strength_vs_topic": 0.08,
         "membership_source": "fixture",
-        "status": "LEADER_CONFIRMED",
+        "status": leader_status,
     }])
     if include_topic_index:
         db.save_strategy4_topic_index_ohlc(
