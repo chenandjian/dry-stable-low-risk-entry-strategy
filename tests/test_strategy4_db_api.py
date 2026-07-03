@@ -345,7 +345,10 @@ def test_strategy4_scan_does_not_create_candidates_from_noise_topics(tmp_path, m
     fake_ak = types.SimpleNamespace()
     fake_ak.stock_board_concept_name_ths = lambda: _fake_frame([{
         "板块": "伪热点",
-        "涨跌幅": 0.5,
+        "涨跌幅": 0,
+        "3日涨幅": 0,
+        "5日涨幅": 0,
+        "量比": 0.5,
         "净流入": 0,
         "上涨家数": 1,
         "下跌家数": 80,
@@ -788,6 +791,8 @@ def _bars_for_buyable_second_wave():
     rows[-1]["low"] = 15.6
     rows[-1]["high"] = 16.6
     rows[9]["high"] = 24.0
+    for row in rows[10:]:
+        row["low"] = max(row["low"], 15.1)
     return rows
 
 

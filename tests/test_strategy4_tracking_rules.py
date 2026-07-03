@@ -13,16 +13,17 @@ from strategy4.tracking_rules import (
 )
 
 
-def test_strategy4_tracking_config_defaults_to_120_calendar_days():
+def test_strategy4_tracking_config_defaults_to_20_calendar_days():
     cfg = resolve_strategy4_config({})
 
     assert cfg["tracking"]["enabled"] is True
-    assert cfg["tracking"]["max_calendar_days"] == 120
+    assert cfg["tracking"]["max_calendar_days"] == 20
     assert cfg["tracking"]["strong_attention_days"] == 20
-    assert cfg["tracking"]["golden_second_wave_days"] == 60
+    assert cfg["tracking"]["golden_second_wave_days"] == 20
+    assert cfg["tracking"]["allow_extension_days"] == 20
 
 
-def test_confirmed_topic_enters_pool_and_expires_after_120_days():
+def test_confirmed_topic_enters_pool_and_expires_after_20_days():
     cfg = resolve_strategy4_config({})
     topic = {
         "topic_id": "concept-ai",
@@ -37,7 +38,7 @@ def test_confirmed_topic_enters_pool_and_expires_after_120_days():
     active = build_topic_tracking_state(topic, evaluation_date="2026-06-01", config=cfg)
     expired = build_topic_tracking_state(
         topic,
-        evaluation_date="2026-10-01",
+        evaluation_date="2026-06-22",
         config=cfg,
         existing=active,
     )
@@ -46,7 +47,7 @@ def test_confirmed_topic_enters_pool_and_expires_after_120_days():
     assert active["first_detected_date"] == "2026-06-01"
     assert active["tracking_phase"] == "strong_attention"
     assert expired["tracking_status"] == TOPIC_EXPIRED
-    assert expired["age_calendar_days"] > 120
+    assert expired["age_calendar_days"] > 20
 
 
 def test_weak_noise_topic_is_invalidated_in_tracking_pool():
@@ -71,7 +72,7 @@ def test_weak_noise_topic_is_invalidated_in_tracking_pool():
 
 @pytest.mark.parametrize(
     ("age", "expected"),
-    [(3, "strong_attention"), (30, "golden_second_wave"), (90, "extension")],
+    [(3, "strong_attention"), (20, "strong_attention"), (21, "expired"), (90, "expired")],
 )
 def test_tracking_phase_for_age(age, expected):
     cfg = resolve_strategy4_config({})

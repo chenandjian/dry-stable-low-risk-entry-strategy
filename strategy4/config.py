@@ -7,28 +7,28 @@ from numbers import Real
 
 DEFAULT_STRATEGY4_CONFIG = {
     "enabled": True,
-    "hot_topic_top_n": 8,
-    "watch_hot_topic_top_n": 15,
-    "min_hot_topic_score": 85,
-    "min_hot_topic_signal_count": 2,
+    "hot_topic_top_n": 16,
+    "watch_hot_topic_top_n": 16,
+    "min_hot_topic_score": 65,
+    "min_hot_topic_signal_count": 1,
     "core_leaders_per_topic": 1,
     "backup_leaders_per_topic": 2,
     "max_total_leaders_per_topic": 3,
-    "min_leader_strength_score": 88,
-    "core_leader_strength_score": 93,
+    "min_leader_strength_score": 50,
+    "core_leader_strength_score": 50,
     "first_wave_lookback_short": 10,
     "first_wave_lookback_long": 20,
-    "min_first_wave_return_10d": 0.25,
-    "min_first_wave_return_20d": 0.35,
-    "min_strong_day_count_10d": 2,
-    "pullback_min_pct": 0.08,
-    "pullback_max_pct": 0.25,
-    "pullback_min_days": 2,
-    "pullback_max_days": 8,
-    "max_risk_ratio": 0.15,
-    "aggressive_max_risk_ratio": 0.20,
-    "min_reward_risk_ratio": 2.0,
-    "core_leader_min_reward_risk_ratio": 1.8,
+    "min_first_wave_return_10d": 0.10,
+    "min_first_wave_return_20d": 0.15,
+    "min_strong_day_count_10d": 1,
+    "pullback_min_pct": 0.05,
+    "pullback_max_pct": 0.30,
+    "pullback_min_days": 1,
+    "pullback_max_days": 40,
+    "max_risk_ratio": 0.10,
+    "aggressive_max_risk_ratio": 0.10,
+    "min_reward_risk_ratio": 1.5,
+    "core_leader_min_reward_risk_ratio": 1.5,
     "topic_index": {
         "enabled": True,
         "preferred_sources": ["akshare_ths", "akshare_eastmoney"],
@@ -57,11 +57,11 @@ DEFAULT_STRATEGY4_CONFIG = {
     },
     "derived_source": {
         "enabled": True,
-        "topic_top_n": 20,
-        "max_topics_per_day": 30,
+        "topic_top_n": 30,
+        "max_topics_per_day": 34,
         "max_leaders_per_topic": 5,
-        "min_topic_hot_score": 60,
-        "min_confirmed_topic_hot_score": 75,
+        "min_topic_hot_score": 50,
+        "min_confirmed_topic_hot_score": 60,
         "min_topic_index_rows": 60,
         "min_amount_ratio_5_20": 1.0,
         "min_breadth_ratio": 0.55,
@@ -78,10 +78,10 @@ DEFAULT_STRATEGY4_CONFIG = {
     },
     "tracking": {
         "enabled": True,
-        "max_calendar_days": 120,
+        "max_calendar_days": 20,
         "strong_attention_days": 20,
-        "golden_second_wave_days": 60,
-        "allow_extension_days": 120,
+        "golden_second_wave_days": 20,
+        "allow_extension_days": 20,
         "expire_without_leader_days": 30,
         "extension_min_reward_risk_ratio": 2.0,
         "extension_max_risk_ratio": 0.12,
@@ -97,9 +97,30 @@ def resolve_strategy4_config(config: dict | None) -> dict:
     config = config or {}
     raw = copy.deepcopy(DEFAULT_STRATEGY4_CONFIG)
     if "strategy4" in config:
-        _deep_update(raw, config.get("strategy4") or {})
+        overrides = config.get("strategy4") or {}
+        _deep_update(raw, overrides)
     else:
-        _deep_update(raw, config)
+        overrides = config
+        _deep_update(raw, overrides)
+
+    if (
+        "min_leader_strength_score" in overrides
+        and "core_leader_strength_score" not in overrides
+        and raw["core_leader_strength_score"] < raw["min_leader_strength_score"]
+    ):
+        raw["core_leader_strength_score"] = raw["min_leader_strength_score"]
+    if (
+        "max_risk_ratio" in overrides
+        and "aggressive_max_risk_ratio" not in overrides
+        and raw["aggressive_max_risk_ratio"] < raw["max_risk_ratio"]
+    ):
+        raw["aggressive_max_risk_ratio"] = raw["max_risk_ratio"]
+    if (
+        "core_leader_min_reward_risk_ratio" in overrides
+        and "min_reward_risk_ratio" not in overrides
+        and raw["min_reward_risk_ratio"] < raw["core_leader_min_reward_risk_ratio"]
+    ):
+        raw["min_reward_risk_ratio"] = raw["core_leader_min_reward_risk_ratio"]
 
     raw["enabled"] = bool(raw.get("enabled", True))
     _validate_int_range(raw, "hot_topic_top_n", 1, 50)

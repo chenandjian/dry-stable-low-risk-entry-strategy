@@ -7,27 +7,28 @@ def test_resolve_strategy4_config_defaults():
     cfg = resolve_strategy4_config({})
 
     assert cfg["enabled"] is True
-    assert cfg["hot_topic_top_n"] == 8
-    assert cfg["watch_hot_topic_top_n"] == 15
-    assert cfg["min_hot_topic_score"] == 85
-    assert cfg["min_hot_topic_signal_count"] == 2
+    assert cfg["hot_topic_top_n"] == 16
+    assert cfg["watch_hot_topic_top_n"] == 16
+    assert cfg["min_hot_topic_score"] == 65
+    assert cfg["min_hot_topic_signal_count"] == 1
     assert cfg["core_leaders_per_topic"] == 1
     assert cfg["backup_leaders_per_topic"] == 2
     assert cfg["max_total_leaders_per_topic"] == 3
-    assert cfg["min_leader_strength_score"] == 88
-    assert cfg["core_leader_strength_score"] == 93
+    assert cfg["min_leader_strength_score"] == 50
+    assert cfg["core_leader_strength_score"] == 50
     assert cfg["first_wave_lookback_short"] == 10
     assert cfg["first_wave_lookback_long"] == 20
-    assert cfg["min_first_wave_return_10d"] == 0.25
-    assert cfg["min_first_wave_return_20d"] == 0.35
-    assert cfg["pullback_min_pct"] == 0.08
-    assert cfg["pullback_max_pct"] == 0.25
-    assert cfg["pullback_min_days"] == 2
-    assert cfg["pullback_max_days"] == 8
-    assert cfg["max_risk_ratio"] == 0.15
-    assert cfg["aggressive_max_risk_ratio"] == 0.20
-    assert cfg["min_reward_risk_ratio"] == 2.0
-    assert cfg["core_leader_min_reward_risk_ratio"] == 1.8
+    assert cfg["min_first_wave_return_10d"] == 0.10
+    assert cfg["min_first_wave_return_20d"] == 0.15
+    assert cfg["min_strong_day_count_10d"] == 1
+    assert cfg["pullback_min_pct"] == 0.05
+    assert cfg["pullback_max_pct"] == 0.30
+    assert cfg["pullback_min_days"] == 1
+    assert cfg["pullback_max_days"] == 40
+    assert cfg["max_risk_ratio"] == 0.10
+    assert cfg["aggressive_max_risk_ratio"] == 0.10
+    assert cfg["min_reward_risk_ratio"] == 1.5
+    assert cfg["core_leader_min_reward_risk_ratio"] == 1.5
     assert cfg["topic_index"]["enabled"] is True
     assert cfg["topic_index"]["preferred_sources"] == ["akshare_ths", "akshare_eastmoney"]
     assert cfg["topic_index"]["history_days"] == 250
@@ -37,7 +38,12 @@ def test_resolve_strategy4_config_defaults():
     assert cfg["source_modes"]["historical_kline_derived_enabled"] is True
     assert cfg["source_modes"]["merge_mode"] == "union_with_confidence"
     assert cfg["derived_source"]["enabled"] is True
-    assert cfg["derived_source"]["min_confirmed_topic_hot_score"] == 75
+    assert cfg["derived_source"]["topic_top_n"] == 30
+    assert cfg["derived_source"]["max_topics_per_day"] == 34
+    assert cfg["derived_source"]["max_leaders_per_topic"] == 5
+    assert cfg["derived_source"]["min_topic_hot_score"] == 50
+    assert cfg["derived_source"]["min_confirmed_topic_hot_score"] == 60
+    assert cfg["derived_source"]["min_member_count"] == 5
     assert cfg["derived_source"]["allow_current_members_proxy"] is True
     assert cfg["merge_policy"]["block_buyable_on_derived_weak_noise"] is True
 

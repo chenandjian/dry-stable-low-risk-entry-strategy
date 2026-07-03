@@ -455,22 +455,22 @@
         <div class="param">
           <label title="热点题材正式榜最多保留数量">热点题材 Top N</label>
           <input type="number" v-model.number="config.strategy4.hot_topic_top_n" @input="markDirty" min="1" max="50" />
-          <span class="default">默认 8</span>
+          <span class="default">默认 16</span>
         </div>
         <div class="param">
           <label title="热点观察榜最多保留数量，必须不小于热点题材 Top N">观察题材 Top N</label>
           <input type="number" v-model.number="config.strategy4.watch_hot_topic_top_n" @input="markDirty" min="1" max="100" />
-          <span class="default">默认 15</span>
+          <span class="default">默认 16</span>
         </div>
         <div class="param">
           <label title="热点题材确认最低分">热点最低分</label>
           <input type="number" v-model.number="config.strategy4.min_hot_topic_score" @input="markDirty" min="0" max="100" />
-          <span class="default">默认 85</span>
+          <span class="default">默认 65</span>
         </div>
         <div class="param">
           <label title="热点至少需要命中的强信号数量">热点强信号数</label>
           <input type="number" v-model.number="config.strategy4.min_hot_topic_signal_count" @input="markDirty" min="1" max="10" />
-          <span class="default">默认 2</span>
+          <span class="default">默认 1</span>
         </div>
         <div class="param">
           <label title="每个热点最多保留的龙头股票数">每题材最多龙头</label>
@@ -480,7 +480,7 @@
         <div class="param">
           <label title="龙头强度分低于该值不作为热点核心龙头">龙头强度最低分</label>
           <input type="number" v-model.number="config.strategy4.min_leader_strength_score" @input="markDirty" min="0" max="100" />
-          <span class="default">默认 88</span>
+          <span class="default">默认 50</span>
         </div>
         <div class="param">
           <label title="健康回踩最小幅度">最小回踩 <span class="unit">%</span></label>
@@ -500,7 +500,7 @@
         <div class="param">
           <label title="策略4最低预估收益风险比">最低收益风险比</label>
           <input type="number" v-model.number="config.strategy4.min_reward_risk_ratio" @input="markDirty" min="0.5" max="10" step="0.1" />
-          <span class="default">默认 2.0</span>
+          <span class="default">默认 1.5</span>
         </div>
         <div class="param">
           <label title="启用后策略4会拉取真实行业/概念/板块指数K线，用于确认热点趋势">板块K线确认</label>
@@ -576,28 +576,28 @@ const defaultStrategy3Config = {
 
 const defaultStrategy4Config = {
   enabled: true,
-  hot_topic_top_n: 8,
-  watch_hot_topic_top_n: 15,
-  min_hot_topic_score: 85,
-  min_hot_topic_signal_count: 2,
+  hot_topic_top_n: 16,
+  watch_hot_topic_top_n: 16,
+  min_hot_topic_score: 65,
+  min_hot_topic_signal_count: 1,
   core_leaders_per_topic: 1,
   backup_leaders_per_topic: 2,
   max_total_leaders_per_topic: 3,
-  min_leader_strength_score: 88,
-  core_leader_strength_score: 93,
+  min_leader_strength_score: 50,
+  core_leader_strength_score: 50,
   first_wave_lookback_short: 10,
   first_wave_lookback_long: 20,
-  min_first_wave_return_10d: 0.25,
-  min_first_wave_return_20d: 0.35,
-  min_strong_day_count_10d: 2,
-  pullback_min_pct: 0.08,
-  pullback_max_pct: 0.25,
-  pullback_min_days: 2,
-  pullback_max_days: 8,
-  max_risk_ratio: 0.15,
-  aggressive_max_risk_ratio: 0.20,
-  min_reward_risk_ratio: 2.0,
-  core_leader_min_reward_risk_ratio: 1.8,
+  min_first_wave_return_10d: 0.10,
+  min_first_wave_return_20d: 0.15,
+  min_strong_day_count_10d: 1,
+  pullback_min_pct: 0.05,
+  pullback_max_pct: 0.30,
+  pullback_min_days: 1,
+  pullback_max_days: 40,
+  max_risk_ratio: 0.10,
+  aggressive_max_risk_ratio: 0.10,
+  min_reward_risk_ratio: 1.5,
+  core_leader_min_reward_risk_ratio: 1.5,
   topic_index: {
     enabled: true,
     preferred_sources: ['akshare_ths', 'akshare_eastmoney'],
@@ -618,6 +618,45 @@ const defaultStrategy4Config = {
   leader_relative_strength: {
     min_rs_10d: 0.05,
     min_rs_20d: 0.08,
+  },
+  source_modes: {
+    live_external_enabled: true,
+    historical_kline_derived_enabled: true,
+    merge_mode: 'union_with_confidence',
+  },
+  derived_source: {
+    enabled: true,
+    topic_top_n: 30,
+    max_topics_per_day: 34,
+    max_leaders_per_topic: 5,
+    min_topic_hot_score: 50,
+    min_confirmed_topic_hot_score: 60,
+    min_topic_index_rows: 60,
+    min_amount_ratio_5_20: 1,
+    min_breadth_ratio: 0.55,
+    min_member_count: 5,
+    allow_current_members_proxy: true,
+    current_members_proxy_trust_level: 'experimental',
+  },
+  merge_policy: {
+    buyable_requires_observed_source: true,
+    block_buyable_on_derived_weak_noise: true,
+    block_buyable_on_derived_high_risk_climax: true,
+    allow_derived_only_watch: true,
+    allow_derived_only_buyable: true,
+  },
+  tracking: {
+    enabled: true,
+    max_calendar_days: 20,
+    strong_attention_days: 20,
+    golden_second_wave_days: 20,
+    allow_extension_days: 20,
+    expire_without_leader_days: 30,
+    extension_min_reward_risk_ratio: 2,
+    extension_max_risk_ratio: 0.12,
+    max_topic_drawdown_since_detected: 0.20,
+    max_leader_drawdown_from_first_wave_high: 0.45,
+    min_extension_leader_rs_20d: -0.05,
   },
 }
 
@@ -807,6 +846,22 @@ function mergeStrategy4Config(value) {
     leader_relative_strength: {
       ...defaultStrategy4Config.leader_relative_strength,
       ...(value.leader_relative_strength || {}),
+    },
+    source_modes: {
+      ...defaultStrategy4Config.source_modes,
+      ...(value.source_modes || {}),
+    },
+    derived_source: {
+      ...defaultStrategy4Config.derived_source,
+      ...(value.derived_source || {}),
+    },
+    merge_policy: {
+      ...defaultStrategy4Config.merge_policy,
+      ...(value.merge_policy || {}),
+    },
+    tracking: {
+      ...defaultStrategy4Config.tracking,
+      ...(value.tracking || {}),
     },
   }
 }

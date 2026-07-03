@@ -136,6 +136,8 @@ def _bars_for_buyable_second_wave():
     rows[-1]["low"] = 15.6
     rows[-1]["high"] = 16.6
     rows[9]["high"] = 24.0
+    for row in rows[10:]:
+        row["low"] = max(row["low"], 15.1)
     return rows
 
 
