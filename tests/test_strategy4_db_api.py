@@ -155,6 +155,73 @@ def test_strategy4_apis_return_snapshots_and_reject_cross_strategy_tasks(tmp_pat
     assert mismatch.json()["error"] == "TASK_STRATEGY_MISMATCH"
 
 
+def test_strategy4_tracking_apis_return_pool_and_task_tracking_candidates(tmp_path, monkeypatch):
+    db_path = str(tmp_path / "test.db")
+    db.init_db(db_path)
+    monkeypatch.setattr(server_mod, "load_config", lambda: {"data": {"database_path": db_path}, "strategy4": {}})
+    server_mod._running.update({"running": False, "task_id": None, "strategy_type": None, "stats": {}})
+
+    db.create_scan_task("s4-track", "2026-07-01 15:30:00", strategy_type=STRATEGY4_TYPE)
+    db.upsert_strategy4_tracked_topic({
+        "topic_id": "concept-ai",
+        "topic_name": "AI算力",
+        "topic_type": "concept",
+        "first_detected_date": "2026-06-01",
+        "last_confirmed_date": "2026-06-20",
+        "last_evaluated_date": "2026-07-01",
+        "age_calendar_days": 30,
+        "tracking_status": "SECOND_WAVE_WATCH",
+        "tracking_phase": "golden_second_wave",
+        "latest_hot_score": 76,
+    })
+    db.upsert_strategy4_tracked_leader({
+        "topic_id": "concept-ai",
+        "topic_name": "AI算力",
+        "code": "300750",
+        "name": "宁德时代",
+        "first_detected_date": "2026-06-01",
+        "last_confirmed_date": "2026-06-20",
+        "last_evaluated_date": "2026-07-01",
+        "tracking_status": "SECOND_WAVE_READY",
+        "tracking_phase": "golden_second_wave",
+        "latest_leader_score": 72,
+        "candidate_origin": "tracking_pool",
+    })
+    db.insert_strategy4_tracking_event({
+        "evaluation_date": "2026-07-01",
+        "task_id": "s4-track",
+        "entity_type": "leader",
+        "topic_id": "concept-ai",
+        "code": "300750",
+        "event_type": "CANDIDATE",
+        "new_status": "SECOND_WAVE_READY",
+    })
+    db.upsert_strategy4_candidate("s4-track", {
+        "topic_id": "concept-ai",
+        "topic_name": "AI算力",
+        "code": "300750",
+        "name": "宁德时代",
+        "evaluation_date": "2026-07-01",
+        "status": "BUYABLE_SECOND_WAVE",
+        "strategy4_score": 88,
+        "hot_topic_score": 76,
+        "leader_strength_score": 72,
+        "tradability_score": 80,
+        "candidate_origin": "tracking_pool",
+    })
+
+    client = TestClient(server_mod.app)
+    topics = client.get("/api/strategy4/tracking/topics").json()["topics"]
+    leaders = client.get("/api/strategy4/tracking/leaders?status=SECOND_WAVE_READY").json()["leaders"]
+    events = client.get("/api/strategy4/tracking/events?topic_id=concept-ai").json()["events"]
+    tracking_candidates = client.get("/api/strategy4/tasks/s4-track/tracking-candidates").json()["candidates"]
+
+    assert topics[0]["topic_id"] == "concept-ai"
+    assert leaders[0]["code"] == "300750"
+    assert events[0]["event_type"] == "CANDIDATE"
+    assert tracking_candidates[0]["candidate_origin"] == "tracking_pool"
+
+
 def test_start_strategy4_scan_uses_strategy4_type_and_persists_result(tmp_path, monkeypatch):
     db_path = str(tmp_path / "test.db")
     db.init_db(db_path)

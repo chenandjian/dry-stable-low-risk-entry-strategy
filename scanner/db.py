@@ -1603,6 +1603,87 @@ def _ensure_strategy4_tables(conn: sqlite3.Connection):
             UNIQUE(task_id, evaluation_date, topic_id, code)
         )
     ''')
+    conn.execute('''
+        CREATE TABLE IF NOT EXISTS strategy4_tracked_topics (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            topic_id TEXT NOT NULL UNIQUE,
+            topic_name TEXT NOT NULL,
+            topic_type TEXT NOT NULL,
+            first_detected_date TEXT NOT NULL,
+            last_confirmed_date TEXT,
+            last_evaluated_date TEXT,
+            age_calendar_days INTEGER DEFAULT 0,
+            tracking_status TEXT NOT NULL,
+            tracking_phase TEXT,
+            source_status TEXT,
+            peak_hot_score REAL DEFAULT 0,
+            latest_hot_score REAL DEFAULT 0,
+            topic_index_phase TEXT,
+            topic_index_latest_date TEXT,
+            source_modes_json TEXT,
+            membership_mode TEXT,
+            invalid_reason TEXT,
+            risk_flags TEXT,
+            raw_snapshot TEXT,
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+        )
+    ''')
+    conn.execute('''
+        CREATE TABLE IF NOT EXISTS strategy4_tracked_leaders (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            topic_id TEXT NOT NULL,
+            topic_name TEXT NOT NULL,
+            code TEXT NOT NULL,
+            name TEXT NOT NULL,
+            first_detected_date TEXT NOT NULL,
+            last_confirmed_date TEXT,
+            last_evaluated_date TEXT,
+            tracking_status TEXT NOT NULL,
+            tracking_phase TEXT,
+            source_status TEXT,
+            peak_leader_score REAL DEFAULT 0,
+            latest_leader_score REAL DEFAULT 0,
+            first_wave_high REAL DEFAULT 0,
+            first_wave_high_date TEXT,
+            pullback_pct REAL DEFAULT 0,
+            pullback_days INTEGER DEFAULT 0,
+            support_price REAL DEFAULT 0,
+            stop_loss REAL DEFAULT 0,
+            target_price REAL DEFAULT 0,
+            risk_ratio REAL DEFAULT 0,
+            reward_risk_ratio REAL DEFAULT 0,
+            candidate_origin TEXT,
+            topic_first_detected_date TEXT,
+            topic_last_confirmed_date TEXT,
+            leader_first_detected_date TEXT,
+            leader_last_confirmed_date TEXT,
+            tracking_age_days INTEGER DEFAULT 0,
+            membership_mode TEXT,
+            invalid_reason TEXT,
+            risk_flags TEXT,
+            raw_snapshot TEXT,
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+            UNIQUE(topic_id, code)
+        )
+    ''')
+    conn.execute('''
+        CREATE TABLE IF NOT EXISTS strategy4_tracking_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            evaluation_date TEXT NOT NULL,
+            task_id TEXT,
+            entity_type TEXT NOT NULL,
+            topic_id TEXT NOT NULL,
+            code TEXT,
+            previous_status TEXT,
+            new_status TEXT,
+            event_type TEXT NOT NULL,
+            reason TEXT,
+            metrics_snapshot TEXT,
+            created_at TEXT NOT NULL DEFAULT (datetime('now'))
+        )
+    ''')
     for column, col_type in {
         "topic_index_source": "TEXT",
         "topic_index_latest_date": "TEXT",
@@ -1646,6 +1727,18 @@ def _ensure_strategy4_tables(conn: sqlite3.Connection):
         "merge_warnings": "TEXT",
         "membership_mode": "TEXT",
         "derived_evaluation_date": "TEXT",
+        "candidate_origin": "TEXT DEFAULT 'current_hot'",
+        "tracking_topic_status": "TEXT",
+        "tracking_leader_status": "TEXT",
+        "topic_first_detected_date": "TEXT",
+        "topic_last_confirmed_date": "TEXT",
+        "leader_first_detected_date": "TEXT",
+        "leader_last_confirmed_date": "TEXT",
+        "tracking_age_days": "INTEGER DEFAULT 0",
+        "tracking_phase": "TEXT",
+        "tracking_reasons": "TEXT",
+        "tracking_risk_flags": "TEXT",
+        "invalid_conditions": "TEXT",
     }.items():
         _ensure_column(conn, "strategy4_candidates", column, col_type)
     conn.execute("CREATE INDEX IF NOT EXISTS idx_strategy4_hot_topics_task ON strategy4_hot_topics(task_id)")
@@ -1661,6 +1754,10 @@ def _ensure_strategy4_tables(conn: sqlite3.Connection):
     conn.execute("CREATE INDEX IF NOT EXISTS idx_s4_topic_members_topic ON strategy4_topic_members(topic_id)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_s4_derived_topics_date ON strategy4_derived_hot_topics(evaluation_date)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_s4_derived_leaders_date ON strategy4_derived_leaders(evaluation_date)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_s4_tracked_topics_status ON strategy4_tracked_topics(tracking_status)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_s4_tracked_leaders_topic ON strategy4_tracked_leaders(topic_id)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_s4_tracked_leaders_status ON strategy4_tracked_leaders(tracking_status)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_s4_tracking_events_topic ON strategy4_tracking_events(topic_id, code)")
 
 
 def _ensure_column(conn: sqlite3.Connection, table: str, column: str, col_type: str):
@@ -2126,7 +2223,11 @@ def upsert_strategy4_candidate(task_id: str, d: dict):
         "reward_risk_ratio", "entry_note", "reject_reason", "evaluation_snapshot",
         "snapshot_source", "source_modes_json", "live_hot_score", "derived_hot_score",
         "live_leader_score", "derived_leader_score", "merge_confidence", "merge_warnings",
-        "membership_mode", "derived_evaluation_date",
+        "membership_mode", "derived_evaluation_date", "candidate_origin",
+        "tracking_topic_status", "tracking_leader_status", "topic_first_detected_date",
+        "topic_last_confirmed_date", "leader_first_detected_date", "leader_last_confirmed_date",
+        "tracking_age_days", "tracking_phase", "tracking_reasons", "tracking_risk_flags",
+        "invalid_conditions",
     ]
     values = [
         task_id,
@@ -2169,6 +2270,18 @@ def upsert_strategy4_candidate(task_id: str, d: dict):
         _json_any(d.get("merge_warnings")),
         d.get("membership_mode", ""),
         d.get("derived_evaluation_date", ""),
+        d.get("candidate_origin", "current_hot"),
+        d.get("tracking_topic_status", ""),
+        d.get("tracking_leader_status", ""),
+        d.get("topic_first_detected_date", ""),
+        d.get("topic_last_confirmed_date", ""),
+        d.get("leader_first_detected_date", ""),
+        d.get("leader_last_confirmed_date", ""),
+        d.get("tracking_age_days", 0),
+        d.get("tracking_phase", ""),
+        _json_any(d.get("tracking_reasons")),
+        _json_any(d.get("tracking_risk_flags")),
+        _json_any(d.get("invalid_conditions")),
     ]
     updates = ", ".join(
         f"{c}=excluded.{c}" for c in columns if c not in ("task_id", "topic_id", "code")
@@ -2589,6 +2702,240 @@ def replace_strategy4_derived_leaders(task_id: str, evaluation_date: str, leader
             )
 
 
+def upsert_strategy4_tracked_topic(item: dict):
+    """Insert or update one Strategy4 tracked topic lifecycle row."""
+    conn = get_conn()
+    columns = [
+        "topic_id", "topic_name", "topic_type", "first_detected_date",
+        "last_confirmed_date", "last_evaluated_date", "age_calendar_days",
+        "tracking_status", "tracking_phase", "source_status", "peak_hot_score",
+        "latest_hot_score", "topic_index_phase", "topic_index_latest_date",
+        "source_modes_json", "membership_mode", "invalid_reason", "risk_flags",
+        "raw_snapshot",
+    ]
+    values = [
+        item.get("topic_id", ""),
+        item.get("topic_name", ""),
+        item.get("topic_type", ""),
+        item.get("first_detected_date", ""),
+        item.get("last_confirmed_date", ""),
+        item.get("last_evaluated_date", ""),
+        item.get("age_calendar_days", 0),
+        item.get("tracking_status", ""),
+        item.get("tracking_phase", ""),
+        item.get("source_status", ""),
+        item.get("peak_hot_score", 0.0),
+        item.get("latest_hot_score", 0.0),
+        item.get("topic_index_phase", ""),
+        item.get("topic_index_latest_date", ""),
+        _json_any(item.get("source_modes")),
+        item.get("membership_mode", ""),
+        item.get("invalid_reason", ""),
+        _json_any(item.get("risk_flags")),
+        _json_any(item.get("raw_snapshot")),
+    ]
+    updates = ", ".join(f"{c}=excluded.{c}" for c in columns if c != "topic_id")
+    conn.execute(
+        f"""INSERT INTO strategy4_tracked_topics ({', '.join(columns)})
+            VALUES ({', '.join('?' for _ in columns)})
+            ON CONFLICT(topic_id) DO UPDATE SET {updates}, updated_at=datetime('now')""",
+        values,
+    )
+    conn.commit()
+
+
+def upsert_strategy4_tracked_leader(item: dict):
+    """Insert or update one Strategy4 tracked leader lifecycle row."""
+    conn = get_conn()
+    columns = [
+        "topic_id", "topic_name", "code", "name", "first_detected_date",
+        "last_confirmed_date", "last_evaluated_date", "tracking_status",
+        "tracking_phase", "source_status", "peak_leader_score", "latest_leader_score",
+        "first_wave_high", "first_wave_high_date", "pullback_pct", "pullback_days",
+        "support_price", "stop_loss", "target_price", "risk_ratio",
+        "reward_risk_ratio", "candidate_origin", "topic_first_detected_date",
+        "topic_last_confirmed_date", "leader_first_detected_date",
+        "leader_last_confirmed_date", "tracking_age_days", "membership_mode",
+        "invalid_reason", "risk_flags", "raw_snapshot",
+    ]
+    values = [
+        item.get("topic_id", ""),
+        item.get("topic_name", ""),
+        item.get("code", ""),
+        item.get("name", ""),
+        item.get("first_detected_date", ""),
+        item.get("last_confirmed_date", ""),
+        item.get("last_evaluated_date", ""),
+        item.get("tracking_status", ""),
+        item.get("tracking_phase", ""),
+        item.get("source_status", ""),
+        item.get("peak_leader_score", 0.0),
+        item.get("latest_leader_score", 0.0),
+        item.get("first_wave_high", 0.0),
+        item.get("first_wave_high_date", ""),
+        item.get("pullback_pct", 0.0),
+        item.get("pullback_days", 0),
+        item.get("support_price", 0.0),
+        item.get("stop_loss", 0.0),
+        item.get("target_price", 0.0),
+        item.get("risk_ratio", 0.0),
+        item.get("reward_risk_ratio", 0.0),
+        item.get("candidate_origin", "tracking_pool"),
+        item.get("topic_first_detected_date", ""),
+        item.get("topic_last_confirmed_date", ""),
+        item.get("leader_first_detected_date", item.get("first_detected_date", "")),
+        item.get("leader_last_confirmed_date", item.get("last_confirmed_date", "")),
+        item.get("tracking_age_days", 0),
+        item.get("membership_mode", ""),
+        item.get("invalid_reason", ""),
+        _json_any(item.get("risk_flags")),
+        _json_any(item.get("raw_snapshot")),
+    ]
+    updates = ", ".join(f"{c}=excluded.{c}" for c in columns if c not in ("topic_id", "code"))
+    conn.execute(
+        f"""INSERT INTO strategy4_tracked_leaders ({', '.join(columns)})
+            VALUES ({', '.join('?' for _ in columns)})
+            ON CONFLICT(topic_id, code) DO UPDATE SET {updates}, updated_at=datetime('now')""",
+        values,
+    )
+    conn.commit()
+
+
+def get_strategy4_tracked_topic(topic_id: str) -> dict | None:
+    rows = get_strategy4_tracked_topics(topic_id=topic_id, include_expired=True)
+    return rows[0] if rows else None
+
+
+def get_strategy4_tracked_leader(topic_id: str, code: str) -> dict | None:
+    rows = get_strategy4_tracked_leaders(topic_id=topic_id, code=code, include_expired=True)
+    return rows[0] if rows else None
+
+
+def get_strategy4_tracked_topics(
+    *,
+    status: str | None = None,
+    topic_id: str | None = None,
+    include_expired: bool = True,
+    limit: int = 500,
+    offset: int = 0,
+) -> list[dict]:
+    conn = get_conn()
+    clauses = []
+    params: list = []
+    if status:
+        clauses.append("tracking_status=?")
+        params.append(status)
+    if topic_id:
+        clauses.append("topic_id=?")
+        params.append(topic_id)
+    if not include_expired:
+        clauses.append("tracking_status NOT IN ('EXPIRED', 'INVALIDATED')")
+    where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+    params.extend([limit, offset])
+    rows = conn.execute(
+        f"""SELECT * FROM strategy4_tracked_topics
+            {where}
+            ORDER BY last_evaluated_date DESC, peak_hot_score DESC, topic_name ASC
+            LIMIT ? OFFSET ?""",
+        params,
+    ).fetchall()
+    cols = [d[1] for d in conn.execute("PRAGMA table_info(strategy4_tracked_topics)").fetchall()]
+    return [_deserialize_strategy4_tracking_row(dict(zip(cols, row))) for row in rows]
+
+
+def get_strategy4_tracked_leaders(
+    *,
+    status: str | None = None,
+    topic_id: str | None = None,
+    code: str | None = None,
+    include_expired: bool = True,
+    limit: int = 500,
+    offset: int = 0,
+) -> list[dict]:
+    conn = get_conn()
+    clauses = []
+    params: list = []
+    if status:
+        clauses.append("tracking_status=?")
+        params.append(status)
+    if topic_id:
+        clauses.append("topic_id=?")
+        params.append(topic_id)
+    if code:
+        clauses.append("code=?")
+        params.append(code)
+    if not include_expired:
+        clauses.append("tracking_status NOT IN ('EXPIRED', 'INVALIDATED')")
+    where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+    params.extend([limit, offset])
+    rows = conn.execute(
+        f"""SELECT * FROM strategy4_tracked_leaders
+            {where}
+            ORDER BY last_evaluated_date DESC, reward_risk_ratio DESC, latest_leader_score DESC, code ASC
+            LIMIT ? OFFSET ?""",
+        params,
+    ).fetchall()
+    cols = [d[1] for d in conn.execute("PRAGMA table_info(strategy4_tracked_leaders)").fetchall()]
+    return [_deserialize_strategy4_tracking_row(dict(zip(cols, row))) for row in rows]
+
+
+def insert_strategy4_tracking_event(item: dict):
+    """Append one lifecycle audit event."""
+    conn = get_conn()
+    conn.execute(
+        """INSERT INTO strategy4_tracking_events (
+               evaluation_date, task_id, entity_type, topic_id, code,
+               previous_status, new_status, event_type, reason, metrics_snapshot
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        (
+            item.get("evaluation_date", ""),
+            item.get("task_id", ""),
+            item.get("entity_type", ""),
+            item.get("topic_id", ""),
+            item.get("code", ""),
+            item.get("previous_status", ""),
+            item.get("new_status", ""),
+            item.get("event_type", ""),
+            item.get("reason", ""),
+            _json_any(item.get("metrics_snapshot")),
+        ),
+    )
+    conn.commit()
+
+
+def get_strategy4_tracking_events(
+    *,
+    topic_id: str | None = None,
+    code: str | None = None,
+    task_id: str | None = None,
+    limit: int = 500,
+    offset: int = 0,
+) -> list[dict]:
+    conn = get_conn()
+    clauses = []
+    params: list = []
+    if topic_id:
+        clauses.append("topic_id=?")
+        params.append(topic_id)
+    if code:
+        clauses.append("code=?")
+        params.append(code)
+    if task_id:
+        clauses.append("task_id=?")
+        params.append(task_id)
+    where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+    params.extend([limit, offset])
+    rows = conn.execute(
+        f"""SELECT * FROM strategy4_tracking_events
+            {where}
+            ORDER BY evaluation_date DESC, id DESC
+            LIMIT ? OFFSET ?""",
+        params,
+    ).fetchall()
+    cols = [d[1] for d in conn.execute("PRAGMA table_info(strategy4_tracking_events)").fetchall()]
+    return [_deserialize_strategy4_tracking_row(dict(zip(cols, row))) for row in rows]
+
+
 def _json_any(value):
     if value is None or value == "":
         return ""
@@ -2621,7 +2968,10 @@ def _deserialize_topic_index_row(row: dict) -> dict:
 
 
 def _deserialize_strategy4_row(row: dict) -> dict:
-    for field in ("raw_snapshot", "evaluation_snapshot", "source_modes_json", "merge_warnings"):
+    for field in (
+        "raw_snapshot", "evaluation_snapshot", "source_modes_json", "merge_warnings",
+        "tracking_reasons", "tracking_risk_flags", "invalid_conditions",
+    ):
         value = row.get(field)
         if isinstance(value, str) and value:
             try:
@@ -2633,14 +2983,41 @@ def _deserialize_strategy4_row(row: dict) -> dict:
             except (json.JSONDecodeError, TypeError):
                 if field == "source_modes_json":
                     row["source_modes"] = []
-                elif field == "merge_warnings":
+                elif field in {"merge_warnings", "tracking_reasons", "tracking_risk_flags", "invalid_conditions"}:
                     row[field] = []
                 else:
                     row[field] = {}
         elif not value:
             if field == "source_modes_json":
                 row["source_modes"] = []
-            elif field == "merge_warnings":
+            elif field in {"merge_warnings", "tracking_reasons", "tracking_risk_flags", "invalid_conditions"}:
+                row[field] = []
+            else:
+                row[field] = {}
+    return row
+
+
+def _deserialize_strategy4_tracking_row(row: dict) -> dict:
+    for field in ("source_modes_json", "risk_flags", "raw_snapshot", "metrics_snapshot"):
+        value = row.get(field)
+        if isinstance(value, str) and value:
+            try:
+                parsed = json.loads(value)
+                if field == "source_modes_json":
+                    row["source_modes"] = parsed
+                else:
+                    row[field] = parsed
+            except (json.JSONDecodeError, TypeError):
+                if field == "source_modes_json":
+                    row["source_modes"] = []
+                elif field == "risk_flags":
+                    row[field] = []
+                else:
+                    row[field] = {}
+        elif not value:
+            if field == "source_modes_json":
+                row["source_modes"] = []
+            elif field == "risk_flags":
                 row[field] = []
             else:
                 row[field] = {}

@@ -1967,6 +1967,80 @@ async def strategy4_candidates(task_id: str):
     return {"taskId": task_id, "candidates": db.get_strategy4_candidates(task_id)}
 
 
+@app.get("/api/strategy4/tracking/topics")
+async def strategy4_tracking_topics(
+    status: str | None = None,
+    topic_id: str | None = None,
+    include_expired: bool = True,
+    page: int = 1,
+    page_size: int = 100,
+):
+    page = max(1, page)
+    page_size = min(max(1, page_size), 500)
+    topics = db.get_strategy4_tracked_topics(
+        status=status,
+        topic_id=topic_id,
+        include_expired=include_expired,
+        limit=page_size,
+        offset=(page - 1) * page_size,
+    )
+    return {"topics": topics, "page": page, "pageSize": page_size}
+
+
+@app.get("/api/strategy4/tracking/leaders")
+async def strategy4_tracking_leaders(
+    status: str | None = None,
+    topic_id: str | None = None,
+    code: str | None = None,
+    include_expired: bool = True,
+    page: int = 1,
+    page_size: int = 100,
+):
+    page = max(1, page)
+    page_size = min(max(1, page_size), 500)
+    leaders = db.get_strategy4_tracked_leaders(
+        status=status,
+        topic_id=topic_id,
+        code=code,
+        include_expired=include_expired,
+        limit=page_size,
+        offset=(page - 1) * page_size,
+    )
+    return {"leaders": leaders, "page": page, "pageSize": page_size}
+
+
+@app.get("/api/strategy4/tracking/events")
+async def strategy4_tracking_events(
+    topic_id: str | None = None,
+    code: str | None = None,
+    task_id: str | None = None,
+    page: int = 1,
+    page_size: int = 100,
+):
+    page = max(1, page)
+    page_size = min(max(1, page_size), 500)
+    events = db.get_strategy4_tracking_events(
+        topic_id=topic_id,
+        code=code,
+        task_id=task_id,
+        limit=page_size,
+        offset=(page - 1) * page_size,
+    )
+    return {"events": events, "page": page, "pageSize": page_size}
+
+
+@app.get("/api/strategy4/tasks/{task_id}/tracking-candidates")
+async def strategy4_tracking_candidates(task_id: str):
+    _, err = _require_task_strategy(task_id, STRATEGY4_TYPE)
+    if err:
+        return err
+    candidates = [
+        c for c in db.get_strategy4_candidates(task_id)
+        if c.get("candidate_origin") in {"tracking_pool", "merged_current_and_tracking"}
+    ]
+    return {"taskId": task_id, "candidates": candidates}
+
+
 @app.get("/api/strategy4/tasks/{task_id}/candidates/{code}")
 async def strategy4_candidate_detail(task_id: str, code: str):
     _, err = _require_task_strategy(task_id, STRATEGY4_TYPE)

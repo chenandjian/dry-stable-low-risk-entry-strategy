@@ -239,6 +239,24 @@ export function useApi() {
     return res.json()
   }
 
+  async function getStrategy4TrackedTopics(params = {}) {
+    const qs = new URLSearchParams(params).toString()
+    const res = await fetch(`${API_BASE}/strategy4/tracking/topics${qs ? '?' + qs : ''}`)
+    return res.json().catch(() => ({ topics: [] }))
+  }
+
+  async function getStrategy4TrackedLeaders(params = {}) {
+    const qs = new URLSearchParams(params).toString()
+    const res = await fetch(`${API_BASE}/strategy4/tracking/leaders${qs ? '?' + qs : ''}`)
+    return res.json().catch(() => ({ leaders: [] }))
+  }
+
+  async function getStrategy4TrackingEvents(params = {}) {
+    const qs = new URLSearchParams(params).toString()
+    const res = await fetch(`${API_BASE}/strategy4/tracking/events${qs ? '?' + qs : ''}`)
+    return res.json().catch(() => ({ events: [] }))
+  }
+
   // Strategy2 Backtest API
   async function startStrategy2Backtest(payload) {
     const res = await fetch(`${API_BASE}/strategy2/backtests`, {
@@ -366,7 +384,8 @@ export function useApi() {
     getStrategy3Candidates, getStrategy3Candidate,
     startStrategy4Scan, getStrategy4ScanStatus, getStrategy4Tasks,
     getStrategy4Topics, getStrategy4Leaders, getStrategy4Candidates,
-    getStrategy4Candidate,
+    getStrategy4Candidate, getStrategy4TrackedTopics, getStrategy4TrackedLeaders,
+    getStrategy4TrackingEvents,
     startStrategy2Backtest, getStrategy2BacktestStatus,
     getStrategy2BacktestTasks, getStrategy2BacktestTask,
     getStrategy2BacktestOpportunities, getStrategy2BacktestInsufficientStocks,

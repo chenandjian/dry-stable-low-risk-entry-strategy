@@ -229,7 +229,10 @@ def test_strategy4_parameter_experiments_filter_observed_snapshots_only(tmp_path
         db_path=db_path,
         start_date="2026-06-20",
         end_date="2026-06-21",
-        base_config={"strategy4": {"source_modes": {"historical_kline_derived_enabled": False}}},
+        base_config={"strategy4": {
+            "source_modes": {"historical_kline_derived_enabled": False},
+            "tracking": {"enabled": False},
+        }},
         experiment_grid=[
             {"name": "strict", "min_hot_topic_score": 95, "min_leader_strength_score": 95},
             {"name": "baseline", "min_hot_topic_score": 85, "min_leader_strength_score": 88},

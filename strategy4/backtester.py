@@ -28,6 +28,7 @@ from strategy4.price_limit import (
 from strategy4.snapshot_merge import merge_leaders, merge_topics
 from strategy4.topic_index_filters import topic_index_context_passes_filters
 from strategy4.topic_index_service import topic_index_context_from_history
+from strategy4.tracking_backtest import Strategy4TrackingReplayPool
 from strategy4.backtest_models import (
     Strategy4BacktestOpportunity,
     Strategy4BacktestResult,
@@ -105,6 +106,7 @@ def run_strategy4_snapshot_backtest(
     cfg = resolve_strategy4_config(config_snapshot)
     engine = HotLeaderSecondWaveEngine({"strategy4": cfg})
     result = Strategy4BacktestResult(task_id=task_id, config_snapshot=config_snapshot)
+    tracking_pool = Strategy4TrackingReplayPool(cfg) if (cfg.get("tracking") or {}).get("enabled", True) else None
 
     for evaluation_date in _evaluation_dates(start_date, end_date):
         result.summary.evaluation_days += 1
@@ -114,8 +116,23 @@ def run_strategy4_snapshot_backtest(
             cfg,
             derived_snapshot_cache,
         )
+        topics: list[dict] = []
+        leaders: list[dict] = []
         if not snapshot_task_id:
-            if not derived_topics:
+            if derived_topics and not derived_leaders:
+                result.summary.unobserved_members_days += 1
+                result.unobserved.append(Strategy4UnobservedDay(
+                    evaluation_date=evaluation_date,
+                    reason_code="UNOBSERVED_DERIVED_MEMBERS",
+                    detail="Derived hot topics exist but no observable member leader snapshots are available.",
+                ))
+            elif derived_topics:
+                topics = derived_topics
+                leaders = derived_leaders
+                result.summary.derived_snapshot_days += 1
+                if any(t.get("membership_mode") == "current_members_proxy" for t in derived_topics):
+                    result.summary.current_members_proxy_days += 1
+            elif tracking_pool is None or not tracking_pool.active_topics():
                 result.summary.unobserved_snapshot_days += 1
                 result.unobserved.append(Strategy4UnobservedDay(
                     evaluation_date=evaluation_date,
@@ -123,20 +140,6 @@ def run_strategy4_snapshot_backtest(
                     detail="No Strategy4 live or derived hot-topic snapshot exists for this evaluation date.",
                 ))
                 continue
-            if not derived_leaders:
-                result.summary.unobserved_snapshot_days += 1
-                result.summary.unobserved_members_days += 1
-                result.unobserved.append(Strategy4UnobservedDay(
-                    evaluation_date=evaluation_date,
-                    reason_code="UNOBSERVED_DERIVED_MEMBERS",
-                    detail="Derived hot topics exist but no observable member leader snapshots are available.",
-                ))
-                continue
-            topics = derived_topics
-            leaders = derived_leaders
-            result.summary.derived_snapshot_days += 1
-            if any(t.get("membership_mode") == "current_members_proxy" for t in derived_topics):
-                result.summary.current_members_proxy_days += 1
         else:
             live_topics = db.get_strategy4_hot_topics(snapshot_task_id)
             live_leaders = db.get_strategy4_leaders(snapshot_task_id)
@@ -149,11 +152,20 @@ def run_strategy4_snapshot_backtest(
                 topics = live_topics
                 leaders = live_leaders
 
-        topics = _select_topics_for_experiment(topics, cfg)
-        leaders_by_topic = _leaders_by_topic(leaders, cfg)
-        result.summary.observed_snapshot_days += 1
+        if tracking_pool is not None and (topics or leaders):
+            tracking_pool.update_from_snapshots(evaluation_date, topics, leaders)
+        if tracking_pool is not None:
+            tracking_pool.advance_to(evaluation_date)
+            result.summary.tracking_pool_topics = max(result.summary.tracking_pool_topics, len(tracking_pool.topics))
+            result.summary.tracking_pool_leaders = max(result.summary.tracking_pool_leaders, len(tracking_pool.leaders))
 
-        for topic in topics:
+        selected_topics = _select_topics_for_experiment(topics, cfg)
+        leaders_by_topic = _leaders_by_topic(leaders, cfg)
+        if selected_topics or (tracking_pool and tracking_pool.active_topics()):
+            result.summary.observed_snapshot_days += 1
+
+        emitted_keys: set[tuple[str, str, str]] = set()
+        for topic in selected_topics:
             topic_index_context = _topic_index_context_for_backtest(topic, cfg, evaluation_date)
             if not topic_index_context.get("observed"):
                 result.summary.unobserved_topic_index_days += 1
@@ -177,11 +189,53 @@ def run_strategy4_snapshot_backtest(
                 )
                 if signal is None:
                     continue
+                signal.evaluation_snapshot.setdefault("candidate_origin", "current_hot")
                 result.signals.append(signal)
                 opp = _opportunity_from_signal(signal)
                 ohlc = _get_ohlc(signal.code, ohlc_cache) or []
                 calculate_strategy4_execution_outcome(opp, ohlc)
                 result.opportunities.append(opp)
+                emitted_keys.add((topic.get("topic_id", ""), leader.get("code", ""), evaluation_date))
+
+        if tracking_pool is not None:
+            for topic in tracking_pool.active_topics():
+                topic_index_context = _topic_index_context_for_backtest(topic, cfg, evaluation_date)
+                if not topic_index_context.get("observed"):
+                    continue
+                if not topic_index_context_passes_filters(topic_index_context, cfg):
+                    continue
+                for leader in tracking_pool.active_leaders_for_topic(topic.get("topic_id", "")):
+                    key = (topic.get("topic_id", ""), leader.get("code", ""), evaluation_date)
+                    if key in emitted_keys:
+                        for signal in result.signals:
+                            if (
+                                signal.topic_id == key[0]
+                                and signal.code == key[1]
+                                and signal.evaluation_date == key[2]
+                            ):
+                                signal.evaluation_snapshot["candidate_origin"] = "merged_current_and_tracking"
+                        continue
+                    signal = _evaluate_leader_snapshot(
+                        topic,
+                        leader,
+                        engine,
+                        cfg,
+                        evaluation_date,
+                        topic_index_context=topic_index_context,
+                        ohlc_cache=ohlc_cache,
+                    )
+                    if signal is None:
+                        continue
+                    metadata = tracking_pool.metadata_for(topic, leader, origin="tracking_pool")
+                    signal.evaluation_snapshot.update(metadata)
+                    signal.evaluation_snapshot["candidate_origin"] = "tracking_pool"
+                    result.signals.append(signal)
+                    opp = _opportunity_from_signal(signal)
+                    ohlc = _get_ohlc(signal.code, ohlc_cache) or []
+                    calculate_strategy4_execution_outcome(opp, ohlc)
+                    result.opportunities.append(opp)
+                    result.summary.tracking_pool_signals += 1
+                    _count_tracking_age_bucket(result.summary, int(metadata.get("tracking_age_days") or 0))
 
     _finalize_summary(result.summary, result.signals, result.opportunities)
     return result
@@ -593,10 +647,27 @@ def _finalize_summary(
     for opp in opportunities:
         snapshot = opp.evaluation_snapshot or {}
         modes = snapshot.get("source_modes") or []
+        origin = snapshot.get("candidate_origin") or "current_hot"
+        if origin == "tracking_pool":
+            summary.tracking_pool_opportunities += 1
+        elif origin == "current_hot":
+            summary.current_hot_opportunities += 1
+        elif origin == "merged_current_and_tracking":
+            summary.current_hot_opportunities += 1
+            summary.tracking_pool_opportunities += 1
         if modes == ["historical_kline_derived"]:
             summary.derived_only_opportunities += 1
         if "live_external" in modes and "historical_kline_derived" in modes:
             summary.live_and_derived_confirmed_opportunities += 1
+
+
+def _count_tracking_age_bucket(summary: Strategy4BacktestSummary, age: int) -> None:
+    if age <= 20:
+        summary.tracking_age_1_20_count += 1
+    elif age <= 60:
+        summary.tracking_age_21_60_count += 1
+    else:
+        summary.tracking_age_61_120_count += 1
 
 
 def _render_report(
@@ -619,8 +690,8 @@ def _render_report(
         "",
         "## 参数实验结果",
         "",
-        "| 实验 | 可观察日 | 不可观察日 | 不可观察率 | 信号 | 机会 | 入场 | 未入场 | 目标 | 止损 | 平均收益 | PF | 平均盈利 | 平均亏损 | 平均盈亏比 | 月度分布 |",
-        "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|",
+        "| 实验 | 可观察日 | 不可观察日 | 不可观察率 | 池题材 | 池龙头 | 信号 | 即时机会 | 跟踪池机会 | 总机会 | 入场 | 未入场 | 目标 | 止损 | 平均收益 | PF | 平均盈利 | 平均亏损 | 平均盈亏比 | 跟踪年龄分布 | 月度分布 |",
+        "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|---|",
     ]
     for name, result in results.items():
         s = result.summary
@@ -628,9 +699,11 @@ def _render_report(
         pf = "--" if s.profit_factor is None else f"{s.profit_factor:.2f}"
         lines.append(
             f"| {name} | {s.observed_snapshot_days} | {s.unobserved_snapshot_days} | {metrics['unobserved_rate']} | "
-            f"{s.total_signals} | {s.total_opportunities} | {s.entered_opportunities} | "
+            f"{s.tracking_pool_topics} | {s.tracking_pool_leaders} | {s.total_signals} | "
+            f"{s.current_hot_opportunities} | {s.tracking_pool_opportunities} | {s.total_opportunities} | {s.entered_opportunities} | "
             f"{s.no_entry_count} | {s.target_count} | {s.stop_count} | {s.avg_realized_return:.2%} | {pf} | "
-            f"{metrics['avg_win']} | {metrics['avg_loss']} | {metrics['avg_win_loss_ratio']} | {metrics['monthly_distribution']} |"
+            f"{metrics['avg_win']} | {metrics['avg_loss']} | {metrics['avg_win_loss_ratio']} | "
+            f"{metrics['tracking_age_distribution']} | {metrics['monthly_distribution']} |"
         )
     opportunity_lines = _opportunity_detail_lines(results)
     if opportunity_lines:
@@ -638,8 +711,8 @@ def _render_report(
             "",
             "## 机会明细",
             "",
-            "| 实验 | 股票 | 题材 | 发现日 | 入场日 | 退出原因 | 收益 | RR | 风险 | 回踩 | 回踩天数 | 板块源 | 板块K线日期 | 板块阶段 |",
-            "|---|---|---|---|---|---|---:|---:|---:|---:|---:|---|---|---|",
+            "| 实验 | 股票 | 题材 | 来源 | 发现日 | 入场日 | 退出原因 | 收益 | RR | 风险 | 回踩 | 回踩天数 | 跟踪天数 | 板块源 | 板块K线日期 | 板块阶段 |",
+            "|---|---|---|---|---|---|---|---:|---:|---:|---:|---:|---:|---|---|---|",
             *opportunity_lines,
         ])
     best_name, best_result = _best_result(results)
@@ -676,9 +749,10 @@ def _opportunity_detail_lines(results: dict[str, Strategy4BacktestResult]) -> li
             entry_date = opp.entry_date or "--"
             realized = "--" if opp.entry_price <= 0 else f"{opp.realized_return:.2%}"
             lines.append(
-                f"| {name} | {opp.code} {opp.name} | {opp.topic_name} | {opp.first_detected_date} | "
+                f"| {name} | {opp.code} {opp.name} | {opp.topic_name} | {snapshot.get('candidate_origin', 'current_hot')} | {opp.first_detected_date} | "
                 f"{entry_date} | {opp.exit_reason or '--'} | {realized} | {opp.reward_risk_ratio:.2f} | "
                 f"{opp.risk_ratio:.2%} | {opp.pullback_pct:.2%} | {opp.pullback_days} | "
+                f"{snapshot.get('tracking_age_days', 0) or 0} | "
                 f"{snapshot.get('topic_index_source', '') or '--'} | {snapshot.get('topic_index_latest_date', '') or '--'} | "
                 f"{snapshot.get('topic_index_phase', '') or '--'} |"
             )
@@ -708,6 +782,11 @@ def _result_metrics(result: Strategy4BacktestResult) -> dict:
         "avg_win": "--" if avg_win is None else f"{avg_win:.2%}",
         "avg_loss": "--" if avg_loss is None else f"{avg_loss:.2%}",
         "avg_win_loss_ratio": "--" if avg_win_loss_ratio is None else f"{avg_win_loss_ratio:.2f}",
+        "tracking_age_distribution": (
+            f"1-20:{s.tracking_age_1_20_count}, "
+            f"21-60:{s.tracking_age_21_60_count}, "
+            f"61-120:{s.tracking_age_61_120_count}"
+        ),
         "monthly_distribution": ", ".join(f"{k}:{v}" for k, v in sorted(monthly.items())) or "--",
     }
 
@@ -772,7 +851,8 @@ def _conclusion_lines(coverage: dict, results: dict[str, Strategy4BacktestResult
     lines = [
         f"当前策略4真实快照覆盖 {coverage['topic_snapshot_days']} 个交易日，历史样本仍偏少。",
         f"行业/题材指数缓存覆盖 {coverage['topic_index_topics']} 个题材、{coverage['topic_index_rows']} 行，日期范围 {coverage['topic_index_min']} 至 {coverage['topic_index_max']}。",
-        "本次回测仅使用历史快照和 evaluation_date 当日及之前的真实板块K线，不使用当前板块数据倒推过去。",
+        "本次回测仅使用历史快照、跟踪池历史状态，以及 evaluation_date 当日及之前的真实板块K线和个股K线，不使用未来数据。",
+        f"跟踪池最大入池题材数 {max((r.summary.tracking_pool_topics for r in results.values()), default=0)}，最大入池龙头数 {max((r.summary.tracking_pool_leaders for r in results.values()), default=0)}。",
     ]
     if max_entered <= 0:
         lines.append(

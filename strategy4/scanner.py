@@ -25,6 +25,7 @@ from strategy4.topic_index_filters import topic_index_context_passes_filters
 from strategy4.topic_scoring import score_hot_topic
 from strategy4.topic_index_service import TopicIndexService, _target_trade_date
 from strategy4.topic_source import TopicSourceError, TopicSourceService
+from strategy4.tracking_service import Strategy4TrackingService, merge_tracking_candidates
 
 logger = logging.getLogger(__name__)
 
@@ -51,6 +52,7 @@ def scan_strategy4_all(config: dict, progress_callback=None, task_id: str | None
         source_modes = cfg.get("source_modes") or {}
         live_enabled = bool(source_modes.get("live_external_enabled", True))
         derived_enabled = bool(source_modes.get("historical_kline_derived_enabled", True))
+        target_date = kwargs.get("evaluation_date") or _target_trade_date(datetime.now())
         topic_service = TopicSourceService() if live_enabled else None
         live_topics: list[dict] = []
         live_error = ""
@@ -85,7 +87,6 @@ def scan_strategy4_all(config: dict, progress_callback=None, task_id: str | None
         derived_topics: list[dict] = []
         derived_leaders: list[dict] = []
         if derived_enabled:
-            target_date = kwargs.get("evaluation_date") or _target_trade_date(datetime.now())
             derived_topics = derive_hot_topics_for_date(target_date, cfg)
             for topic in derived_topics:
                 leaders_for_topic = derive_leaders_for_topic(topic, evaluation_date=target_date, config=cfg)
@@ -124,6 +125,14 @@ def scan_strategy4_all(config: dict, progress_callback=None, task_id: str | None
             fetch_daily_fn=kwargs.get("fetch_daily_fn"),
             force_refresh_daily=bool(kwargs.get("force_refresh_daily", False)),
         )
+        tracking_service = Strategy4TrackingService({"strategy4": cfg})
+        tracking_service.update_from_snapshots(task_id, target_date, topics, leaders, candidates)
+        tracking_candidates = tracking_service.build_candidates_from_pool(
+            task_id=task_id,
+            evaluation_date=target_date,
+            project_config=config,
+        )
+        candidates = merge_tracking_candidates(candidates, tracking_candidates)
         db.replace_strategy4_leaders(task_id, leaders)
         for candidate in candidates:
             db.upsert_strategy4_candidate(task_id, candidate)
@@ -156,6 +165,15 @@ def scan_strategy4_all(config: dict, progress_callback=None, task_id: str | None
     topics = result.get("topics", [])
     leaders = result.get("leaders", [])
     candidates = result.get("candidates", [])
+    target_date = kwargs.get("evaluation_date") or _target_trade_date(datetime.now())
+    tracking_service = Strategy4TrackingService({"strategy4": cfg})
+    tracking_service.update_from_snapshots(task_id, target_date, topics, leaders, candidates)
+    tracking_candidates = tracking_service.build_candidates_from_pool(
+        task_id=task_id,
+        evaluation_date=target_date,
+        project_config=config,
+    )
+    candidates = merge_tracking_candidates(candidates, tracking_candidates)
     db.replace_strategy4_hot_topics(task_id, topics)
     db.replace_strategy4_leaders(task_id, leaders)
     for candidate in candidates:

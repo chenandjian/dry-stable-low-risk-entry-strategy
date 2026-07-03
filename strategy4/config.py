@@ -76,6 +76,19 @@ DEFAULT_STRATEGY4_CONFIG = {
         "allow_derived_only_watch": True,
         "allow_derived_only_buyable": True,
     },
+    "tracking": {
+        "enabled": True,
+        "max_calendar_days": 120,
+        "strong_attention_days": 20,
+        "golden_second_wave_days": 60,
+        "allow_extension_days": 120,
+        "expire_without_leader_days": 30,
+        "extension_min_reward_risk_ratio": 2.0,
+        "extension_max_risk_ratio": 0.12,
+        "max_topic_drawdown_since_detected": 0.20,
+        "max_leader_drawdown_from_first_wave_high": 0.45,
+        "min_extension_leader_rs_20d": -0.05,
+    },
 }
 
 
@@ -120,6 +133,7 @@ def resolve_strategy4_config(config: dict | None) -> dict:
     _validate_source_modes(raw)
     _validate_derived_source(raw)
     _validate_merge_policy(raw)
+    _validate_tracking(raw)
     return raw
 
 
@@ -215,6 +229,38 @@ def _validate_merge_policy(config: dict) -> None:
     ):
         policy[key] = bool(policy.get(key, default))
     config["merge_policy"] = policy
+
+
+def _validate_tracking(config: dict) -> None:
+    tracking = config.get("tracking") or {}
+    tracking["enabled"] = bool(tracking.get("enabled", True))
+    for key, min_v, max_v in (
+        ("strong_attention_days", 1, 120),
+        ("golden_second_wave_days", 1, 180),
+        ("allow_extension_days", 1, 240),
+        ("max_calendar_days", 1, 365),
+        ("expire_without_leader_days", 1, 180),
+    ):
+        value = tracking.get(key)
+        if isinstance(value, bool) or not isinstance(value, int):
+            raise ValueError(f"tracking.{key} must be an integer")
+        if value < min_v or value > max_v:
+            raise ValueError(f"tracking.{key} must be between {min_v} and {max_v}")
+    if tracking["golden_second_wave_days"] < tracking["strong_attention_days"]:
+        raise ValueError("tracking.golden_second_wave_days must be >= tracking.strong_attention_days")
+    if tracking["allow_extension_days"] < tracking["golden_second_wave_days"]:
+        raise ValueError("tracking.allow_extension_days must be >= tracking.golden_second_wave_days")
+    if tracking["max_calendar_days"] < tracking["allow_extension_days"]:
+        raise ValueError("tracking.max_calendar_days must be >= tracking.allow_extension_days")
+    for key, min_v, max_v in (
+        ("extension_min_reward_risk_ratio", 0.5, 10.0),
+        ("extension_max_risk_ratio", 0.01, 0.5),
+        ("max_topic_drawdown_since_detected", 0.01, 0.8),
+        ("max_leader_drawdown_from_first_wave_high", 0.01, 0.9),
+        ("min_extension_leader_rs_20d", -1.0, 1.0),
+    ):
+        _validate_prefixed_number_range(tracking, key, min_v, max_v, "tracking")
+    config["tracking"] = tracking
 
 
 def _validate_int_range(config: dict, key: str, min_value: int, max_value: int) -> None:

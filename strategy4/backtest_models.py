@@ -77,6 +77,14 @@ class Strategy4BacktestSummary:
     current_members_proxy_days: int = 0
     derived_only_opportunities: int = 0
     live_and_derived_confirmed_opportunities: int = 0
+    current_hot_opportunities: int = 0
+    tracking_pool_topics: int = 0
+    tracking_pool_leaders: int = 0
+    tracking_pool_signals: int = 0
+    tracking_pool_opportunities: int = 0
+    tracking_age_1_20_count: int = 0
+    tracking_age_21_60_count: int = 0
+    tracking_age_61_120_count: int = 0
     total_signals: int = 0
     total_opportunities: int = 0
     entered_opportunities: int = 0
