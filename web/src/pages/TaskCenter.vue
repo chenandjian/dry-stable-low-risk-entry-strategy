@@ -258,7 +258,7 @@ async function loadTasks() {
       getStrategy2Tasks().catch(() => ({ tasks: [] })),
       getStrategy3Tasks().catch(() => ({ tasks: [] })),
       getStrategy4Tasks().catch(() => ({ tasks: [] })),
-      getStrategy5Tasks().catch(() => ({ tasks: [] })),
+      (getStrategy5Tasks ? getStrategy5Tasks() : Promise.resolve({ tasks: [] })).catch(() => ({ tasks: [] })),
     ])
     const s1Tasks = (s1Data.tasks || []).map(t => ({ ...t, strategyType: 'STRATEGY_1_CUP_HANDLE' }))
     const s2Tasks = (s2Data.tasks || []).map(t => ({ ...t, strategyType: t.strategy_type || 'STRATEGY_2_EXTREME_DRY_STABLE' }))
