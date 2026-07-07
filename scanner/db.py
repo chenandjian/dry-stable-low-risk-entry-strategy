@@ -137,6 +137,7 @@ def init_db(path: str = "data/cuphandle.db"):
         _ensure_strategy2_candidates_table(conn)
         _ensure_strategy3_candidates_table(conn)
         _ensure_strategy4_tables(conn)
+        _ensure_strategy5_candidates_table(conn)
         _ensure_strategy2_backtest_tables(conn)
         _ensure_strategy3_backtest_tables(conn)
         _ensure_strategy1_backtest_tables(conn)
@@ -1760,6 +1761,95 @@ def _ensure_strategy4_tables(conn: sqlite3.Connection):
     conn.execute("CREATE INDEX IF NOT EXISTS idx_s4_tracking_events_topic ON strategy4_tracking_events(topic_id, code)")
 
 
+def _ensure_strategy5_candidates_table(conn: sqlite3.Connection):
+    """Create strategy5_candidates table if not exists."""
+    conn.execute('''
+        CREATE TABLE IF NOT EXISTS strategy5_candidates (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            task_id TEXT NOT NULL,
+            code TEXT NOT NULL,
+            name TEXT NOT NULL,
+            evaluation_date TEXT NOT NULL,
+            close REAL DEFAULT 0,
+            daily_return REAL DEFAULT 0,
+            change_pct REAL DEFAULT 0,
+            trading_days INTEGER DEFAULT 0,
+            avg_turnover_60d REAL DEFAULT 0,
+            avg_turnover_30d REAL DEFAULT 0,
+            avg_turnover_10d REAL DEFAULT 0,
+            ma5 REAL,
+            ma10 REAL,
+            ma20 REAL,
+            ma50 REAL,
+            ma100 REAL,
+            ma120 REAL,
+            ma250 REAL,
+            distance_to_ma5 REAL,
+            distance_to_ma10 REAL,
+            distance_to_ma20 REAL,
+            recent_5d_return REAL,
+            recent_10d_return REAL,
+            recent_20d_return REAL,
+            drawdown_from_20d_high REAL,
+            amplitude_5d REAL,
+            amplitude_10d REAL,
+            support_status TEXT,
+            main_support_ma TEXT,
+            main_support_price REAL,
+            main_support_distance REAL,
+            support_score INTEGER DEFAULT 0,
+            candidate_type TEXT NOT NULL,
+            classification TEXT NOT NULL,
+            range_5_tag TEXT,
+            range_10_tag TEXT,
+            pullback_tag TEXT,
+            risk_tags TEXT,
+            warn_tags TEXT,
+            near_120d_high_ratio REAL,
+            close_20d_high REAL,
+            close_120d_high REAL,
+            strength_trigger TEXT,
+            high_trigger TEXT,
+            ma20_slope_5d REAL,
+            ma50_slope_10d REAL,
+            max_decline_5d REAL,
+            v20 REAL,
+            technical_score REAL DEFAULT 0,
+            capital_score REAL DEFAULT 0,
+            trend_score REAL DEFAULT 0,
+            support_quality_score REAL DEFAULT 0,
+            total_score REAL DEFAULT 0,
+            reject_reasons TEXT,
+            score_reasons TEXT,
+            data_source TEXT,
+            kline_latest_date TEXT,
+            kline_fetched_at TEXT,
+            quote_status TEXT,
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+            FOREIGN KEY (task_id) REFERENCES scan_tasks(id),
+            UNIQUE(task_id, code)
+        )
+    ''')
+    for column, col_type in {
+        "main_support_price": "REAL",
+        "main_support_distance": "REAL",
+        "data_source": "TEXT",
+        "kline_latest_date": "TEXT",
+        "kline_fetched_at": "TEXT",
+        "quote_status": "TEXT",
+    }.items():
+        _ensure_column(conn, "strategy5_candidates", column, col_type)
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_strategy5_candidates_task_score "
+        "ON strategy5_candidates(task_id, total_score DESC)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_strategy5_candidates_type_score "
+        "ON strategy5_candidates(task_id, candidate_type, total_score DESC)"
+    )
+
+
 def _ensure_column(conn: sqlite3.Connection, table: str, column: str, col_type: str):
     """Compatible add-column-if-not-exists helper."""
     existing = [d[1] for d in conn.execute(f"PRAGMA table_info({table})").fetchall()]
@@ -2340,6 +2430,141 @@ def get_strategy4_candidate(code: str, task_id: str = None) -> dict | None:
         return None
     cols = [d[1] for d in conn.execute("PRAGMA table_info(strategy4_candidates)").fetchall()]
     return _deserialize_strategy4_row(dict(zip(cols, row)))
+
+
+def upsert_strategy5_candidate(task_id: str, d: dict):
+    """Insert or update one Strategy5 candidate."""
+    conn = get_conn()
+    columns = [
+        "task_id", "code", "name", "evaluation_date", "close", "daily_return", "change_pct",
+        "trading_days", "avg_turnover_60d", "avg_turnover_30d", "avg_turnover_10d",
+        "ma5", "ma10", "ma20", "ma50", "ma100", "ma120", "ma250",
+        "distance_to_ma5", "distance_to_ma10", "distance_to_ma20",
+        "recent_5d_return", "recent_10d_return", "recent_20d_return",
+        "drawdown_from_20d_high", "amplitude_5d", "amplitude_10d",
+        "support_status", "main_support_ma", "main_support_price", "main_support_distance",
+        "support_score", "candidate_type", "classification",
+        "range_5_tag", "range_10_tag", "pullback_tag", "risk_tags", "warn_tags",
+        "near_120d_high_ratio", "close_20d_high", "close_120d_high",
+        "strength_trigger", "high_trigger", "ma20_slope_5d", "ma50_slope_10d",
+        "max_decline_5d", "v20", "technical_score", "capital_score", "trend_score",
+        "support_quality_score", "total_score", "reject_reasons", "score_reasons",
+        "data_source", "kline_latest_date", "kline_fetched_at", "quote_status",
+    ]
+    values = [
+        task_id,
+        d.get("code", ""),
+        d.get("name", ""),
+        d.get("evaluation_date", ""),
+        d.get("close", 0.0),
+        d.get("daily_return", 0.0),
+        d.get("change_pct", 0.0),
+        d.get("trading_days", 0),
+        d.get("avg_turnover_60d", 0.0),
+        d.get("avg_turnover_30d", 0.0),
+        d.get("avg_turnover_10d", 0.0),
+        d.get("ma5"),
+        d.get("ma10"),
+        d.get("ma20"),
+        d.get("ma50"),
+        d.get("ma100"),
+        d.get("ma120"),
+        d.get("ma250"),
+        d.get("distance_to_ma5"),
+        d.get("distance_to_ma10"),
+        d.get("distance_to_ma20"),
+        d.get("recent_5d_return"),
+        d.get("recent_10d_return"),
+        d.get("recent_20d_return"),
+        d.get("drawdown_from_20d_high"),
+        d.get("amplitude_5d"),
+        d.get("amplitude_10d"),
+        d.get("support_status", ""),
+        d.get("main_support_ma", ""),
+        d.get("main_support_price"),
+        d.get("main_support_distance"),
+        d.get("support_score", 0),
+        d.get("candidate_type", "REJECTED"),
+        d.get("classification", "rejected"),
+        d.get("range_5_tag", ""),
+        d.get("range_10_tag", ""),
+        d.get("pullback_tag", ""),
+        _json_any(d.get("risk_tags", [])),
+        _json_any(d.get("warn_tags", [])),
+        d.get("near_120d_high_ratio"),
+        d.get("close_20d_high"),
+        d.get("close_120d_high"),
+        d.get("strength_trigger", ""),
+        d.get("high_trigger", ""),
+        d.get("ma20_slope_5d"),
+        d.get("ma50_slope_10d"),
+        d.get("max_decline_5d"),
+        d.get("v20"),
+        d.get("technical_score", 0.0),
+        d.get("capital_score", 0.0),
+        d.get("trend_score", 0.0),
+        d.get("support_quality_score", 0.0),
+        d.get("total_score", 0.0),
+        _json_any(d.get("reject_reasons", [])),
+        _json_any(d.get("score_reasons", [])),
+        d.get("data_source", ""),
+        d.get("kline_latest_date", ""),
+        d.get("kline_fetched_at", ""),
+        d.get("quote_status", ""),
+    ]
+    updates = ", ".join(f"{c}=excluded.{c}" for c in columns if c not in ("task_id", "code"))
+    conn.execute(
+        f"""INSERT INTO strategy5_candidates ({', '.join(columns)}) VALUES ({', '.join('?' for _ in columns)})
+            ON CONFLICT(task_id, code) DO UPDATE SET {updates}, updated_at=datetime('now')""",
+        values,
+    )
+    conn.commit()
+
+
+def get_strategy5_candidates(task_id: str = None) -> list[dict]:
+    """Get Strategy5 candidates, optionally for a task."""
+    conn = get_conn()
+    if task_id:
+        rows = conn.execute(
+            "SELECT * FROM strategy5_candidates WHERE task_id=? "
+            "ORDER BY CASE candidate_type WHEN 'KEY_CANDIDATE' THEN 0 WHEN 'WATCH_CANDIDATE' THEN 1 ELSE 2 END, "
+            "total_score DESC, code ASC",
+            (task_id,),
+        ).fetchall()
+    else:
+        row = conn.execute(
+            "SELECT id FROM scan_tasks WHERE status='completed' "
+            "AND strategy_type='STRATEGY_5_SHORT_SPRINT_SUPPORT' "
+            "ORDER BY started_at DESC LIMIT 1"
+        ).fetchone()
+        if not row:
+            return []
+        rows = conn.execute(
+            "SELECT * FROM strategy5_candidates WHERE task_id=? "
+            "ORDER BY CASE candidate_type WHEN 'KEY_CANDIDATE' THEN 0 WHEN 'WATCH_CANDIDATE' THEN 1 ELSE 2 END, "
+            "total_score DESC, code ASC",
+            (row[0],),
+        ).fetchall()
+    cols = [d[1] for d in conn.execute("PRAGMA table_info(strategy5_candidates)").fetchall()]
+    return [_deserialize_strategy5_row(dict(zip(cols, row))) for row in rows]
+
+
+def get_strategy5_candidate(code: str, task_id: str = None) -> dict | None:
+    conn = get_conn()
+    if task_id:
+        row = conn.execute(
+            "SELECT * FROM strategy5_candidates WHERE code=? AND task_id=? ORDER BY id DESC LIMIT 1",
+            (code, task_id),
+        ).fetchone()
+    else:
+        row = conn.execute(
+            "SELECT * FROM strategy5_candidates WHERE code=? ORDER BY id DESC LIMIT 1",
+            (code,),
+        ).fetchone()
+    if not row:
+        return None
+    cols = [d[1] for d in conn.execute("PRAGMA table_info(strategy5_candidates)").fetchall()]
+    return _deserialize_strategy5_row(dict(zip(cols, row)))
 
 
 def save_strategy4_topic_index_ohlc(
@@ -2994,6 +3219,19 @@ def _deserialize_strategy4_row(row: dict) -> dict:
                 row[field] = []
             else:
                 row[field] = {}
+    return row
+
+
+def _deserialize_strategy5_row(row: dict) -> dict:
+    for field in ("risk_tags", "warn_tags", "reject_reasons", "score_reasons"):
+        value = row.get(field)
+        if isinstance(value, str) and value:
+            try:
+                row[field] = json.loads(value)
+            except (json.JSONDecodeError, TypeError):
+                row[field] = []
+        elif not value:
+            row[field] = []
     return row
 
 
