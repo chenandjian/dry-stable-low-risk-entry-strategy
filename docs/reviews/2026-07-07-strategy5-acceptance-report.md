@@ -16,9 +16,9 @@
 
 | 验证项 | 命令 | 结果 |
 |---|---|---|
-| 策略5专项后端 | `python -m pytest tests/test_strategy5_validation.py tests/test_strategy5_core_rules.py tests/test_strategy5_db_api.py tests/test_strategy5_scanner.py tests/test_strategy5_backtester.py -q` | 13 passed |
+| 策略5专项后端 | `python -m pytest tests/test_strategy5_validation.py tests/test_strategy5_core_rules.py tests/test_strategy5_db_api.py tests/test_strategy5_scanner.py tests/test_strategy5_backtester.py -q` | 14 passed |
 | Python 编译 | `python -m compileall scanner strategy2 strategy3 strategy4 strategy5 server.py -q` | 通过 |
-| 后端回归 | `python -m pytest tests/ -q --ignore=tests/test_akshare_hist.py --ignore=tests/test_tushare_hist.py` | 830 passed |
+| 后端回归 | `python -m pytest tests/ -q --ignore=tests/test_akshare_hist.py --ignore=tests/test_tushare_hist.py` | 831 passed |
 | 前端策略5页 | `npm.cmd --prefix web test -- Strategy5Results --run` | 1 passed |
 | 前端全量 | `npm.cmd --prefix web test -- --run` | 14 files / 62 tests passed |
 | 前端构建 | `npm.cmd --prefix web run build` | 通过 |

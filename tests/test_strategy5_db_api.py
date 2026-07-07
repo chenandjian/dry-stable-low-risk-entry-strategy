@@ -66,3 +66,44 @@ def test_strategy5_api_returns_candidates_and_rejects_cross_strategy(tmp_path, m
     mismatch = client.get("/api/strategy5/tasks/s1-task/candidates")
     assert mismatch.status_code == 400
     assert mismatch.json()["error"] == "TASK_STRATEGY_MISMATCH"
+
+
+def test_startup_resume_strategy5_interrupted_task_finishes(monkeypatch, tmp_path):
+    db_path = str(tmp_path / "s5resume.db")
+    db.init_db(db_path)
+    db.create_scan_task("s5-interrupted", "2026-07-07 10:00:00", total_stocks=1, strategy_type=STRATEGY5_TYPE)
+    db.save_task_stocks("s5-interrupted", [{"code": "000001", "name": "平安银行", "market": "SZ"}])
+    server_mod._running.update({"running": False, "task_id": None, "strategy_type": None, "stats": {}})
+    monkeypatch.setattr(server_mod, "load_config", lambda path="config.yaml": {"data": {"database_path": db_path}, "strategy5": {}})
+
+    def fake_scan(config, progress_callback=None, task_id=None, stocks=None, **kwargs):
+        assert task_id == "s5-interrupted"
+        assert stocks == [{"code": "000001", "name": "平安银行", "market": "SZ"}]
+        db.update_task_stock(task_id, "000001", status="scanned", finished_at="2026-07-07 10:01:00")
+        db.refresh_scan_task_counts(task_id)
+        return {
+            "candidates": [],
+            "stats": {
+                "total": 1,
+                "total_stocks": 1,
+                "processed": 1,
+                "scanned": 1,
+                "skipped": 0,
+                "failed": 0,
+                "candidates_found": 0,
+                "elapsed_seconds": 0.1,
+            },
+            "task_id": task_id,
+        }
+
+    monkeypatch.setattr(server_mod, "scan_strategy5_all", fake_scan)
+
+    import time
+    with TestClient(server_mod.app):
+        deadline = time.time() + 2
+        while time.time() < deadline and server_mod._running.get("running"):
+            time.sleep(0.01)
+
+    task = db.get_scan_task("s5-interrupted")
+    assert task["status"] == "completed"
+    assert task["scanned"] == 1

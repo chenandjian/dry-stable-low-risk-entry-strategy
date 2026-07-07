@@ -111,6 +111,49 @@ async def lifespan(app: FastAPI):
                 finally:
                     _clear_running()
             t = threading.Thread(target=resume_s3, daemon=True)
+        elif s_type == STRATEGY5_TYPE:
+            def resume_s5():
+                try:
+                    pending = db.get_pending_stocks(interrupted["id"])
+                    def on_progress(stage, current, total, detail, discovery=None):
+                        stats = _running.get("stats", {})
+                        if stage == "discovery" and discovery:
+                            found = stats.get("candidates_found", 0) + 1
+                            discoveries = list(stats.get("discoveries") or [])
+                            discoveries.insert(0, _strategy5_discovery_from_candidate(discovery))
+                            _running["stats"] = {**stats, "discoveries": discoveries[:20], "candidates_found": found}
+                        else:
+                            code = detail.split()[0] if detail else ""
+                            _running["stats"] = {
+                                **stats,
+                                "scanned": current,
+                                "processed": current,
+                                "total_stocks": total,
+                                "current_code": code,
+                                "current_name": detail[len(code):].strip() if len(detail) > len(code) else detail,
+                            }
+                    result = scan_strategy5_all(config, progress_callback=on_progress, task_id=interrupted["id"], stocks=pending)
+                    _running["stats"] = result["stats"]
+                    s = result["stats"]
+                    db.finish_scan_task(
+                        interrupted["id"],
+                        finished_at=datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                        candidates_count=s.get("candidates_found", 0),
+                        elapsed_seconds=s.get("elapsed_seconds", 0),
+                        scanned=s.get("scanned", 0),
+                        skipped=s.get("skipped", 0),
+                    )
+                    db.refresh_scan_task_counts(interrupted["id"])
+                except Exception as e:
+                    import traceback
+                    logger.error(f"Strategy5 resume failed: {e}\n{traceback.format_exc()}")
+                    _running["stats"] = {"error": str(e)}
+                    conn = db.get_conn()
+                    conn.execute("UPDATE scan_tasks SET status='failed', error=? WHERE id=?", (str(e), interrupted["id"]))
+                    conn.commit()
+                finally:
+                    _clear_running()
+            t = threading.Thread(target=resume_s5, daemon=True)
         elif s_type == "STRATEGY_2_EXTREME_DRY_STABLE":
             # BUG-S2-001: 策略2恢复
             def resume_s2():
