@@ -147,7 +147,10 @@ export default {
     }
     const queryTaskId = this.$route?.query?.task || new URLSearchParams(window.location.search).get('task')
     const defaultTaskId = queryTaskId || (this.tasks.length === 1 ? this.tasks[0].id : '')
-    if (defaultTaskId && this.tasks.some(t => t.id === defaultTaskId)) {
+    if (defaultTaskId) {
+      if (!this.tasks.some(t => t.id === defaultTaskId)) {
+        this.tasks = [{ id: defaultTaskId, status: 'selected', candidates: 0 }, ...this.tasks]
+      }
       this.selectedTaskId = defaultTaskId
       await this.loadCandidates()
     }

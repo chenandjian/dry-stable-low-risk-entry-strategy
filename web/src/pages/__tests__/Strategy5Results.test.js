@@ -99,4 +99,36 @@ describe('Strategy5Results', () => {
     expect(wrapper.text()).toContain('数据日')
     expect(wrapper.text()).toContain('2026-07-07')
   })
+
+  it('loads and renders all candidates for the task id in the URL even when the task list is stale', async () => {
+    api.getStrategy5Tasks.mockResolvedValue({ tasks: [{ id: 's5-other', status: 'completed', candidates: 1 }] })
+    const candidates = Array.from({ length: 11 }, (_, idx) => ({
+      code: `688${String(idx).padStart(3, '0')}`,
+      name: `候选${idx}`,
+      candidate_type: idx < 7 ? 'KEY_CANDIDATE' : 'WATCH_CANDIDATE',
+      classification: idx < 7 ? 'highlight' : 'observe',
+      total_score: 90 - idx,
+      support_status: 'SPRINT_MA5_SUPPORT',
+      main_support_ma: 'MA5',
+      support_score: 8,
+      risk_tags: [],
+      warn_tags: [],
+    }))
+    api.getStrategy5Candidates.mockResolvedValue({ candidates })
+
+    const wrapper = mount(Strategy5Results, {
+      global: {
+        mocks: {
+          $route: { query: { task: 's5-20260707-224442' } },
+        },
+      },
+    })
+    await flushUi()
+
+    expect(api.getStrategy5Candidates).toHaveBeenCalledWith('s5-20260707-224442')
+    expect(wrapper.text()).toContain('候选数 11')
+    expect(wrapper.findAll('tbody tr')).toHaveLength(11)
+    expect(wrapper.text()).toContain('重点 7')
+    expect(wrapper.text()).toContain('观察 4')
+  })
 })
