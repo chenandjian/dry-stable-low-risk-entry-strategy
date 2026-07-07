@@ -531,6 +531,94 @@
       </div>
     </section>
 
+    <!-- 策略5：短线强势冲刺盘整支撑 -->
+    <section class="section strategy5-section">
+      <h3 class="section-title strategy5-title">策略5 · 短线强势冲刺盘整支撑</h3>
+      <p class="section-hint">
+        策略5从全市场日线中寻找短线强度、新高确认、盘整可控且贴近 MA 支撑的重点/观察候选。
+      </p>
+
+      <div class="toggle-grid" style="margin-bottom:16px">
+        <label class="toggle-item">
+          <span class="toggle-label">启用策略5</span>
+          <button class="toggle" :class="{ active: config.strategy5?.enabled !== false }"
+            @click="toggleStrategy5('enabled')">{{ config.strategy5?.enabled !== false ? '开' : '关' }}</button>
+        </label>
+      </div>
+
+      <div class="param-grid">
+        <div class="param">
+          <label title="策略5需要更长日线历史以计算 MA250 和长期交易日过滤">K线拉取天数</label>
+          <input type="number" v-model.number="config.strategy5.kline_days" @input="markDirty" min="260" max="3000" />
+          <span class="default">默认 1100</span>
+        </div>
+        <div class="param">
+          <label title="低于该数量无法稳定计算 MA250">最低K线数</label>
+          <input type="number" v-model.number="config.strategy5.minimum_kline_days" @input="markDirty" min="120" max="3000" />
+          <span class="default">默认 260</span>
+        </div>
+        <div class="param">
+          <label title="F1：交易天数需要大于该阈值">最低交易天数</label>
+          <input type="number" v-model.number="config.strategy5.minimum_trading_days" @input="markDirty" min="120" max="3000" />
+          <span class="default">默认 1000</span>
+        </div>
+        <div class="param">
+          <label title="F5：60日均成交额，单位亿元">60日均额 <span class="unit">亿</span></label>
+          <input type="number" v-model.number="config.strategy5.min_avg_amount_60d_yi" @input="markDirty" min="0" max="1000" step="1" />
+          <span class="default">默认 20</span>
+        </div>
+        <div class="param">
+          <label title="F6：30日均成交额，单位亿元">30日均额 <span class="unit">亿</span></label>
+          <input type="number" v-model.number="config.strategy5.min_avg_amount_30d_yi" @input="markDirty" min="0" max="1000" step="1" />
+          <span class="default">默认 15</span>
+        </div>
+        <div class="param">
+          <label title="F7：10日均成交额，单位亿元">10日均额 <span class="unit">亿</span></label>
+          <input type="number" v-model.number="config.strategy5.min_avg_amount_10d_yi" @input="markDirty" min="0" max="1000" step="1" />
+          <span class="default">默认 10</span>
+        </div>
+        <div class="param">
+          <label title="F8：20日短线强度阈值">20日强度</label>
+          <input type="number" v-model.number="config.strategy5.strength_ret_20d" @input="markDirty" min="-1" max="5" step="0.01" />
+          <span class="default">默认 0.20</span>
+        </div>
+        <div class="param">
+          <label title="F8：10日短线强度阈值">10日强度</label>
+          <input type="number" v-model.number="config.strategy5.strength_ret_10d" @input="markDirty" min="-1" max="5" step="0.01" />
+          <span class="default">默认 0.12</span>
+        </div>
+        <div class="param">
+          <label title="F8：5日短线强度阈值">5日强度</label>
+          <input type="number" v-model.number="config.strategy5.strength_ret_5d" @input="markDirty" min="-1" max="5" step="0.01" />
+          <span class="default">默认 0.08</span>
+        </div>
+        <div class="param">
+          <label title="F9：近20日收盘高点接近120日高点比例">接近120日高比例</label>
+          <input type="number" v-model.number="config.strategy5.near_120d_high_ratio" @input="markDirty" min="0" max="1" step="0.01" />
+          <span class="default">默认 0.98</span>
+        </div>
+        <div class="param">
+          <label title="F10：5日振幅超过该值直接排除">最大5日振幅</label>
+          <input type="number" v-model.number="config.strategy5.max_amp_5d" @input="markDirty" min="0" max="2" step="0.01" />
+          <span class="default">默认 0.22</span>
+        </div>
+        <div class="param">
+          <label title="F10：10日振幅超过该值直接排除">最大10日振幅</label>
+          <input type="number" v-model.number="config.strategy5.max_amp_10d" @input="markDirty" min="0" max="3" step="0.01" />
+          <span class="default">默认 0.45</span>
+        </div>
+        <div class="param">
+          <label title="重点候选最低支撑评分">重点候选支撑分</label>
+          <input type="number" v-model.number="config.strategy5.key_candidate_min_support_score" @input="markDirty" min="0" max="10" />
+          <span class="default">默认 8</span>
+        </div>
+      </div>
+
+      <div class="info-msg strategy5-info">
+        ⓘ 策略5继续使用 baidu / sina / tencent 日线链路；评分只排序，F1-F11 硬过滤失败不会被评分拉回候选。
+      </div>
+    </section>
+
     <!-- Actions -->
     <div class="actions-bar">
       <div v-if="saved" class="saved-msg">✓ 配置已保存</div>
@@ -660,6 +748,30 @@ const defaultStrategy4Config = {
   },
 }
 
+const defaultStrategy5Config = {
+  enabled: true,
+  kline_days: 1100,
+  minimum_kline_days: 260,
+  minimum_trading_days: 1000,
+  min_avg_amount_60d_yi: 20,
+  min_avg_amount_30d_yi: 15,
+  min_avg_amount_10d_yi: 10,
+  strength_ret_20d: 0.20,
+  strength_ret_10d: 0.12,
+  strength_ret_5d: 0.08,
+  single_day_surge_return: 0.07,
+  single_day_surge_volume_ratio: 1.8,
+  near_120d_high_ratio: 0.98,
+  max_amp_5d: 0.22,
+  max_amp_10d: 0.45,
+  max_drawdown_20d: -0.30,
+  max_decline_5d: -0.08,
+  volume_down_return: -0.07,
+  volume_down_ratio: 1.5,
+  ma50_min_ratio: 0.92,
+  key_candidate_min_support_score: 8,
+}
+
 const config = reactive({
   market: {},
   liquidity: {},
@@ -687,6 +799,7 @@ const config = reactive({
   },
   strategy3: { ...defaultStrategy3Config },
   strategy4: { ...defaultStrategy4Config },
+  strategy5: { ...defaultStrategy5Config },
 })
 
 const dirty = ref(false)
@@ -831,6 +944,10 @@ function ensureStrategy4Config() {
   config.strategy4 = mergeStrategy4Config(config.strategy4 || {})
 }
 
+function ensureStrategy5Config() {
+  config.strategy5 = { ...defaultStrategy5Config, ...(config.strategy5 || {}) }
+}
+
 function mergeStrategy4Config(value) {
   return {
     ...defaultStrategy4Config,
@@ -921,6 +1038,12 @@ function toggleStrategy4(key) {
 function toggleStrategy4TopicIndex(key) {
   ensureStrategy4Config()
   config.strategy4.topic_index[key] = !config.strategy4.topic_index[key]
+  markDirty()
+}
+
+function toggleStrategy5(key) {
+  ensureStrategy5Config()
+  config.strategy5[key] = !config.strategy5[key]
   markDirty()
 }
 
@@ -1053,6 +1176,18 @@ function validate() {
   if (s4TopicIndex.min_required_rows < 2 || s4TopicIndex.min_required_rows > 500) errors.push('策略4: 最低板块K线行数需在 2-500')
   if (s4TopicIndex.history_days < s4TopicIndex.min_required_rows) errors.push('策略4: 板块K线历史不能小于最低行数')
 
+  // Strategy5 validation
+  ensureStrategy5Config()
+  const s5 = config.strategy5 || {}
+  if (s5.kline_days < 260 || s5.kline_days > 3000) errors.push('策略5: K线拉取天数需在 260-3000')
+  if (s5.minimum_kline_days < 120 || s5.minimum_kline_days > s5.kline_days) errors.push('策略5: 最低K线数需在 120 到 K线拉取天数之间')
+  if (s5.minimum_trading_days < 120 || s5.minimum_trading_days > s5.kline_days) errors.push('策略5: 最低交易天数需在 120 到 K线拉取天数之间')
+  if (s5.near_120d_high_ratio < 0 || s5.near_120d_high_ratio > 1) errors.push('策略5: 接近120日高比例需在 0-1')
+  if (s5.max_amp_5d <= 0 || s5.max_amp_5d > 2) errors.push('策略5: 最大5日振幅需在 (0, 2]')
+  if (s5.max_amp_10d <= 0 || s5.max_amp_10d > 3) errors.push('策略5: 最大10日振幅需在 (0, 3]')
+  if (s5.max_drawdown_20d < -1 || s5.max_drawdown_20d > 0) errors.push('策略5: 20日最大回撤阈值需在 -1 到 0')
+  if (s5.key_candidate_min_support_score < 0 || s5.key_candidate_min_support_score > 10) errors.push('策略5: 重点候选支撑分需在 0-10')
+
   return errors
 }
 
@@ -1098,6 +1233,7 @@ async function saveConfig() {
       strategy2: { ...config.strategy2 },
       strategy3: { ...config.strategy3 },
       strategy4: { ...config.strategy4 },
+      strategy5: { ...config.strategy5 },
     }
     const res = await updateConfig(payload)
     if (res.status === 'ok') {
@@ -1122,6 +1258,7 @@ async function resetAll() {
       ensureSchedulerConfig()
       ensureStrategy3Config()
       ensureStrategy4Config()
+      ensureStrategy5Config()
       sanitizeDailySources()
     }
     dirty.value = false
@@ -1140,6 +1277,7 @@ onMounted(async () => {
       ensureSchedulerConfig()
       ensureStrategy3Config()
       ensureStrategy4Config()
+      ensureStrategy5Config()
       sanitizeDailySources()
     }
   } catch (e) {
@@ -1214,6 +1352,9 @@ onMounted(async () => {
 .strategy2-title { color: #ffd700; }
 .strategy4-section { border-color: rgba(249, 115, 22, 0.25); }
 .strategy4-title { color: #fb923c; }
+.strategy5-section { border-color: rgba(34, 197, 94, 0.25); }
+.strategy5-title { color: #86efac; }
+.strategy5-info { border-color: rgba(34, 197, 94, 0.25); color: #86efac; }
 .section-hint { font-size: 12px; color: var(--text-muted); margin: -10px 0 16px; line-height: 1.5; }
 .info-msg {
   margin-top: 16px; padding: 10px 14px; border-radius: 4px;

@@ -1,11 +1,12 @@
 from strategy5.engine import ShortSprintSupportEngine
 from strategy5.support import evaluate_support_status
+from datetime import date, timedelta
 
 
 def _row(i, close=10.0, high=None, low=None, volume=1000, turnover=30):
-    day = i + 1
+    day = date(2022, 1, 1) + timedelta(days=i)
     return {
-        "date": f"2026-{(day // 28) % 12 + 1:02d}-{(day % 28) + 1:02d}",
+        "date": day.isoformat(),
         "open": round(close * 0.995, 4),
         "high": round(high if high is not None else close * 1.01, 4),
         "low": round(low if low is not None else close * 0.99, 4),

@@ -13,6 +13,7 @@ const routes = [
   { path: '/strategy2/backtest', name: 'Strategy2Backtest', component: () => import('../pages/Strategy2Backtest.vue') },
   { path: '/strategy3/results', name: 'Strategy3Results', component: () => import('../pages/Strategy3Results.vue') },
   { path: '/strategy4/results', name: 'Strategy4Results', component: () => import('../pages/Strategy4Results.vue') },
+  { path: '/strategy5/results', name: 'Strategy5Results', component: () => import('../pages/Strategy5Results.vue') },
 ]
 
 const router = createRouter({
