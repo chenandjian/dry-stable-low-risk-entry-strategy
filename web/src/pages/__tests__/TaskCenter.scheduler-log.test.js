@@ -9,6 +9,7 @@ const api = {
   getScanTasks: vi.fn(),
   getStrategy2Tasks: vi.fn(),
   getStrategy3Tasks: vi.fn(),
+  getStrategy4Tasks: vi.fn(),
   reEvaluateTask: vi.fn(),
   reEvaluateStrategy2Task: vi.fn(),
   reEvaluateStrategy3Task: vi.fn(),
@@ -31,6 +32,7 @@ describe('TaskCenter scheduler logs', () => {
     api.getScanTasks.mockResolvedValue({ tasks: [] })
     api.getStrategy2Tasks.mockResolvedValue({ tasks: [] })
     api.getStrategy3Tasks.mockResolvedValue({ tasks: [] })
+    api.getStrategy4Tasks.mockResolvedValue({ tasks: [] })
     api.getSchedulerLogs.mockResolvedValue({
       scheduler: {
         enabled: true,
@@ -85,5 +87,25 @@ describe('TaskCenter scheduler logs', () => {
     expect(wrapper.text()).toContain('策略1全量扫描开始')
     expect(wrapper.text()).toContain('策略1重试后仍有失败股票')
     expect(wrapper.text()).toContain('sched-s1-1')
+  })
+
+  it('loads and displays strategy4 scan tasks in task center', async () => {
+    api.getStrategy4Tasks.mockResolvedValue({
+      tasks: [{
+        id: 's4-20260701-200420',
+        date: '2026-07-01 20:04:20',
+        status: 'completed',
+        candidates: 0,
+        failed: 0,
+        strategy_type: 'STRATEGY_4_HOT_LEADER_SECOND_WAVE',
+      }],
+    })
+
+    const wrapper = mount(TaskCenter)
+    await flushUi()
+
+    expect(api.getStrategy4Tasks).toHaveBeenCalled()
+    expect(wrapper.text()).toContain('s4-20260701-200420')
+    expect(wrapper.text()).toContain('S4')
   })
 })

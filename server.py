@@ -22,6 +22,8 @@ from strategy2.scanner import scan_strategy2_all
 from strategy2.validation import resolve_strategy2_config
 from strategy3.scanner import STRATEGY3_TYPE, scan_strategy3_all
 from strategy3.validation import resolve_strategy3_config
+from strategy4.scanner import STRATEGY4_TYPE, scan_strategy4_all
+from strategy4.config import resolve_strategy4_config
 from scanner.strategy_engine import (
     CupHandleStrategyEngine,
     resolve_strategy_windows,
@@ -444,6 +446,25 @@ def _strategy3_discovery_from_candidate(candidate: dict) -> dict:
     }
 
 
+def _strategy4_discovery_from_candidate(candidate: dict) -> dict:
+    return {
+        "code": candidate.get("code", ""),
+        "name": candidate.get("name", ""),
+        "evaluation_date": candidate.get("evaluation_date", ""),
+        "strategy4_score": candidate.get("strategy4_score") or 0,
+        "status": candidate.get("status", ""),
+        "topic_id": candidate.get("topic_id", ""),
+        "topic_name": candidate.get("topic_name", ""),
+        "leader_strength_score": candidate.get("leader_strength_score", 0),
+        "tradability_score": candidate.get("tradability_score", 0),
+        "pullback_pct": candidate.get("pullback_pct", 0),
+        "risk_ratio": candidate.get("risk_ratio", 0),
+        "reward_risk_ratio": candidate.get("reward_risk_ratio", 0),
+        "price_limit_rule": candidate.get("price_limit_rule", ""),
+        "limit_shape": candidate.get("limit_shape", ""),
+    }
+
+
 def _db_running_scan_status(running_task: dict) -> dict:
     """Build live scan status from persisted DB rows for scheduler-owned scans."""
     task_id = running_task["id"]
@@ -451,7 +472,12 @@ def _db_running_scan_status(running_task: dict) -> dict:
     summary = db.refresh_scan_task_counts(task_id)
     current = _first_current_task_stock(task_id) or {}
 
-    if strategy_type == STRATEGY3_TYPE:
+    if strategy_type == STRATEGY4_TYPE:
+        discoveries = [
+            _strategy4_discovery_from_candidate(c)
+            for c in db.get_strategy4_candidates(task_id=task_id)[:20]
+        ]
+    elif strategy_type == STRATEGY3_TYPE:
         discoveries = [
             _strategy3_discovery_from_candidate(c)
             for c in db.get_strategy3_candidates(task_id=task_id)[:20]
@@ -1735,6 +1761,14 @@ async def update_config(data: dict):
                 {"status": "error", "message": f"Invalid strategy2 config: {e}"},
                 status_code=400,
             )
+    if config.get("strategy4", {}).get("enabled", True):
+        try:
+            resolve_strategy4_config(config)
+        except ValueError as e:
+            return JSONResponse(
+                {"status": "error", "message": f"Invalid strategy4 config: {e}"},
+                status_code=400,
+            )
 
     # Write back to config.yaml
     with open("config.yaml", "w", encoding="utf-8") as f:
@@ -1774,6 +1808,248 @@ async def scan_ws(websocket: WebSocket):
             })
     except WebSocketDisconnect:
         pass
+
+
+# ====== Strategy4 API ======
+
+@app.post("/api/strategy4/scans")
+async def start_strategy4_scan():
+    """启动策略4热点龙头二波扫描。"""
+    config = _ensure_db_initialized_from_config()
+    strategy4_cfg = config.get("strategy4", {})
+    if not strategy4_cfg.get("enabled", True):
+        return JSONResponse(
+            {"error": "STRATEGY4_DISABLED", "message": "策略4未启用"},
+            status_code=400,
+        )
+    try:
+        resolve_strategy4_config(config)
+    except ValueError as exc:
+        return JSONResponse(
+            {"error": "INVALID_CONFIG", "message": f"策略4配置无效: {exc}"},
+            status_code=400,
+        )
+
+    conflict = _scan_conflict_response()
+    if conflict:
+        return conflict
+
+    started = _now()
+    started_at = started.strftime("%Y-%m-%d %H:%M:%S")
+    task_id = f"s4-{started.strftime('%Y%m%d-%H%M%S')}"
+    db.create_scan_task(task_id, started_at, total_stocks=0, retry_mode="full", strategy_type=STRATEGY4_TYPE)
+    _set_running(task_id, "full", strategy_type=STRATEGY4_TYPE)
+    _running["started_at"] = started_at
+    _running["stats"] = {"total_stocks": 0, "current_code": "--", "current_name": "策略4热点题材识别中…"}
+
+    def run():
+        try:
+            def on_progress(stage, current, total, detail, discovery=None):
+                stats = _running.get("stats", {})
+                if stage == "discovery" and discovery:
+                    discoveries = list(stats.get("discoveries") or [])
+                    discoveries.insert(0, _strategy4_discovery_from_candidate(discovery))
+                    _running["stats"] = {
+                        **stats,
+                        "discoveries": discoveries[:20],
+                        "candidates_found": stats.get("candidates_found", 0) + 1,
+                    }
+                else:
+                    code = detail.split()[0] if detail else ""
+                    s = stats.copy()
+                    s.update({
+                        "scanned": current,
+                        "processed": current,
+                        "total_stocks": total,
+                        "current_code": code or "--",
+                        "current_name": detail[len(code):].strip() if code and len(detail) > len(code) else detail,
+                    })
+                    s.setdefault("candidates_found", 0)
+                    s.setdefault("skipped", 0)
+                    s.setdefault("failed", 0)
+                    _running["stats"] = s
+                db.update_scan_progress(
+                    task_id,
+                    scanned=_running["stats"].get("scanned", 0),
+                    skipped=_running["stats"].get("skipped", 0),
+                    candidates_count=_running["stats"].get("candidates_found", 0),
+                )
+
+            result = scan_strategy4_all(config, task_id=task_id, progress_callback=on_progress)
+            stats = result.get("stats", {})
+            _running["stats"] = {**_running.get("stats", {}), **stats}
+            finished_at = _now().strftime("%Y-%m-%d %H:%M:%S")
+            if stats.get("error"):
+                conn = db.get_conn()
+                conn.execute(
+                    "UPDATE scan_tasks SET status='failed', finished_at=?, error=? WHERE id=?",
+                    (finished_at, stats.get("error"), task_id),
+                )
+                conn.commit()
+                return
+            db.finish_scan_task(
+                task_id,
+                finished_at=finished_at,
+                candidates_count=stats.get("candidates_found", 0),
+                elapsed_seconds=stats.get("elapsed_seconds", 0),
+                scanned=stats.get("scanned", 0),
+                skipped=stats.get("skipped", 0),
+            )
+            db.refresh_scan_task_counts(task_id)
+        except Exception as exc:
+            logger.exception("Strategy4 scan failed")
+            _running["stats"] = {"error": str(exc)}
+            conn = db.get_conn()
+            conn.execute(
+                "UPDATE scan_tasks SET status='failed', finished_at=?, error=? WHERE id=?",
+                (_now().strftime("%Y-%m-%d %H:%M:%S"), str(exc), task_id),
+            )
+            conn.commit()
+        finally:
+            _clear_running()
+
+    thread = threading.Thread(target=run, daemon=True)
+    thread.start()
+
+    return {
+        "ok": True,
+        "taskId": task_id,
+        "task_id": task_id,
+        "status": "started",
+        "strategyType": STRATEGY4_TYPE,
+    }
+
+
+@app.get("/api/strategy4/scans/status")
+async def strategy4_scan_status():
+    if _running["running"] and _running.get("strategy_type") == STRATEGY4_TYPE:
+        summary = db.refresh_scan_task_counts(_running["task_id"]) if _running.get("task_id") else {}
+        return {
+            "running": True,
+            "taskId": _running.get("task_id"),
+            "strategyType": STRATEGY4_TYPE,
+            "stats": {**_running.get("stats", {}), **summary},
+        }
+    conn = db.get_conn()
+    row = conn.execute(
+        "SELECT id FROM scan_tasks WHERE status='running' AND strategy_type=? ORDER BY started_at DESC LIMIT 1",
+        (STRATEGY4_TYPE,),
+    ).fetchone()
+    return {"running": bool(row), "taskId": row[0] if row else None, "strategyType": STRATEGY4_TYPE}
+
+
+@app.get("/api/strategy4/tasks")
+async def strategy4_tasks():
+    return {"tasks": db.get_scan_tasks(strategy_type=STRATEGY4_TYPE)}
+
+
+@app.get("/api/strategy4/tasks/{task_id}/topics")
+async def strategy4_topics(task_id: str):
+    _, err = _require_task_strategy(task_id, STRATEGY4_TYPE)
+    if err:
+        return err
+    return {"taskId": task_id, "topics": db.get_strategy4_hot_topics(task_id)}
+
+
+@app.get("/api/strategy4/tasks/{task_id}/leaders")
+async def strategy4_leaders(task_id: str):
+    _, err = _require_task_strategy(task_id, STRATEGY4_TYPE)
+    if err:
+        return err
+    return {"taskId": task_id, "leaders": db.get_strategy4_leaders(task_id)}
+
+
+@app.get("/api/strategy4/tasks/{task_id}/candidates")
+async def strategy4_candidates(task_id: str):
+    _, err = _require_task_strategy(task_id, STRATEGY4_TYPE)
+    if err:
+        return err
+    return {"taskId": task_id, "candidates": db.get_strategy4_candidates(task_id)}
+
+
+@app.get("/api/strategy4/tracking/topics")
+async def strategy4_tracking_topics(
+    status: str | None = None,
+    topic_id: str | None = None,
+    include_expired: bool = True,
+    page: int = 1,
+    page_size: int = 100,
+):
+    page = max(1, page)
+    page_size = min(max(1, page_size), 500)
+    topics = db.get_strategy4_tracked_topics(
+        status=status,
+        topic_id=topic_id,
+        include_expired=include_expired,
+        limit=page_size,
+        offset=(page - 1) * page_size,
+    )
+    return {"topics": topics, "page": page, "pageSize": page_size}
+
+
+@app.get("/api/strategy4/tracking/leaders")
+async def strategy4_tracking_leaders(
+    status: str | None = None,
+    topic_id: str | None = None,
+    code: str | None = None,
+    include_expired: bool = True,
+    page: int = 1,
+    page_size: int = 100,
+):
+    page = max(1, page)
+    page_size = min(max(1, page_size), 500)
+    leaders = db.get_strategy4_tracked_leaders(
+        status=status,
+        topic_id=topic_id,
+        code=code,
+        include_expired=include_expired,
+        limit=page_size,
+        offset=(page - 1) * page_size,
+    )
+    return {"leaders": leaders, "page": page, "pageSize": page_size}
+
+
+@app.get("/api/strategy4/tracking/events")
+async def strategy4_tracking_events(
+    topic_id: str | None = None,
+    code: str | None = None,
+    task_id: str | None = None,
+    page: int = 1,
+    page_size: int = 100,
+):
+    page = max(1, page)
+    page_size = min(max(1, page_size), 500)
+    events = db.get_strategy4_tracking_events(
+        topic_id=topic_id,
+        code=code,
+        task_id=task_id,
+        limit=page_size,
+        offset=(page - 1) * page_size,
+    )
+    return {"events": events, "page": page, "pageSize": page_size}
+
+
+@app.get("/api/strategy4/tasks/{task_id}/tracking-candidates")
+async def strategy4_tracking_candidates(task_id: str):
+    _, err = _require_task_strategy(task_id, STRATEGY4_TYPE)
+    if err:
+        return err
+    candidates = [
+        c for c in db.get_strategy4_candidates(task_id)
+        if c.get("candidate_origin") in {"tracking_pool", "merged_current_and_tracking"}
+    ]
+    return {"taskId": task_id, "candidates": candidates}
+
+
+@app.get("/api/strategy4/tasks/{task_id}/candidates/{code}")
+async def strategy4_candidate_detail(task_id: str, code: str):
+    _, err = _require_task_strategy(task_id, STRATEGY4_TYPE)
+    if err:
+        return err
+    candidate = db.get_strategy4_candidate(code, task_id=task_id)
+    if not candidate:
+        return JSONResponse({"error": "NOT_FOUND", "taskId": task_id, "code": code}, status_code=404)
+    return {"taskId": task_id, "candidate": candidate}
 
 
 # ====== Strategy2 API ======

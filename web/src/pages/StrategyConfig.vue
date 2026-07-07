@@ -436,6 +436,101 @@
       </div>
     </section>
 
+    <!-- 策略4：热点龙头二波 -->
+    <section class="section strategy4-section">
+      <h3 class="section-title strategy4-title">策略4 · 热点龙头二波</h3>
+      <p class="section-hint">
+        策略4先确认热点行业/题材，再识别核心龙头，最后只在龙头池中判断第一波回踩后的二波机会。
+      </p>
+
+      <div class="toggle-grid" style="margin-bottom:16px">
+        <label class="toggle-item">
+          <span class="toggle-label">启用策略4</span>
+          <button class="toggle" :class="{ active: config.strategy4?.enabled !== false }"
+            @click="toggleStrategy4('enabled')">{{ config.strategy4?.enabled !== false ? '开' : '关' }}</button>
+        </label>
+      </div>
+
+      <div class="param-grid">
+        <div class="param">
+          <label title="热点题材正式榜最多保留数量">热点题材 Top N</label>
+          <input type="number" v-model.number="config.strategy4.hot_topic_top_n" @input="markDirty" min="1" max="50" />
+          <span class="default">默认 16</span>
+        </div>
+        <div class="param">
+          <label title="热点观察榜最多保留数量，必须不小于热点题材 Top N">观察题材 Top N</label>
+          <input type="number" v-model.number="config.strategy4.watch_hot_topic_top_n" @input="markDirty" min="1" max="100" />
+          <span class="default">默认 16</span>
+        </div>
+        <div class="param">
+          <label title="热点题材确认最低分">热点最低分</label>
+          <input type="number" v-model.number="config.strategy4.min_hot_topic_score" @input="markDirty" min="0" max="100" />
+          <span class="default">默认 65</span>
+        </div>
+        <div class="param">
+          <label title="热点至少需要命中的强信号数量">热点强信号数</label>
+          <input type="number" v-model.number="config.strategy4.min_hot_topic_signal_count" @input="markDirty" min="1" max="10" />
+          <span class="default">默认 1</span>
+        </div>
+        <div class="param">
+          <label title="每个热点最多保留的龙头股票数">每题材最多龙头</label>
+          <input type="number" v-model.number="config.strategy4.max_total_leaders_per_topic" @input="markDirty" min="1" max="30" />
+          <span class="default">默认 3</span>
+        </div>
+        <div class="param">
+          <label title="龙头强度分低于该值不作为热点核心龙头">龙头强度最低分</label>
+          <input type="number" v-model.number="config.strategy4.min_leader_strength_score" @input="markDirty" min="0" max="100" />
+          <span class="default">默认 50</span>
+        </div>
+        <div class="param">
+          <label title="健康回踩最小幅度">最小回踩 <span class="unit">%</span></label>
+          <input type="range" min="1" max="30" step="0.5" v-model.number="strategy4PullbackMinPct" @input="markDirty" />
+          <div class="range-val">{{ strategy4PullbackMinPct }}%</div>
+        </div>
+        <div class="param">
+          <label title="健康回踩最大幅度">最大回踩 <span class="unit">%</span></label>
+          <input type="range" min="5" max="50" step="0.5" v-model.number="strategy4PullbackMaxPct" @input="markDirty" />
+          <div class="range-val">{{ strategy4PullbackMaxPct }}%</div>
+        </div>
+        <div class="param">
+          <label title="非核心龙头最大风险比">最大风险比 <span class="unit">%</span></label>
+          <input type="range" min="1" max="30" step="0.5" v-model.number="strategy4MaxRiskPct" @input="markDirty" />
+          <div class="range-val">{{ strategy4MaxRiskPct }}%</div>
+        </div>
+        <div class="param">
+          <label title="策略4最低预估收益风险比">最低收益风险比</label>
+          <input type="number" v-model.number="config.strategy4.min_reward_risk_ratio" @input="markDirty" min="0.5" max="10" step="0.1" />
+          <span class="default">默认 1.5</span>
+        </div>
+        <div class="param">
+          <label title="启用后策略4会拉取真实行业/概念/板块指数K线，用于确认热点趋势">板块K线确认</label>
+          <button class="toggle" :class="{ active: config.strategy4.topic_index?.enabled !== false }"
+            @click="toggleStrategy4TopicIndex('enabled')">{{ config.strategy4.topic_index?.enabled !== false ? '开' : '关' }}</button>
+          <span class="default">真实同花顺/东方财富板块K线</span>
+        </div>
+        <div class="param">
+          <label title="正式二波候选必须具备可观察板块K线，否则只进入观察，不进入可买候选">正式候选要求板块K线</label>
+          <button class="toggle" :class="{ active: config.strategy4.topic_index?.require_for_buyable_candidate !== false }"
+            @click="toggleStrategy4TopicIndex('require_for_buyable_candidate')">{{ config.strategy4.topic_index?.require_for_buyable_candidate !== false ? '开' : '关' }}</button>
+          <span class="default">默认开启，防止无板块历史仍出买点</span>
+        </div>
+        <div class="param">
+          <label title="每个热点题材拉取的板块指数K线历史长度">板块K线历史 <span class="unit">交易日</span></label>
+          <input type="number" v-model.number="config.strategy4.topic_index.history_days" @input="markDirty" min="60" max="1000" />
+          <span class="default">默认 250</span>
+        </div>
+        <div class="param">
+          <label title="低于该行数时，板块指数视为不可观察，不用于正式候选确认">最低板块K线行数</label>
+          <input type="number" v-model.number="config.strategy4.topic_index.min_required_rows" @input="markDirty" min="2" max="500" />
+          <span class="default">默认 60</span>
+        </div>
+      </div>
+
+      <div class="info-msg strategy4-info">
+        ⓘ 策略4不从全市场直接找形态，必须先过热点和龙头；正式候选默认必须有真实板块K线确认，缺失时标记不可观察。
+      </div>
+    </section>
+
     <!-- Actions -->
     <div class="actions-bar">
       <div v-if="saved" class="saved-msg">✓ 配置已保存</div>
@@ -479,6 +574,92 @@ const defaultStrategy3Config = {
   dry_support_max_test_count: 2,
 }
 
+const defaultStrategy4Config = {
+  enabled: true,
+  hot_topic_top_n: 16,
+  watch_hot_topic_top_n: 16,
+  min_hot_topic_score: 65,
+  min_hot_topic_signal_count: 1,
+  core_leaders_per_topic: 1,
+  backup_leaders_per_topic: 2,
+  max_total_leaders_per_topic: 3,
+  min_leader_strength_score: 50,
+  core_leader_strength_score: 50,
+  first_wave_lookback_short: 10,
+  first_wave_lookback_long: 20,
+  min_first_wave_return_10d: 0.10,
+  min_first_wave_return_20d: 0.15,
+  min_strong_day_count_10d: 1,
+  pullback_min_pct: 0.05,
+  pullback_max_pct: 0.30,
+  pullback_min_days: 1,
+  pullback_max_days: 40,
+  max_risk_ratio: 0.10,
+  aggressive_max_risk_ratio: 0.10,
+  min_reward_risk_ratio: 1.5,
+  core_leader_min_reward_risk_ratio: 1.5,
+  topic_index: {
+    enabled: true,
+    preferred_sources: ['akshare_ths', 'akshare_eastmoney'],
+    history_days: 250,
+    min_required_rows: 60,
+    require_for_buyable_candidate: true,
+    allow_unobserved_for_watch: true,
+    max_fetch_topics_per_scan: 30,
+    source_retry_attempts: 2,
+  },
+  topic_index_filters: {
+    min_trend_score: 8,
+    min_breakout_score: 0,
+    min_amount_ratio_5_20: 1,
+    max_drawdown_from_high_20: 0.12,
+    allowed_phases: ['EARLY_ACCELERATION', 'MAIN_TREND', 'PULLBACK_REPAIR'],
+  },
+  leader_relative_strength: {
+    min_rs_10d: 0.05,
+    min_rs_20d: 0.08,
+  },
+  source_modes: {
+    live_external_enabled: true,
+    historical_kline_derived_enabled: true,
+    merge_mode: 'union_with_confidence',
+  },
+  derived_source: {
+    enabled: true,
+    topic_top_n: 30,
+    max_topics_per_day: 34,
+    max_leaders_per_topic: 5,
+    min_topic_hot_score: 50,
+    min_confirmed_topic_hot_score: 60,
+    min_topic_index_rows: 60,
+    min_amount_ratio_5_20: 1,
+    min_breadth_ratio: 0.55,
+    min_member_count: 5,
+    allow_current_members_proxy: true,
+    current_members_proxy_trust_level: 'experimental',
+  },
+  merge_policy: {
+    buyable_requires_observed_source: true,
+    block_buyable_on_derived_weak_noise: true,
+    block_buyable_on_derived_high_risk_climax: true,
+    allow_derived_only_watch: true,
+    allow_derived_only_buyable: true,
+  },
+  tracking: {
+    enabled: true,
+    max_calendar_days: 20,
+    strong_attention_days: 20,
+    golden_second_wave_days: 20,
+    allow_extension_days: 20,
+    expire_without_leader_days: 30,
+    extension_min_reward_risk_ratio: 2,
+    extension_max_risk_ratio: 0.12,
+    max_topic_drawdown_since_detected: 0.20,
+    max_leader_drawdown_from_first_wave_high: 0.45,
+    min_extension_leader_rs_20d: -0.05,
+  },
+}
+
 const config = reactive({
   market: {},
   liquidity: {},
@@ -505,6 +686,7 @@ const config = reactive({
     buy_zone_max_premium: 0.03, stop_loss_buffer: 0.03,
   },
   strategy3: { ...defaultStrategy3Config },
+  strategy4: { ...defaultStrategy4Config },
 })
 
 const dirty = ref(false)
@@ -599,6 +781,19 @@ const strategy3MinRSPct = computed({
   set: (v) => { ensureStrategy3Config(); config.strategy3.min_relative_strength_60 = v / 100 },
 })
 
+const strategy4PullbackMinPct = computed({
+  get: () => Number(((config.strategy4?.pullback_min_pct ?? 0.08) * 100).toFixed(1)),
+  set: (v) => { ensureStrategy4Config(); config.strategy4.pullback_min_pct = v / 100 },
+})
+const strategy4PullbackMaxPct = computed({
+  get: () => Number(((config.strategy4?.pullback_max_pct ?? 0.25) * 100).toFixed(1)),
+  set: (v) => { ensureStrategy4Config(); config.strategy4.pullback_max_pct = v / 100 },
+})
+const strategy4MaxRiskPct = computed({
+  get: () => Number(((config.strategy4?.max_risk_ratio ?? 0.15) * 100).toFixed(1)),
+  set: (v) => { ensureStrategy4Config(); config.strategy4.max_risk_ratio = v / 100 },
+})
+
 const serialDualScanTime = computed({
   get: () => cronToTime(config.scheduler?.serial_dual_scan?.cron ?? '15 15 * * 1-5'),
   set: (v) => {
@@ -630,6 +825,45 @@ function ensureSchedulerConfig() {
 
 function ensureStrategy3Config() {
   config.strategy3 = { ...defaultStrategy3Config, ...(config.strategy3 || {}) }
+}
+
+function ensureStrategy4Config() {
+  config.strategy4 = mergeStrategy4Config(config.strategy4 || {})
+}
+
+function mergeStrategy4Config(value) {
+  return {
+    ...defaultStrategy4Config,
+    ...value,
+    topic_index: {
+      ...defaultStrategy4Config.topic_index,
+      ...(value.topic_index || {}),
+    },
+    topic_index_filters: {
+      ...defaultStrategy4Config.topic_index_filters,
+      ...(value.topic_index_filters || {}),
+    },
+    leader_relative_strength: {
+      ...defaultStrategy4Config.leader_relative_strength,
+      ...(value.leader_relative_strength || {}),
+    },
+    source_modes: {
+      ...defaultStrategy4Config.source_modes,
+      ...(value.source_modes || {}),
+    },
+    derived_source: {
+      ...defaultStrategy4Config.derived_source,
+      ...(value.derived_source || {}),
+    },
+    merge_policy: {
+      ...defaultStrategy4Config.merge_policy,
+      ...(value.merge_policy || {}),
+    },
+    tracking: {
+      ...defaultStrategy4Config.tracking,
+      ...(value.tracking || {}),
+    },
+  }
 }
 
 function cronToTime(cron) {
@@ -675,6 +909,18 @@ function toggleStrategy2(key) {
 function toggleStrategy3(key) {
   ensureStrategy3Config()
   config.strategy3[key] = !config.strategy3[key]
+  markDirty()
+}
+
+function toggleStrategy4(key) {
+  ensureStrategy4Config()
+  config.strategy4[key] = !config.strategy4[key]
+  markDirty()
+}
+
+function toggleStrategy4TopicIndex(key) {
+  ensureStrategy4Config()
+  config.strategy4.topic_index[key] = !config.strategy4.topic_index[key]
   markDirty()
 }
 
@@ -791,6 +1037,22 @@ function validate() {
   if (s3.min_relative_strength_60 < -0.5 || s3.min_relative_strength_60 > 0.5) errors.push('策略3: 最低60日相对强度需在 -50%-50%')
   if (s3.volume_shrink_ratio <= 0 || s3.volume_shrink_ratio > 2) errors.push('策略3: 缩量比例需在 (0, 2] 之间')
 
+  // Strategy4 validation
+  ensureStrategy4Config()
+  const s4 = config.strategy4 || {}
+  if (s4.hot_topic_top_n < 1) errors.push('策略4: 热点题材 Top N 至少为 1')
+  if (s4.watch_hot_topic_top_n < s4.hot_topic_top_n) errors.push('策略4: 观察题材 Top N 不能小于热点题材 Top N')
+  if (s4.min_hot_topic_score < 0 || s4.min_hot_topic_score > 100) errors.push('策略4: 热点最低分需在 0-100')
+  if (s4.max_total_leaders_per_topic < s4.core_leaders_per_topic + s4.backup_leaders_per_topic) errors.push('策略4: 每题材最多龙头不能小于核心+备选龙头数')
+  if (s4.core_leader_strength_score < s4.min_leader_strength_score) errors.push('策略4: 核心龙头强度不能低于龙头最低分')
+  if (s4.pullback_max_pct < s4.pullback_min_pct) errors.push('策略4: 最大回踩不能小于最小回踩')
+  if (s4.aggressive_max_risk_ratio < s4.max_risk_ratio) errors.push('策略4: 激进最大风险不能小于标准最大风险')
+  if (s4.core_leader_min_reward_risk_ratio > s4.min_reward_risk_ratio) errors.push('策略4: 核心龙头最低收益比不能高于普通最低收益比')
+  const s4TopicIndex = s4.topic_index || {}
+  if (s4TopicIndex.history_days < 60 || s4TopicIndex.history_days > 1000) errors.push('策略4: 板块K线历史需在 60-1000')
+  if (s4TopicIndex.min_required_rows < 2 || s4TopicIndex.min_required_rows > 500) errors.push('策略4: 最低板块K线行数需在 2-500')
+  if (s4TopicIndex.history_days < s4TopicIndex.min_required_rows) errors.push('策略4: 板块K线历史不能小于最低行数')
+
   return errors
 }
 
@@ -835,6 +1097,7 @@ async function saveConfig() {
       },
       strategy2: { ...config.strategy2 },
       strategy3: { ...config.strategy3 },
+      strategy4: { ...config.strategy4 },
     }
     const res = await updateConfig(payload)
     if (res.status === 'ok') {
@@ -858,6 +1121,7 @@ async function resetAll() {
       Object.assign(config, data.config)
       ensureSchedulerConfig()
       ensureStrategy3Config()
+      ensureStrategy4Config()
       sanitizeDailySources()
     }
     dirty.value = false
@@ -875,6 +1139,7 @@ onMounted(async () => {
       Object.assign(config, data.config)
       ensureSchedulerConfig()
       ensureStrategy3Config()
+      ensureStrategy4Config()
       sanitizeDailySources()
     }
   } catch (e) {
@@ -947,6 +1212,8 @@ onMounted(async () => {
 /* Strategy2 section */
 .strategy2-section { border-color: rgba(255, 215, 0, 0.2); }
 .strategy2-title { color: #ffd700; }
+.strategy4-section { border-color: rgba(249, 115, 22, 0.25); }
+.strategy4-title { color: #fb923c; }
 .section-hint { font-size: 12px; color: var(--text-muted); margin: -10px 0 16px; line-height: 1.5; }
 .info-msg {
   margin-top: 16px; padding: 10px 14px; border-radius: 4px;

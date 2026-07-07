@@ -8,6 +8,7 @@
       <router-link to="/results" class="topnav-tab" :class="{ active: isActive('/results') }">候选列表</router-link>
       <router-link to="/strategy2/results" class="topnav-tab" :class="{ active: isActive('/strategy2/results') }">策略2</router-link>
       <router-link to="/strategy3/results" class="topnav-tab" :class="{ active: isActive('/strategy3/results') }">策略3候选</router-link>
+      <router-link to="/strategy4/results" class="topnav-tab" :class="{ active: isActive('/strategy4/results') }">策略4热点</router-link>
       <router-link to="/strategy1/backtest" class="topnav-tab" :class="{ active: isActive('/strategy1/backtest') }">策略1回测</router-link>
       <router-link to="/strategy2/backtest" class="topnav-tab" :class="{ active: isActive('/strategy2/backtest') }">策略2回测</router-link>
       <router-link to="/backtest/cup-handle" class="topnav-tab" :class="{ active: isActive('/backtest/cup-handle') }">单股回测</router-link>

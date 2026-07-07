@@ -81,13 +81,23 @@
             <span v-if="t.running" class="st-running">实时查看 →</span>
           </template>
           <!-- Strategy 3 -->
-          <template v-else>
+          <template v-else-if="isStrategy3(t)">
             <button class="action-btn" @click="viewResults(t.id, t)" v-if="!isReEvaluating(t) && !t.running">查看结果</button>
             <button class="action-btn primary" @click="handleReEvaluateS3(t.id)" :disabled="isReEvaluating(t)" v-if="!t.running">
               {{ isReEvaluating(t) ? '重新评估中...' : '重新扫描策略' }}
             </button>
             <button class="action-btn" @click="viewFailures(t.id)" v-if="!isReEvaluating(t) && !t.running && t.failed">失败列表</button>
             <button class="action-btn" @click="exportResults(t.id, t)" v-if="!isReEvaluating(t) && !t.running">导出</button>
+            <span v-if="t.running" class="st-running">实时查看 →</span>
+          </template>
+          <!-- Strategy 4 -->
+          <template v-else-if="isStrategy4(t)">
+            <button class="action-btn" @click="viewResults(t.id, t)" v-if="!t.running">查看结果</button>
+            <button class="action-btn" @click="exportResults(t.id, t)" v-if="!t.running">导出</button>
+            <span v-if="t.running" class="st-running">实时查看 →</span>
+          </template>
+          <template v-else>
+            <button class="action-btn" @click="viewResults(t.id, t)" v-if="!t.running">查看结果</button>
             <span v-if="t.running" class="st-running">实时查看 →</span>
           </template>
         </span>
@@ -109,6 +119,7 @@ const {
   reEvaluateStrategy2Task,
   getStrategy3Tasks,
   reEvaluateStrategy3Task,
+  getStrategy4Tasks,
   getSchedulerLogs,
 } = useApi()
 const tasks = ref([])
@@ -148,8 +159,9 @@ function strategyType(t) { return t.strategyType || t.strategy_type || 'STRATEGY
 function isStrategy1(t) { return strategyType(t) === 'STRATEGY_1_CUP_HANDLE' }
 function isStrategy2(t) { return strategyType(t) === 'STRATEGY_2_EXTREME_DRY_STABLE' }
 function isStrategy3(t) { return strategyType(t) === 'STRATEGY_3_STRONG_PULLBACK_SECOND_BREAKOUT' }
-function strategyLabel(t) { return isStrategy3(t) ? 'S3' : isStrategy2(t) ? 'S2' : 'S1' }
-function strategyBadgeClass(t) { return isStrategy3(t) ? 's3' : isStrategy2(t) ? 's2' : 's1' }
+function isStrategy4(t) { return strategyType(t) === 'STRATEGY_4_HOT_LEADER_SECOND_WAVE' }
+function strategyLabel(t) { return isStrategy4(t) ? 'S4' : isStrategy3(t) ? 'S3' : isStrategy2(t) ? 'S2' : 'S1' }
+function strategyBadgeClass(t) { return isStrategy4(t) ? 's4' : isStrategy3(t) ? 's3' : isStrategy2(t) ? 's2' : 's1' }
 const serialScheduler = computed(() => schedulerConfig.value.serial_dual_scan || {})
 const nextSchedulerRun = computed(() => {
   const jobs = schedulerRuntime.value.jobs || []
@@ -157,7 +169,8 @@ const nextSchedulerRun = computed(() => {
   return serialJob?.next_run_time || ''
 })
 function viewResults(id, t) {
-  if (isStrategy3(t)) router.push(`/strategy3/results?task=${id}`)
+  if (isStrategy4(t)) router.push(`/strategy4/results?task=${id}`)
+  else if (isStrategy3(t)) router.push(`/strategy3/results?task=${id}`)
   else if (isStrategy2(t)) router.push(`/strategy2/results?task=${id}`)
   else router.push(`/results?task=${id}`)
 }
@@ -165,9 +178,11 @@ function viewFailures(id) { router.push(`/?task=${id}&status=failed`) }
 function exportResults(id, t) {
   const url = isStrategy3(t)
     ? `/api/strategy3/candidates?task_id=${id}`
-    : isStrategy2(t)
-      ? `/api/strategy2/candidates?task_id=${id}`
-      : `/api/candidates?task_id=${id}`
+    : isStrategy4(t)
+      ? `/api/strategy4/tasks/${id}/candidates`
+      : isStrategy2(t)
+        ? `/api/strategy2/candidates?task_id=${id}`
+        : `/api/candidates?task_id=${id}`
   window.open(url, '_blank')
 }
 async function handleReEvaluateS3(taskId) {
@@ -227,16 +242,18 @@ async function handleReEvaluate(taskId) {
 
 async function loadTasks() {
   try {
-    const [s1Data, s2Data, s3Data] = await Promise.all([
+    const [s1Data, s2Data, s3Data, s4Data] = await Promise.all([
       getScanTasks().catch(() => ({ tasks: [] })),
       getStrategy2Tasks().catch(() => ({ tasks: [] })),
       getStrategy3Tasks().catch(() => ({ tasks: [] })),
+      getStrategy4Tasks().catch(() => ({ tasks: [] })),
     ])
     const s1Tasks = (s1Data.tasks || []).map(t => ({ ...t, strategyType: 'STRATEGY_1_CUP_HANDLE' }))
     const s2Tasks = (s2Data.tasks || []).map(t => ({ ...t, strategyType: t.strategy_type || 'STRATEGY_2_EXTREME_DRY_STABLE' }))
     const s3Tasks = (s3Data.tasks || []).map(t => ({ ...t, strategyType: t.strategy_type || 'STRATEGY_3_STRONG_PULLBACK_SECOND_BREAKOUT' }))
+    const s4Tasks = (s4Data.tasks || []).map(t => ({ ...t, strategyType: t.strategy_type || 'STRATEGY_4_HOT_LEADER_SECOND_WAVE' }))
     // Merge and sort by date descending, running first
-    tasks.value = [...s1Tasks, ...s2Tasks, ...s3Tasks].sort((a, b) => {
+    tasks.value = [...s1Tasks, ...s2Tasks, ...s3Tasks, ...s4Tasks].sort((a, b) => {
       if (a.running && !b.running) return -1
       if (!a.running && b.running) return 1
       return (b.date || '').localeCompare(a.date || '')
@@ -337,4 +354,5 @@ onUnmounted(() => { if (pollTimer) clearInterval(pollTimer) })
 .strategy-badge.s1 { background: rgba(79,125,255,0.15); color: var(--accent); }
 .strategy-badge.s2 { background: rgba(255,215,0,0.15); color: var(--gold); }
 .strategy-badge.s3 { background: rgba(214,179,90,0.18); color: #d6b35a; }
+.strategy-badge.s4 { background: rgba(249,115,22,0.16); color: #fb923c; }
 </style>

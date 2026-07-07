@@ -71,6 +71,7 @@
         @start="handleStartScan"
         @start-strategy2="handleStartStrategy2Scan"
         @start-strategy3="handleStartStrategy3Scan"
+        @start-strategy4="handleStartStrategy4Scan"
       />
     </div>
 
@@ -115,6 +116,7 @@ const {
   startScan,
   startStrategy2Scan,
   startStrategy3Scan,
+  startStrategy4Scan,
   getScanStatus,
   getCandidates,
   getTaskStocks,
@@ -123,6 +125,7 @@ const {
   retryStrategy3FailedStocks,
   getStrategy2Candidates,
   getStrategy3Candidates,
+  getStrategy4Candidates,
 } = useApi()
 
 // Stage 3: 两种互斥模式
@@ -217,6 +220,7 @@ const canRetryFailed = computed(() => [
   'STRATEGY_1_CUP_HANDLE',
   'STRATEGY_2_EXTREME_DRY_STABLE',
   'STRATEGY_3_STRONG_PULLBACK_SECOND_BREAKOUT',
+  'STRATEGY_4_HOT_LEADER_SECOND_WAVE',
 ].includes(activeStrategyType.value))
 
 let pollTimer = null
@@ -362,6 +366,41 @@ async function handleStartStrategy3Scan() {
   }
 }
 
+async function handleStartStrategy4Scan() {
+  if (routeTaskId.value) { await router.replace({ path: '/', query: {} }) }
+  scanError.value = ''
+  try {
+    const res = await startStrategy4Scan()
+    if (!res.ok || res.error) {
+      if (res.statusCode === 409) {
+        scanError.value = `策略4扫描冲突：${res.message || res.runningTaskId || '--'}`
+      } else {
+        scanError.value = res.message || res.error || '策略4启动扫描失败'
+      }
+      return
+    }
+    scanProgress.taskId = res.taskId
+    scanProgress.total = 0
+    scanProgress.stockPoolSource = ''
+    failures.value = []
+    logLines.value = []
+    lastLogScanned = 0
+    scanning.value = res.status !== 'completed'
+    activeStrategyType.value = 'STRATEGY_4_HOT_LEADER_SECOND_WAVE'
+    addLog('info', `策略4扫描启动 · taskId ${res.taskId}`)
+    if (res.status === 'completed') {
+      await loadResults({ taskId: res.taskId, strategyType: activeStrategyType.value, context: captureCurrentViewContext() })
+      addLog('found', '策略4扫描完成')
+      return
+    }
+    if (pollTimer) clearInterval(pollTimer)
+    pollTimer = setInterval(pollStatus, 1000)
+  } catch (e) {
+    scanError.value = '无法连接到后端服务'
+    console.error('Strategy4 start scan failed:', e)
+  }
+}
+
 function applyStats(status, { applyTaskId = true } = {}) {
   const stats = status.stats || {}
   if (applyTaskId && status.task_id) {
@@ -393,6 +432,7 @@ function applyTaskSummary(summary = {}) {
 async function fetchMappedResults(taskId, strategyType) {
   const isS2 = strategyType === 'STRATEGY_2_EXTREME_DRY_STABLE'
   const isS3 = strategyType === 'STRATEGY_3_STRONG_PULLBACK_SECOND_BREAKOUT'
+  const isS4 = strategyType === 'STRATEGY_4_HOT_LEADER_SECOND_WAVE'
   if (isS2) {
     const res = await getStrategy2Candidates(taskId)
     return (res.candidates || []).map(c => ({
@@ -407,6 +447,14 @@ async function fetchMappedResults(taskId, strategyType) {
       code: c.code, name: c.name, score: c.total_score || 0,
       rating: c.level || '', status: c.level || '',
       detail: `回踩${((c.pullback_pct || 0) * 100).toFixed(1)}% 风险${((c.risk_ratio || 0) * 100).toFixed(1)}% RR${Number(c.rr1 || 0).toFixed(1)}`,
+    }))
+  }
+  if (isS4) {
+    const res = await getStrategy4Candidates(taskId)
+    return (res.candidates || []).map(c => ({
+      code: c.code, name: c.name, score: c.strategy4_score || 0,
+      rating: c.status || '', status: c.status || '',
+      detail: `${c.topic_name || '--'} · 龙头${c.leader_strength_score || 0} · RR${Number(c.reward_risk_ratio || 0).toFixed(1)}`,
     }))
   }
   const params = taskId ? { task_id: taskId } : {}
@@ -574,18 +622,21 @@ async function pollStatus() {
     if (status.stats?.discoveries) {
       const isS2 = activeStrategyType.value === 'STRATEGY_2_EXTREME_DRY_STABLE'
       const isS3 = activeStrategyType.value === 'STRATEGY_3_STRONG_PULLBACK_SECOND_BREAKOUT'
+      const isS4 = activeStrategyType.value === 'STRATEGY_4_HOT_LEADER_SECOND_WAVE'
       status.stats.discoveries.forEach(d => {
         if (!discoveries.value.find(e => e.code === d.code)) {
           const item = {
             code: d.code,
             name: d.name,
-            score: (isS2 || isS3) ? (d.total_score || 0) : (d.score || 0),
+            score: isS4 ? (d.strategy4_score || 0) : ((isS2 || isS3) ? (d.total_score || 0) : (d.score || 0)),
             rating: '',
-            status: (isS2 || isS3) ? (d.level || '') : statusFor(d),
+            status: isS4 ? (d.status || '') : ((isS2 || isS3) ? (d.level || '') : statusFor(d)),
             detail: isS2
               ? `量干${d.volume_dry_score || 0} 价稳${d.price_stable_score || 0} 风险${((d.risk_ratio || 0) * 100).toFixed(1)}%`
               : isS3
                 ? `回踩${((d.pullback_pct || 0) * 100).toFixed(1)}% 风险${((d.risk_ratio || 0) * 100).toFixed(1)}% RR${Number(d.rr1 || 0).toFixed(1)}`
+                : isS4
+                  ? `${d.topic_name || '--'} · 龙头${d.leader_strength_score || 0} · RR${Number(d.reward_risk_ratio || 0).toFixed(1)}`
                 : formatDetail(d),
           }
           item.rating = item.score >= 80 ? 'strong' : item.score >= 70 ? 'medium' : 'weak'
