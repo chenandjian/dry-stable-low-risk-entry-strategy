@@ -28,7 +28,7 @@ def build_strong_data(length=1100):
 
     base = data[-21]["close"]
     for j in range(20):
-        close = base * (1 + 0.012 * (j + 1))
+        close = base * (1 + 0.014 * (j + 1))
         data[-20 + j].update({
             "open": round(close * 0.995, 4),
             "high": round(close * 1.01, 4),

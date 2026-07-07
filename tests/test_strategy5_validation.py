@@ -10,15 +10,15 @@ def test_strategy5_default_config_matches_design():
     assert cfg["kline_days"] == 1100
     assert cfg["minimum_kline_days"] == 260
     assert cfg["minimum_trading_days"] == 500
-    assert cfg["min_avg_amount_60d_yi"] == 20
-    assert cfg["min_avg_amount_30d_yi"] == 15
-    assert cfg["min_avg_amount_10d_yi"] == 10
-    assert cfg["strength_ret_20d"] == 0.20
-    assert cfg["strength_ret_10d"] == 0.12
-    assert cfg["strength_ret_5d"] == 0.08
+    assert cfg["min_avg_amount_60d_yi"] == 30
+    assert cfg["min_avg_amount_30d_yi"] == 20
+    assert cfg["min_avg_amount_10d_yi"] == 15
+    assert cfg["strength_ret_20d"] == 0.25
+    assert cfg["strength_ret_10d"] == 0.15
+    assert cfg["strength_ret_5d"] == 0.10
     assert cfg["single_day_surge_return"] == 0.07
     assert cfg["single_day_surge_volume_ratio"] == 1.8
-    assert cfg["near_120d_high_ratio"] == 0.98
+    assert cfg["near_120d_high_ratio"] == 1.00
     assert cfg["max_amp_5d"] == 0.22
     assert cfg["max_amp_10d"] == 0.45
     assert cfg["max_drawdown_20d"] == -0.30
