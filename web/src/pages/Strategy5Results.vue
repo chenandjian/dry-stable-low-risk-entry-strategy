@@ -25,14 +25,41 @@
     <div class="empty" v-if="!loading && !selectedTaskId">请选择一个策略5任务查看结果。</div>
     <div class="empty" v-else-if="!loading && selectedTaskId && !candidates.length">当前任务没有策略5候选。</div>
 
-    <section v-if="keyCandidates.length" class="panel">
-      <div class="panel-header">重点候选 KEY_CANDIDATE</div>
-      <CandidateTable :items="keyCandidates" @select="selected = $event" />
-    </section>
-
-    <section v-if="watchCandidates.length" class="panel">
-      <div class="panel-header">观察候选 WATCH_CANDIDATE</div>
-      <CandidateTable :items="watchCandidates" @select="selected = $event" />
+    <section v-for="group in candidateGroups" :key="group.type" class="panel">
+      <div class="panel-header">{{ group.title }}</div>
+      <div class="table-scroll">
+        <table class="candidate-table">
+          <thead>
+            <tr>
+              <th>股票</th><th>收盘</th><th>总分</th><th>分类</th><th>支撑状态</th><th>主支撑</th>
+              <th>支撑距</th><th>支撑分</th><th>强度触发</th><th>新高触发</th><th>20日涨幅</th>
+              <th>5/10日振幅</th><th>60日成交额</th><th>风险/警告</th><th>数据日</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="c in group.items" :key="c.code" class="clickable" @click="selected = c">
+              <td><span class="code">{{ c.code }}</span> {{ c.name }}</td>
+              <td>{{ fmt(c.close) }}</td>
+              <td class="score">{{ fmt(c.total_score) }}</td>
+              <td><span class="type-badge" :class="c.classification">{{ c.candidate_type }}</span></td>
+              <td>{{ c.support_status }}</td>
+              <td>{{ c.main_support_ma || '--' }}</td>
+              <td>{{ pct(c.main_support_distance) }}</td>
+              <td>{{ c.support_score ?? 0 }}</td>
+              <td>{{ c.strength_trigger || '--' }}</td>
+              <td>{{ c.high_trigger || '--' }}</td>
+              <td>{{ pct(c.recent_20d_return) }}</td>
+              <td>{{ pct(c.amplitude_5d) }} / {{ pct(c.amplitude_10d) }}</td>
+              <td>{{ fmt(c.avg_turnover_60d) }}</td>
+              <td>
+                <span v-for="tag in c.risk_tags || []" :key="'r'+tag" class="tag risk">{{ tag }}</span>
+                <span v-for="tag in c.warn_tags || []" :key="'w'+tag" class="tag warn">{{ tag }}</span>
+              </td>
+              <td>{{ c.kline_latest_date || c.evaluation_date || '--' }}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
     </section>
 
     <section v-if="selected" class="panel detail-panel">
@@ -60,59 +87,8 @@
 <script>
 import { useApi } from '../composables/useApi.js'
 
-const CandidateTable = {
-  props: { items: { type: Array, default: () => [] } },
-  emits: ['select'],
-  template: `
-    <div class="table-scroll">
-      <table class="candidate-table">
-        <thead>
-          <tr>
-            <th>股票</th><th>收盘</th><th>总分</th><th>分类</th><th>支撑状态</th><th>主支撑</th>
-            <th>支撑距</th><th>支撑分</th><th>强度触发</th><th>新高触发</th><th>20日涨幅</th>
-            <th>5/10日振幅</th><th>60日成交额</th><th>风险/警告</th><th>数据日</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr v-for="c in items" :key="c.code" class="clickable" @click="$emit('select', c)">
-            <td><span class="code">{{ c.code }}</span> {{ c.name }}</td>
-            <td>{{ fmt(c.close) }}</td>
-            <td class="score">{{ fmt(c.total_score) }}</td>
-            <td><span class="type-badge" :class="c.classification">{{ c.candidate_type }}</span></td>
-            <td>{{ c.support_status }}</td>
-            <td>{{ c.main_support_ma || '--' }}</td>
-            <td>{{ pct(c.main_support_distance) }}</td>
-            <td>{{ c.support_score ?? 0 }}</td>
-            <td>{{ c.strength_trigger || '--' }}</td>
-            <td>{{ c.high_trigger || '--' }}</td>
-            <td>{{ pct(c.recent_20d_return) }}</td>
-            <td>{{ pct(c.amplitude_5d) }} / {{ pct(c.amplitude_10d) }}</td>
-            <td>{{ fmt(c.avg_turnover_60d) }}</td>
-            <td>
-              <span v-for="tag in c.risk_tags || []" :key="'r'+tag" class="tag risk">{{ tag }}</span>
-              <span v-for="tag in c.warn_tags || []" :key="'w'+tag" class="tag warn">{{ tag }}</span>
-            </td>
-            <td>{{ c.kline_latest_date || c.evaluation_date || '--' }}</td>
-          </tr>
-        </tbody>
-      </table>
-    </div>
-  `,
-  methods: {
-    pct(v) {
-      if (v == null || v === '') return '--'
-      return `${(Number(v) * 100).toFixed(2)}%`
-    },
-    fmt(v, digits = 2) {
-      if (v == null || v === '') return '--'
-      return Number(v).toFixed(digits)
-    },
-  },
-}
-
 export default {
   name: 'Strategy5Results',
-  components: { CandidateTable },
   data() {
     return {
       tasks: [],
@@ -132,6 +108,12 @@ export default {
     },
     watchCandidates() {
       return this.sortedCandidates.filter(c => c.candidate_type === 'WATCH_CANDIDATE')
+    },
+    candidateGroups() {
+      return [
+        { type: 'KEY_CANDIDATE', title: '重点候选 KEY_CANDIDATE', items: this.keyCandidates },
+        { type: 'WATCH_CANDIDATE', title: '观察候选 WATCH_CANDIDATE', items: this.watchCandidates },
+      ].filter(group => group.items.length)
     },
     topScore() {
       return this.sortedCandidates[0]?.total_score ?? '--'

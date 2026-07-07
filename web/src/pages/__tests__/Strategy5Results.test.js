@@ -1,6 +1,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { nextTick } from 'vue'
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 
 const api = {
   getStrategy5Tasks: vi.fn(),
@@ -130,5 +132,12 @@ describe('Strategy5Results', () => {
     expect(wrapper.findAll('tbody tr')).toHaveLength(11)
     expect(wrapper.text()).toContain('重点 7')
     expect(wrapper.text()).toContain('观察 4')
+  })
+
+  it('does not render the candidate table through a runtime-only inline template component', () => {
+    const source = readFileSync(resolve(process.cwd(), 'src/pages/Strategy5Results.vue'), 'utf-8')
+
+    expect(source).not.toContain('const CandidateTable = {')
+    expect(source).not.toContain('template: `')
   })
 })
