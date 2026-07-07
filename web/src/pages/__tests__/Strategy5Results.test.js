@@ -34,11 +34,17 @@ describe('Strategy5Results', () => {
           candidate_type: 'KEY_CANDIDATE',
           classification: 'highlight',
           total_score: 88,
+          close: 12.345,
+          avg_turnover_60d: 36.78,
+          recent_20d_return: 0.25,
+          amplitude_5d: 0.08,
+          amplitude_10d: 0.16,
           support_status: 'SPRINT_MA5_SUPPORT',
           main_support_ma: 'MA5',
           support_score: 9,
           strength_trigger: 'ret_20d',
           high_trigger: 'new_120d_high',
+          kline_latest_date: '2026-07-07',
           risk_tags: [],
           warn_tags: ['LOW_5D_VOLATILITY'],
         },
@@ -76,5 +82,21 @@ describe('Strategy5Results', () => {
     expect(wrapper.text()).toContain('ret_20d')
     expect(wrapper.text()).toContain('near_120d_high')
     expect(wrapper.text()).toContain('EXTREME_PULLBACK_OBSERVE')
+  })
+
+  it('renders full strategy5 candidate fields returned by the API', async () => {
+    const wrapper = mount(Strategy5Results)
+    await flushUi()
+
+    expect(wrapper.text()).toContain('收盘')
+    expect(wrapper.text()).toContain('12.35')
+    expect(wrapper.text()).toContain('60日成交额')
+    expect(wrapper.text()).toContain('36.78')
+    expect(wrapper.text()).toContain('20日涨幅')
+    expect(wrapper.text()).toContain('25.00%')
+    expect(wrapper.text()).toContain('5/10日振幅')
+    expect(wrapper.text()).toContain('8.00% / 16.00%')
+    expect(wrapper.text()).toContain('数据日')
+    expect(wrapper.text()).toContain('2026-07-07')
   })
 })

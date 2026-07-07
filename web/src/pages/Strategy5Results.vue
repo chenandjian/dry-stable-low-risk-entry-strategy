@@ -64,32 +64,50 @@ const CandidateTable = {
   props: { items: { type: Array, default: () => [] } },
   emits: ['select'],
   template: `
-    <table class="candidate-table">
-      <thead>
-        <tr>
-          <th>股票</th><th>总分</th><th>分类</th><th>支撑状态</th><th>主支撑</th>
-          <th>支撑分</th><th>强度触发</th><th>新高触发</th><th>风险/警告</th><th>评估日</th>
-        </tr>
-      </thead>
-      <tbody>
-        <tr v-for="c in items" :key="c.code" class="clickable" @click="$emit('select', c)">
-          <td><span class="code">{{ c.code }}</span> {{ c.name }}</td>
-          <td class="score">{{ c.total_score }}</td>
-          <td><span class="type-badge" :class="c.classification">{{ c.candidate_type }}</span></td>
-          <td>{{ c.support_status }}</td>
-          <td>{{ c.main_support_ma || '--' }}</td>
-          <td>{{ c.support_score ?? 0 }}</td>
-          <td>{{ c.strength_trigger || '--' }}</td>
-          <td>{{ c.high_trigger || '--' }}</td>
-          <td>
-            <span v-for="tag in c.risk_tags || []" :key="'r'+tag" class="tag risk">{{ tag }}</span>
-            <span v-for="tag in c.warn_tags || []" :key="'w'+tag" class="tag warn">{{ tag }}</span>
-          </td>
-          <td>{{ c.evaluation_date || '--' }}</td>
-        </tr>
-      </tbody>
-    </table>
+    <div class="table-scroll">
+      <table class="candidate-table">
+        <thead>
+          <tr>
+            <th>股票</th><th>收盘</th><th>总分</th><th>分类</th><th>支撑状态</th><th>主支撑</th>
+            <th>支撑距</th><th>支撑分</th><th>强度触发</th><th>新高触发</th><th>20日涨幅</th>
+            <th>5/10日振幅</th><th>60日成交额</th><th>风险/警告</th><th>数据日</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr v-for="c in items" :key="c.code" class="clickable" @click="$emit('select', c)">
+            <td><span class="code">{{ c.code }}</span> {{ c.name }}</td>
+            <td>{{ fmt(c.close) }}</td>
+            <td class="score">{{ fmt(c.total_score) }}</td>
+            <td><span class="type-badge" :class="c.classification">{{ c.candidate_type }}</span></td>
+            <td>{{ c.support_status }}</td>
+            <td>{{ c.main_support_ma || '--' }}</td>
+            <td>{{ pct(c.main_support_distance) }}</td>
+            <td>{{ c.support_score ?? 0 }}</td>
+            <td>{{ c.strength_trigger || '--' }}</td>
+            <td>{{ c.high_trigger || '--' }}</td>
+            <td>{{ pct(c.recent_20d_return) }}</td>
+            <td>{{ pct(c.amplitude_5d) }} / {{ pct(c.amplitude_10d) }}</td>
+            <td>{{ fmt(c.avg_turnover_60d) }}</td>
+            <td>
+              <span v-for="tag in c.risk_tags || []" :key="'r'+tag" class="tag risk">{{ tag }}</span>
+              <span v-for="tag in c.warn_tags || []" :key="'w'+tag" class="tag warn">{{ tag }}</span>
+            </td>
+            <td>{{ c.kline_latest_date || c.evaluation_date || '--' }}</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
   `,
+  methods: {
+    pct(v) {
+      if (v == null || v === '') return '--'
+      return `${(Number(v) * 100).toFixed(2)}%`
+    },
+    fmt(v, digits = 2) {
+      if (v == null || v === '') return '--'
+      return Number(v).toFixed(digits)
+    },
+  },
 }
 
 export default {
@@ -179,8 +197,11 @@ select { background: var(--bg-panel); color: var(--text-primary); border: 1px so
 .panel { background: var(--bg-panel); border: 1px solid var(--border); border-radius: 6px; margin: 14px 0; overflow: hidden; }
 .panel-header { padding: 12px 14px; border-bottom: 1px solid var(--border); font-weight: 700; color: var(--text-secondary); }
 .candidate-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.table-scroll { overflow-x: auto; }
+.candidate-table { min-width: 1320px; }
 th, td { border-bottom: 1px solid var(--border); padding: 9px 10px; text-align: left; }
 th { color: var(--text-secondary); font-weight: 600; }
+td { vertical-align: top; }
 .clickable { cursor: pointer; }
 .clickable:hover { background: rgba(255,255,255,0.03); }
 .code { color: var(--accent); font-family: var(--font-mono); }
