@@ -1,5 +1,6 @@
 from strategy5.engine import ShortSprintSupportEngine
 from strategy5.filters import hard_filter_reasons
+from strategy5.indicators import calculate_indicators, normalize_rows
 from strategy5.models import Strategy5Indicators
 from strategy5.validation import resolve_strategy5_config
 from strategy5.support import evaluate_support_status
@@ -80,6 +81,31 @@ def test_insufficient_history_is_rejected_with_stable_reason():
 
     assert result.passed is False
     assert "INSUFFICIENT_KLINE_DAYS" in result.reject_reasons
+
+
+def test_compact_window_with_trading_days_override_matches_full_window():
+    data = build_strong_data(length=800)
+    engine = ShortSprintSupportEngine({})
+
+    full = engine.evaluate_at(data, code="000001", name="平安银行")
+    compact = engine.evaluate_at(
+        data[-260:],
+        code="000001",
+        name="平安银行",
+        trading_days_override=len(data),
+    )
+
+    assert compact.to_candidate_dict() == full.to_candidate_dict()
+
+
+def test_pre_normalized_rows_match_raw_indicator_calculation():
+    data = build_strong_data(length=800)
+    cfg = resolve_strategy5_config({})
+
+    raw = calculate_indicators(data, cfg)
+    normalized = calculate_indicators(normalize_rows(data), cfg, rows_normalized=True)
+
+    assert normalized == raw
 
 
 def test_trading_days_filter_accepts_configured_minimum_boundary():

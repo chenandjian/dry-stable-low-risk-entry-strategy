@@ -1,5 +1,6 @@
 import scanner.db as db
 import pytest
+import strategy5.backtester as strategy5_backtester
 from strategy5.backtester import run_strategy5_historical_performance_backtest, run_strategy5_local_backtest
 from tests.test_strategy5_core_rules import _row, build_strong_data
 
@@ -66,3 +67,32 @@ def test_strategy5_historical_performance_reports_no_observable_forward_window(t
     assert summary["historical_evaluation_points"] == 0
     assert summary["no_observable_window_stocks"] == 1
     assert summary["limitation"] == "INSUFFICIENT_HISTORY_PLUS_FORWARD_WINDOW"
+
+
+def test_strategy5_historical_performance_uses_compact_indicator_window(tmp_path, monkeypatch):
+    db_path = str(tmp_path / "s5bt_compact.db")
+    db.init_db(db_path)
+    db.save_stock_pool([{"code": "000001", "name": "平安银行", "market": "SZ"}])
+    data = build_strong_data(length=820)
+    db.save_ohlc("000001", data)
+
+    seen_lengths = []
+    seen_overrides = []
+    original_evaluate_at = strategy5_backtester.ShortSprintSupportEngine.evaluate_at
+
+    def spy_evaluate_at(self, rows, **kwargs):
+        seen_lengths.append(len(rows))
+        seen_overrides.append(kwargs.get("trading_days_override"))
+        return original_evaluate_at(self, rows, **kwargs)
+
+    monkeypatch.setattr(strategy5_backtester.ShortSprintSupportEngine, "evaluate_at", spy_evaluate_at)
+
+    summary = run_strategy5_historical_performance_backtest(
+        {"data": {"database_path": db_path}},
+        forward_windows=(5, 10, 20),
+        evaluation_step=50,
+    )
+
+    assert summary["historical_evaluation_points"] > 1
+    assert max(seen_lengths) <= 260
+    assert max(seen_overrides) > max(seen_lengths)

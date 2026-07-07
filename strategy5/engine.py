@@ -24,8 +24,15 @@ class ShortSprintSupportEngine:
         data_source: str = "",
         kline_fetched_at: str = "",
         quote_status: str = "",
+        trading_days_override: int | None = None,
+        rows_normalized: bool = False,
     ) -> Strategy5Evaluation:
-        indicators = calculate_indicators(data, self.config)
+        indicators = calculate_indicators(
+            data,
+            self.config,
+            trading_days_override=trading_days_override,
+            rows_normalized=rows_normalized,
+        )
         if indicators.trading_days < self.config["minimum_kline_days"]:
             support = Strategy5Support("SPRINT_FAILED")
             score = Strategy5Score()

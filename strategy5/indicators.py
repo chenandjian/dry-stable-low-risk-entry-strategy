@@ -1,16 +1,20 @@
 """Strategy5 indicator calculations."""
 from __future__ import annotations
 
-from statistics import mean
-
 from strategy5.models import Strategy5Indicators
 
 MA_PERIODS = (5, 10, 20, 50, 100, 120, 250)
 
 
-def calculate_indicators(data: list[dict], config: dict) -> Strategy5Indicators:
-    rows = [_normalize_row(r) for r in data]
-    ind = Strategy5Indicators(trading_days=len(rows))
+def calculate_indicators(
+    data: list[dict],
+    config: dict,
+    *,
+    trading_days_override: int | None = None,
+    rows_normalized: bool = False,
+) -> Strategy5Indicators:
+    rows = data if rows_normalized else normalize_rows(data)
+    ind = Strategy5Indicators(trading_days=trading_days_override or len(rows))
     if not rows:
         return ind
 
@@ -55,6 +59,10 @@ def calculate_indicators(data: list[dict], config: dict) -> Strategy5Indicators:
     return ind
 
 
+def normalize_rows(data: list[dict]) -> list[dict]:
+    return [_normalize_row(r) for r in data]
+
+
 def _normalize_row(row: dict) -> dict:
     close = _float(row.get("close", row.get("last", 0)))
     return {
@@ -82,7 +90,7 @@ def _ma(rows: list[dict], period: int, end: int | None = None) -> float:
     start = end - period
     if start < 0 or end > len(rows):
         return 0.0
-    return round(mean(r["close"] for r in rows[start:end]), 4)
+    return round(_mean(r["close"] for r in rows[start:end]), 4)
 
 
 def _ma_slope(rows: list[dict], period: int, lookback: int) -> float:
@@ -116,12 +124,12 @@ def _avg_amount_yi(rows: list[dict], days: int) -> float:
     for row in selected:
         amount = row["turnover"]
         values.append(amount / 100_000_000 if amount > 10_000 else amount)
-    return round(mean(values), 4)
+    return round(_mean(values), 4)
 
 
 def _avg_volume(rows: list[dict], days: int) -> float:
     selected = rows[-days:]
-    return round(mean(r["volume"] for r in selected), 4) if selected else 0.0
+    return round(_mean(r["volume"] for r in selected), 4) if selected else 0.0
 
 
 def _amplitude(rows: list[dict], days: int) -> float:
@@ -134,6 +142,15 @@ def _amplitude(rows: list[dict], days: int) -> float:
 
 def _distance(close: float, value: float) -> float:
     return round(abs(close - value) / close, 6) if close > 0 and value > 0 else 0.0
+
+
+def _mean(values) -> float:
+    total = 0.0
+    count = 0
+    for value in values:
+        total += value
+        count += 1
+    return total / count if count else 0.0
 
 
 def _strength_trigger(rows: list[dict], ind: Strategy5Indicators, config: dict) -> str:

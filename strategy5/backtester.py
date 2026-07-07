@@ -12,8 +12,10 @@ from collections.abc import Sequence
 
 import scanner.db as db
 from strategy5.engine import ShortSprintSupportEngine
+from strategy5.indicators import normalize_rows
 
 DEFAULT_FORWARD_WINDOWS = (5, 10, 20)
+DEFAULT_HISTORICAL_INDICATOR_WINDOW_DAYS = 260
 
 
 def run_strategy5_local_backtest(
@@ -109,6 +111,10 @@ def run_strategy5_historical_performance_backtest(
     max_forward = max(windows)
     min_history = int(engine.config["minimum_trading_days"])
     min_eval_idx = min_history - 1
+    history_window_days = max(
+        DEFAULT_HISTORICAL_INDICATOR_WINDOW_DAYS,
+        int(engine.config["minimum_kline_days"]),
+    )
     historical_evaluation_points = 0
     insufficient_stocks = 0
     no_observable_window_stocks = 0
@@ -122,6 +128,7 @@ def run_strategy5_historical_performance_backtest(
             insufficient_stocks += 1
             reject_reasons["NO_DAILY_OHLC"] += 1
             continue
+        normalized_data = normalize_rows(data)
         last_eval_idx = len(data) - 1 - max_forward
         if last_eval_idx < min_eval_idx:
             no_observable_window_stocks += 1
@@ -130,7 +137,14 @@ def run_strategy5_historical_performance_backtest(
         last_event_idx: int | None = None
         for eval_idx in range(min_eval_idx, last_eval_idx + 1, evaluation_step):
             historical_evaluation_points += 1
-            result = engine.evaluate_at(data[: eval_idx + 1], code=stock["code"], name=stock.get("name", ""))
+            strategy_window = _select_historical_strategy_window(normalized_data, eval_idx, history_window_days)
+            result = engine.evaluate_at(
+                strategy_window,
+                code=stock["code"],
+                name=stock.get("name", ""),
+                trading_days_override=eval_idx + 1,
+                rows_normalized=True,
+            )
             if not result.passed:
                 reject_reasons[result.status_reason or "REJECTED"] += 1
                 continue
@@ -157,6 +171,7 @@ def run_strategy5_historical_performance_backtest(
         "no_observable_window_stocks": no_observable_window_stocks,
         "skipped_duplicate_events": skipped_duplicate_events,
         "minimum_trading_days": min_history,
+        "historical_indicator_window_days": history_window_days,
         "max_forward_days": max_forward,
         "forward_windows": list(windows),
         "reject_reasons": dict(reject_reasons.most_common(20)),
@@ -167,6 +182,11 @@ def run_strategy5_historical_performance_backtest(
     else:
         summary["limitation"] = ""
     return summary
+
+
+def _select_historical_strategy_window(data: list[dict], eval_idx: int, history_window_days: int) -> list[dict]:
+    start = max(0, eval_idx + 1 - history_window_days)
+    return data[start: eval_idx + 1]
 
 
 def _build_performance_event(candidate: dict, data: list[dict], eval_idx: int, windows: Sequence[int]) -> dict | None:
