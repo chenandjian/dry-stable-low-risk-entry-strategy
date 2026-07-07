@@ -558,9 +558,9 @@
           <span class="default">默认 260</span>
         </div>
         <div class="param">
-          <label title="F1：交易天数需要大于该阈值">最低交易天数</label>
+          <label title="F1：交易天数需要大于等于该阈值">最低交易天数</label>
           <input type="number" v-model.number="config.strategy5.minimum_trading_days" @input="markDirty" min="120" max="3000" />
-          <span class="default">默认 1000</span>
+          <span class="default">默认 500</span>
         </div>
         <div class="param">
           <label title="F5：60日均成交额，单位亿元">60日均额 <span class="unit">亿</span></label>
@@ -752,7 +752,7 @@ const defaultStrategy5Config = {
   enabled: true,
   kline_days: 1100,
   minimum_kline_days: 260,
-  minimum_trading_days: 1000,
+  minimum_trading_days: 500,
   min_avg_amount_60d_yi: 20,
   min_avg_amount_30d_yi: 15,
   min_avg_amount_10d_yi: 10,

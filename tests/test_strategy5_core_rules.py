@@ -1,4 +1,7 @@
 from strategy5.engine import ShortSprintSupportEngine
+from strategy5.filters import hard_filter_reasons
+from strategy5.models import Strategy5Indicators
+from strategy5.validation import resolve_strategy5_config
 from strategy5.support import evaluate_support_status
 from datetime import date, timedelta
 
@@ -77,6 +80,17 @@ def test_insufficient_history_is_rejected_with_stable_reason():
 
     assert result.passed is False
     assert "INSUFFICIENT_KLINE_DAYS" in result.reject_reasons
+
+
+def test_trading_days_filter_accepts_configured_minimum_boundary():
+    cfg = resolve_strategy5_config({})
+    indicators = Strategy5Indicators(trading_days=cfg["minimum_trading_days"])
+
+    assert "TRADING_DAYS_LT_500" not in hard_filter_reasons(indicators, cfg)
+
+    indicators.trading_days = cfg["minimum_trading_days"] - 1
+
+    assert "TRADING_DAYS_LT_500" in hard_filter_reasons(indicators, cfg)
 
 
 def test_support_status_priority_prefers_ma5_before_ma10():

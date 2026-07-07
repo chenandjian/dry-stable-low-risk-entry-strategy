@@ -9,7 +9,7 @@ DEFAULT_STRATEGY5_CONFIG = {
     "enabled": True,
     "kline_days": 1100,
     "minimum_kline_days": 260,
-    "minimum_trading_days": 1000,
+    "minimum_trading_days": 500,
     "min_avg_amount_60d_yi": 20,
     "min_avg_amount_30d_yi": 15,
     "min_avg_amount_10d_yi": 10,

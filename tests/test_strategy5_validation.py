@@ -9,7 +9,7 @@ def test_strategy5_default_config_matches_design():
     assert cfg["enabled"] is True
     assert cfg["kline_days"] == 1100
     assert cfg["minimum_kline_days"] == 260
-    assert cfg["minimum_trading_days"] == 1000
+    assert cfg["minimum_trading_days"] == 500
     assert cfg["min_avg_amount_60d_yi"] == 20
     assert cfg["min_avg_amount_30d_yi"] == 15
     assert cfg["min_avg_amount_10d_yi"] == 10
