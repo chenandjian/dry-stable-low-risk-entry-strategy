@@ -100,7 +100,7 @@ scheduler:
   webhook_url: null
   serial_dual_scan:
     enabled: true
-    cron: 34 16 * * 1-5
+    cron: 30 16 * * 1-5
     strategy1_failed_retry_rounds: 3
 strategy2:
   enabled: true
@@ -130,7 +130,7 @@ strategy3:
   max_recent_range_5: 0.12
   max_recent_surge_3: 0.1
   min_relative_strength_60: 0.05
-  volume_shrink_ratio: 0.70
+  volume_shrink_ratio: 0.7
   dry_volume_ratio: 0.6
   dry_extreme_volume_ratio: 0.5
   dry_return_5_floor: 0.02
@@ -168,22 +168,22 @@ strategy4:
   core_leader_strength_score: 50
   first_wave_lookback_short: 10
   first_wave_lookback_long: 20
-  min_first_wave_return_10d: 0.10
+  min_first_wave_return_10d: 0.1
   min_first_wave_return_20d: 0.15
   min_strong_day_count_10d: 1
   pullback_min_pct: 0.05
-  pullback_max_pct: 0.30
+  pullback_max_pct: 0.3
   pullback_min_days: 1
   pullback_max_days: 40
-  max_risk_ratio: 0.10
-  aggressive_max_risk_ratio: 0.10
+  max_risk_ratio: 0.1
+  aggressive_max_risk_ratio: 0.1
   min_reward_risk_ratio: 1.5
   core_leader_min_reward_risk_ratio: 1.5
   topic_index:
     enabled: true
     preferred_sources:
-      - akshare_ths
-      - akshare_eastmoney
+    - akshare_ths
+    - akshare_eastmoney
     history_days: 250
     min_required_rows: 60
     require_for_buyable_candidate: true
@@ -191,14 +191,14 @@ strategy4:
     max_fetch_topics_per_scan: 30
     source_retry_attempts: 2
   topic_index_filters:
-    min_trend_score: 8.0
-    min_breakout_score: 0.0
-    min_amount_ratio_5_20: 1.0
+    min_trend_score: 8
+    min_breakout_score: 0
+    min_amount_ratio_5_20: 1
     max_drawdown_from_high_20: 0.12
     allowed_phases:
-      - EARLY_ACCELERATION
-      - MAIN_TREND
-      - PULLBACK_REPAIR
+    - EARLY_ACCELERATION
+    - MAIN_TREND
+    - PULLBACK_REPAIR
   leader_relative_strength:
     min_rs_10d: 0.05
     min_rs_20d: 0.08
@@ -214,7 +214,7 @@ strategy4:
     min_topic_hot_score: 50
     min_confirmed_topic_hot_score: 60
     min_topic_index_rows: 60
-    min_amount_ratio_5_20: 1.0
+    min_amount_ratio_5_20: 1
     min_breadth_ratio: 0.55
     min_member_count: 5
     allow_current_members_proxy: true
@@ -232,8 +232,8 @@ strategy4:
     golden_second_wave_days: 20
     allow_extension_days: 20
     expire_without_leader_days: 30
-    extension_min_reward_risk_ratio: 2.0
+    extension_min_reward_risk_ratio: 2
     extension_max_risk_ratio: 0.12
-    max_topic_drawdown_since_detected: 0.20
+    max_topic_drawdown_since_detected: 0.2
     max_leader_drawdown_from_first_wave_high: 0.45
     min_extension_leader_rs_20d: -0.05
