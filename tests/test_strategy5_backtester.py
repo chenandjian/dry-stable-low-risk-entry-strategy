@@ -96,3 +96,39 @@ def test_strategy5_historical_performance_uses_compact_indicator_window(tmp_path
     assert summary["historical_evaluation_points"] > 1
     assert max(seen_lengths) <= 260
     assert max(seen_overrides) > max(seen_lengths)
+
+
+def test_strategy5_historical_performance_can_limit_to_trade_candidates(tmp_path, monkeypatch):
+    db_path = str(tmp_path / "s5bt_trade_only.db")
+    db.init_db(db_path)
+    db.save_stock_pool([
+        {"code": "000001", "name": "正式候选", "market": "SZ"},
+        {"code": "000002", "name": "观察候选", "market": "SZ"},
+    ])
+    db.save_ohlc("000001", build_strong_data(length=520))
+    db.save_ohlc("000002", build_strong_data(length=520))
+
+    original_evaluate_at = strategy5_backtester.ShortSprintSupportEngine.evaluate_at
+
+    def fake_evaluate_at(self, rows, **kwargs):
+        result = original_evaluate_at(self, rows, **kwargs)
+        if kwargs.get("code") == "000001":
+            result.candidate_type = "BUY_CANDIDATE"
+            result.classification = "trade"
+        else:
+            result.candidate_type = "WATCH_CANDIDATE"
+            result.classification = "observe"
+        return result
+
+    monkeypatch.setattr(strategy5_backtester.ShortSprintSupportEngine, "evaluate_at", fake_evaluate_at)
+
+    summary = run_strategy5_historical_performance_backtest(
+        {"data": {"database_path": db_path}},
+        forward_windows=(5, 10, 20),
+        evaluation_step=50,
+        trade_only=True,
+    )
+
+    assert summary["events"] == 1
+    assert summary["trade_only"] is True
+    assert summary["events_detail"][0]["code"] == "000001"

@@ -37,6 +37,10 @@ def test_strategy5_default_config_matches_design():
     assert cfg["key_candidate_min_support_score"] == 8
     assert cfg["volume_dry_min_score_key"] == 14
     assert cfg["volume_dry_min_score_watch"] == 10
+    assert cfg["trade_candidate_min_score"] == 70
+    assert cfg["trade_volume_dry_min_score"] == 14
+    assert cfg["trade_allow_ret50"] is False
+    assert cfg["trade_allow_ma5_support"] is False
     assert cfg["volume_dry_ratio_5_20"] == 0.75
     assert cfg["volume_dry_strong_ratio_5_20"] == 0.65
     assert cfg["volume_dry_extreme_ratio_5_20"] == 0.50
@@ -90,6 +94,12 @@ def test_strategy5_rejects_invalid_ranges():
 
     with pytest.raises(ValueError, match="volume_dry_min_score_watch"):
         resolve_strategy5_config({"strategy5": {"volume_dry_min_score_watch": 15, "volume_dry_min_score_key": 14}})
+
+    with pytest.raises(ValueError, match="trade_candidate_min_score"):
+        resolve_strategy5_config({"strategy5": {"trade_candidate_min_score": 101}})
+
+    with pytest.raises(ValueError, match="trade_volume_dry_min_score"):
+        resolve_strategy5_config({"strategy5": {"trade_volume_dry_min_score": 21}})
 
     with pytest.raises(ValueError, match="volume_dry_strong_ratio_5_20"):
         resolve_strategy5_config({"strategy5": {"volume_dry_ratio_5_20": 0.70, "volume_dry_strong_ratio_5_20": 0.80}})

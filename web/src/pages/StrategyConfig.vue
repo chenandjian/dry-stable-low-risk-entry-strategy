@@ -657,10 +657,32 @@
           <input type="number" v-model.number="config.strategy5.volume_dry_min_score_watch" @input="markDirty" min="0" max="20" />
           <span class="default">默认 10 · 不高于重点候选</span>
         </div>
+        <div class="param">
+          <label title="正式交易候选最低总分；低于该分数只进入观察，不进入正式买入统计">正式候选最低分</label>
+          <input type="number" v-model.number="config.strategy5.trade_candidate_min_score" @input="markDirty" min="0" max="100" step="1" />
+          <span class="default">默认 70</span>
+        </div>
+        <div class="param">
+          <label title="正式交易候选最低量干分；观察候选仍使用观察量干分">正式候选量干分</label>
+          <input type="number" v-model.number="config.strategy5.trade_volume_dry_min_score" @input="markDirty" min="0" max="20" step="1" />
+          <span class="default">默认 14 · 满分20</span>
+        </div>
+        <div class="param">
+          <label title="关闭时，50日补漏入口只能进入观察候选，不进入正式买入候选">正式允许50日补漏</label>
+          <button class="toggle" :class="{ active: config.strategy5.trade_allow_ret50 === true }"
+            @click="toggleStrategy5('trade_allow_ret50')">{{ config.strategy5.trade_allow_ret50 === true ? '开' : '关' }}</button>
+          <span class="default">默认关闭</span>
+        </div>
+        <div class="param">
+          <label title="关闭时，MA5支撑只作为偏追高观察，不进入正式买入候选">正式允许MA5支撑</label>
+          <button class="toggle" :class="{ active: config.strategy5.trade_allow_ma5_support === true }"
+            @click="toggleStrategy5('trade_allow_ma5_support')">{{ config.strategy5.trade_allow_ma5_support === true ? '开' : '关' }}</button>
+          <span class="default">默认关闭</span>
+        </div>
       </div>
 
       <div class="info-msg strategy5-info">
-        ⓘ 策略5继续使用 baidu / sina / tencent 日线链路；主板/创业板与科创板流动性分开过滤，评分只排序，F1-F11 硬过滤失败不会被评分拉回候选。
+        ⓘ 策略5继续使用 baidu / sina / tencent 日线链路；正式候选用于买入统计，观察候选只用于跟踪，不进入正式收益口径。
       </div>
     </section>
 
@@ -824,6 +846,10 @@ const defaultStrategy5Config = {
   key_candidate_min_support_score: 8,
   volume_dry_min_score_key: 14,
   volume_dry_min_score_watch: 10,
+  trade_candidate_min_score: 70,
+  trade_volume_dry_min_score: 14,
+  trade_allow_ret50: false,
+  trade_allow_ma5_support: false,
   volume_dry_ratio_5_20: 0.75,
   volume_dry_strong_ratio_5_20: 0.65,
   volume_dry_extreme_ratio_5_20: 0.50,
@@ -1271,6 +1297,8 @@ function validate() {
   if (s5.key_candidate_min_support_score < 0 || s5.key_candidate_min_support_score > 10) errors.push('策略5: 重点候选支撑分需在 0-10')
   if (s5.volume_dry_min_score_key < 0 || s5.volume_dry_min_score_key > 20) errors.push('策略5: 重点候选量干分需在 0-20')
   if (s5.volume_dry_min_score_watch < 0 || s5.volume_dry_min_score_watch > s5.volume_dry_min_score_key) errors.push('策略5: 观察候选量干分需在 0 到重点候选量干分之间')
+  if (s5.trade_candidate_min_score < 0 || s5.trade_candidate_min_score > 100) errors.push('策略5: 正式候选最低分需在 0-100')
+  if (s5.trade_volume_dry_min_score < 0 || s5.trade_volume_dry_min_score > 20) errors.push('策略5: 正式候选量干分需在 0-20')
 
   return errors
 }

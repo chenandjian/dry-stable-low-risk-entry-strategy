@@ -115,7 +115,11 @@ class Strategy5Evaluation:
 
     @property
     def passed(self) -> bool:
-        return self.candidate_type in {"KEY_CANDIDATE", "WATCH_CANDIDATE"}
+        return self.candidate_type in {"BUY_CANDIDATE", "KEY_CANDIDATE", "WATCH_CANDIDATE"}
+
+    @property
+    def is_trade_candidate(self) -> bool:
+        return self.candidate_type == "BUY_CANDIDATE"
 
     def to_candidate_dict(self) -> dict:
         ind = self.indicators
@@ -156,6 +160,7 @@ class Strategy5Evaluation:
             "support_score": sup.support_score,
             "candidate_type": self.candidate_type,
             "classification": self.classification,
+            "is_trade_candidate": self.is_trade_candidate,
             "range_5_tag": ind.range_5_tag,
             "range_10_tag": ind.range_10_tag,
             "pullback_tag": ind.pullback_tag,

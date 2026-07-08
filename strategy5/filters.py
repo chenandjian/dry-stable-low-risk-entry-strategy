@@ -74,19 +74,23 @@ def classify_candidate(
     config: dict,
     reject_reasons: list[str],
     volume_dry: Strategy5VolumeDry | None = None,
+    *,
+    total_score: float | None = None,
 ) -> tuple[str, str]:
     if reject_reasons:
         return "REJECTED", "rejected"
     if support.support_status == "SPRINT_FAILED":
         return "REJECTED", "rejected"
     volume_score = volume_dry.volume_dry_score if volume_dry else 0
+    if _is_trade_candidate(ind, support, config, volume_score, total_score):
+        return "BUY_CANDIDATE", "trade"
     if support.support_status in {"SPRINT_MA5_SUPPORT", "SPRINT_MA10_SUPPORT", "SPRINT_MA20_SUPPORT"}:
         if (
             "BIG_DROP_TODAY" not in ind.risk_tags
             and support.support_score >= config["key_candidate_min_support_score"]
             and volume_score >= config["volume_dry_min_score_key"]
         ):
-            return "KEY_CANDIDATE", "highlight"
+            return "WATCH_CANDIDATE", "observe"
         if volume_score < config["volume_dry_min_score_watch"]:
             return "REJECTED", "rejected"
     if support.support_status == "SPRINT_MA50_TESTING":
@@ -102,3 +106,21 @@ def classify_candidate(
     if config["max_drawdown_20d"] < ind.drawdown_from_20d_high <= -0.22:
         return "WATCH_CANDIDATE", "observe"
     return "REJECTED", "rejected"
+
+
+def _is_trade_candidate(
+    ind: Strategy5Indicators,
+    support: Strategy5Support,
+    config: dict,
+    volume_score: int,
+    total_score: float | None,
+) -> bool:
+    if total_score is None or total_score < config["trade_candidate_min_score"]:
+        return False
+    if volume_score < config["trade_volume_dry_min_score"]:
+        return False
+    if not config["trade_allow_ret50"] and ind.strength_trigger == "ret_50d":
+        return False
+    if not config["trade_allow_ma5_support"] and support.support_status == "SPRINT_MA5_SUPPORT":
+        return False
+    return support.support_status in {"SPRINT_MA10_SUPPORT", "SPRINT_MA20_SUPPORT"}

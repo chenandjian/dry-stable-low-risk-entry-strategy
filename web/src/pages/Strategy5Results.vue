@@ -17,6 +17,7 @@
 
     <div class="summary-bar" v-if="candidates.length">
       <span>候选数 <strong>{{ candidates.length }}</strong></span>
+      <span class="chip trade">正式 {{ tradeCandidates.length }}</span>
       <span class="chip key">重点 {{ keyCandidates.length }}</span>
       <span class="chip watch">观察 {{ watchCandidates.length }}</span>
       <span>最高分 {{ topScore }}</span>
@@ -112,11 +113,15 @@ export default {
     keyCandidates() {
       return this.sortedCandidates.filter(c => c.candidate_type === 'KEY_CANDIDATE')
     },
+    tradeCandidates() {
+      return this.sortedCandidates.filter(c => c.candidate_type === 'BUY_CANDIDATE' || c.is_trade_candidate === true)
+    },
     watchCandidates() {
       return this.sortedCandidates.filter(c => c.candidate_type === 'WATCH_CANDIDATE')
     },
     candidateGroups() {
       return [
+        { type: 'BUY_CANDIDATE', title: '正式买入候选 BUY_CANDIDATE', items: this.tradeCandidates },
         { type: 'KEY_CANDIDATE', title: '重点候选 KEY_CANDIDATE', items: this.keyCandidates },
         { type: 'WATCH_CANDIDATE', title: '观察候选 WATCH_CANDIDATE', items: this.watchCandidates },
       ].filter(group => group.items.length)
@@ -193,6 +198,7 @@ p { margin: 0; color: var(--text-secondary); }
 select { background: var(--bg-panel); color: var(--text-primary); border: 1px solid var(--border); border-radius: 4px; padding: 8px; min-width: 320px; }
 .summary-bar { display: flex; gap: 12px; align-items: center; margin: 12px 0; color: var(--text-secondary); }
 .chip, .type-badge, .tag, .dry-badge { border-radius: 999px; padding: 2px 8px; font-size: 12px; display: inline-block; margin: 1px 3px 1px 0; }
+.chip.trade, .type-badge.trade { background: rgba(59, 130, 246, 0.18); color: #93c5fd; }
 .chip.key, .type-badge.highlight { background: rgba(34, 197, 94, 0.15); color: #86efac; }
 .chip.watch, .type-badge.observe { background: rgba(234, 179, 8, 0.15); color: #fde68a; }
 .dry-badge.good, .tag.dry { background: rgba(34, 197, 94, 0.15); color: #86efac; }

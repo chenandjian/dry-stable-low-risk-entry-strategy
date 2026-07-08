@@ -86,6 +86,7 @@ def run_strategy5_historical_performance_backtest(
     cooldown_days: int = 10,
     limit: int | None = None,
     top_events: int = 50,
+    trade_only: bool = False,
 ) -> dict:
     """Evaluate historical Strategy5 signals and their forward returns.
 
@@ -145,6 +146,9 @@ def run_strategy5_historical_performance_backtest(
             if not result.passed:
                 reject_reasons[result.status_reason or "REJECTED"] += 1
                 continue
+            if trade_only and not result.is_trade_candidate:
+                reject_reasons["NON_TRADE_CANDIDATE"] += 1
+                continue
             if last_event_idx is not None and eval_idx - last_event_idx <= cooldown_days:
                 skipped_duplicate_events += 1
                 continue
@@ -162,8 +166,10 @@ def run_strategy5_historical_performance_backtest(
         "stocks": len(stocks),
         "historical_evaluation_points": historical_evaluation_points,
         "events": len(events),
+        "trade_events": sum(1 for event in events if event.get("candidate_type") == "BUY_CANDIDATE"),
         "key_events": sum(1 for event in events if event.get("candidate_type") == "KEY_CANDIDATE"),
         "watch_events": sum(1 for event in events if event.get("candidate_type") == "WATCH_CANDIDATE"),
+        "trade_only": trade_only,
         "insufficient_stocks": insufficient_stocks,
         "no_observable_window_stocks": no_observable_window_stocks,
         "skipped_duplicate_events": skipped_duplicate_events,

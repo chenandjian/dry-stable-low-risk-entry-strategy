@@ -276,3 +276,71 @@ def test_watch_candidate_fallbacks_require_minimum_volume_dry_score():
     candidate_type, classification = classify_candidate(indicators, support, cfg, [], volume_dry)
 
     assert (candidate_type, classification) == ("REJECTED", "rejected")
+
+
+def test_trade_candidate_requires_short_strength_non_ma5_support_and_score_floor():
+    cfg = resolve_strategy5_config({})
+    indicators = Strategy5Indicators(
+        strength_trigger="ret_20d",
+        amplitude_5d=0.10,
+        amplitude_10d=0.18,
+        drawdown_from_20d_high=-0.08,
+    )
+    support = Strategy5Support(
+        support_status="SPRINT_MA20_SUPPORT",
+        main_support_ma="MA20",
+        support_score=8,
+    )
+    volume_dry = Strategy5VolumeDry(volume_dry_score=cfg["volume_dry_min_score_key"])
+
+    candidate_type, classification = classify_candidate(
+        indicators,
+        support,
+        cfg,
+        [],
+        volume_dry,
+        total_score=cfg["trade_candidate_min_score"],
+    )
+
+    assert (candidate_type, classification) == ("BUY_CANDIDATE", "trade")
+
+    indicators.strength_trigger = "ret_50d"
+    candidate_type, classification = classify_candidate(
+        indicators,
+        support,
+        cfg,
+        [],
+        volume_dry,
+        total_score=cfg["trade_candidate_min_score"],
+    )
+
+    assert (candidate_type, classification) == ("WATCH_CANDIDATE", "observe")
+
+    indicators.strength_trigger = "ret_20d"
+    support.support_status = "SPRINT_MA5_SUPPORT"
+    support.main_support_ma = "MA5"
+    support.support_score = 10
+    candidate_type, classification = classify_candidate(
+        indicators,
+        support,
+        cfg,
+        [],
+        volume_dry,
+        total_score=cfg["trade_candidate_min_score"] + 20,
+    )
+
+    assert (candidate_type, classification) == ("WATCH_CANDIDATE", "observe")
+
+    support.support_status = "SPRINT_MA20_SUPPORT"
+    support.main_support_ma = "MA20"
+    support.support_score = 8
+    candidate_type, classification = classify_candidate(
+        indicators,
+        support,
+        cfg,
+        [],
+        volume_dry,
+        total_score=cfg["trade_candidate_min_score"] - 0.01,
+    )
+
+    assert (candidate_type, classification) == ("WATCH_CANDIDATE", "observe")
