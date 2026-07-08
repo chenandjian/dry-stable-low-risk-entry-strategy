@@ -6,8 +6,6 @@ from strategy5.models import Strategy5Indicators, Strategy5Support
 
 def hard_filter_reasons(ind: Strategy5Indicators, config: dict) -> list[str]:
     reasons: list[str] = []
-    if ind.trading_days < config["minimum_kline_days"]:
-        return ["INSUFFICIENT_KLINE_DAYS"]
     if ind.trading_days < config["minimum_trading_days"]:
         reasons.append(f"TRADING_DAYS_LT_{config['minimum_trading_days']}")
     if min(ind.ma5, ind.ma10, ind.ma20, ind.ma50, ind.ma100, ind.ma120, ind.ma250) <= 0:

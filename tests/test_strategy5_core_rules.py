@@ -152,7 +152,9 @@ def test_insufficient_history_is_rejected_with_stable_reason():
     result = ShortSprintSupportEngine({}).evaluate_at(build_strong_data(length=200), code="000001", name="平安银行")
 
     assert result.passed is False
-    assert "INSUFFICIENT_KLINE_DAYS" in result.reject_reasons
+    assert result.status_reason == "TRADING_DAYS_LT_500"
+    assert "TRADING_DAYS_LT_500" in result.reject_reasons
+    assert "INSUFFICIENT_KLINE_DAYS" not in result.reject_reasons
 
 
 def test_compact_window_with_trading_days_override_matches_full_window():

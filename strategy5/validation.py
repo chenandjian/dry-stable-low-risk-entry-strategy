@@ -8,7 +8,6 @@ from numbers import Real
 DEFAULT_STRATEGY5_CONFIG = {
     "enabled": True,
     "kline_days": 1100,
-    "minimum_kline_days": 260,
     "minimum_trading_days": 500,
     "min_avg_amount_60d_yi": 30,
     "min_avg_amount_30d_yi": 20,
@@ -45,8 +44,8 @@ def resolve_strategy5_config(config: dict | None) -> dict:
 
     raw["enabled"] = bool(raw.get("enabled", True))
     _validate_int_range(raw, "kline_days", 260, 3000)
-    _validate_int_range(raw, "minimum_kline_days", 120, raw["kline_days"])
-    _validate_int_range(raw, "minimum_trading_days", 120, raw["kline_days"])
+    raw.pop("minimum_kline_days", None)
+    _validate_int_range(raw, "minimum_trading_days", 260, raw["kline_days"])
     _validate_number_range(raw, "min_avg_amount_60d_yi", 0, 1000)
     _validate_number_range(raw, "min_avg_amount_30d_yi", 0, 1000)
     _validate_number_range(raw, "min_avg_amount_10d_yi", 0, 1000)

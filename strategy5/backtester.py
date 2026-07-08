@@ -111,10 +111,7 @@ def run_strategy5_historical_performance_backtest(
     max_forward = max(windows)
     min_history = int(engine.config["minimum_trading_days"])
     min_eval_idx = min_history - 1
-    history_window_days = max(
-        DEFAULT_HISTORICAL_INDICATOR_WINDOW_DAYS,
-        int(engine.config["minimum_kline_days"]),
-    )
+    history_window_days = DEFAULT_HISTORICAL_INDICATOR_WINDOW_DAYS
     historical_evaluation_points = 0
     insufficient_stocks = 0
     no_observable_window_stocks = 0

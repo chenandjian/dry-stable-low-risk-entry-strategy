@@ -553,14 +553,9 @@
           <span class="default">默认 1100</span>
         </div>
         <div class="param">
-          <label title="低于该数量无法稳定计算 MA250">最低K线数</label>
-          <input type="number" v-model.number="config.strategy5.minimum_kline_days" @input="markDirty" min="120" max="3000" />
-          <span class="default">默认 260</span>
-        </div>
-        <div class="param">
-          <label title="F1：交易天数需要大于等于该阈值">最低交易天数</label>
-          <input type="number" v-model.number="config.strategy5.minimum_trading_days" @input="markDirty" min="120" max="3000" />
-          <span class="default">默认 500</span>
+          <label title="F1：交易天数需要大于等于该阈值；最低 260 天用于保证 MA250 可计算">最低交易天数</label>
+          <input type="number" v-model.number="config.strategy5.minimum_trading_days" @input="markDirty" min="260" max="3000" />
+          <span class="default">默认 500 · ≥ 260</span>
         </div>
         <div class="param">
           <label title="F5：60日均成交额，单位亿元">60日均额 <span class="unit">亿</span></label>
@@ -776,7 +771,6 @@ const defaultStrategy4Config = {
 const defaultStrategy5Config = {
   enabled: true,
   kline_days: 1100,
-  minimum_kline_days: 260,
   minimum_trading_days: 500,
   min_avg_amount_60d_yi: 20,
   min_avg_amount_30d_yi: 15,
@@ -975,7 +969,12 @@ function ensureStrategy4Config() {
 }
 
 function ensureStrategy5Config() {
-  config.strategy5 = { ...defaultStrategy5Config, ...(config.strategy5 || {}) }
+  config.strategy5 = sanitizeStrategy5Config(config.strategy5 || {})
+}
+
+function sanitizeStrategy5Config(value) {
+  const { minimum_kline_days, ...rest } = value || {}
+  return { ...defaultStrategy5Config, ...rest }
 }
 
 function mergeStrategy4Config(value) {
@@ -1210,8 +1209,7 @@ function validate() {
   ensureStrategy5Config()
   const s5 = config.strategy5 || {}
   if (s5.kline_days < 260 || s5.kline_days > 3000) errors.push('策略5: K线拉取天数需在 260-3000')
-  if (s5.minimum_kline_days < 120 || s5.minimum_kline_days > s5.kline_days) errors.push('策略5: 最低K线数需在 120 到 K线拉取天数之间')
-  if (s5.minimum_trading_days < 120 || s5.minimum_trading_days > s5.kline_days) errors.push('策略5: 最低交易天数需在 120 到 K线拉取天数之间')
+  if (s5.minimum_trading_days < 260 || s5.minimum_trading_days > s5.kline_days) errors.push('策略5: 最低交易天数需在 260 到 K线拉取天数之间')
   if (s5.strength_ret_50d < -1 || s5.strength_ret_50d > 5) errors.push('策略5: 50日补漏强度需在 -1 到 5')
   if (s5.strength_ret_50d_min_20d < -1 || s5.strength_ret_50d_min_20d > 5) errors.push('策略5: 补漏20日最低涨幅需在 -1 到 5')
   if (s5.strength_ret_50d_ma20_ratio < 0 || s5.strength_ret_50d_ma20_ratio > 2) errors.push('策略5: 补漏MA20系数需在 0-2')
@@ -1268,7 +1266,7 @@ async function saveConfig() {
       strategy2: { ...config.strategy2 },
       strategy3: { ...config.strategy3 },
       strategy4: { ...config.strategy4 },
-      strategy5: { ...config.strategy5 },
+      strategy5: sanitizeStrategy5Config(config.strategy5),
     }
     const res = await updateConfig(payload)
     if (res.status === 'ok') {

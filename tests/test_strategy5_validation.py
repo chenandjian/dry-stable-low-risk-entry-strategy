@@ -8,7 +8,7 @@ def test_strategy5_default_config_matches_design():
 
     assert cfg["enabled"] is True
     assert cfg["kline_days"] == 1100
-    assert cfg["minimum_kline_days"] == 260
+    assert "minimum_kline_days" not in cfg
     assert cfg["minimum_trading_days"] == 500
     assert cfg["min_avg_amount_60d_yi"] == 30
     assert cfg["min_avg_amount_30d_yi"] == 20
@@ -50,6 +50,18 @@ def test_strategy5_overrides_nested_project_config():
     assert cfg["min_avg_amount_60d_yi"] == 18
 
 
+def test_strategy5_ignores_legacy_minimum_kline_days_config():
+    cfg = resolve_strategy5_config({
+        "strategy5": {
+            "minimum_kline_days": 120,
+            "minimum_trading_days": 500,
+        }
+    })
+
+    assert "minimum_kline_days" not in cfg
+    assert cfg["minimum_trading_days"] == 500
+
+
 def test_strategy5_rejects_invalid_ranges():
     with pytest.raises(ValueError, match="kline_days"):
         resolve_strategy5_config({"strategy5": {"kline_days": 200}})
@@ -62,3 +74,6 @@ def test_strategy5_rejects_invalid_ranges():
 
     with pytest.raises(ValueError, match="strength_ret_50d_max_decline_5d"):
         resolve_strategy5_config({"strategy5": {"strength_ret_50d_max_decline_5d": 0.1}})
+
+    with pytest.raises(ValueError, match="minimum_trading_days"):
+        resolve_strategy5_config({"strategy5": {"minimum_trading_days": 259}})

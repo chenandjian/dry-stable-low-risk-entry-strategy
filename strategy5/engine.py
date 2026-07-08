@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from strategy5.filters import classify_candidate, hard_filter_reasons
 from strategy5.indicators import calculate_indicators
-from strategy5.models import Strategy5Evaluation, Strategy5Score, Strategy5Support
+from strategy5.models import Strategy5Evaluation
 from strategy5.scorer import score_strategy5
 from strategy5.support import evaluate_support_status
 from strategy5.validation import resolve_strategy5_config
@@ -33,23 +33,6 @@ class ShortSprintSupportEngine:
             trading_days_override=trading_days_override,
             rows_normalized=rows_normalized,
         )
-        if indicators.trading_days < self.config["minimum_kline_days"]:
-            support = Strategy5Support("SPRINT_FAILED")
-            score = Strategy5Score()
-            reasons = ["INSUFFICIENT_KLINE_DAYS"]
-            return Strategy5Evaluation(
-                code=code,
-                name=name,
-                indicators=indicators,
-                support=support,
-                score=score,
-                reject_reasons=reasons,
-                status_reason=reasons[0],
-                data_source=data_source,
-                kline_latest_date=indicators.evaluation_date,
-                kline_fetched_at=kline_fetched_at,
-                quote_status=quote_status,
-            )
 
         support = evaluate_support_status(
             close=indicators.close,
