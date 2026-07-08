@@ -32,6 +32,11 @@ def test_strategy5_default_config_matches_design():
     assert cfg["volume_down_ratio"] == 1.5
     assert cfg["ma50_min_ratio"] == 0.92
     assert cfg["key_candidate_min_support_score"] == 8
+    assert cfg["volume_dry_min_score_key"] == 14
+    assert cfg["volume_dry_min_score_watch"] == 10
+    assert cfg["volume_dry_ratio_5_20"] == 0.75
+    assert cfg["volume_dry_strong_ratio_5_20"] == 0.65
+    assert cfg["volume_dry_extreme_ratio_5_20"] == 0.50
 
 
 def test_strategy5_overrides_nested_project_config():
@@ -77,3 +82,9 @@ def test_strategy5_rejects_invalid_ranges():
 
     with pytest.raises(ValueError, match="minimum_trading_days"):
         resolve_strategy5_config({"strategy5": {"minimum_trading_days": 259}})
+
+    with pytest.raises(ValueError, match="volume_dry_min_score_watch"):
+        resolve_strategy5_config({"strategy5": {"volume_dry_min_score_watch": 15, "volume_dry_min_score_key": 14}})
+
+    with pytest.raises(ValueError, match="volume_dry_strong_ratio_5_20"):
+        resolve_strategy5_config({"strategy5": {"volume_dry_ratio_5_20": 0.70, "volume_dry_strong_ratio_5_20": 0.80}})

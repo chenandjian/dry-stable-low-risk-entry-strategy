@@ -32,7 +32,27 @@ class Strategy5Indicators:
     amplitude_5d: float = 0.0
     amplitude_10d: float = 0.0
     max_decline_5d: float = 0.0
+    v3: float = 0.0
+    v5: float = 0.0
+    v10: float = 0.0
     v20: float = 0.0
+    v50: float = 0.0
+    volume_ratio_5_20: float = 0.0
+    volume_ratio_5_50: float = 0.0
+    volume_percentile_60: float = 0.0
+    down_volume_ratio_5: float = 0.0
+    down_day_avg_volume_ratio_20: float = 0.0
+    has_big_down_volume: bool = False
+    consecutive_heavy_bear_days: int = 0
+    close_range_5: float = 0.0
+    atr_ratio_5_20: float = 0.0
+    direction_efficiency_5: float = 0.0
+    no_new_low_5: bool = True
+    bear_body_shrink: bool = False
+    down_return_contracting: bool = False
+    dry_support_price: float = 0.0
+    dry_support_distance: float = 0.0
+    dry_support_valid: bool = False
     near_120d_high_ratio: float = 0.0
     close_20d_high: float = 0.0
     close_120d_high: float = 0.0
@@ -46,6 +66,15 @@ class Strategy5Indicators:
     ma20_slope_5d: float = 0.0
     ma50_slope_10d: float = 0.0
     has_volume_up_decline: bool = False
+
+
+@dataclass
+class Strategy5VolumeDry:
+    volume_dry_score: int = 0
+    volume_dry_level: str = "NOT_DRY"
+    volume_dry_reasons: list[str] = field(default_factory=list)
+    volume_dry_warnings: list[str] = field(default_factory=list)
+    volume_dry_rejects: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -74,6 +103,7 @@ class Strategy5Evaluation:
     indicators: Strategy5Indicators
     support: Strategy5Support
     score: Strategy5Score
+    volume_dry: Strategy5VolumeDry = field(default_factory=Strategy5VolumeDry)
     candidate_type: str = "REJECTED"
     classification: str = "rejected"
     reject_reasons: list[str] = field(default_factory=list)
@@ -139,7 +169,27 @@ class Strategy5Evaluation:
             "ma20_slope_5d": ind.ma20_slope_5d,
             "ma50_slope_10d": ind.ma50_slope_10d,
             "max_decline_5d": ind.max_decline_5d,
+            "v3": ind.v3,
+            "v5": ind.v5,
+            "v10": ind.v10,
             "v20": ind.v20,
+            "v50": ind.v50,
+            "volume_ratio_5_20": ind.volume_ratio_5_20,
+            "volume_ratio_5_50": ind.volume_ratio_5_50,
+            "volume_percentile_60": ind.volume_percentile_60,
+            "down_volume_ratio_5": ind.down_volume_ratio_5,
+            "down_day_avg_volume_ratio_20": ind.down_day_avg_volume_ratio_20,
+            "close_range_5": ind.close_range_5,
+            "atr_ratio_5_20": ind.atr_ratio_5_20,
+            "direction_efficiency_5": ind.direction_efficiency_5,
+            "dry_support_price": ind.dry_support_price,
+            "dry_support_distance": ind.dry_support_distance,
+            "dry_support_valid": ind.dry_support_valid,
+            "volume_dry_score": self.volume_dry.volume_dry_score,
+            "volume_dry_level": self.volume_dry.volume_dry_level,
+            "volume_dry_reasons": self.volume_dry.volume_dry_reasons,
+            "volume_dry_warnings": self.volume_dry.volume_dry_warnings,
+            "volume_dry_rejects": self.volume_dry.volume_dry_rejects,
             "technical_score": score.technical_score,
             "capital_score": score.capital_score,
             "trend_score": score.trend_score,

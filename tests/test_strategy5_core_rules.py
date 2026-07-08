@@ -1,7 +1,7 @@
 from strategy5.engine import ShortSprintSupportEngine
-from strategy5.filters import hard_filter_reasons
+from strategy5.filters import classify_candidate, hard_filter_reasons
 from strategy5.indicators import calculate_indicators, normalize_rows
-from strategy5.models import Strategy5Indicators
+from strategy5.models import Strategy5Indicators, Strategy5Support, Strategy5VolumeDry
 from strategy5.validation import resolve_strategy5_config
 from strategy5.support import evaluate_support_status
 from datetime import date, timedelta
@@ -37,6 +37,9 @@ def build_strong_data(length=1100):
             "volume": 2_000_000 + j * 10_000,
             "turnover": 35,
         })
+    for j, volume in enumerate([1_450_000, 1_280_000, 1_100_000, 920_000, 780_000]):
+        data[-5 + j]["volume"] = volume
+        data[-5 + j]["turnover"] = 30
 
     return data
 
@@ -72,6 +75,9 @@ def build_50d_quality_catchup_data(length=1100, *, recent_10d_amplitude=0.08):
             "volume": 2_500_000 + j * 3_000,
             "turnover": 45,
         })
+    for j, volume in enumerate([1_600_000, 1_400_000, 1_200_000, 1_000_000, 850_000]):
+        data[-5 + j]["volume"] = volume
+        data[-5 + j]["turnover"] = 32
 
     if recent_10d_amplitude > 0.08:
         base_11 = data[-11]["close"]
@@ -93,6 +99,7 @@ def test_engine_outputs_candidate_with_strength_high_support_and_scores():
     data = build_strong_data()
 
     result = ShortSprintSupportEngine({}).evaluate_at(data, code="000001", name="平安银行")
+    candidate = result.to_candidate_dict()
 
     assert result.passed is True
     assert result.code == "000001"
@@ -107,6 +114,9 @@ def test_engine_outputs_candidate_with_strength_high_support_and_scores():
     assert 0 <= result.score.trend_score <= 20
     assert 0 <= result.score.support_quality_score <= 15
     assert 0 <= result.score.total_score <= 100
+    assert 0 <= candidate["volume_dry_score"] <= 20
+    assert candidate["volume_dry_level"] in {"EXTREME_DRY", "HEALTHY_DRY", "WATCH_DRY", "NOT_DRY"}
+    assert isinstance(candidate["volume_dry_reasons"], list)
 
 
 def test_volume_up_decline_is_rejected_with_stable_reason():
@@ -122,6 +132,21 @@ def test_volume_up_decline_is_rejected_with_stable_reason():
     assert result.passed is False
     assert result.candidate_type == "REJECTED"
     assert "CONSOLIDATION_VOLUME_UP_DECLINE" in result.reject_reasons
+
+
+def test_volume_dry_reject_blocks_candidate_even_when_strength_and_support_pass():
+    data = build_strong_data()
+    data[-1]["open"] = data[-2]["close"]
+    data[-1]["close"] = round(data[-2]["close"] * 0.94, 4)
+    data[-1]["high"] = round(data[-2]["close"] * 1.005, 4)
+    data[-1]["low"] = round(data[-1]["close"] * 0.99, 4)
+    data[-1]["volume"] = data[-20]["volume"] * 3
+
+    result = ShortSprintSupportEngine({}).evaluate_at(data, code="000001", name="平安银行")
+
+    assert result.passed is False
+    assert "DRY_BIG_DOWN_VOLUME" in result.reject_reasons
+    assert result.to_candidate_dict()["volume_dry_level"] == "BAD_DRY"
 
 
 def test_50d_quality_catchup_strength_can_enter_candidate_when_short_windows_do_not_trigger():
@@ -207,3 +232,22 @@ def test_support_status_marks_ma50_testing_as_watch_quality():
     assert support.support_status == "SPRINT_MA50_TESTING"
     assert support.main_support_ma == "MA50"
     assert support.support_score == 4
+
+
+def test_watch_candidate_fallbacks_require_minimum_volume_dry_score():
+    cfg = resolve_strategy5_config({})
+    indicators = Strategy5Indicators(
+        amplitude_5d=0.20,
+        amplitude_10d=0.20,
+        drawdown_from_20d_high=-0.10,
+    )
+    support = Strategy5Support(
+        support_status="SPRINT_MA20_SUPPORT",
+        main_support_ma="MA20",
+        support_score=8,
+    )
+    volume_dry = Strategy5VolumeDry(volume_dry_score=cfg["volume_dry_min_score_watch"] - 1)
+
+    candidate_type, classification = classify_candidate(indicators, support, cfg, [], volume_dry)
+
+    assert (candidate_type, classification) == ("REJECTED", "rejected")

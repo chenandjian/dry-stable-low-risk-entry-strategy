@@ -1,10 +1,14 @@
 """Strategy5 hard filters and candidate classification."""
 from __future__ import annotations
 
-from strategy5.models import Strategy5Indicators, Strategy5Support
+from strategy5.models import Strategy5Indicators, Strategy5Support, Strategy5VolumeDry
 
 
-def hard_filter_reasons(ind: Strategy5Indicators, config: dict) -> list[str]:
+def hard_filter_reasons(
+    ind: Strategy5Indicators,
+    config: dict,
+    volume_dry: Strategy5VolumeDry | None = None,
+) -> list[str]:
     reasons: list[str] = []
     if ind.trading_days < config["minimum_trading_days"]:
         reasons.append(f"TRADING_DAYS_LT_{config['minimum_trading_days']}")
@@ -34,6 +38,8 @@ def hard_filter_reasons(ind: Strategy5Indicators, config: dict) -> list[str]:
         reasons.append("MAX_DECLINE_LT_NEG8PCT")
     if ind.has_volume_up_decline:
         reasons.append("CONSOLIDATION_VOLUME_UP_DECLINE")
+    if volume_dry:
+        reasons.extend(volume_dry.volume_dry_rejects)
     if ind.ma50 > 0 and ind.close < ind.ma50 * config["ma50_min_ratio"]:
         reasons.append("CLOSE_LT_MA50_0_92")
     return reasons
@@ -44,15 +50,25 @@ def classify_candidate(
     support: Strategy5Support,
     config: dict,
     reject_reasons: list[str],
+    volume_dry: Strategy5VolumeDry | None = None,
 ) -> tuple[str, str]:
     if reject_reasons:
         return "REJECTED", "rejected"
     if support.support_status == "SPRINT_FAILED":
         return "REJECTED", "rejected"
+    volume_score = volume_dry.volume_dry_score if volume_dry else 0
     if support.support_status in {"SPRINT_MA5_SUPPORT", "SPRINT_MA10_SUPPORT", "SPRINT_MA20_SUPPORT"}:
-        if "BIG_DROP_TODAY" not in ind.risk_tags and support.support_score >= config["key_candidate_min_support_score"]:
+        if (
+            "BIG_DROP_TODAY" not in ind.risk_tags
+            and support.support_score >= config["key_candidate_min_support_score"]
+            and volume_score >= config["volume_dry_min_score_key"]
+        ):
             return "KEY_CANDIDATE", "highlight"
+        if volume_score < config["volume_dry_min_score_watch"]:
+            return "REJECTED", "rejected"
     if support.support_status == "SPRINT_MA50_TESTING":
+        if volume_score < config["volume_dry_min_score_watch"]:
+            return "REJECTED", "rejected"
         return "WATCH_CANDIDATE", "observe"
     if support.support_status == "SPRINT_MA20_SUPPORT" and (ind.daily_return <= -0.07 or support.support_score < 8):
         return "WATCH_CANDIDATE", "observe"

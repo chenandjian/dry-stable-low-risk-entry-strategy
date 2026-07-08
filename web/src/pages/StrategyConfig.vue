@@ -632,6 +632,16 @@
           <input type="number" v-model.number="config.strategy5.key_candidate_min_support_score" @input="markDirty" min="0" max="10" />
           <span class="default">默认 8</span>
         </div>
+        <div class="param">
+          <label title="策略5量干评分达到该值，才允许进入重点候选">重点候选量干分</label>
+          <input type="number" v-model.number="config.strategy5.volume_dry_min_score_key" @input="markDirty" min="0" max="20" />
+          <span class="default">默认 14 · 满分20</span>
+        </div>
+        <div class="param">
+          <label title="策略5量干评分达到该值，才允许进入观察候选">观察候选量干分</label>
+          <input type="number" v-model.number="config.strategy5.volume_dry_min_score_watch" @input="markDirty" min="0" max="20" />
+          <span class="default">默认 10 · 不高于重点候选</span>
+        </div>
       </div>
 
       <div class="info-msg strategy5-info">
@@ -794,6 +804,21 @@ const defaultStrategy5Config = {
   volume_down_ratio: 1.5,
   ma50_min_ratio: 0.92,
   key_candidate_min_support_score: 8,
+  volume_dry_min_score_key: 14,
+  volume_dry_min_score_watch: 10,
+  volume_dry_ratio_5_20: 0.75,
+  volume_dry_strong_ratio_5_20: 0.65,
+  volume_dry_extreme_ratio_5_20: 0.50,
+  volume_dry_ratio_5_50: 0.70,
+  volume_dry_percentile_60: 0.25,
+  volume_dry_down_volume_ratio_5: 0.60,
+  volume_dry_down_day_avg_ratio_20: 0.90,
+  volume_dry_big_down_return: -0.05,
+  volume_dry_big_down_volume_ratio: 1.30,
+  volume_dry_consecutive_bear_days: 2,
+  volume_dry_close_range_5: 0.06,
+  volume_dry_atr_contract_ratio: 0.85,
+  volume_dry_direction_efficiency: 0.35,
 }
 
 const config = reactive({
@@ -1220,6 +1245,8 @@ function validate() {
   if (s5.max_amp_10d <= 0 || s5.max_amp_10d > 3) errors.push('策略5: 最大10日振幅需在 (0, 3]')
   if (s5.max_drawdown_20d < -1 || s5.max_drawdown_20d > 0) errors.push('策略5: 20日最大回撤阈值需在 -1 到 0')
   if (s5.key_candidate_min_support_score < 0 || s5.key_candidate_min_support_score > 10) errors.push('策略5: 重点候选支撑分需在 0-10')
+  if (s5.volume_dry_min_score_key < 0 || s5.volume_dry_min_score_key > 20) errors.push('策略5: 重点候选量干分需在 0-20')
+  if (s5.volume_dry_min_score_watch < 0 || s5.volume_dry_min_score_watch > s5.volume_dry_min_score_key) errors.push('策略5: 观察候选量干分需在 0 到重点候选量干分之间')
 
   return errors
 }

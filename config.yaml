@@ -263,3 +263,18 @@ strategy5:
   volume_down_ratio: 1.5
   ma50_min_ratio: 0.92
   key_candidate_min_support_score: 8
+  volume_dry_min_score_key: 14
+  volume_dry_min_score_watch: 10
+  volume_dry_ratio_5_20: 0.75
+  volume_dry_strong_ratio_5_20: 0.65
+  volume_dry_extreme_ratio_5_20: 0.5
+  volume_dry_ratio_5_50: 0.7
+  volume_dry_percentile_60: 0.25
+  volume_dry_down_volume_ratio_5: 0.6
+  volume_dry_down_day_avg_ratio_20: 0.9
+  volume_dry_big_down_return: -0.05
+  volume_dry_big_down_volume_ratio: 1.3
+  volume_dry_consecutive_bear_days: 2
+  volume_dry_close_range_5: 0.06
+  volume_dry_atr_contract_ratio: 0.85
+  volume_dry_direction_efficiency: 0.35

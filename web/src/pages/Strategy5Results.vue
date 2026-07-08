@@ -32,7 +32,7 @@
           <thead>
             <tr>
               <th>股票</th><th>收盘</th><th>总分</th><th>分类</th><th>支撑状态</th><th>主支撑</th>
-              <th>支撑距</th><th>支撑分</th><th>强度触发</th><th>新高触发</th><th>20/50日涨幅</th>
+              <th>支撑距</th><th>支撑分</th><th>量干</th><th>强度触发</th><th>新高触发</th><th>20/50日涨幅</th>
               <th>5/10日振幅</th><th>60日成交额</th><th>风险/警告</th><th>数据日</th>
             </tr>
           </thead>
@@ -46,6 +46,7 @@
               <td>{{ c.main_support_ma || '--' }}</td>
               <td>{{ pct(c.main_support_distance) }}</td>
               <td>{{ c.support_score ?? 0 }}</td>
+              <td><span class="dry-badge" :class="dryClass(c.volume_dry_level)">{{ dryText(c) }}</span></td>
               <td>{{ c.strength_trigger || '--' }}</td>
               <td>{{ c.high_trigger || '--' }}</td>
               <td>{{ pct(c.recent_20d_return) }} / {{ pct(c.recent_50d_return) }}</td>
@@ -68,6 +69,8 @@
         <div><span>分类</span><strong>{{ selected.candidate_type }} / {{ selected.classification }}</strong></div>
         <div><span>支撑</span><strong>{{ selected.support_status }} · {{ selected.main_support_ma }} · {{ selected.support_score }}</strong></div>
         <div><span>触发</span><strong>{{ selected.strength_trigger || '--' }} / {{ selected.high_trigger || '--' }}</strong></div>
+        <div><span>量干</span><strong>{{ dryText(selected) }}</strong></div>
+        <div><span>量比</span><strong>V5/V20 {{ fmt(selected.volume_ratio_5_20, 3) }} · V5/V50 {{ fmt(selected.volume_ratio_5_50, 3) }}</strong></div>
         <div><span>近期涨幅</span><strong>{{ pct(selected.recent_5d_return) }} / {{ pct(selected.recent_10d_return) }} / {{ pct(selected.recent_20d_return) }} / {{ pct(selected.recent_50d_return) }}</strong></div>
         <div><span>振幅</span><strong>{{ pct(selected.amplitude_5d) }} / {{ pct(selected.amplitude_10d) }}</strong></div>
         <div><span>20日回撤</span><strong>{{ pct(selected.drawdown_from_20d_high) }}</strong></div>
@@ -77,6 +80,9 @@
       <div class="tags">
         <span v-for="tag in selected.risk_tags || []" :key="'r' + tag" class="tag risk">{{ tag }}</span>
         <span v-for="tag in selected.warn_tags || []" :key="'w' + tag" class="tag warn">{{ tag }}</span>
+        <span v-for="tag in selected.volume_dry_reasons || []" :key="'dr' + tag" class="tag dry">{{ tag }}</span>
+        <span v-for="tag in selected.volume_dry_warnings || []" :key="'dw' + tag" class="tag warn">{{ tag }}</span>
+        <span v-for="tag in selected.volume_dry_rejects || []" :key="'dx' + tag" class="tag risk">{{ tag }}</span>
       </div>
     </section>
 
@@ -165,6 +171,16 @@ export default {
       if (v == null) return '--'
       return Number(v).toFixed(digits)
     },
+    dryText(c) {
+      if (c?.volume_dry_score == null && !c?.volume_dry_level) return '--'
+      return `${c.volume_dry_score ?? 0} / ${c.volume_dry_level || '--'}`
+    },
+    dryClass(level) {
+      if (level === 'EXTREME_DRY' || level === 'HEALTHY_DRY') return 'good'
+      if (level === 'WATCH_DRY') return 'watch'
+      if (level === 'BAD_DRY') return 'bad'
+      return ''
+    },
   },
 }
 </script>
@@ -176,9 +192,12 @@ h1 { margin: 0 0 6px; font-size: 22px; }
 p { margin: 0; color: var(--text-secondary); }
 select { background: var(--bg-panel); color: var(--text-primary); border: 1px solid var(--border); border-radius: 4px; padding: 8px; min-width: 320px; }
 .summary-bar { display: flex; gap: 12px; align-items: center; margin: 12px 0; color: var(--text-secondary); }
-.chip, .type-badge, .tag { border-radius: 999px; padding: 2px 8px; font-size: 12px; display: inline-block; margin: 1px 3px 1px 0; }
+.chip, .type-badge, .tag, .dry-badge { border-radius: 999px; padding: 2px 8px; font-size: 12px; display: inline-block; margin: 1px 3px 1px 0; }
 .chip.key, .type-badge.highlight { background: rgba(34, 197, 94, 0.15); color: #86efac; }
 .chip.watch, .type-badge.observe { background: rgba(234, 179, 8, 0.15); color: #fde68a; }
+.dry-badge.good, .tag.dry { background: rgba(34, 197, 94, 0.15); color: #86efac; }
+.dry-badge.watch { background: rgba(234, 179, 8, 0.15); color: #fde68a; }
+.dry-badge.bad { background: rgba(239, 68, 68, 0.16); color: #fca5a5; }
 .panel { background: var(--bg-panel); border: 1px solid var(--border); border-radius: 6px; margin: 14px 0; overflow: hidden; }
 .panel-header { padding: 12px 14px; border-bottom: 1px solid var(--border); font-weight: 700; color: var(--text-secondary); }
 .candidate-table { width: 100%; border-collapse: collapse; font-size: 13px; }

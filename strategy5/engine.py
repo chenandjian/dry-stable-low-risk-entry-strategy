@@ -7,6 +7,7 @@ from strategy5.models import Strategy5Evaluation
 from strategy5.scorer import score_strategy5
 from strategy5.support import evaluate_support_status
 from strategy5.validation import resolve_strategy5_config
+from strategy5.volume_dry import evaluate_strategy5_volume_dry
 
 
 class ShortSprintSupportEngine:
@@ -41,8 +42,9 @@ class ShortSprintSupportEngine:
             ma20=indicators.ma20,
             ma50=indicators.ma50,
         )
-        reject_reasons = hard_filter_reasons(indicators, self.config)
-        candidate_type, classification = classify_candidate(indicators, support, self.config, reject_reasons)
+        volume_dry = evaluate_strategy5_volume_dry(indicators, self.config)
+        reject_reasons = hard_filter_reasons(indicators, self.config, volume_dry)
+        candidate_type, classification = classify_candidate(indicators, support, self.config, reject_reasons, volume_dry)
         score = score_strategy5(indicators, support)
         status_reason = reject_reasons[0] if reject_reasons else candidate_type
         return Strategy5Evaluation(
@@ -51,6 +53,7 @@ class ShortSprintSupportEngine:
             indicators=indicators,
             support=support,
             score=score,
+            volume_dry=volume_dry,
             candidate_type=candidate_type,
             classification=classification,
             reject_reasons=reject_reasons,

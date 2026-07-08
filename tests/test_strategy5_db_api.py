@@ -23,6 +23,14 @@ def test_strategy5_candidate_table_is_independent(tmp_path):
         "support_score": 9,
         "risk_tags": [],
         "warn_tags": ["LOW_5D_VOLATILITY"],
+        "volume_dry_score": 16,
+        "volume_dry_level": "HEALTHY_DRY",
+        "volume_ratio_5_20": 0.62,
+        "volume_ratio_5_50": 0.68,
+        "volume_percentile_60": 0.18,
+        "volume_dry_reasons": ["volume:dry"],
+        "volume_dry_warnings": [],
+        "volume_dry_rejects": [],
         "score_reasons": ["technical=30.0"],
         "reject_reasons": [],
     })
@@ -32,6 +40,9 @@ def test_strategy5_candidate_table_is_independent(tmp_path):
     assert rows[0]["code"] == "000001"
     assert rows[0]["candidate_type"] == "KEY_CANDIDATE"
     assert rows[0]["warn_tags"] == ["LOW_5D_VOLATILITY"]
+    assert rows[0]["volume_dry_score"] == 16
+    assert rows[0]["volume_dry_level"] == "HEALTHY_DRY"
+    assert rows[0]["volume_dry_reasons"] == ["volume:dry"]
     assert detail["support_score"] == 9
     assert db.get_candidates(task_id="s5-test") == []
     assert db.get_strategy2_candidates(task_id="s5-test") == []

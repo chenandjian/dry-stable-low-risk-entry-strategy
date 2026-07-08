@@ -1813,7 +1813,27 @@ def _ensure_strategy5_candidates_table(conn: sqlite3.Connection):
             ma20_slope_5d REAL,
             ma50_slope_10d REAL,
             max_decline_5d REAL,
+            v3 REAL,
+            v5 REAL,
+            v10 REAL,
             v20 REAL,
+            v50 REAL,
+            volume_ratio_5_20 REAL,
+            volume_ratio_5_50 REAL,
+            volume_percentile_60 REAL,
+            down_volume_ratio_5 REAL,
+            down_day_avg_volume_ratio_20 REAL,
+            close_range_5 REAL,
+            atr_ratio_5_20 REAL,
+            direction_efficiency_5 REAL,
+            dry_support_price REAL,
+            dry_support_distance REAL,
+            dry_support_valid INTEGER DEFAULT 0,
+            volume_dry_score INTEGER DEFAULT 0,
+            volume_dry_level TEXT,
+            volume_dry_reasons TEXT,
+            volume_dry_warnings TEXT,
+            volume_dry_rejects TEXT,
             technical_score REAL DEFAULT 0,
             capital_score REAL DEFAULT 0,
             trend_score REAL DEFAULT 0,
@@ -1838,6 +1858,26 @@ def _ensure_strategy5_candidates_table(conn: sqlite3.Connection):
         "kline_latest_date": "TEXT",
         "kline_fetched_at": "TEXT",
         "quote_status": "TEXT",
+        "v3": "REAL",
+        "v5": "REAL",
+        "v10": "REAL",
+        "v50": "REAL",
+        "volume_ratio_5_20": "REAL",
+        "volume_ratio_5_50": "REAL",
+        "volume_percentile_60": "REAL",
+        "down_volume_ratio_5": "REAL",
+        "down_day_avg_volume_ratio_20": "REAL",
+        "close_range_5": "REAL",
+        "atr_ratio_5_20": "REAL",
+        "direction_efficiency_5": "REAL",
+        "dry_support_price": "REAL",
+        "dry_support_distance": "REAL",
+        "dry_support_valid": "INTEGER DEFAULT 0",
+        "volume_dry_score": "INTEGER DEFAULT 0",
+        "volume_dry_level": "TEXT",
+        "volume_dry_reasons": "TEXT",
+        "volume_dry_warnings": "TEXT",
+        "volume_dry_rejects": "TEXT",
     }.items():
         _ensure_column(conn, "strategy5_candidates", column, col_type)
     conn.execute(
@@ -2447,7 +2487,14 @@ def upsert_strategy5_candidate(task_id: str, d: dict):
         "range_5_tag", "range_10_tag", "pullback_tag", "risk_tags", "warn_tags",
         "near_120d_high_ratio", "close_20d_high", "close_120d_high",
         "strength_trigger", "high_trigger", "ma20_slope_5d", "ma50_slope_10d",
-        "max_decline_5d", "v20", "technical_score", "capital_score", "trend_score",
+        "max_decline_5d", "v3", "v5", "v10", "v20", "v50",
+        "volume_ratio_5_20", "volume_ratio_5_50", "volume_percentile_60",
+        "down_volume_ratio_5", "down_day_avg_volume_ratio_20",
+        "close_range_5", "atr_ratio_5_20", "direction_efficiency_5",
+        "dry_support_price", "dry_support_distance", "dry_support_valid",
+        "volume_dry_score", "volume_dry_level", "volume_dry_reasons",
+        "volume_dry_warnings", "volume_dry_rejects",
+        "technical_score", "capital_score", "trend_score",
         "support_quality_score", "total_score", "reject_reasons", "score_reasons",
         "data_source", "kline_latest_date", "kline_fetched_at", "quote_status",
     ]
@@ -2499,7 +2546,27 @@ def upsert_strategy5_candidate(task_id: str, d: dict):
         d.get("ma20_slope_5d"),
         d.get("ma50_slope_10d"),
         d.get("max_decline_5d"),
+        d.get("v3"),
+        d.get("v5"),
+        d.get("v10"),
         d.get("v20"),
+        d.get("v50"),
+        d.get("volume_ratio_5_20"),
+        d.get("volume_ratio_5_50"),
+        d.get("volume_percentile_60"),
+        d.get("down_volume_ratio_5"),
+        d.get("down_day_avg_volume_ratio_20"),
+        d.get("close_range_5"),
+        d.get("atr_ratio_5_20"),
+        d.get("direction_efficiency_5"),
+        d.get("dry_support_price"),
+        d.get("dry_support_distance"),
+        1 if d.get("dry_support_valid") else 0,
+        d.get("volume_dry_score", 0),
+        d.get("volume_dry_level", ""),
+        _json_any(d.get("volume_dry_reasons", [])),
+        _json_any(d.get("volume_dry_warnings", [])),
+        _json_any(d.get("volume_dry_rejects", [])),
         d.get("technical_score", 0.0),
         d.get("capital_score", 0.0),
         d.get("trend_score", 0.0),
@@ -3223,7 +3290,10 @@ def _deserialize_strategy4_row(row: dict) -> dict:
 
 
 def _deserialize_strategy5_row(row: dict) -> dict:
-    for field in ("risk_tags", "warn_tags", "reject_reasons", "score_reasons"):
+    for field in (
+        "risk_tags", "warn_tags", "reject_reasons", "score_reasons",
+        "volume_dry_reasons", "volume_dry_warnings", "volume_dry_rejects",
+    ):
         value = row.get(field)
         if isinstance(value, str) and value:
             try:
@@ -3232,6 +3302,8 @@ def _deserialize_strategy5_row(row: dict) -> dict:
                 row[field] = []
         elif not value:
             row[field] = []
+    if "dry_support_valid" in row:
+        row["dry_support_valid"] = bool(row.get("dry_support_valid"))
     return row
 
 
