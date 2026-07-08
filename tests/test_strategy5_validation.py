@@ -37,8 +37,11 @@ def test_strategy5_default_config_matches_design():
     assert cfg["key_candidate_min_support_score"] == 8
     assert cfg["volume_dry_min_score_key"] == 14
     assert cfg["volume_dry_min_score_watch"] == 10
-    assert cfg["trade_candidate_min_score"] == 70
-    assert cfg["trade_volume_dry_min_score"] == 14
+    assert cfg["trade_candidate_min_score"] == 68
+    assert cfg["trade_volume_dry_min_score"] == 13
+    assert cfg["trade_short_weighted_min_score"] == 76
+    assert cfg["trade_total_score_weight"] == 0.75
+    assert cfg["trade_short_strength_weight"] == 1.25
     assert cfg["trade_allow_ret50"] is False
     assert cfg["trade_allow_ma5_support"] is False
     assert cfg["volume_dry_ratio_5_20"] == 0.75

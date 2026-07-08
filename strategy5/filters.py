@@ -123,4 +123,10 @@ def _is_trade_candidate(
         return False
     if not config["trade_allow_ma5_support"] and support.support_status == "SPRINT_MA5_SUPPORT":
         return False
+    short_weighted_score = (
+        total_score * config["trade_total_score_weight"]
+        + ind.short_strength_score * config["trade_short_strength_weight"]
+    )
+    if short_weighted_score < config["trade_short_weighted_min_score"]:
+        return False
     return support.support_status in {"SPRINT_MA10_SUPPORT", "SPRINT_MA20_SUPPORT"}

@@ -603,31 +603,6 @@
           <span class="default">默认 0.08</span>
         </div>
         <div class="param">
-          <label title="高质量补漏入口：50日涨幅达到该值，并同时满足横盘稳定保护">50日补漏强度</label>
-          <input type="number" v-model.number="config.strategy5.strength_ret_50d" @input="markDirty" min="-1" max="5" step="0.01" />
-          <span class="default">默认 0.35</span>
-        </div>
-        <div class="param">
-          <label title="50日补漏要求最近20日仍保持正向，避免接入已经走弱的老涨幅">补漏20日最低涨幅</label>
-          <input type="number" v-model.number="config.strategy5.strength_ret_50d_min_20d" @input="markDirty" min="-1" max="5" step="0.01" />
-          <span class="default">默认 0.05</span>
-        </div>
-        <div class="param">
-          <label title="50日补漏要求当前价不明显跌破MA20">补漏MA20系数</label>
-          <input type="number" v-model.number="config.strategy5.strength_ret_50d_ma20_ratio" @input="markDirty" min="0" max="2" step="0.01" />
-          <span class="default">默认 0.98</span>
-        </div>
-        <div class="param">
-          <label title="50日补漏要求10日横盘更稳，超过该振幅不触发ret_50d">补漏最大10日振幅</label>
-          <input type="number" v-model.number="config.strategy5.strength_ret_50d_max_amp_10d" @input="markDirty" min="0" max="3" step="0.01" />
-          <span class="default">默认 0.30</span>
-        </div>
-        <div class="param">
-          <label title="50日补漏要求最近5日不能出现明显单日下杀">补漏最大5日单跌</label>
-          <input type="number" v-model.number="config.strategy5.strength_ret_50d_max_decline_5d" @input="markDirty" min="-1" max="0" step="0.01" />
-          <span class="default">默认 -0.06</span>
-        </div>
-        <div class="param">
           <label title="F9：近20日收盘高点接近120日高点比例">接近120日高比例</label>
           <input type="number" v-model.number="config.strategy5.near_120d_high_ratio" @input="markDirty" min="0" max="1" step="0.01" />
           <span class="default">默认 0.98</span>
@@ -660,18 +635,27 @@
         <div class="param">
           <label title="正式交易候选最低总分；低于该分数只进入观察，不进入正式买入统计">正式候选最低分</label>
           <input type="number" v-model.number="config.strategy5.trade_candidate_min_score" @input="markDirty" min="0" max="100" step="1" />
-          <span class="default">默认 70</span>
+          <span class="default">默认 68</span>
         </div>
         <div class="param">
           <label title="正式交易候选最低量干分；观察候选仍使用观察量干分">正式候选量干分</label>
           <input type="number" v-model.number="config.strategy5.trade_volume_dry_min_score" @input="markDirty" min="0" max="20" step="1" />
-          <span class="default">默认 14 · 满分20</span>
+          <span class="default">默认 13 · 满分20</span>
         </div>
         <div class="param">
-          <label title="关闭时，50日补漏入口只能进入观察候选，不进入正式买入候选">正式允许50日补漏</label>
-          <button class="toggle" :class="{ active: config.strategy5.trade_allow_ret50 === true }"
-            @click="toggleStrategy5('trade_allow_ret50')">{{ config.strategy5.trade_allow_ret50 === true ? '开' : '关' }}</button>
-          <span class="default">默认关闭</span>
+          <label title="正式候选短线加权分 = 总分×总分权重 + 短线强度分×短线权重">短线加权最低分</label>
+          <input type="number" v-model.number="config.strategy5.trade_short_weighted_min_score" @input="markDirty" min="0" max="150" step="1" />
+          <span class="default">默认 76</span>
+        </div>
+        <div class="param">
+          <label title="正式候选短线加权分中的总分权重">总分权重</label>
+          <input type="number" v-model.number="config.strategy5.trade_total_score_weight" @input="markDirty" min="0" max="2" step="0.05" />
+          <span class="default">默认 0.75</span>
+        </div>
+        <div class="param">
+          <label title="正式候选短线加权分中的短线强度权重">短线强度权重</label>
+          <input type="number" v-model.number="config.strategy5.trade_short_strength_weight" @input="markDirty" min="0" max="5" step="0.05" />
+          <span class="default">默认 1.25</span>
         </div>
         <div class="param">
           <label title="关闭时，MA5支撑只作为偏追高观察，不进入正式买入候选">正式允许MA5支撑</label>
@@ -846,8 +830,11 @@ const defaultStrategy5Config = {
   key_candidate_min_support_score: 8,
   volume_dry_min_score_key: 14,
   volume_dry_min_score_watch: 10,
-  trade_candidate_min_score: 70,
-  trade_volume_dry_min_score: 14,
+  trade_candidate_min_score: 68,
+  trade_volume_dry_min_score: 13,
+  trade_short_weighted_min_score: 76,
+  trade_total_score_weight: 0.75,
+  trade_short_strength_weight: 1.25,
   trade_allow_ret50: false,
   trade_allow_ma5_support: false,
   volume_dry_ratio_5_20: 0.75,
@@ -1299,6 +1286,9 @@ function validate() {
   if (s5.volume_dry_min_score_watch < 0 || s5.volume_dry_min_score_watch > s5.volume_dry_min_score_key) errors.push('策略5: 观察候选量干分需在 0 到重点候选量干分之间')
   if (s5.trade_candidate_min_score < 0 || s5.trade_candidate_min_score > 100) errors.push('策略5: 正式候选最低分需在 0-100')
   if (s5.trade_volume_dry_min_score < 0 || s5.trade_volume_dry_min_score > 20) errors.push('策略5: 正式候选量干分需在 0-20')
+  if (s5.trade_short_weighted_min_score < 0 || s5.trade_short_weighted_min_score > 150) errors.push('策略5: 短线加权最低分需在 0-150')
+  if (s5.trade_total_score_weight < 0 || s5.trade_total_score_weight > 2) errors.push('策略5: 总分权重需在 0-2')
+  if (s5.trade_short_strength_weight < 0 || s5.trade_short_strength_weight > 5) errors.push('策略5: 短线强度权重需在 0-5')
 
   return errors
 }

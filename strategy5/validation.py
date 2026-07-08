@@ -36,8 +36,11 @@ DEFAULT_STRATEGY5_CONFIG = {
     "key_candidate_min_support_score": 8,
     "volume_dry_min_score_key": 14,
     "volume_dry_min_score_watch": 10,
-    "trade_candidate_min_score": 70,
-    "trade_volume_dry_min_score": 14,
+    "trade_candidate_min_score": 68,
+    "trade_volume_dry_min_score": 13,
+    "trade_short_weighted_min_score": 76,
+    "trade_total_score_weight": 0.75,
+    "trade_short_strength_weight": 1.25,
     "trade_allow_ret50": False,
     "trade_allow_ma5_support": False,
     "volume_dry_ratio_5_20": 0.75,
@@ -97,6 +100,9 @@ def resolve_strategy5_config(config: dict | None) -> dict:
     _validate_int_range(raw, "volume_dry_min_score_watch", 0, raw["volume_dry_min_score_key"])
     _validate_number_range(raw, "trade_candidate_min_score", 0, 100)
     _validate_int_range(raw, "trade_volume_dry_min_score", 0, 20)
+    _validate_number_range(raw, "trade_short_weighted_min_score", 0, 150)
+    _validate_number_range(raw, "trade_total_score_weight", 0, 2)
+    _validate_number_range(raw, "trade_short_strength_weight", 0, 5)
     raw["trade_allow_ret50"] = bool(raw.get("trade_allow_ret50", False))
     raw["trade_allow_ma5_support"] = bool(raw.get("trade_allow_ma5_support", False))
     _validate_number_range(raw, "volume_dry_ratio_5_20", 0.1, 2)

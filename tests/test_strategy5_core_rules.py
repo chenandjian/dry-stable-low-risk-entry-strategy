@@ -154,12 +154,13 @@ def test_50d_quality_catchup_strength_can_enter_candidate_when_short_windows_do_
 
     result = ShortSprintSupportEngine({}).evaluate_at(data, code="000001", name="平安银行")
 
-    assert result.passed is True
-    assert result.indicators.strength_trigger == "ret_50d"
+    assert result.passed is False
+    assert result.indicators.strength_trigger == ""
     assert result.indicators.recent_50d_return >= 0.35
     assert result.indicators.recent_20d_return < 0.25
     assert result.indicators.recent_10d_return < 0.15
     assert result.indicators.recent_5d_return < 0.10
+    assert "SHORT_TERM_STRENGTH_FAILED" in result.reject_reasons
 
 
 def test_50d_quality_catchup_requires_stable_recent_consolidation():
@@ -282,6 +283,7 @@ def test_trade_candidate_requires_short_strength_non_ma5_support_and_score_floor
     cfg = resolve_strategy5_config({})
     indicators = Strategy5Indicators(
         strength_trigger="ret_20d",
+        short_strength_score=23,
         amplitude_5d=0.10,
         amplitude_10d=0.18,
         drawdown_from_20d_high=-0.08,
@@ -315,6 +317,51 @@ def test_trade_candidate_requires_short_strength_non_ma5_support_and_score_floor
     )
 
     assert (candidate_type, classification) == ("WATCH_CANDIDATE", "observe")
+
+
+def test_trade_candidate_requires_short_weighted_score_floor():
+    cfg = resolve_strategy5_config({})
+    indicators = Strategy5Indicators(
+        strength_trigger="single_day_surge",
+        short_strength_score=13,
+        amplitude_5d=0.18,
+        amplitude_10d=0.25,
+        drawdown_from_20d_high=-0.18,
+    )
+    support = Strategy5Support(
+        support_status="SPRINT_MA20_SUPPORT",
+        main_support_ma="MA20",
+        support_score=8,
+    )
+    volume_dry = Strategy5VolumeDry(volume_dry_score=cfg["volume_dry_min_score_key"])
+
+    candidate_type, classification = classify_candidate(
+        indicators,
+        support,
+        cfg,
+        [],
+        volume_dry,
+        total_score=cfg["trade_candidate_min_score"],
+    )
+
+    assert (candidate_type, classification) == ("WATCH_CANDIDATE", "observe")
+
+    indicators.strength_trigger = "ret_20d"
+    indicators.short_strength_score = 23
+    indicators.drawdown_from_20d_high = -0.08
+    indicators.amplitude_5d = 0.12
+    support.support_status = "SPRINT_MA10_SUPPORT"
+    support.main_support_ma = "MA10"
+    candidate_type, classification = classify_candidate(
+        indicators,
+        support,
+        cfg,
+        [],
+        volume_dry,
+        total_score=cfg["trade_candidate_min_score"],
+    )
+
+    assert (candidate_type, classification) == ("BUY_CANDIDATE", "trade")
 
     indicators.strength_trigger = "ret_20d"
     support.support_status = "SPRINT_MA5_SUPPORT"

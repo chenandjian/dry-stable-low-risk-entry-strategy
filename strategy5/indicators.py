@@ -74,6 +74,7 @@ def calculate_indicators(
     ind.dry_support_valid = _dry_support_valid(rows, ind.dry_support_price)
 
     ind.strength_trigger = _strength_trigger(rows, ind, config)
+    ind.short_strength_score = _short_strength_score(ind)
     ind.high_trigger = _high_trigger(ind, config)
     ind.has_volume_up_decline = _has_volume_up_decline(rows, config, ind.v20)
     _apply_tags(ind, config)
@@ -338,23 +339,25 @@ def _strength_trigger(rows: list[dict], ind: Strategy5Indicators, config: dict) 
         ret = _return_between(rows[i - 1]["close"], rows[i]["close"])
         if ret >= threshold and v20 > 0 and rows[i]["volume"] >= v20 * volume_ratio:
             return "single_day_surge"
-    if _is_50d_quality_catchup(ind, config):
-        return "ret_50d"
     return ""
 
 
-def _is_50d_quality_catchup(ind: Strategy5Indicators, config: dict) -> bool:
-    if ind.recent_50d_return < config["strength_ret_50d"]:
-        return False
-    if ind.recent_20d_return < config["strength_ret_50d_min_20d"]:
-        return False
-    if ind.ma20 <= 0 or ind.close < ind.ma20 * config["strength_ret_50d_ma20_ratio"]:
-        return False
-    if ind.amplitude_10d > config["strength_ret_50d_max_amp_10d"]:
-        return False
-    if ind.max_decline_5d < config["strength_ret_50d_max_decline_5d"]:
-        return False
-    return True
+def _short_strength_score(ind: Strategy5Indicators) -> int:
+    base = {
+        "ret_20d": 20,
+        "ret_10d": 18,
+        "ret_5d": 16,
+        "single_day_surge": 13,
+    }.get(ind.strength_trigger, 0)
+    if base == 0:
+        return 0
+    if ind.drawdown_from_20d_high >= -0.12:
+        base += 2
+    if 0 < ind.amplitude_5d <= 0.16:
+        base += 1
+    if ind.close >= ind.ma10 > 0:
+        base += 1
+    return min(base, 24)
 
 
 def _high_trigger(ind: Strategy5Indicators, config: dict) -> str:

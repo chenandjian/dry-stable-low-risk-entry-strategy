@@ -57,6 +57,7 @@ class Strategy5Indicators:
     close_20d_high: float = 0.0
     close_120d_high: float = 0.0
     strength_trigger: str = ""
+    short_strength_score: int = 0
     high_trigger: str = ""
     range_5_tag: str = ""
     range_10_tag: str = ""
@@ -170,6 +171,7 @@ class Strategy5Evaluation:
             "close_20d_high": ind.close_20d_high,
             "close_120d_high": ind.close_120d_high,
             "strength_trigger": ind.strength_trigger,
+            "short_strength_score": ind.short_strength_score,
             "high_trigger": ind.high_trigger,
             "ma20_slope_5d": ind.ma20_slope_5d,
             "ma50_slope_10d": ind.ma50_slope_10d,

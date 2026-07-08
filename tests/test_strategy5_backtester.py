@@ -50,6 +50,8 @@ def test_strategy5_historical_performance_calculates_returns_and_max_drawdown(tm
     assert summary["avg_return_20d"] == pytest.approx(0.20, abs=0.0001)
     assert summary["worst_max_drawdown"] == -0.10
     assert summary["events_detail"][0]["entry_model"] == "NEXT_OPEN"
+    assert summary["events_detail"][0]["short_strength_score"] > 0
+    assert summary["events_detail"][0]["volume_dry_score"] > 0
 
 
 def test_strategy5_historical_performance_reports_no_observable_forward_window(tmp_path):

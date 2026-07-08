@@ -1809,6 +1809,7 @@ def _ensure_strategy5_candidates_table(conn: sqlite3.Connection):
             close_20d_high REAL,
             close_120d_high REAL,
             strength_trigger TEXT,
+            short_strength_score INTEGER DEFAULT 0,
             high_trigger TEXT,
             ma20_slope_5d REAL,
             ma50_slope_10d REAL,
@@ -1878,6 +1879,7 @@ def _ensure_strategy5_candidates_table(conn: sqlite3.Connection):
         "volume_dry_reasons": "TEXT",
         "volume_dry_warnings": "TEXT",
         "volume_dry_rejects": "TEXT",
+        "short_strength_score": "INTEGER DEFAULT 0",
     }.items():
         _ensure_column(conn, "strategy5_candidates", column, col_type)
     conn.execute(
@@ -2486,7 +2488,7 @@ def upsert_strategy5_candidate(task_id: str, d: dict):
         "support_score", "candidate_type", "classification",
         "range_5_tag", "range_10_tag", "pullback_tag", "risk_tags", "warn_tags",
         "near_120d_high_ratio", "close_20d_high", "close_120d_high",
-        "strength_trigger", "high_trigger", "ma20_slope_5d", "ma50_slope_10d",
+        "strength_trigger", "short_strength_score", "high_trigger", "ma20_slope_5d", "ma50_slope_10d",
         "max_decline_5d", "v3", "v5", "v10", "v20", "v50",
         "volume_ratio_5_20", "volume_ratio_5_50", "volume_percentile_60",
         "down_volume_ratio_5", "down_day_avg_volume_ratio_20",
@@ -2542,6 +2544,7 @@ def upsert_strategy5_candidate(task_id: str, d: dict):
         d.get("close_20d_high"),
         d.get("close_120d_high"),
         d.get("strength_trigger", ""),
+        d.get("short_strength_score", 0),
         d.get("high_trigger", ""),
         d.get("ma20_slope_5d"),
         d.get("ma50_slope_10d"),
