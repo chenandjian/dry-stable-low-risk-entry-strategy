@@ -32,7 +32,7 @@
           <thead>
             <tr>
               <th>股票</th><th>收盘</th><th>总分</th><th>分类</th><th>支撑状态</th><th>主支撑</th>
-              <th>支撑距</th><th>支撑分</th><th>强度触发</th><th>新高触发</th><th>20日涨幅</th>
+              <th>支撑距</th><th>支撑分</th><th>强度触发</th><th>新高触发</th><th>20/50日涨幅</th>
               <th>5/10日振幅</th><th>60日成交额</th><th>风险/警告</th><th>数据日</th>
             </tr>
           </thead>
@@ -48,7 +48,7 @@
               <td>{{ c.support_score ?? 0 }}</td>
               <td>{{ c.strength_trigger || '--' }}</td>
               <td>{{ c.high_trigger || '--' }}</td>
-              <td>{{ pct(c.recent_20d_return) }}</td>
+              <td>{{ pct(c.recent_20d_return) }} / {{ pct(c.recent_50d_return) }}</td>
               <td>{{ pct(c.amplitude_5d) }} / {{ pct(c.amplitude_10d) }}</td>
               <td>{{ fmt(c.avg_turnover_60d) }}</td>
               <td>
@@ -68,7 +68,7 @@
         <div><span>分类</span><strong>{{ selected.candidate_type }} / {{ selected.classification }}</strong></div>
         <div><span>支撑</span><strong>{{ selected.support_status }} · {{ selected.main_support_ma }} · {{ selected.support_score }}</strong></div>
         <div><span>触发</span><strong>{{ selected.strength_trigger || '--' }} / {{ selected.high_trigger || '--' }}</strong></div>
-        <div><span>近期涨幅</span><strong>{{ pct(selected.recent_5d_return) }} / {{ pct(selected.recent_10d_return) }} / {{ pct(selected.recent_20d_return) }}</strong></div>
+        <div><span>近期涨幅</span><strong>{{ pct(selected.recent_5d_return) }} / {{ pct(selected.recent_10d_return) }} / {{ pct(selected.recent_20d_return) }} / {{ pct(selected.recent_50d_return) }}</strong></div>
         <div><span>振幅</span><strong>{{ pct(selected.amplitude_5d) }} / {{ pct(selected.amplitude_10d) }}</strong></div>
         <div><span>20日回撤</span><strong>{{ pct(selected.drawdown_from_20d_high) }}</strong></div>
         <div><span>新高比例</span><strong>{{ fmt(selected.near_120d_high_ratio, 3) }}</strong></div>

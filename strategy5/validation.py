@@ -16,6 +16,11 @@ DEFAULT_STRATEGY5_CONFIG = {
     "strength_ret_20d": 0.25,
     "strength_ret_10d": 0.15,
     "strength_ret_5d": 0.10,
+    "strength_ret_50d": 0.35,
+    "strength_ret_50d_min_20d": 0.05,
+    "strength_ret_50d_ma20_ratio": 0.98,
+    "strength_ret_50d_max_amp_10d": 0.30,
+    "strength_ret_50d_max_decline_5d": -0.06,
     "single_day_surge_return": 0.07,
     "single_day_surge_volume_ratio": 1.8,
     "near_120d_high_ratio": 1.00,
@@ -48,6 +53,11 @@ def resolve_strategy5_config(config: dict | None) -> dict:
     _validate_number_range(raw, "strength_ret_20d", -1, 5)
     _validate_number_range(raw, "strength_ret_10d", -1, 5)
     _validate_number_range(raw, "strength_ret_5d", -1, 5)
+    _validate_number_range(raw, "strength_ret_50d", -1, 5)
+    _validate_number_range(raw, "strength_ret_50d_min_20d", -1, 5)
+    _validate_number_range(raw, "strength_ret_50d_ma20_ratio", 0, 2)
+    _validate_number_range(raw, "strength_ret_50d_max_amp_10d", 0, 3)
+    _validate_number_range(raw, "strength_ret_50d_max_decline_5d", -1, 0)
     _validate_number_range(raw, "single_day_surge_return", 0, 1)
     _validate_number_range(raw, "single_day_surge_volume_ratio", 0, 20)
     _validate_number_range(raw, "near_120d_high_ratio", 0, 1)

@@ -27,6 +27,7 @@ class Strategy5Indicators:
     recent_5d_return: float = 0.0
     recent_10d_return: float = 0.0
     recent_20d_return: float = 0.0
+    recent_50d_return: float = 0.0
     drawdown_from_20d_high: float = 0.0
     amplitude_5d: float = 0.0
     amplitude_10d: float = 0.0
@@ -114,6 +115,7 @@ class Strategy5Evaluation:
             "recent_5d_return": ind.recent_5d_return,
             "recent_10d_return": ind.recent_10d_return,
             "recent_20d_return": ind.recent_20d_return,
+            "recent_50d_return": ind.recent_50d_return,
             "drawdown_from_20d_high": ind.drawdown_from_20d_high,
             "amplitude_5d": ind.amplitude_5d,
             "amplitude_10d": ind.amplitude_10d,

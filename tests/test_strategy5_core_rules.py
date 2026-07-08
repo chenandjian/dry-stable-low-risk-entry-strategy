@@ -41,6 +41,54 @@ def build_strong_data(length=1100):
     return data
 
 
+def build_50d_quality_catchup_data(length=1100, *, recent_10d_amplitude=0.08):
+    data = []
+    for i in range(length):
+        close = 10 + i * 0.01
+        data.append(_row(i, close=close, volume=1_000_000 + i * 10, turnover=35))
+
+    start = data[-51]["close"]
+    for j in range(50):
+        progress = (j + 1) / 50
+        close = start * (1 + 0.50 * progress)
+        data[-50 + j].update({
+            "open": round(close * 0.995, 4),
+            "high": round(close * 1.01, 4),
+            "low": round(close * 0.99, 4),
+            "close": round(close, 4),
+            "volume": 2_000_000 + j * 5_000,
+            "turnover": 40,
+        })
+
+    base_21 = data[-21]["close"]
+    for j in range(20):
+        progress = (j + 1) / 20
+        close = base_21 * (1 + 0.06 * progress)
+        data[-20 + j].update({
+            "open": round(close * 0.995, 4),
+            "high": round(close * 1.01, 4),
+            "low": round(close * 0.99, 4),
+            "close": round(close, 4),
+            "volume": 2_500_000 + j * 3_000,
+            "turnover": 45,
+        })
+
+    if recent_10d_amplitude > 0.08:
+        base_11 = data[-11]["close"]
+        for j in range(10):
+            close = base_11 * (1 + 0.006 * (j + 1))
+            data[-10 + j].update({
+                "open": round(close, 4),
+                "high": round(base_11 * (1 + recent_10d_amplitude * 0.65), 4),
+                "low": round(base_11 * (1 - recent_10d_amplitude * 0.45), 4),
+                "close": round(close, 4),
+                "volume": 2_500_000 + j * 3_000,
+                "turnover": 45,
+            })
+
+    return data
+
+
 def test_engine_outputs_candidate_with_strength_high_support_and_scores():
     data = build_strong_data()
 
@@ -74,6 +122,30 @@ def test_volume_up_decline_is_rejected_with_stable_reason():
     assert result.passed is False
     assert result.candidate_type == "REJECTED"
     assert "CONSOLIDATION_VOLUME_UP_DECLINE" in result.reject_reasons
+
+
+def test_50d_quality_catchup_strength_can_enter_candidate_when_short_windows_do_not_trigger():
+    data = build_50d_quality_catchup_data()
+
+    result = ShortSprintSupportEngine({}).evaluate_at(data, code="000001", name="平安银行")
+
+    assert result.passed is True
+    assert result.indicators.strength_trigger == "ret_50d"
+    assert result.indicators.recent_50d_return >= 0.35
+    assert result.indicators.recent_20d_return < 0.25
+    assert result.indicators.recent_10d_return < 0.15
+    assert result.indicators.recent_5d_return < 0.10
+
+
+def test_50d_quality_catchup_requires_stable_recent_consolidation():
+    data = build_50d_quality_catchup_data(recent_10d_amplitude=0.38)
+
+    result = ShortSprintSupportEngine({}).evaluate_at(data, code="000001", name="平安银行")
+
+    assert result.passed is False
+    assert result.indicators.recent_50d_return >= 0.35
+    assert result.indicators.strength_trigger == ""
+    assert "SHORT_TERM_STRENGTH_FAILED" in result.reject_reasons
 
 
 def test_insufficient_history_is_rejected_with_stable_reason():

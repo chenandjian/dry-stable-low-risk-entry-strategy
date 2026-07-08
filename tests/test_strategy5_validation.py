@@ -16,6 +16,11 @@ def test_strategy5_default_config_matches_design():
     assert cfg["strength_ret_20d"] == 0.25
     assert cfg["strength_ret_10d"] == 0.15
     assert cfg["strength_ret_5d"] == 0.10
+    assert cfg["strength_ret_50d"] == 0.35
+    assert cfg["strength_ret_50d_min_20d"] == 0.05
+    assert cfg["strength_ret_50d_ma20_ratio"] == 0.98
+    assert cfg["strength_ret_50d_max_amp_10d"] == 0.30
+    assert cfg["strength_ret_50d_max_decline_5d"] == -0.06
     assert cfg["single_day_surge_return"] == 0.07
     assert cfg["single_day_surge_volume_ratio"] == 1.8
     assert cfg["near_120d_high_ratio"] == 1.00
@@ -54,3 +59,6 @@ def test_strategy5_rejects_invalid_ranges():
 
     with pytest.raises(ValueError, match="max_drawdown_20d"):
         resolve_strategy5_config({"strategy5": {"max_drawdown_20d": 0.1}})
+
+    with pytest.raises(ValueError, match="strength_ret_50d_max_decline_5d"):
+        resolve_strategy5_config({"strategy5": {"strength_ret_50d_max_decline_5d": 0.1}})

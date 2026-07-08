@@ -39,6 +39,7 @@ describe('Strategy5Results', () => {
           close: 12.345,
           avg_turnover_60d: 36.78,
           recent_20d_return: 0.25,
+          recent_50d_return: 0.36,
           amplitude_5d: 0.08,
           amplitude_10d: 0.16,
           support_status: 'SPRINT_MA5_SUPPORT',
@@ -94,8 +95,10 @@ describe('Strategy5Results', () => {
     expect(wrapper.text()).toContain('12.35')
     expect(wrapper.text()).toContain('60日成交额')
     expect(wrapper.text()).toContain('36.78')
-    expect(wrapper.text()).toContain('20日涨幅')
+    expect(wrapper.text()).toContain('20/50日涨幅')
     expect(wrapper.text()).toContain('25.00%')
+    expect(wrapper.text()).toContain('50日涨幅')
+    expect(wrapper.text()).toContain('36.00%')
     expect(wrapper.text()).toContain('5/10日振幅')
     expect(wrapper.text()).toContain('8.00% / 16.00%')
     expect(wrapper.text()).toContain('数据日')

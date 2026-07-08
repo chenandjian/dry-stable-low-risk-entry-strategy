@@ -593,6 +593,31 @@
           <span class="default">默认 0.08</span>
         </div>
         <div class="param">
+          <label title="高质量补漏入口：50日涨幅达到该值，并同时满足横盘稳定保护">50日补漏强度</label>
+          <input type="number" v-model.number="config.strategy5.strength_ret_50d" @input="markDirty" min="-1" max="5" step="0.01" />
+          <span class="default">默认 0.35</span>
+        </div>
+        <div class="param">
+          <label title="50日补漏要求最近20日仍保持正向，避免接入已经走弱的老涨幅">补漏20日最低涨幅</label>
+          <input type="number" v-model.number="config.strategy5.strength_ret_50d_min_20d" @input="markDirty" min="-1" max="5" step="0.01" />
+          <span class="default">默认 0.05</span>
+        </div>
+        <div class="param">
+          <label title="50日补漏要求当前价不明显跌破MA20">补漏MA20系数</label>
+          <input type="number" v-model.number="config.strategy5.strength_ret_50d_ma20_ratio" @input="markDirty" min="0" max="2" step="0.01" />
+          <span class="default">默认 0.98</span>
+        </div>
+        <div class="param">
+          <label title="50日补漏要求10日横盘更稳，超过该振幅不触发ret_50d">补漏最大10日振幅</label>
+          <input type="number" v-model.number="config.strategy5.strength_ret_50d_max_amp_10d" @input="markDirty" min="0" max="3" step="0.01" />
+          <span class="default">默认 0.30</span>
+        </div>
+        <div class="param">
+          <label title="50日补漏要求最近5日不能出现明显单日下杀">补漏最大5日单跌</label>
+          <input type="number" v-model.number="config.strategy5.strength_ret_50d_max_decline_5d" @input="markDirty" min="-1" max="0" step="0.01" />
+          <span class="default">默认 -0.06</span>
+        </div>
+        <div class="param">
           <label title="F9：近20日收盘高点接近120日高点比例">接近120日高比例</label>
           <input type="number" v-model.number="config.strategy5.near_120d_high_ratio" @input="markDirty" min="0" max="1" step="0.01" />
           <span class="default">默认 0.98</span>
@@ -759,6 +784,11 @@ const defaultStrategy5Config = {
   strength_ret_20d: 0.20,
   strength_ret_10d: 0.12,
   strength_ret_5d: 0.08,
+  strength_ret_50d: 0.35,
+  strength_ret_50d_min_20d: 0.05,
+  strength_ret_50d_ma20_ratio: 0.98,
+  strength_ret_50d_max_amp_10d: 0.30,
+  strength_ret_50d_max_decline_5d: -0.06,
   single_day_surge_return: 0.07,
   single_day_surge_volume_ratio: 1.8,
   near_120d_high_ratio: 0.98,
@@ -1182,6 +1212,11 @@ function validate() {
   if (s5.kline_days < 260 || s5.kline_days > 3000) errors.push('策略5: K线拉取天数需在 260-3000')
   if (s5.minimum_kline_days < 120 || s5.minimum_kline_days > s5.kline_days) errors.push('策略5: 最低K线数需在 120 到 K线拉取天数之间')
   if (s5.minimum_trading_days < 120 || s5.minimum_trading_days > s5.kline_days) errors.push('策略5: 最低交易天数需在 120 到 K线拉取天数之间')
+  if (s5.strength_ret_50d < -1 || s5.strength_ret_50d > 5) errors.push('策略5: 50日补漏强度需在 -1 到 5')
+  if (s5.strength_ret_50d_min_20d < -1 || s5.strength_ret_50d_min_20d > 5) errors.push('策略5: 补漏20日最低涨幅需在 -1 到 5')
+  if (s5.strength_ret_50d_ma20_ratio < 0 || s5.strength_ret_50d_ma20_ratio > 2) errors.push('策略5: 补漏MA20系数需在 0-2')
+  if (s5.strength_ret_50d_max_amp_10d <= 0 || s5.strength_ret_50d_max_amp_10d > 3) errors.push('策略5: 补漏最大10日振幅需在 (0, 3]')
+  if (s5.strength_ret_50d_max_decline_5d < -1 || s5.strength_ret_50d_max_decline_5d > 0) errors.push('策略5: 补漏最大5日单跌需在 -1 到 0')
   if (s5.near_120d_high_ratio < 0 || s5.near_120d_high_ratio > 1) errors.push('策略5: 接近120日高比例需在 0-1')
   if (s5.max_amp_5d <= 0 || s5.max_amp_5d > 2) errors.push('策略5: 最大5日振幅需在 (0, 2]')
   if (s5.max_amp_10d <= 0 || s5.max_amp_10d > 3) errors.push('策略5: 最大10日振幅需在 (0, 3]')
