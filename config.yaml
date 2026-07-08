@@ -246,24 +246,24 @@ strategy5:
   min_avg_amount_10d_yi: 15
   strength_ret_20d: 0.25
   strength_ret_10d: 0.15
-  strength_ret_5d: 0.1
+  strength_ret_5d: 0.2
   strength_ret_50d: 0.35
-  strength_ret_50d_min_20d: 0.05
+  strength_ret_50d_min_20d: 0.1
   strength_ret_50d_ma20_ratio: 0.98
   strength_ret_50d_max_amp_10d: 0.3
   strength_ret_50d_max_decline_5d: -0.06
   single_day_surge_return: 0.07
   single_day_surge_volume_ratio: 1.8
   near_120d_high_ratio: 1
-  max_amp_5d: 0.22
-  max_amp_10d: 0.45
-  max_drawdown_20d: -0.3
-  max_decline_5d: -0.08
+  max_amp_5d: 0.16
+  max_amp_10d: 0.32
+  max_drawdown_20d: -0.15
+  max_decline_5d: -0.06
   volume_down_return: -0.07
   volume_down_ratio: 1.5
   ma50_min_ratio: 0.92
   key_candidate_min_support_score: 8
-  volume_dry_min_score_key: 14
+  volume_dry_min_score_key: 16
   volume_dry_min_score_watch: 10
   volume_dry_ratio_5_20: 0.75
   volume_dry_strong_ratio_5_20: 0.65
