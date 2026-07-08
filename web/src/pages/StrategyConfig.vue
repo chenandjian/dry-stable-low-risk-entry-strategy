@@ -558,19 +558,34 @@
           <span class="default">默认 500 · ≥ 260</span>
         </div>
         <div class="param">
-          <label title="F5：60日均成交额，单位亿元">60日均额 <span class="unit">亿</span></label>
+          <label title="F5：主板/创业板 60日均成交额，单位亿元">主创60日均额 <span class="unit">亿</span></label>
           <input type="number" v-model.number="config.strategy5.min_avg_amount_60d_yi" @input="markDirty" min="0" max="1000" step="1" />
-          <span class="default">默认 20</span>
-        </div>
-        <div class="param">
-          <label title="F6：30日均成交额，单位亿元">30日均额 <span class="unit">亿</span></label>
-          <input type="number" v-model.number="config.strategy5.min_avg_amount_30d_yi" @input="markDirty" min="0" max="1000" step="1" />
           <span class="default">默认 15</span>
         </div>
         <div class="param">
-          <label title="F7：10日均成交额，单位亿元">10日均额 <span class="unit">亿</span></label>
+          <label title="F6：主板/创业板 30日均成交额，单位亿元">主创30日均额 <span class="unit">亿</span></label>
+          <input type="number" v-model.number="config.strategy5.min_avg_amount_30d_yi" @input="markDirty" min="0" max="1000" step="1" />
+          <span class="default">默认 8</span>
+        </div>
+        <div class="param">
+          <label title="F7：主板/创业板 10日均成交额，单位亿元">主创10日均额 <span class="unit">亿</span></label>
           <input type="number" v-model.number="config.strategy5.min_avg_amount_10d_yi" @input="markDirty" min="0" max="1000" step="1" />
-          <span class="default">默认 10</span>
+          <span class="default">默认 5</span>
+        </div>
+        <div class="param">
+          <label title="科创板单独使用更高流动性门槛，减少低流动性科创股占比">科创60日均额 <span class="unit">亿</span></label>
+          <input type="number" v-model.number="config.strategy5.kcb_min_avg_amount_60d_yi" @input="markDirty" min="0" max="1000" step="1" />
+          <span class="default">默认 50</span>
+        </div>
+        <div class="param">
+          <label title="科创板单独使用更高流动性门槛，减少低流动性科创股占比">科创30日均额 <span class="unit">亿</span></label>
+          <input type="number" v-model.number="config.strategy5.kcb_min_avg_amount_30d_yi" @input="markDirty" min="0" max="1000" step="1" />
+          <span class="default">默认 30</span>
+        </div>
+        <div class="param">
+          <label title="科创板单独使用更高流动性门槛，减少低流动性科创股占比">科创10日均额 <span class="unit">亿</span></label>
+          <input type="number" v-model.number="config.strategy5.kcb_min_avg_amount_10d_yi" @input="markDirty" min="0" max="1000" step="1" />
+          <span class="default">默认 20</span>
         </div>
         <div class="param">
           <label title="F8：20日短线强度阈值">20日强度</label>
@@ -645,7 +660,7 @@
       </div>
 
       <div class="info-msg strategy5-info">
-        ⓘ 策略5继续使用 baidu / sina / tencent 日线链路；评分只排序，F1-F11 硬过滤失败不会被评分拉回候选。
+        ⓘ 策略5继续使用 baidu / sina / tencent 日线链路；主板/创业板与科创板流动性分开过滤，评分只排序，F1-F11 硬过滤失败不会被评分拉回候选。
       </div>
     </section>
 
@@ -782,9 +797,12 @@ const defaultStrategy5Config = {
   enabled: true,
   kline_days: 1100,
   minimum_trading_days: 500,
-  min_avg_amount_60d_yi: 20,
-  min_avg_amount_30d_yi: 15,
-  min_avg_amount_10d_yi: 10,
+  min_avg_amount_60d_yi: 15,
+  min_avg_amount_30d_yi: 8,
+  min_avg_amount_10d_yi: 5,
+  kcb_min_avg_amount_60d_yi: 50,
+  kcb_min_avg_amount_30d_yi: 30,
+  kcb_min_avg_amount_10d_yi: 20,
   strength_ret_20d: 0.20,
   strength_ret_10d: 0.12,
   strength_ret_5d: 0.08,
@@ -1235,6 +1253,12 @@ function validate() {
   const s5 = config.strategy5 || {}
   if (s5.kline_days < 260 || s5.kline_days > 3000) errors.push('策略5: K线拉取天数需在 260-3000')
   if (s5.minimum_trading_days < 260 || s5.minimum_trading_days > s5.kline_days) errors.push('策略5: 最低交易天数需在 260 到 K线拉取天数之间')
+  if (s5.min_avg_amount_60d_yi < 0 || s5.min_avg_amount_60d_yi > 1000) errors.push('策略5: 主创60日均额需在 0-1000 亿')
+  if (s5.min_avg_amount_30d_yi < 0 || s5.min_avg_amount_30d_yi > 1000) errors.push('策略5: 主创30日均额需在 0-1000 亿')
+  if (s5.min_avg_amount_10d_yi < 0 || s5.min_avg_amount_10d_yi > 1000) errors.push('策略5: 主创10日均额需在 0-1000 亿')
+  if (s5.kcb_min_avg_amount_60d_yi < 0 || s5.kcb_min_avg_amount_60d_yi > 1000) errors.push('策略5: 科创60日均额需在 0-1000 亿')
+  if (s5.kcb_min_avg_amount_30d_yi < 0 || s5.kcb_min_avg_amount_30d_yi > 1000) errors.push('策略5: 科创30日均额需在 0-1000 亿')
+  if (s5.kcb_min_avg_amount_10d_yi < 0 || s5.kcb_min_avg_amount_10d_yi > 1000) errors.push('策略5: 科创10日均额需在 0-1000 亿')
   if (s5.strength_ret_50d < -1 || s5.strength_ret_50d > 5) errors.push('策略5: 50日补漏强度需在 -1 到 5')
   if (s5.strength_ret_50d_min_20d < -1 || s5.strength_ret_50d_min_20d > 5) errors.push('策略5: 补漏20日最低涨幅需在 -1 到 5')
   if (s5.strength_ret_50d_ma20_ratio < 0 || s5.strength_ret_50d_ma20_ratio > 2) errors.push('策略5: 补漏MA20系数需在 0-2')

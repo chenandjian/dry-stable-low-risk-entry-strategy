@@ -10,9 +10,12 @@ def test_strategy5_default_config_matches_design():
     assert cfg["kline_days"] == 1100
     assert "minimum_kline_days" not in cfg
     assert cfg["minimum_trading_days"] == 500
-    assert cfg["min_avg_amount_60d_yi"] == 30
-    assert cfg["min_avg_amount_30d_yi"] == 20
-    assert cfg["min_avg_amount_10d_yi"] == 15
+    assert cfg["min_avg_amount_60d_yi"] == 15
+    assert cfg["min_avg_amount_30d_yi"] == 8
+    assert cfg["min_avg_amount_10d_yi"] == 5
+    assert cfg["kcb_min_avg_amount_60d_yi"] == 50
+    assert cfg["kcb_min_avg_amount_30d_yi"] == 30
+    assert cfg["kcb_min_avg_amount_10d_yi"] == 20
     assert cfg["strength_ret_20d"] == 0.25
     assert cfg["strength_ret_10d"] == 0.15
     assert cfg["strength_ret_5d"] == 0.10
@@ -46,6 +49,7 @@ def test_strategy5_overrides_nested_project_config():
             "kline_days": 1200,
             "minimum_trading_days": 900,
             "min_avg_amount_60d_yi": 18,
+            "kcb_min_avg_amount_60d_yi": 60,
         }
     })
 
@@ -53,6 +57,7 @@ def test_strategy5_overrides_nested_project_config():
     assert cfg["kline_days"] == 1200
     assert cfg["minimum_trading_days"] == 900
     assert cfg["min_avg_amount_60d_yi"] == 18
+    assert cfg["kcb_min_avg_amount_60d_yi"] == 60
 
 
 def test_strategy5_ignores_legacy_minimum_kline_days_config():
@@ -88,3 +93,6 @@ def test_strategy5_rejects_invalid_ranges():
 
     with pytest.raises(ValueError, match="volume_dry_strong_ratio_5_20"):
         resolve_strategy5_config({"strategy5": {"volume_dry_ratio_5_20": 0.70, "volume_dry_strong_ratio_5_20": 0.80}})
+
+    with pytest.raises(ValueError, match="kcb_min_avg_amount_60d_yi"):
+        resolve_strategy5_config({"strategy5": {"kcb_min_avg_amount_60d_yi": -1}})

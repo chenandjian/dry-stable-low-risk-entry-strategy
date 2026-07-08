@@ -218,6 +218,31 @@ def test_trading_days_filter_accepts_configured_minimum_boundary():
     assert "TRADING_DAYS_LT_500" in hard_filter_reasons(indicators, cfg)
 
 
+def test_board_specific_liquidity_uses_stricter_kcb_thresholds():
+    cfg = resolve_strategy5_config({})
+    indicators = Strategy5Indicators(
+        trading_days=cfg["minimum_trading_days"],
+        ma5=10,
+        ma10=10,
+        ma20=10,
+        ma50=10,
+        ma100=10,
+        ma120=11,
+        ma250=10,
+        close=12,
+        avg_turnover_60d=30,
+        avg_turnover_30d=20,
+        avg_turnover_10d=15,
+        strength_trigger="ret_20d",
+        high_trigger="near_120d_high",
+    )
+
+    assert not any(reason.startswith("AVG") for reason in hard_filter_reasons(indicators, cfg, code="300001"))
+    assert "KCB_AVG60D_LE_MIN" in hard_filter_reasons(indicators, cfg, code="688001")
+    assert "KCB_AVG30D_LE_MIN" in hard_filter_reasons(indicators, cfg, code="688001")
+    assert "KCB_AVG10D_LE_MIN" in hard_filter_reasons(indicators, cfg, code="688001")
+
+
 def test_support_status_priority_prefers_ma5_before_ma10():
     support = evaluate_support_status(close=100, ma5=99, ma10=98, ma20=96, ma50=92)
 

@@ -9,9 +9,12 @@ DEFAULT_STRATEGY5_CONFIG = {
     "enabled": True,
     "kline_days": 1100,
     "minimum_trading_days": 500,
-    "min_avg_amount_60d_yi": 30,
-    "min_avg_amount_30d_yi": 20,
-    "min_avg_amount_10d_yi": 15,
+    "min_avg_amount_60d_yi": 15,
+    "min_avg_amount_30d_yi": 8,
+    "min_avg_amount_10d_yi": 5,
+    "kcb_min_avg_amount_60d_yi": 50,
+    "kcb_min_avg_amount_30d_yi": 30,
+    "kcb_min_avg_amount_10d_yi": 20,
     "strength_ret_20d": 0.25,
     "strength_ret_10d": 0.15,
     "strength_ret_5d": 0.10,
@@ -64,6 +67,9 @@ def resolve_strategy5_config(config: dict | None) -> dict:
     _validate_number_range(raw, "min_avg_amount_60d_yi", 0, 1000)
     _validate_number_range(raw, "min_avg_amount_30d_yi", 0, 1000)
     _validate_number_range(raw, "min_avg_amount_10d_yi", 0, 1000)
+    _validate_number_range(raw, "kcb_min_avg_amount_60d_yi", 0, 1000)
+    _validate_number_range(raw, "kcb_min_avg_amount_30d_yi", 0, 1000)
+    _validate_number_range(raw, "kcb_min_avg_amount_10d_yi", 0, 1000)
     _validate_number_range(raw, "strength_ret_20d", -1, 5)
     _validate_number_range(raw, "strength_ret_10d", -1, 5)
     _validate_number_range(raw, "strength_ret_5d", -1, 5)

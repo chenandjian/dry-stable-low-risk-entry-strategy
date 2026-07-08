@@ -117,15 +117,15 @@
 | F2 | 均线可计算 | MA5/10/20/50/100/120/250 全部可算 | `MA_CALC_FAILED` |
 | F3 | 年线之上 | `close > MA250` | `CLOSE_LE_MA250` |
 | F4 | 长趋势 | `MA120 > MA250` | `MA120_LE_MA250` |
-| F5 | 60 日均额 | `avg_amount_60d > 20亿` | `AVG60D_LE_20YI` |
-| F6 | 30 日均额 | `avg_amount_30d > 15亿` | `AVG30D_LE_15YI` |
-| F7 | 10 日均额 | `avg_amount_10d > 10亿` | `AVG10D_LE_10YI` |
+| F5 | 60 日均额 | 主板/创业板 `avg_amount_60d > 15亿`；科创板 `avg_amount_60d > 50亿` | `AVG60D_LE_MIN` / `KCB_AVG60D_LE_MIN` |
+| F6 | 30 日均额 | 主板/创业板 `avg_amount_30d > 8亿`；科创板 `avg_amount_30d > 30亿` | `AVG30D_LE_MIN` / `KCB_AVG30D_LE_MIN` |
+| F7 | 10 日均额 | 主板/创业板 `avg_amount_10d > 5亿`；科创板 `avg_amount_10d > 20亿` | `AVG10D_LE_MIN` / `KCB_AVG10D_LE_MIN` |
 | F8 | 短线强度 | 见第 6 节 | `SHORT_TERM_STRENGTH_FAILED` |
 | F9 | 新高确认 | 见第 7 节 | `NEW_HIGH_FAILED` |
 | F10 | 盘整期 | 见第 8 节 | 见第 8 节 |
 | F11 | 中期支撑 | `close >= MA50 * 0.92` | `CLOSE_LT_MA50_0_92` |
 
-成交额统一使用日线中的 `turnover` 字段；若数据源字段为 `amount`，应在数据适配层或策略5指标计算中统一兼容，但不得改变共享日线服务的字段语义。
+成交额统一使用日线中的 `turnover` 字段；若数据源字段为 `amount`，应在数据适配层或策略5指标计算中统一兼容，但不得改变共享日线服务的字段语义。板块识别优先使用 A 股代码前缀：`688/689` 为科创板，`300/301` 为创业板，`0/2/6` 为主板。
 
 ## 6. F8 短线强度
 

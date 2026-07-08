@@ -8,6 +8,8 @@ def hard_filter_reasons(
     ind: Strategy5Indicators,
     config: dict,
     volume_dry: Strategy5VolumeDry | None = None,
+    *,
+    code: str = "",
 ) -> list[str]:
     reasons: list[str] = []
     if ind.trading_days < config["minimum_trading_days"]:
@@ -18,12 +20,14 @@ def hard_filter_reasons(
         reasons.append("CLOSE_LE_MA250")
     if ind.ma120 > 0 and ind.ma250 > 0 and ind.ma120 <= ind.ma250:
         reasons.append("MA120_LE_MA250")
-    if ind.avg_turnover_60d <= config["min_avg_amount_60d_yi"]:
-        reasons.append("AVG60D_LE_20YI")
-    if ind.avg_turnover_30d <= config["min_avg_amount_30d_yi"]:
-        reasons.append("AVG30D_LE_15YI")
-    if ind.avg_turnover_10d <= config["min_avg_amount_10d_yi"]:
-        reasons.append("AVG10D_LE_10YI")
+    liquidity = _liquidity_thresholds_for_code(config, code)
+    reason_prefix = "KCB_" if _is_kcb_code(code) else ""
+    if ind.avg_turnover_60d <= liquidity["min_avg_amount_60d_yi"]:
+        reasons.append(f"{reason_prefix}AVG60D_LE_MIN")
+    if ind.avg_turnover_30d <= liquidity["min_avg_amount_30d_yi"]:
+        reasons.append(f"{reason_prefix}AVG30D_LE_MIN")
+    if ind.avg_turnover_10d <= liquidity["min_avg_amount_10d_yi"]:
+        reasons.append(f"{reason_prefix}AVG10D_LE_MIN")
     if not ind.strength_trigger:
         reasons.append("SHORT_TERM_STRENGTH_FAILED")
     if not ind.high_trigger:
@@ -43,6 +47,25 @@ def hard_filter_reasons(
     if ind.ma50 > 0 and ind.close < ind.ma50 * config["ma50_min_ratio"]:
         reasons.append("CLOSE_LT_MA50_0_92")
     return reasons
+
+
+def _is_kcb_code(code: str) -> bool:
+    normalized = str(code or "").strip()
+    return normalized.startswith(("688", "689"))
+
+
+def _liquidity_thresholds_for_code(config: dict, code: str) -> dict[str, float]:
+    if _is_kcb_code(code):
+        return {
+            "min_avg_amount_60d_yi": config["kcb_min_avg_amount_60d_yi"],
+            "min_avg_amount_30d_yi": config["kcb_min_avg_amount_30d_yi"],
+            "min_avg_amount_10d_yi": config["kcb_min_avg_amount_10d_yi"],
+        }
+    return {
+        "min_avg_amount_60d_yi": config["min_avg_amount_60d_yi"],
+        "min_avg_amount_30d_yi": config["min_avg_amount_30d_yi"],
+        "min_avg_amount_10d_yi": config["min_avg_amount_10d_yi"],
+    }
 
 
 def classify_candidate(
