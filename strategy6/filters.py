@@ -37,6 +37,9 @@ def hard_filter_reasons(
         reasons.append("AVG10D_LT_MIN")
     if ind.amount_avg_30 > 0 and ind.amount_avg_10 < ind.amount_avg_30 * config["amount10_vs_30_min_ratio"]:
         reasons.append("AVG10D_LT_AVG30D_RATIO")
+    if ind.relative_strength_20_observed and ind.relative_strength_20 < config["min_relative_strength_20"]:
+        threshold = str(config["min_relative_strength_20"]).replace(".", "_")
+        reasons.append(f"RS20_LT_{threshold}")
     if start.start_type not in PASSING_START_TYPES:
         reasons.append("NO_STRONG_START")
     if not start.high_trigger:

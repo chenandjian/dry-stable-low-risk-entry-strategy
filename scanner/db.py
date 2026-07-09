@@ -1922,6 +1922,7 @@ def _ensure_strategy6_candidates_table(conn: sqlite3.Connection):
             return_10 REAL,
             return_20 REAL,
             relative_strength_20 REAL DEFAULT 0,
+            relative_strength_20_observed INTEGER DEFAULT 0,
             relative_strength_10_sector REAL DEFAULT 0,
             sector_member_new_high_count INTEGER DEFAULT 0,
             amount_avg_10 REAL,
@@ -2006,6 +2007,7 @@ def _ensure_strategy6_candidates_table(conn: sqlite3.Connection):
         "pool_age_trading_days": "INTEGER DEFAULT 0",
         "current_price": "REAL DEFAULT 0",
         "relative_strength_20": "REAL DEFAULT 0",
+        "relative_strength_20_observed": "INTEGER DEFAULT 0",
         "relative_strength_10_sector": "REAL DEFAULT 0",
         "sector_member_new_high_count": "INTEGER DEFAULT 0",
         "risk_tags": "TEXT",
@@ -2787,7 +2789,7 @@ def upsert_strategy6_candidate(task_id: str, d: dict):
         "current_price", "close", "daily_return", "trading_days",
         "ma5", "ma10", "ma20", "ma50", "ma120", "ma250",
         "return_5", "return_10", "return_20",
-        "relative_strength_20", "relative_strength_10_sector", "sector_member_new_high_count",
+        "relative_strength_20", "relative_strength_20_observed", "relative_strength_10_sector", "sector_member_new_high_count",
         "amount_avg_10", "amount_avg_30", "amount_avg_60",
         "v3", "v5", "v10", "v20", "volume_ratio_5_20",
         "highest_close_20", "highest_close_120", "pullback_from_20d_high",
@@ -2834,6 +2836,7 @@ def upsert_strategy6_candidate(task_id: str, d: dict):
         d.get("return_10"),
         d.get("return_20"),
         d.get("relative_strength_20", 0.0),
+        1 if d.get("relative_strength_20_observed") else 0,
         d.get("relative_strength_10_sector", 0.0),
         d.get("sector_member_new_high_count", 0),
         d.get("amount_avg_10"),
@@ -3717,7 +3720,7 @@ def _deserialize_strategy6_row(row: dict) -> dict:
                 row[field] = []
         elif not value:
             row[field] = []
-    for field in ("is_limit_up", "is_one_word_limit_up", "enable_market_filter", "enable_sector_filter"):
+    for field in ("is_limit_up", "is_one_word_limit_up", "enable_market_filter", "enable_sector_filter", "relative_strength_20_observed"):
         if field in row:
             row[field] = bool(row.get(field))
     return row

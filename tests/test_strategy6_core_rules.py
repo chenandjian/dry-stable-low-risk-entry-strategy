@@ -143,6 +143,7 @@ def test_strategy6_defaults_enable_real_market_filter_only():
     assert cfg["enable_sector_filter"] is True
     assert cfg["sector_filter_mode"] == "downgrade"
     assert cfg["sector_min_member_new_high_count"] == 3
+    assert cfg["min_relative_strength_20"] == 0.10
 
 
 def _market_rows(closes):
@@ -205,6 +206,50 @@ def test_market_filter_downgrade_moves_ready_or_key_to_watch():
     assert "MARKET_WEAK_DOWNGRADED" in candidate["warn_tags"]
 
 
+def test_market_filter_score_only_deducts_score_without_downgrading_candidate_type():
+    data = build_strategy6_candidate_data()
+    weak_market = {
+        "sh000001": _market_rows([120 - i * 0.2 for i in range(80)]),
+        "sz399001": _market_rows([130 - i * 0.2 for i in range(80)]),
+        "sz399006": _market_rows([140 - i * 0.2 for i in range(80)]),
+    }
+
+    score_only = StrongVcpTailEngine({"strategy6": {"enable_market_filter": True, "market_filter_mode": "score_only"}}).evaluate_at(
+        data,
+        code="000001",
+        name="平安银行",
+        market_data_by_symbol=weak_market,
+    )
+    filter_off = StrongVcpTailEngine({"strategy6": {"enable_market_filter": False, "market_filter_mode": "score_only"}}).evaluate_at(
+        data,
+        code="000001",
+        name="平安银行",
+        market_data_by_symbol=weak_market,
+    )
+
+    assert score_only.passed is True
+    assert score_only.candidate_type == filter_off.candidate_type
+    assert score_only.score.risk_control_score == filter_off.score.risk_control_score - 5
+    assert "MARKET_WEAK_DOWNGRADED" not in score_only.indicators.warn_tags
+
+
+def test_sector_filter_strict_blocks_ready_or_key_but_keeps_watch_candidate():
+    data = build_strategy6_candidate_data()
+
+    result = StrongVcpTailEngine({"strategy6": {"enable_sector_filter": True, "sector_filter_mode": "strict"}}).evaluate_at(
+        data,
+        code="000001",
+        name="平安银行",
+        sector_context={"sector_strength_status": "SECTOR_WEAK", "relative_strength_10_sector": -0.05},
+    )
+    candidate = result.to_candidate_dict()
+
+    assert result.passed is True
+    assert result.candidate_type == "WATCH_CANDIDATE"
+    assert candidate["sector_filter_mode"] == "strict"
+    assert "SECTOR_WEAK_STRICT" in candidate["warn_tags"]
+
+
 def test_sector_filter_downgrade_moves_ready_or_key_to_watch():
     data = build_strategy6_candidate_data()
 
@@ -238,6 +283,38 @@ def test_relative_strength_20_is_reported_against_hs300_index():
     candidate = result.to_candidate_dict()
 
     assert candidate["relative_strength_20"] > 0.10
+
+
+def test_relative_strength_20_below_minimum_rejects_candidate():
+    data = build_strategy6_candidate_data()
+    market = {
+        "hs300": _market_rows([100 + i * 0.5 for i in range(80)]),
+    }
+
+    result = StrongVcpTailEngine({}).evaluate_at(
+        data,
+        code="000001",
+        name="平安银行",
+        market_data_by_symbol=market,
+    )
+
+    assert result.passed is False
+    assert "RS20_LT_0_1" in result.reject_reasons
+
+
+def test_missing_market_data_does_not_apply_rs20_filter():
+    data = build_strategy6_candidate_data()
+
+    result = StrongVcpTailEngine({}).evaluate_at(
+        data,
+        code="000001",
+        name="平安银行",
+    )
+    candidate = result.to_candidate_dict()
+
+    assert result.passed is True
+    assert candidate["relative_strength_20_observed"] is False
+    assert "RS20_LT_0_1" not in result.reject_reasons
 
 
 def test_sector_context_classifies_strength_and_relative_strength():

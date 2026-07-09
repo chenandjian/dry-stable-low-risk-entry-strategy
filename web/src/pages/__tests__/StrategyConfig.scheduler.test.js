@@ -189,4 +189,34 @@ describe('StrategyConfig scheduler controls', () => {
     expect(payload.strategy4.tracking.golden_second_wave_days).toBe(20)
     expect(payload.strategy4.tracking.allow_extension_days).toBe(20)
   })
+
+  it('renders strategy6 real market and sector filter tuning controls', async () => {
+    const wrapper = mount(StrategyConfig)
+    await flushUi()
+
+    expect(wrapper.text()).toContain('最低RS20')
+    expect(wrapper.text()).toContain('板块新高成员数')
+    expect(wrapper.text()).toContain('市场过滤模式')
+    expect(wrapper.text()).toContain('板块过滤模式')
+    expect(wrapper.find('[data-test="strategy6-market-filter-mode"]').element.value).toBe('downgrade')
+    expect(wrapper.find('[data-test="strategy6-sector-filter-mode"]').element.value).toBe('downgrade')
+    expect(wrapper.text()).toContain('真实市场/板块过滤已接入')
+    expect(wrapper.text()).not.toContain('真实过滤留到二期接入')
+  })
+
+  it('saves strategy6 filter modes and new real filter thresholds', async () => {
+    const wrapper = mount(StrategyConfig)
+    await flushUi()
+
+    await wrapper.find('[data-test="strategy6-market-filter-mode"]').setValue('strict')
+    await wrapper.find('[data-test="strategy6-sector-filter-mode"]').setValue('score_only')
+    await wrapper.find('.btn-save').trigger('click')
+    await flushUi()
+
+    const payload = api.updateConfig.mock.calls[0][0]
+    expect(payload.strategy6.market_filter_mode).toBe('strict')
+    expect(payload.strategy6.sector_filter_mode).toBe('score_only')
+    expect(payload.strategy6.min_relative_strength_20).toBe(0.10)
+    expect(payload.strategy6.sector_min_member_new_high_count).toBe(3)
+  })
 })

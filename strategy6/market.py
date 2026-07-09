@@ -48,6 +48,16 @@ def compute_relative_strength_20(stock_return_20: float, market_data_by_symbol: 
     return round(stock_return_20 - market_return, 6)
 
 
+def has_relative_strength_20_market(market_data_by_symbol: dict[str, list[dict]] | None) -> bool:
+    data = market_data_by_symbol or {}
+    for symbol in HS300_ALIASES:
+        rows = data.get(symbol)
+        if rows and len(rows) > 20:
+            return True
+    rows = data.get("sh000001") or []
+    return len(rows) > 20
+
+
 def _market_return_20(data: dict[str, list[dict]]) -> float:
     for symbol in HS300_ALIASES:
         rows = data.get(symbol)

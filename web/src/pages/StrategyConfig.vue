@@ -684,12 +684,12 @@
             @click="toggleStrategy6('enabled')">{{ config.strategy6?.enabled !== false ? '开' : '关' }}</button>
         </label>
         <label class="toggle-item">
-          <span class="toggle-label" title="一期只保留字段和开关，不接入真实大盘过滤">市场过滤</span>
+          <span class="toggle-label" title="开启后按过滤模式处理 MARKET_WEAK / MARKET_RISK">市场过滤</span>
           <button class="toggle" :class="{ active: config.strategy6?.enable_market_filter === true }"
             @click="toggleStrategy6('enable_market_filter')">{{ config.strategy6?.enable_market_filter === true ? '开' : '关' }}</button>
         </label>
         <label class="toggle-item">
-          <span class="toggle-label" title="一期只保留字段和开关，不接入真实板块过滤">板块过滤</span>
+          <span class="toggle-label" title="开启后按过滤模式处理 SECTOR_WEAK / SECTOR_RISK">板块过滤</span>
           <button class="toggle" :class="{ active: config.strategy6?.enable_sector_filter === true }"
             @click="toggleStrategy6('enable_sector_filter')">{{ config.strategy6?.enable_sector_filter === true ? '开' : '关' }}</button>
         </label>
@@ -735,6 +735,34 @@
           <label title="近20日最高收盘接近120日高点的比例">接近120日高比例</label>
           <input type="number" v-model.number="config.strategy6.near_120d_high_ratio" @input="markDirty" min="0" max="1" step="0.01" />
           <span class="default">默认 0.98</span>
+        </div>
+        <div class="param">
+          <label title="strict: 弱市场不允许重点/就绪；downgrade: 降为观察；score_only: 只扣风险分">市场过滤模式</label>
+          <select data-test="strategy6-market-filter-mode" v-model="config.strategy6.market_filter_mode" @change="markDirty">
+            <option value="strict">strict · 严格</option>
+            <option value="downgrade">downgrade · 降级</option>
+            <option value="score_only">score_only · 只扣分</option>
+          </select>
+          <span class="default">默认 downgrade</span>
+        </div>
+        <div class="param">
+          <label title="strict: 弱板块不允许重点/就绪；downgrade: 降为观察；score_only: 只扣风险分">板块过滤模式</label>
+          <select data-test="strategy6-sector-filter-mode" v-model="config.strategy6.sector_filter_mode" @change="markDirty">
+            <option value="strict">strict · 严格</option>
+            <option value="downgrade">downgrade · 降级</option>
+            <option value="score_only">score_only · 只扣分</option>
+          </select>
+          <span class="default">默认 downgrade</span>
+        </div>
+        <div class="param">
+          <label title="个股20日涨幅相对沪深300的最低超额收益">最低RS20</label>
+          <input type="number" v-model.number="config.strategy6.min_relative_strength_20" @input="markDirty" min="-1" max="1" step="0.01" />
+          <span class="default">默认 0.10</span>
+        </div>
+        <div class="param">
+          <label title="所属板块内最近5日创20日新高的最少股票数量">板块新高成员数</label>
+          <input type="number" v-model.number="config.strategy6.sector_min_member_new_high_count" @input="markDirty" min="0" max="50" step="1" />
+          <span class="default">默认 3</span>
         </div>
         <div class="param">
           <label title="尾部5日收盘波动上限">尾部收盘波动</label>
@@ -789,7 +817,7 @@
       </div>
 
       <div class="info-msg strategy6-info">
-        ⓘ 策略6一期不伪造市场/板块强度，相关字段默认 UNKNOWN；真实过滤留到二期接入。
+        ⓘ 策略6真实市场/板块过滤已接入；关闭过滤时仍计算状态并输出到候选与日报，但不参与降级或扣分。
       </div>
     </section>
 
@@ -994,6 +1022,8 @@ const defaultStrategy6Config = {
   limit_up_volume_ratio: 1.5,
   low_volume_limit_up_min_ratio: 0.6,
   near_120d_high_ratio: 0.98,
+  min_relative_strength_20: 0.10,
+  sector_min_member_new_high_count: 3,
   max_amp_5d_s: 0.25,
   max_amp_10d_s: 0.45,
   max_pullback_20d_s: -0.30,
@@ -1485,6 +1515,10 @@ function validate() {
   if (s6.normal_start_return < 0 || s6.normal_start_return > 1) errors.push('策略6: 普通启动涨幅需在 0-1')
   if (s6.normal_start_volume_ratio < 0 || s6.normal_start_volume_ratio > 20) errors.push('策略6: 普通启动量比需在 0-20')
   if (s6.near_120d_high_ratio < 0 || s6.near_120d_high_ratio > 1) errors.push('策略6: 接近120日高比例需在 0-1')
+  if (!['strict', 'downgrade', 'score_only'].includes(s6.market_filter_mode)) errors.push('策略6: 市场过滤模式必须是 strict/downgrade/score_only')
+  if (!['strict', 'downgrade', 'score_only'].includes(s6.sector_filter_mode)) errors.push('策略6: 板块过滤模式必须是 strict/downgrade/score_only')
+  if (s6.min_relative_strength_20 < -1 || s6.min_relative_strength_20 > 1) errors.push('策略6: 最低RS20需在 -1 到 1')
+  if (s6.sector_min_member_new_high_count < 0 || s6.sector_min_member_new_high_count > 50) errors.push('策略6: 板块新高成员数需在 0-50')
   if (s6.tail_close_range_5 < 0 || s6.tail_close_range_5 > 1) errors.push('策略6: 尾部收盘波动需在 0-1')
   if (s6.tail_volume_ratio_5_20 <= 0 || s6.tail_volume_ratio_5_20 > 2) errors.push('策略6: 尾部 V5/V20 需在 (0,2]')
   if (s6.tail_strong_volume_ratio_5_20 <= 0 || s6.tail_strong_volume_ratio_5_20 > s6.tail_volume_ratio_5_20) errors.push('策略6: 强量干 V5/V20 需大于0且不高于尾部门槛')

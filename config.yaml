@@ -300,6 +300,8 @@ strategy6:
   enable_sector_filter: true
   market_filter_mode: downgrade
   sector_filter_mode: downgrade
+  sector_min_member_new_high_count: 3
+  min_relative_strength_20: 0.10
   normal_start_return: 0.07
   normal_start_volume_ratio: 2.0
   normal_start_close_position: 0.65

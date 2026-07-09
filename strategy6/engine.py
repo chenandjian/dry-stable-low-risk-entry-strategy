@@ -4,7 +4,7 @@ from __future__ import annotations
 from strategy6.dry_tail import evaluate_dry_tail
 from strategy6.filters import classify_candidate, hard_filter_reasons
 from strategy6.indicators import calculate_indicators
-from strategy6.market import compute_relative_strength_20, evaluate_market_context
+from strategy6.market import compute_relative_strength_20, evaluate_market_context, has_relative_strength_20_market
 from strategy6.models import Strategy6Evaluation
 from strategy6.pressure import apply_pressure_tags
 from strategy6.scorer import score_strategy6
@@ -43,6 +43,7 @@ class StrongVcpTailEngine:
         )
         market_context = evaluate_market_context(market_data_by_symbol)
         indicators.market_status = market_context["market_status"]
+        indicators.relative_strength_20_observed = has_relative_strength_20_market(market_data_by_symbol)
         indicators.relative_strength_20 = compute_relative_strength_20(indicators.return_20, market_data_by_symbol)
         indicators.market_filter_enabled = bool(self.config["enable_market_filter"])
         indicators.sector_filter_enabled = bool(self.config["enable_sector_filter"])

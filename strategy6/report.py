@@ -29,6 +29,7 @@ STRATEGY6_REPORT_COLUMNS = [
     ("return_10", "return_10"),
     ("return_20", "return_20"),
     ("relative_strength_20", "relative_strength_20"),
+    ("relative_strength_20_observed", "relative_strength_20_observed"),
     ("relative_strength_10_sector", "relative_strength_10_sector"),
     ("sector_member_new_high_count", "sector_member_new_high_count"),
     ("amount_avg_10", "amount_avg_10"),

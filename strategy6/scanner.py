@@ -194,7 +194,7 @@ def scan_strategy6_all(
                     data_source=fetch_result.primary_source,
                     kline_fetched_at=fetch_result.kline_fetched_at or "",
                     quote_status=fetch_result.quote_status or "",
-                    market_data_by_symbol=market_data_by_symbol,
+                    market_data_by_symbol=_market_data_until(market_data_by_symbol, latest_trade_date or ""),
                     sector_context=_load_sector_context(code, data, cfg, sector_cache, sector_cache_lock),
                 )
                 if evaluation.passed:
@@ -270,8 +270,6 @@ def _ensure_scan_task(task_id: str) -> None:
 
 
 def _load_market_data_by_symbol(cfg: dict) -> dict[str, list[dict]]:
-    if not cfg.get("enable_market_filter"):
-        return {}
     result: dict[str, list[dict]] = {}
     for symbol in ("sh000001", "sz399001", "sz399006", "hs300"):
         fetch_symbol = "sh000300" if symbol == "hs300" else symbol
@@ -284,6 +282,15 @@ def _load_market_data_by_symbol(cfg: dict) -> dict[str, list[dict]]:
     return result
 
 
+def _market_data_until(market_data_by_symbol: dict[str, list[dict]], evaluation_date: str) -> dict[str, list[dict]]:
+    if not evaluation_date:
+        return {}
+    return {
+        symbol: [row for row in rows if str(row.get("date") or "") <= evaluation_date]
+        for symbol, rows in market_data_by_symbol.items()
+    }
+
+
 def _load_sector_context(
     code: str,
     data: list[dict],
@@ -291,8 +298,6 @@ def _load_sector_context(
     cache: dict[tuple[str, str], dict],
     cache_lock: threading.Lock,
 ) -> dict:
-    if not cfg.get("enable_sector_filter"):
-        return {}
     try:
         _, indicators = calculate_indicators(data, cfg)
         evaluation_date = indicators.evaluation_date
