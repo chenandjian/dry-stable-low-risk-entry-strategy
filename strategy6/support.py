@@ -10,15 +10,18 @@ def evaluate_support(rows: list[dict], ind: Strategy6Indicators, start: Strategy
         return Strategy6Support(support_status=status)
 
     key_support = _select_key_support(rows, ind, ma_price, start)
+    prior_key_support = _prior_key_support(rows, ma_price)
     zone_low, zone_high = _support_zone(key_support, status)
     support_tests = _support_test_count(rows, key_support)
-    pivot = max((r["close"] for r in rows[-20:]), default=ind.current_price)
+    history = rows[:-1] if len(rows) > 1 else rows
+    pivot = max((r["close"] for r in history[-20:]), default=ind.current_price)
     box_height = max(0.0, pivot - key_support)
     score = _support_score(ind.current_price, status, key_support, support_tests)
     return Strategy6Support(
         support_status=status,
         main_support_ma=ma_label,
         key_support_price=round(key_support, 4),
+        prior_key_support_price=round(prior_key_support, 4),
         support_zone_low=round(zone_low, 4),
         support_zone_high=round(zone_high, 4),
         defense_support_price=round(ind.ma50 if ind.ma50 > 0 else key_support, 4),
@@ -48,13 +51,14 @@ def _support_status(ind: Strategy6Indicators) -> tuple[str, str, float]:
 
 def _select_key_support(rows: list[dict], ind: Strategy6Indicators, ma_price: float, start: Strategy6Start) -> float:
     values = [ma_price]
-    if rows[-10:]:
-        values.append(min(r["close"] for r in rows[-10:]))
-        values.append(min(r["low"] for r in rows[-10:]))
-    if rows[-20:]:
-        values.append(min(r["close"] for r in rows[-20:]))
-        values.append(min(r["low"] for r in rows[-20:]))
-    for row in rows[-20:]:
+    history = rows[:-1] if len(rows) > 1 else rows
+    if history[-10:]:
+        values.append(min(r["close"] for r in history[-10:]))
+        values.append(min(r["low"] for r in history[-10:]))
+    if history[-20:]:
+        values.append(min(r["close"] for r in history[-20:]))
+        values.append(min(r["low"] for r in history[-20:]))
+    for row in history[-20:]:
         if row["date"] == start.start_date:
             values.append(row["low"])
             break
@@ -62,6 +66,22 @@ def _select_key_support(rows: list[dict], ind: Strategy6Indicators, ma_price: fl
     if not valid:
         return ma_price if ma_price > 0 else ind.current_price
     return max(valid, key=lambda value: _support_candidate_score(rows, ind.current_price, value, ma_price))
+
+
+def _prior_key_support(rows: list[dict], ma_price: float) -> float:
+    history = rows[:-1] if len(rows) > 1 else rows
+    values = [_ma(history, 5), _ma(history, 10), _ma(history, 20), _ma(history, 50)]
+    if history[-10:]:
+        values.append(min(r["close"] for r in history[-10:]))
+    valid = [value for value in values if value > 0]
+    return max(valid) if valid else 0.0
+
+
+def _ma(rows: list[dict], days: int) -> float:
+    if len(rows) < days:
+        return 0.0
+    selected = rows[-days:]
+    return sum(row["close"] for row in selected) / len(selected)
 
 
 def _support_candidate_score(rows: list[dict], close: float, value: float, ma_price: float) -> float:
@@ -99,4 +119,3 @@ def _support_score(close: float, status: str, key_support: float, support_tests:
     elif support_tests >= 1:
         base += 2
     return min(25, base)
-

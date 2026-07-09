@@ -46,7 +46,7 @@
           <thead>
             <tr>
               <th>股票</th><th>现价</th><th>总分</th><th>分类</th><th>生命周期</th>
-              <th>启动类型/等级</th><th>支撑状态</th><th>Key支撑</th><th>买入区</th>
+              <th>启动类型/等级</th><th>支撑状态</th><th>Key/前置支撑</th><th>买入区</th>
               <th>止损</th><th>目标1/2/3</th><th>RR2</th><th>V5/V20</th><th>市场/RS</th><th>入池</th><th>风险/警告</th><th>数据日</th>
             </tr>
           </thead>
@@ -59,7 +59,7 @@
               <td>{{ c.lifecycle_status || '--' }}</td>
               <td>{{ c.start_type || '--' }} / {{ c.start_grade || '--' }}</td>
               <td>{{ c.support_status || '--' }}</td>
-              <td>{{ fmt(c.key_support_price) }}</td>
+              <td>{{ fmt(c.key_support_price) }} / {{ fmt(c.prior_key_support_price) }}</td>
               <td>{{ priceRange(c.buy_zone_low, c.buy_zone_high) }}</td>
               <td>{{ fmt(c.stop_loss_price) }}</td>
               <td>{{ fmt(c.target_price_1) }} / {{ fmt(c.target_price_2) }} / {{ fmt(c.target_price_3) }}</td>
@@ -89,9 +89,10 @@
       <div class="detail-grid">
         <div><span>分类</span><strong>{{ selected.candidate_type }} / {{ selected.classification || '--' }}</strong></div>
         <div><span>生命周期</span><strong>{{ selected.lifecycle_status || '--' }}</strong></div>
-        <div><span>强势启动</span><strong>{{ selected.start_type || '--' }} / {{ selected.start_grade || '--' }} / {{ pct(selected.start_day_return) }}</strong></div>
+        <div><span>强势启动</span><strong>{{ selected.start_type || '--' }} / {{ selected.start_grade || '--' }} / {{ pct(selected.start_day_return) }} · 启动后{{ selected.days_since_start ?? 0 }}日</strong></div>
+        <div><span>启动日低点</span><strong>{{ fmt(selected.start_low) }}</strong></div>
         <div><span>支撑</span><strong>{{ selected.support_status || '--' }} · {{ selected.main_support_ma || '--' }} · 测试{{ selected.support_test_count ?? 0 }}次</strong></div>
-        <div><span>战术价格</span><strong>支撑 {{ fmt(selected.key_support_price) }} · 止损 {{ fmt(selected.stop_loss_price) }}</strong></div>
+        <div><span>战术价格</span><strong>支撑 {{ fmt(selected.key_support_price) }} · 前置支撑 {{ fmt(selected.prior_key_support_price) }} · 止损 {{ fmt(selected.stop_loss_price) }}</strong></div>
         <div><span>买入区</span><strong>{{ priceRange(selected.buy_zone_low, selected.buy_zone_high) }}</strong></div>
         <div><span>目标</span><strong>{{ fmt(selected.target_price_1) }} / {{ fmt(selected.target_price_2) }} / {{ fmt(selected.target_price_3) }}</strong></div>
         <div><span>盈亏比</span><strong>RR1 {{ fmt(selected.risk_reward_ratio_1) }} · RR2 {{ fmt(selected.risk_reward_ratio_2) }} · RR3 {{ fmt(selected.risk_reward_ratio_3) }}</strong></div>
@@ -246,8 +247,11 @@ export default {
           { header: '启动日', value: c => c.start_date || '' },
           { header: '启动类型', value: c => c.start_type || '' },
           { header: '启动等级', value: c => c.start_grade || '' },
+          { header: '启动日低点', value: c => this.fmt(c.start_low) },
+          { header: '启动后天数', value: c => c.days_since_start ?? '' },
           { header: '支撑状态', value: c => c.support_status || '' },
           { header: 'Key支撑', value: c => this.fmt(c.key_support_price) },
+          { header: '前置支撑', value: c => this.fmt(c.prior_key_support_price) },
           { header: '支撑区低', value: c => this.fmt(c.support_zone_low) },
           { header: '支撑区高', value: c => this.fmt(c.support_zone_high) },
           { header: '建议买入价', value: c => this.fmt(c.suggested_buy_price) },

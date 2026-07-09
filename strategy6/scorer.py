@@ -90,4 +90,6 @@ def _risk_control_score(ind: Strategy6Indicators, start: Strategy6Start, trade_p
         score -= 5
     if ind.sector_filter_enabled and ind.sector_filter_mode == "score_only" and ind.sector_strength_status in {"SECTOR_WEAK", "SECTOR_RISK"}:
         score -= 5
+    if "UPPER_SHADOW_PRESSURE" in ind.warn_tags:
+        score -= 5
     return max(0, score)

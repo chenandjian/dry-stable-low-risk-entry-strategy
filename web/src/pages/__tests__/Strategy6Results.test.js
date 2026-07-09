@@ -50,8 +50,11 @@ describe('Strategy6Results', () => {
           current_price: 12.34,
           start_type: 'VOLUME_LIMIT_UP',
           start_grade: 'S',
+          start_low: 11.2,
+          days_since_start: 5,
           support_status: 'MA10_SUPPORT',
           key_support_price: 11.8,
+          prior_key_support_price: 11.6,
           buy_zone_low: 11.8,
           buy_zone_high: 12.2,
           stop_loss_price: 11.45,
@@ -131,6 +134,9 @@ describe('Strategy6Results', () => {
     expect(wrapper.text()).toContain('WATCH_CANDIDATE')
     expect(wrapper.text()).toContain('VOLUME_LIMIT_UP / S')
     expect(wrapper.text()).toContain('MA10_SUPPORT')
+    expect(wrapper.text()).toContain('11.80 / 11.60')
+    expect(wrapper.text()).toContain('启动后5日')
+    expect(wrapper.text()).toContain('启动日低点')
     expect(wrapper.text()).toContain('11.80 - 12.20')
     expect(wrapper.text()).toContain('止损')
     expect(wrapper.text()).toContain('RR2')
@@ -197,6 +203,8 @@ describe('Strategy6Results', () => {
     const csv = await blob.text()
     expect(csv).toContain('代码,名称,板块,候选类型,生命周期,首次入池,池龄交易日')
     expect(csv).toContain('市场状态,板块状态,RS20,板块RS10')
+    expect(csv).toContain('启动日低点,启动后天数')
+    expect(csv).toContain('Key支撑,前置支撑')
     expect(csv).toContain('000001,平安银行,,READY_CANDIDATE,BUY_ZONE,2026-07-01,6')
     expect(csv).toContain('MARKET_WEAK,UNKNOWN,18.00%,3.00%')
   })

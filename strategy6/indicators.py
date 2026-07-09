@@ -38,6 +38,7 @@ def calculate_indicators(
     ind.evaluation_date = rows[-1]["date"]
     ind.current_price = rows[-1]["close"]
     ind.daily_return = _return_between(rows[-1]["prev_close"], rows[-1]["close"])
+    ind.current_close_position = _close_position(rows[-1])
     ind.ma5 = _ma(rows, 5)
     ind.ma10 = _ma(rows, 10)
     ind.ma20 = _ma(rows, 20)
@@ -136,6 +137,11 @@ def _has_big_down_volume(rows: list[dict], v20: float, config: dict) -> bool:
     return False
 
 
+def _close_position(row: dict) -> float:
+    span = row["high"] - row["low"]
+    return round((row["close"] - row["low"]) / span, 6) if span > 0 else 1.0
+
+
 def _mean(values) -> float:
     total = 0.0
     count = 0
@@ -143,4 +149,3 @@ def _mean(values) -> float:
         total += value
         count += 1
     return total / count if count else 0.0
-

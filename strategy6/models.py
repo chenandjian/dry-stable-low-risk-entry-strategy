@@ -9,6 +9,7 @@ class Strategy6Indicators:
     evaluation_date: str = ""
     current_price: float = 0.0
     daily_return: float = 0.0
+    current_close_position: float = 0.0
     trading_days: int = 0
     ma5: float = 0.0
     ma10: float = 0.0
@@ -58,10 +59,12 @@ class Strategy6Start:
     start_day_volume_ratio: float = 0.0
     start_day_amount: float = 0.0
     start_day_close_position: float = 0.0
+    start_low: float = 0.0
     is_limit_up: bool = False
     is_one_word_limit_up: bool = False
     limit_up_pct: float = 0.0
     high_trigger: str = ""
+    days_since_start: int = 0
 
 
 @dataclass
@@ -69,6 +72,7 @@ class Strategy6Support:
     support_status: str = "SUPPORT_FAILED"
     main_support_ma: str = ""
     key_support_price: float = 0.0
+    prior_key_support_price: float = 0.0
     support_zone_low: float = 0.0
     support_zone_high: float = 0.0
     defense_support_price: float = 0.0
@@ -153,6 +157,7 @@ class Strategy6Evaluation:
             "current_price": ind.current_price,
             "close": ind.current_price,
             "daily_return": ind.daily_return,
+            "current_close_position": ind.current_close_position,
             "trading_days": ind.trading_days,
             "ma5": ind.ma5,
             "ma10": ind.ma10,
@@ -188,11 +193,14 @@ class Strategy6Evaluation:
             "start_day_volume_ratio": start.start_day_volume_ratio,
             "start_day_amount": start.start_day_amount,
             "start_day_close_position": start.start_day_close_position,
+            "start_low": start.start_low,
             "is_limit_up": start.is_limit_up,
             "is_one_word_limit_up": start.is_one_word_limit_up,
             "limit_up_pct": start.limit_up_pct,
+            "days_since_start": start.days_since_start,
             "high_trigger": start.high_trigger,
             "key_support_price": support.key_support_price,
+            "prior_key_support_price": support.prior_key_support_price,
             "support_zone_low": support.support_zone_low,
             "support_zone_high": support.support_zone_high,
             "defense_support_price": support.defense_support_price,

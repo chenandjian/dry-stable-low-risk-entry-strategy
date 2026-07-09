@@ -22,8 +22,12 @@ def _candidate():
         "total_score": 82,
         "start_type": "NORMAL_STRONG_BREAKOUT",
         "start_grade": "A",
+        "current_close_position": 0.72,
+        "start_low": 11.5,
+        "days_since_start": 5,
         "support_status": "MA20_SUPPORT",
         "key_support_price": 12.0,
+        "prior_key_support_price": 11.8,
         "support_zone_low": 11.64,
         "support_zone_high": 12.48,
         "suggested_buy_price": 12.34,
@@ -49,6 +53,9 @@ def test_strategy6_candidate_table_is_independent(tmp_path):
     detail = db.get_strategy6_candidate("000001", task_id="s6-task")
     assert rows[0]["code"] == "000001"
     assert rows[0]["candidate_type"] == "KEY_CANDIDATE"
+    assert rows[0]["days_since_start"] == 5
+    assert rows[0]["start_low"] == 11.5
+    assert rows[0]["prior_key_support_price"] == 11.8
     assert rows[0]["first_pool_date"] == "2026-07-01"
     assert rows[0]["pool_age_trading_days"] == 6
     assert rows[0]["warn_tags"] == ["PRESSURE_NEAR_HIGH"]
@@ -112,6 +119,9 @@ def test_strategy6_api_exports_excel_report(tmp_path, monkeypatch):
     assert "enable_market_filter" in shared
     assert "relative_strength_10_sector" in shared
     assert "sector_member_new_high_count" in shared
+    assert "days_since_start" in shared
+    assert "start_low" in shared
+    assert "prior_key_support_price" in shared
     assert "000001" in shared
     assert "MARKET_STRONG" in shared
     assert "SECTOR_STRONG" in shared

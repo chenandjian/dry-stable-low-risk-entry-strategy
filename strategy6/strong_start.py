@@ -47,9 +47,11 @@ def evaluate_strong_start(rows: list[dict], ind: Strategy6Indicators, config: di
             start_day_volume_ratio=round(volume_ratio, 6),
             start_day_amount=round(amount_yi, 4),
             start_day_close_position=round(close_position, 6),
+            start_low=row["low"],
             is_limit_up=limit_up,
             is_one_word_limit_up=one_word,
             limit_up_pct=get_limit_up_pct(code),
+            days_since_start=len(rows) - idx - 1,
         )
         candidate.start_grade = _grade(candidate, ind)
         if _rank(candidate) > _rank(best):
@@ -57,6 +59,8 @@ def evaluate_strong_start(rows: list[dict], ind: Strategy6Indicators, config: di
     best.high_trigger = _high_trigger(ind, config)
     if best.start_type == "NONE":
         best.start_grade = _grade(best, ind)
+        if best.start_grade == "B":
+            best.start_type = "B_GRADE_MOMENTUM"
     return best
 
 
@@ -99,6 +103,7 @@ def _rank(start: Strategy6Start) -> int:
         "LOW_VOLUME_LIMIT_UP": 3,
         "VOLUME_LIMIT_UP": 4,
         "ONE_WORD_LIMIT_UP": 5,
+        "B_GRADE_MOMENTUM": 2,
     }.get(start.start_type, 0)
     grade_rank = {"NONE": 0, "B": 1, "A": 2, "S": 3}.get(start.start_grade, 0)
     return type_rank * 10 + grade_rank
@@ -113,4 +118,3 @@ def _avg_prior_volume(rows: list[dict], idx: int, days: int) -> float:
     start = max(0, idx - days)
     selected = rows[start:idx]
     return sum(r["volume"] for r in selected) / len(selected) if selected else 0.0
-

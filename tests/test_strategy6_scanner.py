@@ -126,8 +126,8 @@ def test_strategy6_scan_reports_market_status_when_market_filter_disabled(tmp_pa
     row = db.get_strategy6_candidates("s6-market-off")[0]
     assert row["enable_market_filter"] is False
     assert row["market_status"] == "MARKET_WEAK"
-    assert row["candidate_type"] != "WATCH_CANDIDATE"
     assert "MARKET_WEAK_DOWNGRADED" not in row["warn_tags"]
+    assert "MARKET_WEAK_STRICT" not in row["warn_tags"]
 
 
 def test_strategy6_scan_truncates_market_context_to_stock_evaluation_date(tmp_path, monkeypatch):
@@ -323,8 +323,8 @@ def test_strategy6_scan_reports_sector_status_when_sector_filter_disabled(tmp_pa
     row = db.get_strategy6_candidates("s6-sector-off")[0]
     assert row["enable_sector_filter"] is False
     assert row["sector_strength_status"] == "SECTOR_STRONG"
-    assert row["candidate_type"] != "WATCH_CANDIDATE"
     assert "SECTOR_WEAK_DOWNGRADED" not in row["warn_tags"]
+    assert "SECTOR_WEAK_STRICT" not in row["warn_tags"]
 
 
 def test_strategy6_sector_strength_requires_member_new_high_breadth(tmp_path, monkeypatch):

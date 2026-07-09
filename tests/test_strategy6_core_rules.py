@@ -117,6 +117,222 @@ def test_big_down_volume_is_hard_rejected():
     assert "BIG_DOWN_VOLUME" in result.reject_reasons
 
 
+def test_consolidation_limits_are_hard_filters_by_start_grade():
+    data = build_strategy6_candidate_data()
+    # S-grade start allows 25% range_5. This deliberately exceeds it while
+    # staying below the absolute 50% range_10 floor, so the grade-specific
+    # consolidation rule is the only reason to reject.
+    base = data[-6]["close"]
+    data[-5]["high"] = round(base * 1.16, 4)
+    data[-5]["low"] = round(base * 0.88, 4)
+
+    result = StrongVcpTailEngine({}).evaluate_at(data, code="000001", name="平安银行")
+
+    assert result.passed is False
+    assert "CONSOLIDATION_RANGE_5_GT_S_LIMIT" in result.reject_reasons
+
+
+def test_support_requires_recent_valid_support_test():
+    data = build_strategy6_candidate_data()
+    # Keep MA20 support but make all recent lows stay well above the selected
+    # support so "横盘必须有支撑测试" is not satisfied.
+    for row in data[-10:]:
+        row["open"] = round(row["close"] * 1.055, 4)
+        row["low"] = round(row["close"] * 1.05, 4)
+        row["high"] = round(row["close"] * 1.06, 4)
+
+    result = StrongVcpTailEngine({}).evaluate_at(data, code="000001", name="平安银行")
+
+    assert result.passed is False
+    assert "NO_VALID_SUPPORT_TEST" in result.reject_reasons
+
+
+def test_one_word_limit_up_without_followup_confirmation_is_watch_only():
+    data = build_strategy6_candidate_data()
+    idx = -3
+    for offset in range(-5, 0):
+        data[offset]["volume"] = 320_000 + (offset + 5) * 10_000
+        data[offset]["amount"] = 1_200_000_000
+    prev_close = data[idx - 1]["close"]
+    limit_price = round(prev_close * 1.10, 2)
+    data[idx].update({
+        "open": limit_price,
+        "high": limit_price,
+        "low": limit_price,
+        "close": limit_price,
+        "volume": 300_000,
+        "amount": 1_400_000_000,
+    })
+    for offset, multiplier in ((-2, 1.002), (-1, 1.003)):
+        close = round(limit_price * multiplier, 4)
+        data[offset].update({
+            "open": round(close * 0.998, 4),
+            "high": round(close * 1.01, 4),
+            "low": round(close * 0.992, 4),
+            "close": close,
+            "volume": 260_000 if offset == -2 else 240_000,
+            "amount": 1_200_000_000,
+        })
+
+    result = StrongVcpTailEngine({"strategy6": {"tail_close_range_5": 0.12}}).evaluate_at(data, code="000001", name="平安银行")
+    candidate = result.to_candidate_dict()
+
+    assert result.passed is True
+    assert result.start.start_type == "ONE_WORD_LIMIT_UP"
+    assert result.candidate_type == "WATCH_CANDIDATE"
+    assert "ONE_WORD_LIMIT_UP_UNCONFIRMED" in candidate["warn_tags"]
+
+
+def test_upper_shadow_pressure_downgrades_key_candidate_to_watch():
+    data = build_strategy6_candidate_data()
+    pressure = data[-8]
+    pressure["high"] = round(data[-1]["close"] * 1.02, 4)
+    pressure["open"] = round(pressure["high"] * 0.90, 4)
+    pressure["close"] = round(pressure["high"] * 0.91, 4)
+    pressure["low"] = round(pressure["high"] * 0.89, 4)
+    pressure["volume"] = 2_000_000
+
+    result = StrongVcpTailEngine({}).evaluate_at(data, code="000001", name="平安银行")
+    candidate = result.to_candidate_dict()
+
+    assert result.passed is True
+    assert result.candidate_type == "WATCH_CANDIDATE"
+    assert "UPPER_SHADOW_PRESSURE" in candidate["warn_tags"]
+
+
+def test_one_word_limit_up_confirmation_requires_close_above_start_low():
+    data = build_strategy6_candidate_data()
+    idx = -4
+    prev_close = data[idx - 1]["close"]
+    limit_price = round(prev_close * 1.10, 2)
+    data[idx].update({
+        "open": limit_price,
+        "high": limit_price,
+        "low": limit_price,
+        "close": limit_price,
+        "volume": 300_000,
+        "amount": 1_400_000_000,
+    })
+    for offset, multiplier in ((-3, 0.996), (-2, 0.994), (-1, 0.993)):
+        close = round(limit_price * multiplier, 4)
+        data[offset].update({
+            "open": round(close * 0.998, 4),
+            "high": round(close * 1.006, 4),
+            "low": round(close * 0.99, 4),
+            "close": close,
+            "volume": 220_000,
+            "amount": 1_200_000_000,
+        })
+
+    result = StrongVcpTailEngine({"strategy6": {"tail_close_range_5": 0.12}}).evaluate_at(data, code="000001", name="平安银行")
+    candidate = result.to_candidate_dict()
+
+    assert result.start.start_type == "ONE_WORD_LIMIT_UP"
+    assert result.start.days_since_start >= 3
+    assert result.passed is True
+    assert result.candidate_type == "WATCH_CANDIDATE"
+    assert "ONE_WORD_LIMIT_UP_UNCONFIRMED" in candidate["warn_tags"]
+
+
+def test_breakout_confirmation_requires_quality_breakout_not_extended_chase():
+    data = build_strategy6_candidate_data()
+    current = data[-1]["close"]
+    for row in data[-20:-1]:
+        row["high"] = round(current * 1.005, 4)
+        row["close"] = round(min(row["close"], current * 1.002), 4)
+    pivot = max(row["close"] for row in data[-20:-1])
+    data[-1].update({
+        "open": round(pivot * 1.05, 4),
+        "high": round(pivot * 1.105, 4),
+        "low": round(pivot * 1.04, 4),
+        "close": round(pivot * 1.09, 4),
+        "volume": 900_000,
+    })
+
+    result = StrongVcpTailEngine({"strategy6": {"tail_close_range_5": 0.12}}).evaluate_at(data, code="000001", name="平安银行")
+
+    assert result.lifecycle_status != "BREAKOUT_CONFIRMED"
+    assert result.passed is False
+
+
+def test_close_below_key_support_shape_failure_marks_failed():
+    data = build_strategy6_candidate_data()
+    initial = StrongVcpTailEngine({}).evaluate_at(data, code="000001", name="平安银行")
+    key_support = initial.support.key_support_price
+    for offset, multiplier in ((-2, 0.965), (-1, 0.955)):
+        data[offset].update({
+            "open": round(key_support * (multiplier + 0.004), 4),
+            "high": round(key_support * (multiplier + 0.01), 4),
+            "low": round(key_support * (multiplier - 0.01), 4),
+            "close": round(key_support * multiplier, 4),
+            "volume": 430_000,
+        })
+
+    result = StrongVcpTailEngine({}).evaluate_at(data, code="000001", name="平安银行")
+
+    assert result.passed is False
+    assert result.lifecycle_status == "FAILED"
+    assert "CLOSE_LT_KEY_SUPPORT_0_96" in result.reject_reasons
+
+
+def test_b_grade_strong_start_is_watch_only_even_with_high_score():
+    data = build_strategy6_candidate_data()
+    base = data[-21]["close"]
+    close = base * 1.03
+    data[-20].update({
+        "open": round(close * 0.995, 4),
+        "high": round(close * 1.015, 4),
+        "low": round(close * 0.985, 4),
+        "close": round(close, 4),
+        "volume": 1_200_000,
+        "amount": 1_400_000_000,
+    })
+    pivot = data[-20]["close"]
+    closes = [pivot * v for v in (1.06, 1.08, 1.10, 1.12, 1.135, 1.15, 1.16, 1.17, 1.178, 1.184,
+                                  1.188, 1.191, 1.194, 1.197, 1.199, 1.201, 1.202, 1.203, 1.204)]
+    volumes = [1_400_000, 1_300_000, 1_200_000, 1_100_000, 1_000_000,
+               950_000, 900_000, 850_000, 800_000, 760_000,
+               720_000, 680_000, 640_000, 600_000, 560_000,
+               520_000, 500_000, 480_000, 460_000]
+    for j, close in enumerate(closes):
+        data[-19 + j].update({
+            "open": round(close * 0.998, 4),
+            "high": round(close * 1.01, 4),
+            "low": round(close * 0.985, 4),
+            "close": round(close, 4),
+            "volume": volumes[j],
+            "amount": 1_200_000_000,
+        })
+    result = StrongVcpTailEngine({
+        "strategy6": {
+            "tail_close_range_5": 0.12,
+            "tail_volume_ratio_5_20": 0.90,
+            "ready_min_score": 60,
+            "key_min_score": 60,
+        }
+    }).evaluate_at(data, code="000001", name="平安银行")
+
+    assert result.start.start_grade == "B"
+    assert result.passed is True
+    assert result.candidate_type == "WATCH_CANDIDATE"
+
+
+def test_upper_shadow_pressure_deducts_risk_control_score():
+    data = build_strategy6_candidate_data()
+    clean = StrongVcpTailEngine({}).evaluate_at(data, code="000001", name="平安银行")
+    pressure = data[-8]
+    pressure["high"] = round(data[-1]["close"] * 1.02, 4)
+    pressure["open"] = round(pressure["high"] * 0.90, 4)
+    pressure["close"] = round(pressure["high"] * 0.91, 4)
+    pressure["low"] = round(pressure["high"] * 0.89, 4)
+    pressure["volume"] = 2_000_000
+
+    pressured = StrongVcpTailEngine({}).evaluate_at(data, code="000001", name="平安银行")
+
+    assert "UPPER_SHADOW_PRESSURE" in pressured.indicators.warn_tags
+    assert pressured.score.risk_control_score == clean.score.risk_control_score - 5
+
+
 def test_close_below_ma5_is_not_marked_ma5_support():
     data = build_strategy6_candidate_data()
     data[-1]["close"] = round(data[-1]["close"] * 0.96, 4)
@@ -176,10 +392,11 @@ def test_market_filter_off_reports_weak_market_without_downgrading():
     )
     candidate = result.to_candidate_dict()
 
-    assert result.candidate_type == "KEY_CANDIDATE"
+    assert result.passed is True
     assert candidate["market_status"] == "MARKET_WEAK"
     assert candidate["enable_market_filter"] is False
     assert "MARKET_WEAK_DOWNGRADED" not in candidate["warn_tags"]
+    assert "MARKET_WEAK_STRICT" not in candidate["warn_tags"]
 
 
 def test_market_filter_downgrade_moves_ready_or_key_to_watch():

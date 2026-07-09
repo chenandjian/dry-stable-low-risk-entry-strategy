@@ -59,7 +59,7 @@ class StrongVcpTailEngine:
         apply_pressure_tags(rows, indicators)
         trade_plan = calculate_trade_plan(indicators, support)
         score = score_strategy6(indicators, start, support, dry_tail, trade_plan)
-        reject_reasons = hard_filter_reasons(indicators, start, support, dry_tail, trade_plan, self.config)
+        reject_reasons = hard_filter_reasons(rows, indicators, start, support, dry_tail, trade_plan, self.config)
         candidate_type, classification, lifecycle_status, suggestion = classify_candidate(
             indicators,
             start,
