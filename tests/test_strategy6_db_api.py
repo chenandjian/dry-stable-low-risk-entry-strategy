@@ -1,4 +1,6 @@
 from fastapi.testclient import TestClient
+import zipfile
+from io import BytesIO
 
 import scanner.db as db
 import server as server_mod
@@ -76,6 +78,45 @@ def test_strategy6_api_returns_candidates_and_rejects_cross_strategy(tmp_path, m
     mismatch = client.get("/api/strategy6/tasks/s1-task/candidates")
     assert mismatch.status_code == 400
     assert mismatch.json()["error"] == "TASK_STRATEGY_MISMATCH"
+
+
+def test_strategy6_api_exports_excel_report(tmp_path, monkeypatch):
+    db_path = str(tmp_path / "s6report.db")
+    db.init_db(db_path)
+    monkeypatch.setattr(server_mod, "load_config", lambda path="config.yaml": {"data": {"database_path": db_path}, "strategy6": {}})
+    server_mod._running.update({"running": False, "task_id": None, "strategy_type": None, "stats": {}})
+
+    candidate = _candidate()
+    candidate.update({
+        "enable_market_filter": True,
+        "enable_sector_filter": True,
+        "market_filter_mode": "downgrade",
+        "sector_filter_mode": "downgrade",
+        "market_status": "MARKET_STRONG",
+        "sector_strength_status": "SECTOR_STRONG",
+        "relative_strength_20": 0.18,
+        "relative_strength_10_sector": 0.03,
+    })
+    db.create_scan_task("s6-report", "2026-07-09 10:05:00", strategy_type=STRATEGY6_TYPE)
+    db.upsert_strategy6_candidate("s6-report", candidate)
+
+    response = TestClient(server_mod.app).get("/api/strategy6/tasks/s6-report/report.xlsx")
+
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    assert "strategy6-report-s6-report.xlsx" in response.headers["content-disposition"]
+    workbook = zipfile.ZipFile(BytesIO(response.content))
+    sheet = workbook.read("xl/worksheets/sheet1.xml").decode("utf-8")
+    shared = workbook.read("xl/sharedStrings.xml").decode("utf-8")
+    assert "stock_code" in shared
+    assert "enable_market_filter" in shared
+    assert "relative_strength_10_sector" in shared
+    assert "sector_member_new_high_count" in shared
+    assert "000001" in shared
+    assert "MARKET_STRONG" in shared
+    assert "SECTOR_STRONG" in shared
+    assert "<v>0.18</v>" in sheet
+    assert "<v>0.03</v>" in sheet
 
 
 def test_strategy6_candidate_expires_after_ten_trading_days(tmp_path):

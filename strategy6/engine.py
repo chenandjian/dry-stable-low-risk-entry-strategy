@@ -51,6 +51,7 @@ class StrongVcpTailEngine:
         if sector_context:
             indicators.sector_strength_status = str(sector_context.get("sector_strength_status") or "UNKNOWN")
             indicators.relative_strength_10_sector = float(sector_context.get("relative_strength_10_sector") or 0.0)
+            indicators.sector_member_new_high_count = int(sector_context.get("sector_member_new_high_count") or 0)
         start = evaluate_strong_start(rows, indicators, self.config, code)
         support = evaluate_support(rows, indicators, start)
         dry_tail = evaluate_dry_tail(rows, indicators, self.config)

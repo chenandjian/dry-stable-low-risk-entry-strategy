@@ -313,6 +313,12 @@ export function useApi() {
     return res.json()
   }
 
+  async function downloadStrategy6Report(taskId) {
+    const res = await fetch(`${API_BASE}/strategy6/tasks/${encodeURIComponent(taskId)}/report.xlsx`)
+    if (!res.ok) throw new Error('strategy6 report export failed')
+    return res.blob()
+  }
+
   // Strategy2 Backtest API
   async function startStrategy2Backtest(payload) {
     const res = await fetch(`${API_BASE}/strategy2/backtests`, {
@@ -445,7 +451,7 @@ export function useApi() {
     startStrategy5Scan, getStrategy5ScanStatus, getStrategy5Tasks,
     getStrategy5Candidates, getStrategy5Candidate,
     startStrategy6Scan, getStrategy6ScanStatus, getStrategy6Tasks,
-    getStrategy6Candidates, getStrategy6Candidate,
+    getStrategy6Candidates, getStrategy6Candidate, downloadStrategy6Report,
     startStrategy2Backtest, getStrategy2BacktestStatus,
     getStrategy2BacktestTasks, getStrategy2BacktestTask,
     getStrategy2BacktestOpportunities, getStrategy2BacktestInsufficientStocks,

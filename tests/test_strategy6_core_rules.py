@@ -142,6 +142,7 @@ def test_strategy6_defaults_enable_real_market_filter_only():
     assert cfg["market_filter_mode"] == "downgrade"
     assert cfg["enable_sector_filter"] is True
     assert cfg["sector_filter_mode"] == "downgrade"
+    assert cfg["sector_min_member_new_high_count"] == 3
 
 
 def _market_rows(closes):

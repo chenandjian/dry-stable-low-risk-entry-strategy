@@ -36,6 +36,7 @@ class Strategy6Indicators:
     close_range_5: float = 0.0
     relative_strength_20: float = 0.0
     relative_strength_10_sector: float = 0.0
+    sector_member_new_high_count: int = 0
     market_status: str = "UNKNOWN"
     sector_strength_status: str = "UNKNOWN"
     market_filter_enabled: bool = False
@@ -163,6 +164,7 @@ class Strategy6Evaluation:
             "return_20": ind.return_20,
             "relative_strength_20": ind.relative_strength_20,
             "relative_strength_10_sector": ind.relative_strength_10_sector,
+            "sector_member_new_high_count": ind.sector_member_new_high_count,
             "amount_avg_10": ind.amount_avg_10,
             "amount_avg_30": ind.amount_avg_30,
             "amount_avg_60": ind.amount_avg_60,

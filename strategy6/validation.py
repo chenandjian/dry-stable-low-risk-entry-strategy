@@ -17,6 +17,7 @@ DEFAULT_STRATEGY6_CONFIG = {
     "enable_sector_filter": True,
     "market_filter_mode": "downgrade",
     "sector_filter_mode": "downgrade",
+    "sector_min_member_new_high_count": 3,
     "normal_start_return": 0.07,
     "normal_start_volume_ratio": 2.0,
     "normal_start_close_position": 0.65,
@@ -62,6 +63,7 @@ def resolve_strategy6_config(config: dict | None) -> dict:
     raw["enabled"] = bool(raw.get("enabled", True))
     _validate_int_range(raw, "kline_days", 260, 3000)
     _validate_int_range(raw, "minimum_trading_days", 260, raw["kline_days"])
+    _validate_int_range(raw, "sector_min_member_new_high_count", 0, 50)
     for key in (
         "min_avg_amount_60d_yi", "min_avg_amount_30d_yi", "min_avg_amount_10d_yi",
         "amount10_vs_30_min_ratio", "normal_start_return", "normal_start_volume_ratio",

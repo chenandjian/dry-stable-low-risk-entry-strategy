@@ -124,8 +124,28 @@ def test_strategy6_scan_uses_cached_topic_index_for_sector_strength(tmp_path):
         source="akshare_ths",
         membership_snapshot_date=(start_date + timedelta(days=79)).isoformat(),
         membership_mode="historical_members",
-        members=[{"code": "000001", "name": "平安银行"}],
+        members=[
+            {"code": "000001", "name": "平安银行"},
+            {"code": "000002", "name": "宽度1"},
+            {"code": "000003", "name": "宽度2"},
+        ],
     )
+    for member in ("000001", "000002", "000003"):
+        rows = []
+        for i in range(80):
+            close = 10 + i * 0.01
+            if i >= 76:
+                close = 13 + i * 0.02
+            rows.append({
+                "date": (start_date + timedelta(days=i)).isoformat(),
+                "open": close * 0.99,
+                "high": close * 1.01,
+                "low": close * 0.98,
+                "close": close,
+                "volume": 1_000_000,
+                "turnover": 600_000_000,
+            })
+        db.save_ohlc(member, rows)
     stocks = [{"code": "000001", "name": "平安银行", "market": "SZ", "sector_name": "银行"}]
 
     def fake_fetch(*args, **kwargs):
@@ -137,3 +157,86 @@ def test_strategy6_scan_uses_cached_topic_index_for_sector_strength(tmp_path):
     assert row["enable_sector_filter"] is True
     assert row["sector_strength_status"] == "SECTOR_STRONG"
     assert row["relative_strength_10_sector"] != 0
+
+
+def test_strategy6_sector_strength_requires_member_new_high_breadth(tmp_path):
+    from tests.test_strategy6_core_rules import build_strategy6_candidate_data
+
+    db_path = str(tmp_path / "s6sectorbreadth.db")
+    config = {
+        "data": {"database_path": db_path, "daily_sources": ["baidu", "sina", "tencent"], "worker_count": 1},
+        "strategy6": {
+            "enable_market_filter": False,
+            "enable_sector_filter": True,
+            "sector_filter_mode": "downgrade",
+        },
+    }
+    db.init_db(db_path)
+    topic_rows = []
+    start_date = date(2025, 11, 11)
+    for i in range(80):
+        close = 100 + i * 0.1
+        if i >= 70:
+            close += (i - 69) * 1.2
+        topic_rows.append({
+            "date": (start_date + timedelta(days=i)).isoformat(),
+            "open": close * 0.99,
+            "high": close * 1.01,
+            "low": close * 0.98,
+            "close": close,
+            "amount": 10_000_000_000,
+        })
+    db.save_strategy4_topic_index_ohlc(
+        topic_id="industry:银行",
+        topic_name="银行",
+        topic_type="industry",
+        source="akshare_ths",
+        rows=topic_rows,
+    )
+    members = [
+        {"code": "000001", "name": "平安银行"},
+        {"code": "000002", "name": "宽度1"},
+        {"code": "000003", "name": "宽度2"},
+        {"code": "000004", "name": "未新高"},
+    ]
+    db.save_strategy4_topic_members(
+        topic_id="industry:银行",
+        topic_name="银行",
+        topic_type="industry",
+        source="akshare_ths",
+        membership_snapshot_date=(start_date + timedelta(days=79)).isoformat(),
+        membership_mode="historical_members",
+        members=members,
+    )
+
+    for idx, member in enumerate(members):
+        rows = []
+        for i in range(80):
+            close = 10 + i * 0.01
+            if idx < 2 and i >= 76:
+                close = 13 + i * 0.02
+            elif idx >= 2 and i >= 75:
+                close = 9.5 + i * 0.001
+            rows.append({
+                "date": (start_date + timedelta(days=i)).isoformat(),
+                "open": close * 0.99,
+                "high": close * 1.01,
+                "low": close * 0.98,
+                "close": close,
+                "volume": 1_000_000,
+                "turnover": 600_000_000,
+            })
+        db.save_ohlc(member["code"], rows)
+
+    stocks = [{"code": "000001", "name": "平安银行", "market": "SZ", "sector_name": "银行"}]
+
+    def fake_fetch(*args, **kwargs):
+        return FetchResult(data=build_strategy6_candidate_data(), primary_source="baidu", fallback_source="baidu")
+
+    scan_strategy6_all(config, task_id="s6-sector-breadth", stocks=stocks, fetch_daily_fn=fake_fetch, worker_count=1)
+
+    row = db.get_strategy6_candidates("s6-sector-breadth")[0]
+    assert row["sector_strength_status"] != "SECTOR_STRONG"
+    assert row["sector_member_new_high_count"] == 2
+    assert row["candidate_type"] == "WATCH_CANDIDATE"
+    assert "SECTOR_WEAK_DOWNGRADED" in row["warn_tags"]

@@ -5,6 +5,7 @@ import { nextTick } from 'vue'
 const api = {
   getStrategy6Tasks: vi.fn(),
   getStrategy6Candidates: vi.fn(),
+  downloadStrategy6Report: vi.fn(),
 }
 
 vi.mock('../../composables/useApi.js', () => ({ useApi: () => api }))
@@ -104,6 +105,9 @@ describe('Strategy6Results', () => {
         },
       ],
     })
+    api.downloadStrategy6Report.mockResolvedValue(new Blob(['xlsx-bytes'], {
+      type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    }))
   })
 
   afterEach(() => {
@@ -195,5 +199,28 @@ describe('Strategy6Results', () => {
     expect(csv).toContain('市场状态,板块状态,RS20,板块RS10')
     expect(csv).toContain('000001,平安银行,,READY_CANDIDATE,BUY_ZONE,2026-07-01,6')
     expect(csv).toContain('MARKET_WEAK,UNKNOWN,18.00%,3.00%')
+  })
+
+  it('exports strategy6 daily report as excel from backend report endpoint', async () => {
+    const wrapper = mount(Strategy6Results, {
+      global: {
+        mocks: {
+          $route: { query: { task: 's6-task' } },
+        },
+      },
+    })
+    await flushUi()
+    const mocks = installDownloadMocks()
+
+    const button = wrapper.find('[data-test="export-excel-report"]')
+    expect(button.exists()).toBe(true)
+    await button.trigger('click')
+
+    expect(api.downloadStrategy6Report).toHaveBeenCalledWith('s6-task')
+    expect(mocks.click).toHaveBeenCalled()
+    const anchor = document.createElement.mock.results.find(result => result.value.tagName === 'A').value
+    expect(anchor.download).toBe('strategy6-report-s6-task.xlsx')
+    const blob = mocks.createObjectURL.mock.calls[0][0]
+    expect(blob.type).toBe('application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
   })
 })

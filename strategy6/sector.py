@@ -2,7 +2,13 @@
 from __future__ import annotations
 
 
-def evaluate_sector_context(stock_return_10: float, topic_rows: list[dict] | None) -> dict:
+def evaluate_sector_context(
+    stock_return_10: float,
+    topic_rows: list[dict] | None,
+    *,
+    member_new_high_count: int | None = None,
+    min_member_new_high_count: int = 3,
+) -> dict:
     rows = sorted([row for row in (topic_rows or []) if isinstance(row, dict)], key=lambda r: str(r.get("date") or ""))
     if len(rows) <= 20:
         return {
@@ -10,12 +16,16 @@ def evaluate_sector_context(stock_return_10: float, topic_rows: list[dict] | Non
             "relative_strength_10_sector": 0.0,
             "sector_return_10": 0.0,
             "sector_return_20": 0.0,
+            "sector_member_new_high_count": member_new_high_count or 0,
         }
 
     ret10 = _return(rows, 10)
     ret20 = _return(rows, 20)
-    if ret10 >= 0.05 and ret20 >= 0.08:
+    breadth_ok = member_new_high_count is None or member_new_high_count >= min_member_new_high_count
+    if ret10 >= 0.05 and ret20 >= 0.08 and breadth_ok:
         status = "SECTOR_STRONG"
+    elif ret10 >= 0.05 and ret20 >= 0.08 and not breadth_ok:
+        status = "SECTOR_WEAK"
     elif ret10 <= 0 and ret20 <= 0:
         status = "SECTOR_WEAK"
     else:
@@ -26,6 +36,7 @@ def evaluate_sector_context(stock_return_10: float, topic_rows: list[dict] | Non
         "relative_strength_10_sector": round(stock_return_10 - ret10, 6),
         "sector_return_10": round(ret10, 6),
         "sector_return_20": round(ret20, 6),
+        "sector_member_new_high_count": member_new_high_count or 0,
     }
 
 

@@ -17,6 +17,12 @@
         :disabled="!candidates.length"
         @click="exportCandidates"
       >一键导出列表</button>
+      <button
+        data-test="export-excel-report"
+        class="export-btn"
+        :disabled="!selectedTaskId"
+        @click="exportExcelReport"
+      >导出日报Excel</button>
     </div>
 
     <div v-if="error" class="error-banner">{{ error }}</div>
@@ -268,6 +274,22 @@ export default {
         ],
         rows: this.candidates,
       })
+    },
+    async exportExcelReport() {
+      if (!this.selectedTaskId) return
+      this.error = ''
+      const api = useApi()
+      try {
+        const blob = await api.downloadStrategy6Report(this.selectedTaskId)
+        const url = URL.createObjectURL(blob)
+        const a = document.createElement('a')
+        a.href = url
+        a.download = `strategy6-report-${this.selectedTaskId}.xlsx`
+        a.click()
+        URL.revokeObjectURL(url)
+      } catch (e) {
+        this.error = '策略6日报Excel导出失败'
+      }
     },
   },
 }

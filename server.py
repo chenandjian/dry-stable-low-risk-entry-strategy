@@ -6,7 +6,7 @@ import sys
 import threading
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 
 logging.basicConfig(
     level=logging.INFO,
@@ -27,6 +27,7 @@ from strategy4.config import resolve_strategy4_config
 from strategy5.scanner import STRATEGY5_TYPE, scan_strategy5_all
 from strategy5.validation import resolve_strategy5_config
 from strategy6 import STRATEGY6_TYPE
+from strategy6.report import build_strategy6_report_xlsx
 from strategy6.scanner import scan_strategy6_all
 from strategy6.validation import resolve_strategy6_config
 from scanner.strategy_engine import (
@@ -2455,6 +2456,20 @@ async def strategy6_candidate_detail(task_id: str, code: str):
     if not candidate:
         return JSONResponse({"error": "NOT_FOUND", "taskId": task_id, "code": code}, status_code=404)
     return {"taskId": task_id, "candidate": candidate}
+
+
+@app.get("/api/strategy6/tasks/{task_id}/report.xlsx")
+async def strategy6_excel_report(task_id: str):
+    _, err = _require_task_strategy(task_id, STRATEGY6_TYPE)
+    if err:
+        return err
+    candidates = db.get_strategy6_candidates(task_id)
+    content = build_strategy6_report_xlsx(candidates)
+    return Response(
+        content=content,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="strategy6-report-{task_id}.xlsx"'},
+    )
 
 
 # ====== Strategy2 API ======
