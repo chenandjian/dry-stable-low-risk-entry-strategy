@@ -670,6 +670,129 @@
       </div>
     </section>
 
+    <!-- 策略6：强势 VCP 尾部候选池 -->
+    <section class="section strategy6-section">
+      <h3 class="section-title strategy6-title">策略6 · 强势 VCP 尾部候选池</h3>
+      <p class="section-hint">
+        策略6独立寻找强势启动后的支撑横盘尾部，重点看价稳量干、支撑有效和 RR2 盈亏比。
+      </p>
+
+      <div class="toggle-grid" style="margin-bottom:16px">
+        <label class="toggle-item">
+          <span class="toggle-label">启用策略6</span>
+          <button class="toggle" :class="{ active: config.strategy6?.enabled !== false }"
+            @click="toggleStrategy6('enabled')">{{ config.strategy6?.enabled !== false ? '开' : '关' }}</button>
+        </label>
+        <label class="toggle-item">
+          <span class="toggle-label" title="一期只保留字段和开关，不接入真实大盘过滤">市场过滤</span>
+          <button class="toggle" :class="{ active: config.strategy6?.enable_market_filter === true }"
+            @click="toggleStrategy6('enable_market_filter')">{{ config.strategy6?.enable_market_filter === true ? '开' : '关' }}</button>
+        </label>
+        <label class="toggle-item">
+          <span class="toggle-label" title="一期只保留字段和开关，不接入真实板块过滤">板块过滤</span>
+          <button class="toggle" :class="{ active: config.strategy6?.enable_sector_filter === true }"
+            @click="toggleStrategy6('enable_sector_filter')">{{ config.strategy6?.enable_sector_filter === true ? '开' : '关' }}</button>
+        </label>
+      </div>
+
+      <div class="param-grid">
+        <div class="param">
+          <label title="策略6需要 MA250 和长期新高确认">K线拉取天数</label>
+          <input type="number" v-model.number="config.strategy6.kline_days" @input="markDirty" min="260" max="3000" />
+          <span class="default">默认 1100</span>
+        </div>
+        <div class="param">
+          <label title="低于该交易日数时不参与策略6评估">最低交易天数</label>
+          <input type="number" v-model.number="config.strategy6.minimum_trading_days" @input="markDirty" min="260" max="3000" />
+          <span class="default">默认 500</span>
+        </div>
+        <div class="param">
+          <label title="60日均成交额过滤，单位亿元">60日均额 <span class="unit">亿</span></label>
+          <input type="number" v-model.number="config.strategy6.min_avg_amount_60d_yi" @input="markDirty" min="0" max="1000" step="1" />
+          <span class="default">默认 3</span>
+        </div>
+        <div class="param">
+          <label title="30日均成交额过滤，单位亿元">30日均额 <span class="unit">亿</span></label>
+          <input type="number" v-model.number="config.strategy6.min_avg_amount_30d_yi" @input="markDirty" min="0" max="1000" step="1" />
+          <span class="default">默认 5</span>
+        </div>
+        <div class="param">
+          <label title="10日均成交额过滤，单位亿元">10日均额 <span class="unit">亿</span></label>
+          <input type="number" v-model.number="config.strategy6.min_avg_amount_10d_yi" @input="markDirty" min="0" max="1000" step="1" />
+          <span class="default">默认 5</span>
+        </div>
+        <div class="param">
+          <label title="普通强势启动最低单日涨幅">普通启动涨幅</label>
+          <input type="number" v-model.number="config.strategy6.normal_start_return" @input="markDirty" min="0" max="1" step="0.01" />
+          <span class="default">默认 0.07</span>
+        </div>
+        <div class="param">
+          <label title="普通强势启动最低量比">普通启动量比</label>
+          <input type="number" v-model.number="config.strategy6.normal_start_volume_ratio" @input="markDirty" min="0" max="20" step="0.1" />
+          <span class="default">默认 2.0</span>
+        </div>
+        <div class="param">
+          <label title="近20日最高收盘接近120日高点的比例">接近120日高比例</label>
+          <input type="number" v-model.number="config.strategy6.near_120d_high_ratio" @input="markDirty" min="0" max="1" step="0.01" />
+          <span class="default">默认 0.98</span>
+        </div>
+        <div class="param">
+          <label title="尾部5日收盘波动上限">尾部收盘波动</label>
+          <input type="number" v-model.number="config.strategy6.tail_close_range_5" @input="markDirty" min="0" max="1" step="0.01" />
+          <span class="default">默认 0.08</span>
+        </div>
+        <div class="param">
+          <label title="尾部量干门槛，V5/V20 不高于该值">尾部 V5/V20</label>
+          <input type="number" v-model.number="config.strategy6.tail_volume_ratio_5_20" @input="markDirty" min="0" max="2" step="0.01" />
+          <span class="default">默认 0.75</span>
+        </div>
+        <div class="param">
+          <label title="强量干门槛，用于 READY 候选">强量干 V5/V20</label>
+          <input type="number" v-model.number="config.strategy6.tail_strong_volume_ratio_5_20" @input="markDirty" min="0" max="2" step="0.01" />
+          <span class="default">默认 0.60</span>
+        </div>
+        <div class="param">
+          <label title="放量下跌一票否决的跌幅">放量下跌跌幅</label>
+          <input type="number" v-model.number="config.strategy6.big_down_return" @input="markDirty" min="-1" max="0" step="0.01" />
+          <span class="default">默认 -0.07</span>
+        </div>
+        <div class="param">
+          <label title="观察候选最低 RR2">观察最低 RR2</label>
+          <input type="number" v-model.number="config.strategy6.rr2_min_watch" @input="markDirty" min="0" max="20" step="0.1" />
+          <span class="default">默认 1.5</span>
+        </div>
+        <div class="param">
+          <label title="重点候选最低 RR2">重点最低 RR2</label>
+          <input type="number" v-model.number="config.strategy6.rr2_min_key" @input="markDirty" min="0" max="20" step="0.1" />
+          <span class="default">默认 2.0</span>
+        </div>
+        <div class="param">
+          <label title="就绪候选最低 RR2">就绪最低 RR2</label>
+          <input type="number" v-model.number="config.strategy6.rr2_min_ready" @input="markDirty" min="0" max="20" step="0.1" />
+          <span class="default">默认 2.5</span>
+        </div>
+        <div class="param">
+          <label title="READY_CANDIDATE 最低总分">就绪最低分</label>
+          <input type="number" v-model.number="config.strategy6.ready_min_score" @input="markDirty" min="0" max="100" step="1" />
+          <span class="default">默认 85</span>
+        </div>
+        <div class="param">
+          <label title="KEY_CANDIDATE 最低总分">重点最低分</label>
+          <input type="number" v-model.number="config.strategy6.key_min_score" @input="markDirty" min="0" max="100" step="1" />
+          <span class="default">默认 75</span>
+        </div>
+        <div class="param">
+          <label title="WATCH_CANDIDATE 最低总分">观察最低分</label>
+          <input type="number" v-model.number="config.strategy6.watch_min_score" @input="markDirty" min="0" max="100" step="1" />
+          <span class="default">默认 60</span>
+        </div>
+      </div>
+
+      <div class="info-msg strategy6-info">
+        ⓘ 策略6一期不伪造市场/板块强度，相关字段默认 UNKNOWN；真实过滤留到二期接入。
+      </div>
+    </section>
+
     <!-- Actions -->
     <div class="actions-bar">
       <div v-if="saved" class="saved-msg">✓ 配置已保存</div>
@@ -852,6 +975,52 @@ const defaultStrategy5Config = {
   volume_dry_direction_efficiency: 0.35,
 }
 
+const defaultStrategy6Config = {
+  enabled: true,
+  kline_days: 1100,
+  minimum_trading_days: 500,
+  min_avg_amount_60d_yi: 3,
+  min_avg_amount_30d_yi: 5,
+  min_avg_amount_10d_yi: 5,
+  amount10_vs_30_min_ratio: 0.8,
+  enable_market_filter: false,
+  enable_sector_filter: false,
+  market_filter_mode: 'downgrade',
+  sector_filter_mode: 'downgrade',
+  normal_start_return: 0.07,
+  normal_start_volume_ratio: 2.0,
+  normal_start_close_position: 0.65,
+  normal_start_min_amount_yi: 8,
+  limit_up_volume_ratio: 1.5,
+  low_volume_limit_up_min_ratio: 0.6,
+  near_120d_high_ratio: 0.98,
+  max_amp_5d_s: 0.25,
+  max_amp_10d_s: 0.45,
+  max_pullback_20d_s: -0.30,
+  max_amp_5d_a: 0.22,
+  max_amp_10d_a: 0.40,
+  max_pullback_20d_a: -0.26,
+  max_amp_5d_b: 0.18,
+  max_amp_10d_b: 0.35,
+  max_pullback_20d_b: -0.22,
+  absolute_max_amp_10d: 0.50,
+  absolute_max_pullback_20d: -0.35,
+  ma50_min_ratio: 0.92,
+  tail_close_range_5: 0.08,
+  tail_volume_ratio_5_20: 0.75,
+  tail_strong_volume_ratio_5_20: 0.60,
+  tail_min_return_5: -0.06,
+  tail_min_return_3: -0.04,
+  big_down_return: -0.07,
+  big_down_volume_ratio: 1.5,
+  rr2_min_watch: 1.5,
+  rr2_min_key: 2.0,
+  rr2_min_ready: 2.5,
+  ready_min_score: 85,
+  key_min_score: 75,
+  watch_min_score: 60,
+}
+
 const config = reactive({
   market: {},
   liquidity: {},
@@ -880,6 +1049,7 @@ const config = reactive({
   strategy3: { ...defaultStrategy3Config },
   strategy4: { ...defaultStrategy4Config },
   strategy5: { ...defaultStrategy5Config },
+  strategy6: { ...defaultStrategy6Config },
 })
 
 const dirty = ref(false)
@@ -1028,9 +1198,17 @@ function ensureStrategy5Config() {
   config.strategy5 = sanitizeStrategy5Config(config.strategy5 || {})
 }
 
+function ensureStrategy6Config() {
+  config.strategy6 = sanitizeStrategy6Config(config.strategy6 || {})
+}
+
 function sanitizeStrategy5Config(value) {
   const { minimum_kline_days, ...rest } = value || {}
   return { ...defaultStrategy5Config, ...rest }
+}
+
+function sanitizeStrategy6Config(value) {
+  return { ...defaultStrategy6Config, ...(value || {}) }
 }
 
 function mergeStrategy4Config(value) {
@@ -1129,6 +1307,12 @@ function toggleStrategy4TopicIndex(key) {
 function toggleStrategy5(key) {
   ensureStrategy5Config()
   config.strategy5[key] = !config.strategy5[key]
+  markDirty()
+}
+
+function toggleStrategy6(key) {
+  ensureStrategy6Config()
+  config.strategy6[key] = !config.strategy6[key]
   markDirty()
 }
 
@@ -1290,6 +1474,28 @@ function validate() {
   if (s5.trade_total_score_weight < 0 || s5.trade_total_score_weight > 2) errors.push('策略5: 总分权重需在 0-2')
   if (s5.trade_short_strength_weight < 0 || s5.trade_short_strength_weight > 5) errors.push('策略5: 短线强度权重需在 0-5')
 
+  // Strategy6 validation
+  ensureStrategy6Config()
+  const s6 = config.strategy6 || {}
+  if (s6.kline_days < 260 || s6.kline_days > 3000) errors.push('策略6: K线拉取天数需在 260-3000')
+  if (s6.minimum_trading_days < 260 || s6.minimum_trading_days > s6.kline_days) errors.push('策略6: 最低交易天数需在 260 到 K线拉取天数之间')
+  if (s6.min_avg_amount_60d_yi < 0 || s6.min_avg_amount_60d_yi > 1000) errors.push('策略6: 60日均额需在 0-1000 亿')
+  if (s6.min_avg_amount_30d_yi < 0 || s6.min_avg_amount_30d_yi > 1000) errors.push('策略6: 30日均额需在 0-1000 亿')
+  if (s6.min_avg_amount_10d_yi < 0 || s6.min_avg_amount_10d_yi > 1000) errors.push('策略6: 10日均额需在 0-1000 亿')
+  if (s6.normal_start_return < 0 || s6.normal_start_return > 1) errors.push('策略6: 普通启动涨幅需在 0-1')
+  if (s6.normal_start_volume_ratio < 0 || s6.normal_start_volume_ratio > 20) errors.push('策略6: 普通启动量比需在 0-20')
+  if (s6.near_120d_high_ratio < 0 || s6.near_120d_high_ratio > 1) errors.push('策略6: 接近120日高比例需在 0-1')
+  if (s6.tail_close_range_5 < 0 || s6.tail_close_range_5 > 1) errors.push('策略6: 尾部收盘波动需在 0-1')
+  if (s6.tail_volume_ratio_5_20 <= 0 || s6.tail_volume_ratio_5_20 > 2) errors.push('策略6: 尾部 V5/V20 需在 (0,2]')
+  if (s6.tail_strong_volume_ratio_5_20 <= 0 || s6.tail_strong_volume_ratio_5_20 > s6.tail_volume_ratio_5_20) errors.push('策略6: 强量干 V5/V20 需大于0且不高于尾部门槛')
+  if (s6.big_down_return < -1 || s6.big_down_return > 0) errors.push('策略6: 放量下跌跌幅需在 -1 到 0')
+  if (s6.rr2_min_watch < 0 || s6.rr2_min_watch > s6.rr2_min_key) errors.push('策略6: 观察最低 RR2 需不高于重点最低 RR2')
+  if (s6.rr2_min_key < s6.rr2_min_watch || s6.rr2_min_key > s6.rr2_min_ready) errors.push('策略6: 重点最低 RR2 需在观察和就绪之间')
+  if (s6.rr2_min_ready < s6.rr2_min_key || s6.rr2_min_ready > 20) errors.push('策略6: 就绪最低 RR2 需不低于重点且不超过20')
+  if (s6.watch_min_score < 0 || s6.watch_min_score > s6.key_min_score) errors.push('策略6: 观察最低分需在 0 到重点最低分之间')
+  if (s6.key_min_score < s6.watch_min_score || s6.key_min_score > s6.ready_min_score) errors.push('策略6: 重点最低分需在观察和就绪之间')
+  if (s6.ready_min_score < s6.key_min_score || s6.ready_min_score > 100) errors.push('策略6: 就绪最低分需不低于重点且不超过100')
+
   return errors
 }
 
@@ -1336,6 +1542,7 @@ async function saveConfig() {
       strategy3: { ...config.strategy3 },
       strategy4: { ...config.strategy4 },
       strategy5: sanitizeStrategy5Config(config.strategy5),
+      strategy6: sanitizeStrategy6Config(config.strategy6),
     }
     const res = await updateConfig(payload)
     if (res.status === 'ok') {
@@ -1361,6 +1568,7 @@ async function resetAll() {
       ensureStrategy3Config()
       ensureStrategy4Config()
       ensureStrategy5Config()
+      ensureStrategy6Config()
       sanitizeDailySources()
     }
     dirty.value = false
@@ -1380,6 +1588,7 @@ onMounted(async () => {
       ensureStrategy3Config()
       ensureStrategy4Config()
       ensureStrategy5Config()
+      ensureStrategy6Config()
       sanitizeDailySources()
     }
   } catch (e) {

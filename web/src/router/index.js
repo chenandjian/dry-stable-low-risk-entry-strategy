@@ -14,6 +14,7 @@ const routes = [
   { path: '/strategy3/results', name: 'Strategy3Results', component: () => import('../pages/Strategy3Results.vue') },
   { path: '/strategy4/results', name: 'Strategy4Results', component: () => import('../pages/Strategy4Results.vue') },
   { path: '/strategy5/results', name: 'Strategy5Results', component: () => import('../pages/Strategy5Results.vue') },
+  { path: '/strategy6/results', name: 'Strategy6Results', component: () => import('../pages/Strategy6Results.vue') },
 ]
 
 const router = createRouter({

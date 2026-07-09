@@ -285,6 +285,34 @@ export function useApi() {
     return res.json()
   }
 
+  // Strategy6 API
+  async function startStrategy6Scan() {
+    const res = await fetch(`${API_BASE}/strategy6/scans`, { method: 'POST' })
+    const body = await res.json().catch(() => ({}))
+    return { ...body, ok: res.ok, statusCode: res.status }
+  }
+
+  async function getStrategy6ScanStatus() {
+    const res = await fetch(`${API_BASE}/strategy6/scans/status`)
+    return res.json().catch(() => ({ running: false, stats: {} }))
+  }
+
+  async function getStrategy6Tasks() {
+    const res = await fetch(`${API_BASE}/strategy6/tasks`)
+    return res.json().catch(() => ({ tasks: [] }))
+  }
+
+  async function getStrategy6Candidates(taskId) {
+    const res = await fetch(`${API_BASE}/strategy6/tasks/${encodeURIComponent(taskId)}/candidates`)
+    return res.json().catch(() => ({ candidates: [] }))
+  }
+
+  async function getStrategy6Candidate(taskId, code) {
+    const res = await fetch(`${API_BASE}/strategy6/tasks/${encodeURIComponent(taskId)}/candidates/${encodeURIComponent(code)}`)
+    if (!res.ok) return null
+    return res.json()
+  }
+
   // Strategy2 Backtest API
   async function startStrategy2Backtest(payload) {
     const res = await fetch(`${API_BASE}/strategy2/backtests`, {
@@ -416,6 +444,8 @@ export function useApi() {
     getStrategy4TrackingEvents,
     startStrategy5Scan, getStrategy5ScanStatus, getStrategy5Tasks,
     getStrategy5Candidates, getStrategy5Candidate,
+    startStrategy6Scan, getStrategy6ScanStatus, getStrategy6Tasks,
+    getStrategy6Candidates, getStrategy6Candidate,
     startStrategy2Backtest, getStrategy2BacktestStatus,
     getStrategy2BacktestTasks, getStrategy2BacktestTask,
     getStrategy2BacktestOpportunities, getStrategy2BacktestInsufficientStocks,

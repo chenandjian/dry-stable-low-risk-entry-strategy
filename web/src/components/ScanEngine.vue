@@ -59,6 +59,9 @@
       <button class="btn-secondary strategy5" @click="$emit('startStrategy5')" title="策略5: 短线强势冲刺盘整支撑">
         启动策略5扫描
       </button>
+      <button class="btn-secondary strategy6" @click="$emit('startStrategy6')" title="策略6: 强势VCP尾部候选池">
+        启动策略6扫描
+      </button>
     </div>
   </div>
 </template>
@@ -78,7 +81,7 @@ const props = defineProps({
   stockPoolSource: String,
   logLines: { type: Array, default: () => [] },
 })
-defineEmits(['start', 'startStrategy2', 'startStrategy3', 'startStrategy4', 'startStrategy5'])
+defineEmits(['start', 'startStrategy2', 'startStrategy3', 'startStrategy4', 'startStrategy5', 'startStrategy6'])
 
 const logExpanded = ref(true)
 const progressPct = computed(() => props.total > 0 ? Math.round(props.scanned / props.total * 100) : 0)
@@ -150,4 +153,6 @@ const sourceText = computed(() => props.stockPoolSource ? `股票池 ${props.sto
 .btn-secondary.strategy4:hover { border-color: #f97316; color: #fb923c; }
 .btn-secondary.strategy5 { color: #22c55e; border-color: rgba(34,197,94,0.55); }
 .btn-secondary.strategy5:hover { border-color: #22c55e; color: #86efac; }
+.btn-secondary.strategy6 { color: #a78bfa; border-color: rgba(167,139,250,0.55); }
+.btn-secondary.strategy6:hover { border-color: #a78bfa; color: #c4b5fd; }
 </style>

@@ -288,3 +288,47 @@ strategy5:
   volume_dry_close_range_5: 0.06
   volume_dry_atr_contract_ratio: 0.85
   volume_dry_direction_efficiency: 0.35
+strategy6:
+  enabled: true
+  kline_days: 1100
+  minimum_trading_days: 500
+  min_avg_amount_60d_yi: 3
+  min_avg_amount_30d_yi: 5
+  min_avg_amount_10d_yi: 5
+  amount10_vs_30_min_ratio: 0.8
+  enable_market_filter: false
+  enable_sector_filter: false
+  market_filter_mode: downgrade
+  sector_filter_mode: downgrade
+  normal_start_return: 0.07
+  normal_start_volume_ratio: 2.0
+  normal_start_close_position: 0.65
+  normal_start_min_amount_yi: 8
+  limit_up_volume_ratio: 1.5
+  low_volume_limit_up_min_ratio: 0.6
+  near_120d_high_ratio: 0.98
+  max_amp_5d_s: 0.25
+  max_amp_10d_s: 0.45
+  max_pullback_20d_s: -0.30
+  max_amp_5d_a: 0.22
+  max_amp_10d_a: 0.40
+  max_pullback_20d_a: -0.26
+  max_amp_5d_b: 0.18
+  max_amp_10d_b: 0.35
+  max_pullback_20d_b: -0.22
+  absolute_max_amp_10d: 0.50
+  absolute_max_pullback_20d: -0.35
+  ma50_min_ratio: 0.92
+  tail_close_range_5: 0.08
+  tail_volume_ratio_5_20: 0.75
+  tail_strong_volume_ratio_5_20: 0.60
+  tail_min_return_5: -0.06
+  tail_min_return_3: -0.04
+  big_down_return: -0.07
+  big_down_volume_ratio: 1.5
+  rr2_min_watch: 1.5
+  rr2_min_key: 2.0
+  rr2_min_ready: 2.5
+  ready_min_score: 85
+  key_min_score: 75
+  watch_min_score: 60
