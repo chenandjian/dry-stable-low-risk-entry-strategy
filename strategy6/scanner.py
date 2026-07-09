@@ -21,6 +21,8 @@ from scanner.daily_data_service import (
 from scanner.data_source import DataSourceManager
 from strategy6 import STRATEGY6_TYPE
 from strategy6.engine import StrongVcpTailEngine
+from strategy6.indicators import calculate_indicators
+from strategy6.sector import evaluate_sector_context
 from strategy6.validation import resolve_strategy6_config
 
 logger = logging.getLogger(__name__)
@@ -65,6 +67,8 @@ def scan_strategy6_all(
     mgr = DataSourceManager()
     engine = StrongVcpTailEngine({"strategy6": cfg})
     market_data_by_symbol = _load_market_data_by_symbol(cfg)
+    sector_cache: dict[tuple[str, str], dict] = {}
+    sector_cache_lock = threading.Lock()
     candidate_by_code: dict[str, dict] = {}
     candidate_lock = threading.Lock()
     busy_retries_by_code: dict[str, int] = {}
@@ -191,6 +195,7 @@ def scan_strategy6_all(
                     kline_fetched_at=fetch_result.kline_fetched_at or "",
                     quote_status=fetch_result.quote_status or "",
                     market_data_by_symbol=market_data_by_symbol,
+                    sector_context=_load_sector_context(code, data, cfg, sector_cache, sector_cache_lock),
                 )
                 if evaluation.passed:
                     discovery = evaluation.to_candidate_dict()
@@ -277,6 +282,53 @@ def _load_market_data_by_symbol(cfg: dict) -> dict[str, list[dict]]:
             rows = []
         result[symbol] = rows
     return result
+
+
+def _load_sector_context(
+    code: str,
+    data: list[dict],
+    cfg: dict,
+    cache: dict[tuple[str, str], dict],
+    cache_lock: threading.Lock,
+) -> dict:
+    if not cfg.get("enable_sector_filter"):
+        return {}
+    try:
+        _, indicators = calculate_indicators(data, cfg)
+        evaluation_date = indicators.evaluation_date
+        cache_key = (code, evaluation_date)
+        with cache_lock:
+            if cache_key in cache:
+                return dict(cache[cache_key])
+        context = _derive_sector_context(code, indicators.return_10, evaluation_date)
+        with cache_lock:
+            cache[cache_key] = dict(context)
+        return context
+    except Exception as exc:
+        logger.warning("Strategy6 sector context failed for %s: %s", code, exc)
+        return {}
+
+
+def _derive_sector_context(code: str, stock_return_10: float, evaluation_date: str) -> dict:
+    topics = db.get_strategy4_topics_for_member(code, evaluation_date=evaluation_date)
+    best_context: dict | None = None
+    best_score = -999.0
+    for topic in topics:
+        topic_id = str(topic.get("topic_id") or "")
+        rows = db.get_strategy4_topic_index_ohlc(topic_id, end_date=evaluation_date, max_rows=80)
+        context = evaluate_sector_context(stock_return_10, rows)
+        score = float(context.get("sector_return_10") or 0.0) + float(context.get("sector_return_20") or 0.0)
+        if context.get("sector_strength_status") == "SECTOR_STRONG":
+            score += 1.0
+        if score > best_score:
+            best_score = score
+            best_context = {
+                **context,
+                "sector_topic_id": topic_id,
+                "sector_topic_name": topic.get("topic_name", ""),
+                "sector_membership_mode": topic.get("membership_mode", ""),
+            }
+    return best_context or {}
 
 
 def _now() -> str:

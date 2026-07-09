@@ -1,6 +1,7 @@
 from datetime import date, timedelta
 
 from strategy6.engine import StrongVcpTailEngine
+from strategy6.sector import evaluate_sector_context
 from strategy6.validation import resolve_strategy6_config
 
 
@@ -139,7 +140,7 @@ def test_strategy6_defaults_enable_real_market_filter_only():
 
     assert cfg["enable_market_filter"] is True
     assert cfg["market_filter_mode"] == "downgrade"
-    assert cfg["enable_sector_filter"] is False
+    assert cfg["enable_sector_filter"] is True
     assert cfg["sector_filter_mode"] == "downgrade"
 
 
@@ -203,6 +204,24 @@ def test_market_filter_downgrade_moves_ready_or_key_to_watch():
     assert "MARKET_WEAK_DOWNGRADED" in candidate["warn_tags"]
 
 
+def test_sector_filter_downgrade_moves_ready_or_key_to_watch():
+    data = build_strategy6_candidate_data()
+
+    result = StrongVcpTailEngine({"strategy6": {"enable_sector_filter": True, "sector_filter_mode": "downgrade"}}).evaluate_at(
+        data,
+        code="000001",
+        name="平安银行",
+        sector_context={"sector_strength_status": "SECTOR_WEAK", "relative_strength_10_sector": -0.05},
+    )
+    candidate = result.to_candidate_dict()
+
+    assert result.passed is True
+    assert result.candidate_type == "WATCH_CANDIDATE"
+    assert candidate["sector_strength_status"] == "SECTOR_WEAK"
+    assert candidate["enable_sector_filter"] is True
+    assert "SECTOR_WEAK_DOWNGRADED" in candidate["warn_tags"]
+
+
 def test_relative_strength_20_is_reported_against_hs300_index():
     data = build_strategy6_candidate_data()
     market = {
@@ -218,3 +237,17 @@ def test_relative_strength_20_is_reported_against_hs300_index():
     candidate = result.to_candidate_dict()
 
     assert candidate["relative_strength_20"] > 0.10
+
+
+def test_sector_context_classifies_strength_and_relative_strength():
+    strong_rows = _market_rows([100 + i * 0.2 for i in range(80)])
+    for idx, row in enumerate(strong_rows[-20:]):
+        row["close"] += idx * 0.8
+
+    context = evaluate_sector_context(0.20, strong_rows)
+
+    assert context["sector_strength_status"] == "SECTOR_STRONG"
+    assert context["relative_strength_10_sector"] > 0
+
+    weak_context = evaluate_sector_context(0.03, _market_rows([100 - i * 0.2 for i in range(80)]))
+    assert weak_context["sector_strength_status"] == "SECTOR_WEAK"

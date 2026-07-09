@@ -3255,6 +3255,40 @@ def get_strategy4_topic_members(topic_id: str, *, evaluation_date: str | None = 
     return _strategy4_members_for_snapshot(topic_id, row[0], row[1])
 
 
+def get_strategy4_topics_for_member(code: str, *, evaluation_date: str | None = None) -> list[dict]:
+    """Return Strategy4 topics whose latest eligible member snapshot contains code."""
+    conn = get_conn()
+    clauses = ["code=?"]
+    params: list = [code]
+    if evaluation_date:
+        clauses.append("membership_snapshot_date<=?")
+        params.append(evaluation_date[:10])
+    rows = conn.execute(
+        f"""SELECT topic_id, topic_name, topic_type, source, membership_snapshot_date, membership_mode
+            FROM strategy4_topic_members
+            WHERE {' AND '.join(clauses)}
+            ORDER BY CASE WHEN membership_mode='current_members_proxy' THEN 1 ELSE 0 END,
+                     membership_snapshot_date DESC, id DESC""",
+        params,
+    ).fetchall()
+    seen: set[str] = set()
+    topics: list[dict] = []
+    for row in rows:
+        topic_id = row[0]
+        if topic_id in seen:
+            continue
+        seen.add(topic_id)
+        topics.append({
+            "topic_id": topic_id,
+            "topic_name": row[1],
+            "topic_type": row[2],
+            "source": row[3],
+            "membership_snapshot_date": row[4],
+            "membership_mode": row[5],
+        })
+    return topics
+
+
 def _strategy4_members_for_snapshot(topic_id: str, snapshot_date: str, source: str) -> list[dict]:
     conn = get_conn()
     rows = conn.execute(
