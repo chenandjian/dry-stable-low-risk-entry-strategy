@@ -138,6 +138,7 @@ def init_db(path: str = "data/cuphandle.db"):
         _ensure_strategy3_candidates_table(conn)
         _ensure_strategy4_tables(conn)
         _ensure_strategy5_candidates_table(conn)
+        _ensure_strategy6_candidates_table(conn)
         _ensure_strategy2_backtest_tables(conn)
         _ensure_strategy3_backtest_tables(conn)
         _ensure_strategy1_backtest_tables(conn)
@@ -1892,6 +1893,132 @@ def _ensure_strategy5_candidates_table(conn: sqlite3.Connection):
     )
 
 
+def _ensure_strategy6_candidates_table(conn: sqlite3.Connection):
+    """Create strategy6_candidates table if not exists."""
+    conn.execute('''
+        CREATE TABLE IF NOT EXISTS strategy6_candidates (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            task_id TEXT NOT NULL,
+            code TEXT NOT NULL,
+            name TEXT NOT NULL,
+            sector_name TEXT,
+            evaluation_date TEXT NOT NULL,
+            candidate_type TEXT NOT NULL,
+            classification TEXT NOT NULL,
+            lifecycle_status TEXT,
+            current_price REAL DEFAULT 0,
+            close REAL DEFAULT 0,
+            daily_return REAL DEFAULT 0,
+            trading_days INTEGER DEFAULT 0,
+            ma5 REAL,
+            ma10 REAL,
+            ma20 REAL,
+            ma50 REAL,
+            ma120 REAL,
+            ma250 REAL,
+            return_5 REAL,
+            return_10 REAL,
+            return_20 REAL,
+            amount_avg_10 REAL,
+            amount_avg_30 REAL,
+            amount_avg_60 REAL,
+            v3 REAL,
+            v5 REAL,
+            v10 REAL,
+            v20 REAL,
+            volume_ratio_5_20 REAL,
+            highest_close_20 REAL,
+            highest_close_120 REAL,
+            pullback_from_20d_high REAL,
+            range_5 REAL,
+            range_10 REAL,
+            close_range_5 REAL,
+            start_date TEXT,
+            start_type TEXT,
+            start_grade TEXT,
+            start_day_return REAL,
+            start_day_volume_ratio REAL,
+            start_day_amount REAL,
+            start_day_close_position REAL,
+            is_limit_up INTEGER DEFAULT 0,
+            is_one_word_limit_up INTEGER DEFAULT 0,
+            limit_up_pct REAL,
+            high_trigger TEXT,
+            key_support_price REAL,
+            support_zone_low REAL,
+            support_zone_high REAL,
+            defense_support_price REAL,
+            main_support_ma TEXT,
+            support_status TEXT,
+            support_test_count INTEGER DEFAULT 0,
+            pivot_price REAL,
+            box_height REAL,
+            support_score INTEGER DEFAULT 0,
+            suggested_buy_price REAL,
+            buy_zone_low REAL,
+            buy_zone_high REAL,
+            stop_loss_price REAL,
+            target_price_1 REAL,
+            target_price_2 REAL,
+            target_price_3 REAL,
+            risk_amount REAL,
+            reward_amount_1 REAL,
+            reward_amount_2 REAL,
+            reward_amount_3 REAL,
+            risk_reward_ratio_1 REAL,
+            risk_reward_ratio_2 REAL,
+            risk_reward_ratio_3 REAL,
+            strong_start_score INTEGER DEFAULT 0,
+            dry_stable_score INTEGER DEFAULT 0,
+            risk_reward_score INTEGER DEFAULT 0,
+            risk_control_score INTEGER DEFAULT 0,
+            total_score REAL DEFAULT 0,
+            market_status TEXT,
+            sector_strength_status TEXT,
+            enable_market_filter INTEGER DEFAULT 0,
+            enable_sector_filter INTEGER DEFAULT 0,
+            market_filter_mode TEXT,
+            sector_filter_mode TEXT,
+            risk_tags TEXT,
+            warn_tags TEXT,
+            reject_reasons TEXT,
+            score_reasons TEXT,
+            suggestion TEXT,
+            data_source TEXT,
+            kline_latest_date TEXT,
+            kline_fetched_at TEXT,
+            quote_status TEXT,
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+            FOREIGN KEY (task_id) REFERENCES scan_tasks(id),
+            UNIQUE(task_id, code)
+        )
+    ''')
+    for column, col_type in {
+        "sector_name": "TEXT",
+        "lifecycle_status": "TEXT",
+        "current_price": "REAL DEFAULT 0",
+        "risk_tags": "TEXT",
+        "warn_tags": "TEXT",
+        "reject_reasons": "TEXT",
+        "score_reasons": "TEXT",
+        "suggestion": "TEXT",
+        "data_source": "TEXT",
+        "kline_latest_date": "TEXT",
+        "kline_fetched_at": "TEXT",
+        "quote_status": "TEXT",
+    }.items():
+        _ensure_column(conn, "strategy6_candidates", column, col_type)
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_strategy6_candidates_task_score "
+        "ON strategy6_candidates(task_id, total_score DESC)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_strategy6_candidates_type_score "
+        "ON strategy6_candidates(task_id, candidate_type, total_score DESC)"
+    )
+
+
 def _ensure_column(conn: sqlite3.Connection, table: str, column: str, col_type: str):
     """Compatible add-column-if-not-exists helper."""
     existing = [d[1] for d in conn.execute(f"PRAGMA table_info({table})").fetchall()]
@@ -2637,6 +2764,182 @@ def get_strategy5_candidate(code: str, task_id: str = None) -> dict | None:
     return _deserialize_strategy5_row(dict(zip(cols, row)))
 
 
+def upsert_strategy6_candidate(task_id: str, d: dict):
+    """Insert or update one Strategy6 candidate."""
+    conn = get_conn()
+    columns = [
+        "task_id", "code", "name", "sector_name", "evaluation_date",
+        "candidate_type", "classification", "lifecycle_status",
+        "current_price", "close", "daily_return", "trading_days",
+        "ma5", "ma10", "ma20", "ma50", "ma120", "ma250",
+        "return_5", "return_10", "return_20",
+        "amount_avg_10", "amount_avg_30", "amount_avg_60",
+        "v3", "v5", "v10", "v20", "volume_ratio_5_20",
+        "highest_close_20", "highest_close_120", "pullback_from_20d_high",
+        "range_5", "range_10", "close_range_5",
+        "start_date", "start_type", "start_grade", "start_day_return",
+        "start_day_volume_ratio", "start_day_amount", "start_day_close_position",
+        "is_limit_up", "is_one_word_limit_up", "limit_up_pct", "high_trigger",
+        "key_support_price", "support_zone_low", "support_zone_high",
+        "defense_support_price", "main_support_ma", "support_status",
+        "support_test_count", "pivot_price", "box_height", "support_score",
+        "suggested_buy_price", "buy_zone_low", "buy_zone_high", "stop_loss_price",
+        "target_price_1", "target_price_2", "target_price_3",
+        "risk_amount", "reward_amount_1", "reward_amount_2", "reward_amount_3",
+        "risk_reward_ratio_1", "risk_reward_ratio_2", "risk_reward_ratio_3",
+        "strong_start_score", "dry_stable_score", "risk_reward_score",
+        "risk_control_score", "total_score",
+        "market_status", "sector_strength_status", "enable_market_filter",
+        "enable_sector_filter", "market_filter_mode", "sector_filter_mode",
+        "risk_tags", "warn_tags", "reject_reasons", "score_reasons", "suggestion",
+        "data_source", "kline_latest_date", "kline_fetched_at", "quote_status",
+    ]
+    values = [
+        task_id,
+        d.get("code", ""),
+        d.get("name", ""),
+        d.get("sector_name", ""),
+        d.get("evaluation_date", ""),
+        d.get("candidate_type", "REJECTED"),
+        d.get("classification", "rejected"),
+        d.get("lifecycle_status", ""),
+        d.get("current_price", d.get("close", 0.0)),
+        d.get("close", d.get("current_price", 0.0)),
+        d.get("daily_return", 0.0),
+        d.get("trading_days", 0),
+        d.get("ma5"),
+        d.get("ma10"),
+        d.get("ma20"),
+        d.get("ma50"),
+        d.get("ma120"),
+        d.get("ma250"),
+        d.get("return_5"),
+        d.get("return_10"),
+        d.get("return_20"),
+        d.get("amount_avg_10"),
+        d.get("amount_avg_30"),
+        d.get("amount_avg_60"),
+        d.get("v3"),
+        d.get("v5"),
+        d.get("v10"),
+        d.get("v20"),
+        d.get("volume_ratio_5_20"),
+        d.get("highest_close_20"),
+        d.get("highest_close_120"),
+        d.get("pullback_from_20d_high"),
+        d.get("range_5"),
+        d.get("range_10"),
+        d.get("close_range_5"),
+        d.get("start_date", ""),
+        d.get("start_type", ""),
+        d.get("start_grade", ""),
+        d.get("start_day_return"),
+        d.get("start_day_volume_ratio"),
+        d.get("start_day_amount"),
+        d.get("start_day_close_position"),
+        1 if d.get("is_limit_up") else 0,
+        1 if d.get("is_one_word_limit_up") else 0,
+        d.get("limit_up_pct"),
+        d.get("high_trigger", ""),
+        d.get("key_support_price"),
+        d.get("support_zone_low"),
+        d.get("support_zone_high"),
+        d.get("defense_support_price"),
+        d.get("main_support_ma", ""),
+        d.get("support_status", ""),
+        d.get("support_test_count", 0),
+        d.get("pivot_price"),
+        d.get("box_height"),
+        d.get("support_score", 0),
+        d.get("suggested_buy_price"),
+        d.get("buy_zone_low"),
+        d.get("buy_zone_high"),
+        d.get("stop_loss_price"),
+        d.get("target_price_1"),
+        d.get("target_price_2"),
+        d.get("target_price_3"),
+        d.get("risk_amount"),
+        d.get("reward_amount_1"),
+        d.get("reward_amount_2"),
+        d.get("reward_amount_3"),
+        d.get("risk_reward_ratio_1"),
+        d.get("risk_reward_ratio_2"),
+        d.get("risk_reward_ratio_3"),
+        d.get("strong_start_score", 0),
+        d.get("dry_stable_score", 0),
+        d.get("risk_reward_score", 0),
+        d.get("risk_control_score", 0),
+        d.get("total_score", 0.0),
+        d.get("market_status", "UNKNOWN"),
+        d.get("sector_strength_status", "UNKNOWN"),
+        1 if d.get("enable_market_filter") else 0,
+        1 if d.get("enable_sector_filter") else 0,
+        d.get("market_filter_mode", "downgrade"),
+        d.get("sector_filter_mode", "downgrade"),
+        _json_any(d.get("risk_tags", [])),
+        _json_any(d.get("warn_tags", [])),
+        _json_any(d.get("reject_reasons", [])),
+        _json_any(d.get("score_reasons", [])),
+        d.get("suggestion", ""),
+        d.get("data_source", ""),
+        d.get("kline_latest_date", ""),
+        d.get("kline_fetched_at", ""),
+        d.get("quote_status", ""),
+    ]
+    updates = ", ".join(f"{c}=excluded.{c}" for c in columns if c not in ("task_id", "code"))
+    conn.execute(
+        f"""INSERT INTO strategy6_candidates ({', '.join(columns)}) VALUES ({', '.join('?' for _ in columns)})
+            ON CONFLICT(task_id, code) DO UPDATE SET {updates}, updated_at=datetime('now')""",
+        values,
+    )
+    conn.commit()
+
+
+def get_strategy6_candidates(task_id: str = None) -> list[dict]:
+    """Get Strategy6 candidates, optionally for a task."""
+    conn = get_conn()
+    if task_id:
+        rows = conn.execute(
+            "SELECT * FROM strategy6_candidates WHERE task_id=? "
+            "ORDER BY CASE candidate_type WHEN 'READY_CANDIDATE' THEN 0 WHEN 'KEY_CANDIDATE' THEN 1 "
+            "WHEN 'WATCH_CANDIDATE' THEN 2 ELSE 3 END, total_score DESC, code ASC",
+            (task_id,),
+        ).fetchall()
+    else:
+        row = conn.execute(
+            "SELECT id FROM scan_tasks WHERE status='completed' "
+            "AND strategy_type='STRATEGY_6_STRONG_VCP_TAIL' "
+            "ORDER BY started_at DESC LIMIT 1"
+        ).fetchone()
+        if not row:
+            return []
+        rows = conn.execute(
+            "SELECT * FROM strategy6_candidates WHERE task_id=? "
+            "ORDER BY total_score DESC, code ASC",
+            (row[0],),
+        ).fetchall()
+    cols = [d[1] for d in conn.execute("PRAGMA table_info(strategy6_candidates)").fetchall()]
+    return [_deserialize_strategy6_row(dict(zip(cols, row))) for row in rows]
+
+
+def get_strategy6_candidate(code: str, task_id: str = None) -> dict | None:
+    conn = get_conn()
+    if task_id:
+        row = conn.execute(
+            "SELECT * FROM strategy6_candidates WHERE code=? AND task_id=? ORDER BY id DESC LIMIT 1",
+            (code, task_id),
+        ).fetchone()
+    else:
+        row = conn.execute(
+            "SELECT * FROM strategy6_candidates WHERE code=? ORDER BY id DESC LIMIT 1",
+            (code,),
+        ).fetchone()
+    if not row:
+        return None
+    cols = [d[1] for d in conn.execute("PRAGMA table_info(strategy6_candidates)").fetchall()]
+    return _deserialize_strategy6_row(dict(zip(cols, row)))
+
+
 def save_strategy4_topic_index_ohlc(
     *,
     topic_id: str,
@@ -3307,6 +3610,22 @@ def _deserialize_strategy5_row(row: dict) -> dict:
             row[field] = []
     if "dry_support_valid" in row:
         row["dry_support_valid"] = bool(row.get("dry_support_valid"))
+    return row
+
+
+def _deserialize_strategy6_row(row: dict) -> dict:
+    for field in ("risk_tags", "warn_tags", "reject_reasons", "score_reasons"):
+        value = row.get(field)
+        if isinstance(value, str) and value:
+            try:
+                row[field] = json.loads(value)
+            except (json.JSONDecodeError, TypeError):
+                row[field] = []
+        elif not value:
+            row[field] = []
+    for field in ("is_limit_up", "is_one_word_limit_up", "enable_market_filter", "enable_sector_filter"):
+        if field in row:
+            row[field] = bool(row.get(field))
     return row
 
 

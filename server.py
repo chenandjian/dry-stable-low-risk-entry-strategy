@@ -26,6 +26,8 @@ from strategy4.scanner import STRATEGY4_TYPE, scan_strategy4_all
 from strategy4.config import resolve_strategy4_config
 from strategy5.scanner import STRATEGY5_TYPE, scan_strategy5_all
 from strategy5.validation import resolve_strategy5_config
+from strategy6 import STRATEGY6_TYPE
+from strategy6.validation import resolve_strategy6_config
 from scanner.strategy_engine import (
     CupHandleStrategyEngine,
     resolve_strategy_windows,
@@ -2249,6 +2251,35 @@ async def strategy5_candidate_detail(task_id: str, code: str):
     if err:
         return err
     candidate = db.get_strategy5_candidate(code, task_id=task_id)
+    if not candidate:
+        return JSONResponse({"error": "NOT_FOUND", "taskId": task_id, "code": code}, status_code=404)
+    return {"taskId": task_id, "candidate": candidate}
+
+
+# ====== Strategy6 API ======
+
+@app.get("/api/strategy6/tasks")
+async def strategy6_tasks():
+    config = load_config()
+    db.init_db(config.get("data", {}).get("database_path", "data/cuphandle.db"))
+    return {"tasks": db.get_scan_tasks(strategy_type=STRATEGY6_TYPE)}
+
+
+@app.get("/api/strategy6/tasks/{task_id}/candidates")
+async def strategy6_candidates(task_id: str):
+    _, err = _require_task_strategy(task_id, STRATEGY6_TYPE)
+    if err:
+        return err
+    candidates = db.get_strategy6_candidates(task_id)
+    return {"taskId": task_id, "candidates": candidates, "total": len(candidates)}
+
+
+@app.get("/api/strategy6/tasks/{task_id}/candidates/{code}")
+async def strategy6_candidate_detail(task_id: str, code: str):
+    _, err = _require_task_strategy(task_id, STRATEGY6_TYPE)
+    if err:
+        return err
+    candidate = db.get_strategy6_candidate(code, task_id=task_id)
     if not candidate:
         return JSONResponse({"error": "NOT_FOUND", "taskId": task_id, "code": code}, status_code=404)
     return {"taskId": task_id, "candidate": candidate}
