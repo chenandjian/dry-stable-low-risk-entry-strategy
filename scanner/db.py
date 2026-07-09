@@ -1906,6 +1906,8 @@ def _ensure_strategy6_candidates_table(conn: sqlite3.Connection):
             candidate_type TEXT NOT NULL,
             classification TEXT NOT NULL,
             lifecycle_status TEXT,
+            first_pool_date TEXT,
+            pool_age_trading_days INTEGER DEFAULT 0,
             current_price REAL DEFAULT 0,
             close REAL DEFAULT 0,
             daily_return REAL DEFAULT 0,
@@ -1919,6 +1921,8 @@ def _ensure_strategy6_candidates_table(conn: sqlite3.Connection):
             return_5 REAL,
             return_10 REAL,
             return_20 REAL,
+            relative_strength_20 REAL DEFAULT 0,
+            relative_strength_10_sector REAL DEFAULT 0,
             amount_avg_10 REAL,
             amount_avg_30 REAL,
             amount_avg_60 REAL,
@@ -1997,7 +2001,11 @@ def _ensure_strategy6_candidates_table(conn: sqlite3.Connection):
     for column, col_type in {
         "sector_name": "TEXT",
         "lifecycle_status": "TEXT",
+        "first_pool_date": "TEXT",
+        "pool_age_trading_days": "INTEGER DEFAULT 0",
         "current_price": "REAL DEFAULT 0",
+        "relative_strength_20": "REAL DEFAULT 0",
+        "relative_strength_10_sector": "REAL DEFAULT 0",
         "risk_tags": "TEXT",
         "warn_tags": "TEXT",
         "reject_reasons": "TEXT",
@@ -2767,12 +2775,17 @@ def get_strategy5_candidate(code: str, task_id: str = None) -> dict | None:
 def upsert_strategy6_candidate(task_id: str, d: dict):
     """Insert or update one Strategy6 candidate."""
     conn = get_conn()
+    first_pool_date, pool_age = _strategy6_lifecycle_values(conn, task_id, d)
+    lifecycle_status = d.get("lifecycle_status", "")
+    if pool_age >= 10 and lifecycle_status not in {"BREAKOUT_CONFIRMED", "EXTENDED", "FAILED"}:
+        lifecycle_status = "EXPIRED"
     columns = [
         "task_id", "code", "name", "sector_name", "evaluation_date",
-        "candidate_type", "classification", "lifecycle_status",
+        "candidate_type", "classification", "lifecycle_status", "first_pool_date", "pool_age_trading_days",
         "current_price", "close", "daily_return", "trading_days",
         "ma5", "ma10", "ma20", "ma50", "ma120", "ma250",
         "return_5", "return_10", "return_20",
+        "relative_strength_20", "relative_strength_10_sector",
         "amount_avg_10", "amount_avg_30", "amount_avg_60",
         "v3", "v5", "v10", "v20", "volume_ratio_5_20",
         "highest_close_20", "highest_close_120", "pullback_from_20d_high",
@@ -2802,7 +2815,9 @@ def upsert_strategy6_candidate(task_id: str, d: dict):
         d.get("evaluation_date", ""),
         d.get("candidate_type", "REJECTED"),
         d.get("classification", "rejected"),
-        d.get("lifecycle_status", ""),
+        lifecycle_status,
+        first_pool_date,
+        pool_age,
         d.get("current_price", d.get("close", 0.0)),
         d.get("close", d.get("current_price", 0.0)),
         d.get("daily_return", 0.0),
@@ -2816,6 +2831,8 @@ def upsert_strategy6_candidate(task_id: str, d: dict):
         d.get("return_5"),
         d.get("return_10"),
         d.get("return_20"),
+        d.get("relative_strength_20", 0.0),
+        d.get("relative_strength_10_sector", 0.0),
         d.get("amount_avg_10"),
         d.get("amount_avg_30"),
         d.get("amount_avg_60"),
@@ -2893,6 +2910,46 @@ def upsert_strategy6_candidate(task_id: str, d: dict):
         values,
     )
     conn.commit()
+
+
+def _strategy6_lifecycle_values(conn: sqlite3.Connection, task_id: str, d: dict) -> tuple[str, int]:
+    evaluation_date = str(d.get("evaluation_date") or "")
+    row = conn.execute(
+        """SELECT first_pool_date, evaluation_date FROM strategy6_candidates
+           WHERE code=? AND task_id<>?
+           ORDER BY evaluation_date ASC, id ASC LIMIT 1""",
+        (d.get("code", ""), task_id),
+    ).fetchone()
+    if row:
+        first_pool_date = row[0] or row[1] or evaluation_date
+        return first_pool_date, _weekday_distance(first_pool_date, evaluation_date)
+
+    explicit_first = str(d.get("first_pool_date") or "")
+    explicit_age = d.get("pool_age_trading_days")
+    if explicit_first:
+        return explicit_first, int(explicit_age or _weekday_distance(explicit_first, evaluation_date))
+
+    first_pool_date = evaluation_date
+    return first_pool_date, _weekday_distance(first_pool_date, evaluation_date)
+
+
+def _weekday_distance(start_date: str, end_date: str) -> int:
+    from datetime import date, timedelta
+
+    try:
+        start = date.fromisoformat(str(start_date)[:10])
+        end = date.fromisoformat(str(end_date)[:10])
+    except ValueError:
+        return 0
+    if end <= start:
+        return 0
+    days = 0
+    current = start + timedelta(days=1)
+    while current <= end:
+        if current.weekday() < 5:
+            days += 1
+        current += timedelta(days=1)
+    return days
 
 
 def get_strategy6_candidates(task_id: str = None) -> list[dict]:

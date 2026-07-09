@@ -86,5 +86,8 @@ def _risk_control_score(ind: Strategy6Indicators, start: Strategy6Start, trade_p
         score -= 5
     if ind.volume_ratio_5_20 > 0.90:
         score -= 5
+    if ind.market_filter_enabled and ind.market_filter_mode == "score_only" and ind.market_status in {"MARKET_WEAK", "MARKET_RISK"}:
+        score -= 5
+    if ind.sector_filter_enabled and ind.sector_filter_mode == "score_only" and ind.sector_strength_status in {"SECTOR_WEAK", "SECTOR_RISK"}:
+        score -= 5
     return max(0, score)
-

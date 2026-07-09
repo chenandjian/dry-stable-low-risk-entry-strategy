@@ -66,6 +66,7 @@ def classify_candidate(
     if reject_reasons:
         return "REJECTED", "rejected", lifecycle, "排除：存在硬性风险或盈亏比不足"
     major_risk = any(tag in ind.risk_tags for tag in {"BIG_DOWN_VOLUME"})
+    environment_blocks_ready = _environment_blocks_ready(ind)
     if (
         score.total_score >= config["ready_min_score"]
         and trade_plan.risk_reward_ratio_2 >= config["rr2_min_ready"]
@@ -73,6 +74,7 @@ def classify_candidate(
         and ind.volume_ratio_5_20 <= config["tail_strong_volume_ratio_5_20"]
         and support.support_status in {"MA5_SUPPORT", "MA10_SUPPORT", "MA20_SUPPORT"}
         and not major_risk
+        and not environment_blocks_ready
     ):
         return "READY_CANDIDATE", "ready", lifecycle, "低吸候选：支撑区内，量干价稳，盈亏比较好"
     if (
@@ -81,6 +83,7 @@ def classify_candidate(
         and support.support_status in {"MA5_SUPPORT", "MA10_SUPPORT", "MA20_SUPPORT"}
         and dry_tail.dry_stable_score >= 15
         and not major_risk
+        and not environment_blocks_ready
     ):
         return "KEY_CANDIDATE", "highlight", lifecycle, "重点观察：等待支撑低吸或突破确认"
     if score.total_score >= config["watch_min_score"] or trade_plan.risk_reward_ratio_2 >= config["rr2_min_watch"]:
@@ -106,6 +109,24 @@ def _lifecycle_status(
     if dry_tail.dry_tail_pass:
         return "READY"
     return "SETUP_FORMING"
+
+
+def _environment_blocks_ready(ind: Strategy6Indicators) -> bool:
+    if ind.market_filter_enabled and ind.market_filter_mode in {"strict", "downgrade"}:
+        if ind.market_status in {"MARKET_WEAK", "MARKET_RISK"}:
+            if ind.market_filter_mode == "strict":
+                ind.warn_tags.append("MARKET_WEAK_STRICT")
+            else:
+                ind.warn_tags.append("MARKET_WEAK_DOWNGRADED")
+            return True
+    if ind.sector_filter_enabled and ind.sector_filter_mode in {"strict", "downgrade"}:
+        if ind.sector_strength_status in {"SECTOR_WEAK", "SECTOR_RISK"}:
+            if ind.sector_filter_mode == "strict":
+                ind.warn_tags.append("SECTOR_WEAK_STRICT")
+            else:
+                ind.warn_tags.append("SECTOR_WEAK_DOWNGRADED")
+            return True
+    return False
 
 
 def _dedupe(values: list[str]) -> list[str]:

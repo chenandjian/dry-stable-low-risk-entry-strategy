@@ -13,7 +13,7 @@ DEFAULT_STRATEGY6_CONFIG = {
     "min_avg_amount_30d_yi": 5,
     "min_avg_amount_10d_yi": 5,
     "amount10_vs_30_min_ratio": 0.8,
-    "enable_market_filter": False,
+    "enable_market_filter": True,
     "enable_sector_filter": False,
     "market_filter_mode": "downgrade",
     "sector_filter_mode": "downgrade",
@@ -107,4 +107,3 @@ def _validate_number_range(config: dict, key: str, min_v: float, max_v: float) -
     value = config[key]
     if value < min_v or value > max_v:
         raise ValueError(f"{key} must be between {min_v} and {max_v}")
-

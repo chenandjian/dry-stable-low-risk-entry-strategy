@@ -18,6 +18,21 @@ async function flushUi() {
   await nextTick()
 }
 
+function installDownloadMocks() {
+  const originalUrl = globalThis.URL
+  const createObjectURL = vi.fn(() => 'blob:strategy6')
+  const revokeObjectURL = vi.fn()
+  const click = vi.fn()
+  vi.stubGlobal('URL', { ...originalUrl, createObjectURL, revokeObjectURL })
+  const originalCreateElement = document.createElement.bind(document)
+  vi.spyOn(document, 'createElement').mockImplementation(tag => {
+    const el = originalCreateElement(tag)
+    if (tag === 'a') vi.spyOn(el, 'click').mockImplementation(click)
+    return el
+  })
+  return { createObjectURL, click }
+}
+
 describe('Strategy6Results', () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -44,6 +59,14 @@ describe('Strategy6Results', () => {
           target_price_3: 16.5,
           risk_reward_ratio_2: 3.4,
           volume_ratio_5_20: 0.52,
+          relative_strength_20: 0.18,
+          relative_strength_10_sector: 0.03,
+          market_status: 'MARKET_WEAK',
+          sector_strength_status: 'UNKNOWN',
+          first_pool_date: '2026-07-01',
+          pool_age_trading_days: 6,
+          enable_market_filter: true,
+          market_filter_mode: 'downgrade',
           risk_tags: [],
           warn_tags: ['NEAR_120D_PRESSURE'],
           evaluation_date: '2026-07-09',
@@ -109,6 +132,10 @@ describe('Strategy6Results', () => {
     expect(wrapper.text()).toContain('RR2')
     expect(wrapper.text()).toContain('3.40')
     expect(wrapper.text()).toContain('BUY_ZONE')
+    expect(wrapper.text()).toContain('MARKET_WEAK')
+    expect(wrapper.text()).toContain('RS20 18.00%')
+    expect(wrapper.text()).toContain('首次入池 2026-07-01')
+    expect(wrapper.text()).toContain('池龄 6日')
     expect(wrapper.text()).toContain('NEAR_120D_PRESSURE')
   })
 
@@ -144,5 +171,29 @@ describe('Strategy6Results', () => {
     expect(wrapper.text()).toContain('重点 4')
     expect(wrapper.text()).toContain('观察 3')
     expect(wrapper.findAll('tbody tr')).toHaveLength(9)
+  })
+
+  it('exports strategy6 candidates with market, lifecycle and trade plan fields', async () => {
+    const wrapper = mount(Strategy6Results, {
+      global: {
+        mocks: {
+          $route: { query: { task: 's6-task' } },
+        },
+      },
+    })
+    await flushUi()
+    const mocks = installDownloadMocks()
+
+    const button = wrapper.find('[data-test="export-candidates"]')
+    expect(button.exists()).toBe(true)
+    await button.trigger('click')
+
+    expect(mocks.click).toHaveBeenCalled()
+    const blob = mocks.createObjectURL.mock.calls[0][0]
+    const csv = await blob.text()
+    expect(csv).toContain('代码,名称,板块,候选类型,生命周期,首次入池,池龄交易日')
+    expect(csv).toContain('市场状态,板块状态,RS20,板块RS10')
+    expect(csv).toContain('000001,平安银行,,READY_CANDIDATE,BUY_ZONE,2026-07-01,6')
+    expect(csv).toContain('MARKET_WEAK,UNKNOWN,18.00%,3.00%')
   })
 })

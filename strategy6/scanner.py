@@ -8,6 +8,7 @@ from datetime import datetime
 from queue import Queue
 
 import scanner.db as db
+from scanner.index_source import fetch_market_index_daily
 from scanner.daily_data_service import (
     DEFAULT_DAILY_SOURCES,
     FetchResult,
@@ -63,6 +64,7 @@ def scan_strategy6_all(
 
     mgr = DataSourceManager()
     engine = StrongVcpTailEngine({"strategy6": cfg})
+    market_data_by_symbol = _load_market_data_by_symbol(cfg)
     candidate_by_code: dict[str, dict] = {}
     candidate_lock = threading.Lock()
     busy_retries_by_code: dict[str, int] = {}
@@ -188,6 +190,7 @@ def scan_strategy6_all(
                     data_source=fetch_result.primary_source,
                     kline_fetched_at=fetch_result.kline_fetched_at or "",
                     quote_status=fetch_result.quote_status or "",
+                    market_data_by_symbol=market_data_by_symbol,
                 )
                 if evaluation.passed:
                     discovery = evaluation.to_candidate_dict()
@@ -261,6 +264,20 @@ def _ensure_scan_task(task_id: str) -> None:
     )
 
 
+def _load_market_data_by_symbol(cfg: dict) -> dict[str, list[dict]]:
+    if not cfg.get("enable_market_filter"):
+        return {}
+    result: dict[str, list[dict]] = {}
+    for symbol in ("sh000001", "sz399001", "sz399006", "hs300"):
+        fetch_symbol = "sh000300" if symbol == "hs300" else symbol
+        try:
+            rows = fetch_market_index_daily(fetch_symbol, days=250) or []
+        except Exception as exc:
+            logger.warning("Strategy6 market index fetch failed for %s: %s", fetch_symbol, exc)
+            rows = []
+        result[symbol] = rows
+    return result
+
+
 def _now() -> str:
     return time.strftime("%Y-%m-%d %H:%M:%S")
-

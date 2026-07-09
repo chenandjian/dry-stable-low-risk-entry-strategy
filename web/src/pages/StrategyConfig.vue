@@ -983,7 +983,7 @@ const defaultStrategy6Config = {
   min_avg_amount_30d_yi: 5,
   min_avg_amount_10d_yi: 5,
   amount10_vs_30_min_ratio: 0.8,
-  enable_market_filter: false,
+  enable_market_filter: true,
   enable_sector_filter: false,
   market_filter_mode: 'downgrade',
   sector_filter_mode: 'downgrade',

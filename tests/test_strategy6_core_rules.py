@@ -132,3 +132,89 @@ def test_config_rejects_invalid_filter_mode():
         assert "market_filter_mode" in str(exc)
     else:
         raise AssertionError("invalid market_filter_mode should fail")
+
+
+def test_strategy6_defaults_enable_real_market_filter_only():
+    cfg = resolve_strategy6_config({})
+
+    assert cfg["enable_market_filter"] is True
+    assert cfg["market_filter_mode"] == "downgrade"
+    assert cfg["enable_sector_filter"] is False
+    assert cfg["sector_filter_mode"] == "downgrade"
+
+
+def _market_rows(closes):
+    rows = []
+    for i, close in enumerate(closes):
+        rows.append({
+            "date": (date(2024, 1, 1) + timedelta(days=i)).isoformat(),
+            "open": close,
+            "high": close * 1.01,
+            "low": close * 0.99,
+            "close": close,
+            "volume": 1_000_000 + i * 1000,
+        })
+    return rows
+
+
+def test_market_filter_off_reports_weak_market_without_downgrading():
+    data = build_strategy6_candidate_data()
+    weak_market = {
+        "sh000001": _market_rows([120 - i * 0.2 for i in range(80)]),
+        "sz399001": _market_rows([130 - i * 0.2 for i in range(80)]),
+        "sz399006": _market_rows([140 - i * 0.2 for i in range(80)]),
+    }
+
+    result = StrongVcpTailEngine({"strategy6": {"enable_market_filter": False}}).evaluate_at(
+        data,
+        code="000001",
+        name="平安银行",
+        market_data_by_symbol=weak_market,
+    )
+    candidate = result.to_candidate_dict()
+
+    assert result.candidate_type == "KEY_CANDIDATE"
+    assert candidate["market_status"] == "MARKET_WEAK"
+    assert candidate["enable_market_filter"] is False
+    assert "MARKET_WEAK_DOWNGRADED" not in candidate["warn_tags"]
+
+
+def test_market_filter_downgrade_moves_ready_or_key_to_watch():
+    data = build_strategy6_candidate_data()
+    weak_market = {
+        "sh000001": _market_rows([120 - i * 0.2 for i in range(80)]),
+        "sz399001": _market_rows([130 - i * 0.2 for i in range(80)]),
+        "sz399006": _market_rows([140 - i * 0.2 for i in range(80)]),
+    }
+
+    result = StrongVcpTailEngine({"strategy6": {"enable_market_filter": True, "market_filter_mode": "downgrade"}}).evaluate_at(
+        data,
+        code="000001",
+        name="平安银行",
+        market_data_by_symbol=weak_market,
+    )
+    candidate = result.to_candidate_dict()
+
+    assert result.passed is True
+    assert result.candidate_type == "WATCH_CANDIDATE"
+    assert candidate["classification"] == "observe"
+    assert candidate["market_status"] == "MARKET_WEAK"
+    assert candidate["enable_market_filter"] is True
+    assert "MARKET_WEAK_DOWNGRADED" in candidate["warn_tags"]
+
+
+def test_relative_strength_20_is_reported_against_hs300_index():
+    data = build_strategy6_candidate_data()
+    market = {
+        "hs300": _market_rows([100 + i * 0.02 for i in range(80)]),
+    }
+
+    result = StrongVcpTailEngine({}).evaluate_at(
+        data,
+        code="000001",
+        name="平安银行",
+        market_data_by_symbol=market,
+    )
+    candidate = result.to_candidate_dict()
+
+    assert candidate["relative_strength_20"] > 0.10

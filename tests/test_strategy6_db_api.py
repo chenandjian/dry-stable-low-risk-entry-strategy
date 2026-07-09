@@ -14,6 +14,8 @@ def _candidate():
         "candidate_type": "KEY_CANDIDATE",
         "classification": "highlight",
         "lifecycle_status": "BUY_ZONE",
+        "first_pool_date": "2026-07-01",
+        "pool_age_trading_days": 6,
         "current_price": 12.34,
         "total_score": 82,
         "start_type": "NORMAL_STRONG_BREAKOUT",
@@ -45,6 +47,8 @@ def test_strategy6_candidate_table_is_independent(tmp_path):
     detail = db.get_strategy6_candidate("000001", task_id="s6-task")
     assert rows[0]["code"] == "000001"
     assert rows[0]["candidate_type"] == "KEY_CANDIDATE"
+    assert rows[0]["first_pool_date"] == "2026-07-01"
+    assert rows[0]["pool_age_trading_days"] == 6
     assert rows[0]["warn_tags"] == ["PRESSURE_NEAR_HIGH"]
     assert detail["risk_reward_ratio_2"] == 2.5
     assert db.get_candidates(task_id="s6-task") == []
@@ -73,3 +77,22 @@ def test_strategy6_api_returns_candidates_and_rejects_cross_strategy(tmp_path, m
     assert mismatch.status_code == 400
     assert mismatch.json()["error"] == "TASK_STRATEGY_MISMATCH"
 
+
+def test_strategy6_candidate_expires_after_ten_trading_days(tmp_path):
+    db.init_db(str(tmp_path / "s6lifecycle.db"))
+    previous = _candidate()
+    previous["evaluation_date"] = "2026-07-01"
+    previous["first_pool_date"] = "2026-07-01"
+    previous["pool_age_trading_days"] = 0
+    current = _candidate()
+    current["evaluation_date"] = "2026-07-22"
+
+    db.create_scan_task("s6-old", "2026-07-01 10:00:00", strategy_type=STRATEGY6_TYPE)
+    db.upsert_strategy6_candidate("s6-old", previous)
+    db.create_scan_task("s6-new", "2026-07-22 10:00:00", strategy_type=STRATEGY6_TYPE)
+    db.upsert_strategy6_candidate("s6-new", current)
+
+    saved = db.get_strategy6_candidate("000001", task_id="s6-new")
+    assert saved["first_pool_date"] == "2026-07-01"
+    assert saved["pool_age_trading_days"] >= 10
+    assert saved["lifecycle_status"] == "EXPIRED"

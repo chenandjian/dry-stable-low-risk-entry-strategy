@@ -34,6 +34,14 @@ class Strategy6Indicators:
     range_5: float = 0.0
     range_10: float = 0.0
     close_range_5: float = 0.0
+    relative_strength_20: float = 0.0
+    relative_strength_10_sector: float = 0.0
+    market_status: str = "UNKNOWN"
+    sector_strength_status: str = "UNKNOWN"
+    market_filter_enabled: bool = False
+    sector_filter_enabled: bool = False
+    market_filter_mode: str = "downgrade"
+    sector_filter_mode: str = "downgrade"
     has_big_down_volume: bool = False
     risk_tags: list[str] = field(default_factory=list)
     warn_tags: list[str] = field(default_factory=list)
@@ -153,6 +161,8 @@ class Strategy6Evaluation:
             "return_5": ind.return_5,
             "return_10": ind.return_10,
             "return_20": ind.return_20,
+            "relative_strength_20": ind.relative_strength_20,
+            "relative_strength_10_sector": ind.relative_strength_10_sector,
             "amount_avg_10": ind.amount_avg_10,
             "amount_avg_30": ind.amount_avg_30,
             "amount_avg_60": ind.amount_avg_60,
@@ -210,12 +220,14 @@ class Strategy6Evaluation:
             "candidate_type": self.candidate_type,
             "classification": self.classification,
             "lifecycle_status": self.lifecycle_status,
-            "market_status": "UNKNOWN",
-            "sector_strength_status": "UNKNOWN",
-            "enable_market_filter": False,
-            "enable_sector_filter": False,
-            "market_filter_mode": "downgrade",
-            "sector_filter_mode": "downgrade",
+            "first_pool_date": ind.evaluation_date,
+            "pool_age_trading_days": 0,
+            "market_status": ind.market_status,
+            "sector_strength_status": ind.sector_strength_status,
+            "enable_market_filter": ind.market_filter_enabled,
+            "enable_sector_filter": ind.sector_filter_enabled,
+            "market_filter_mode": ind.market_filter_mode,
+            "sector_filter_mode": ind.sector_filter_mode,
             "risk_tags": ind.risk_tags,
             "warn_tags": ind.warn_tags,
             "reject_reasons": self.reject_reasons,
@@ -226,4 +238,3 @@ class Strategy6Evaluation:
             "kline_fetched_at": self.kline_fetched_at,
             "quote_status": self.quote_status,
         }
-

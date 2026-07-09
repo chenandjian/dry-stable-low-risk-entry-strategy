@@ -11,6 +11,12 @@
           {{ task.id }} · {{ task.status }} · {{ task.candidates || 0 }} 候选
         </option>
       </select>
+      <button
+        data-test="export-candidates"
+        class="export-btn"
+        :disabled="!candidates.length"
+        @click="exportCandidates"
+      >一键导出列表</button>
     </div>
 
     <div v-if="error" class="error-banner">{{ error }}</div>
@@ -35,7 +41,7 @@
             <tr>
               <th>股票</th><th>现价</th><th>总分</th><th>分类</th><th>生命周期</th>
               <th>启动类型/等级</th><th>支撑状态</th><th>Key支撑</th><th>买入区</th>
-              <th>止损</th><th>目标1/2/3</th><th>RR2</th><th>V5/V20</th><th>风险/警告</th><th>数据日</th>
+              <th>止损</th><th>目标1/2/3</th><th>RR2</th><th>V5/V20</th><th>市场/RS</th><th>入池</th><th>风险/警告</th><th>数据日</th>
             </tr>
           </thead>
           <tbody>
@@ -53,6 +59,14 @@
               <td>{{ fmt(c.target_price_1) }} / {{ fmt(c.target_price_2) }} / {{ fmt(c.target_price_3) }}</td>
               <td class="rr">{{ fmt(c.risk_reward_ratio_2) }}</td>
               <td>{{ fmt(c.volume_ratio_5_20, 3) }}</td>
+              <td>
+                <div>{{ c.market_status || 'UNKNOWN' }}</div>
+                <div class="muted">RS20 {{ pct(c.relative_strength_20) }}</div>
+              </td>
+              <td>
+                <div>首次入池 {{ c.first_pool_date || '--' }}</div>
+                <div class="muted">池龄 {{ c.pool_age_trading_days ?? 0 }}日</div>
+              </td>
               <td>
                 <span v-for="tag in c.risk_tags || []" :key="'r'+tag" class="tag risk">{{ tag }}</span>
                 <span v-for="tag in c.warn_tags || []" :key="'w'+tag" class="tag warn">{{ tag }}</span>
@@ -76,6 +90,10 @@
         <div><span>目标</span><strong>{{ fmt(selected.target_price_1) }} / {{ fmt(selected.target_price_2) }} / {{ fmt(selected.target_price_3) }}</strong></div>
         <div><span>盈亏比</span><strong>RR1 {{ fmt(selected.risk_reward_ratio_1) }} · RR2 {{ fmt(selected.risk_reward_ratio_2) }} · RR3 {{ fmt(selected.risk_reward_ratio_3) }}</strong></div>
         <div><span>评分</span><strong>启动{{ selected.strong_start_score ?? 0 }} 支撑{{ selected.support_score ?? 0 }} 量干{{ selected.dry_stable_score ?? 0 }} RR{{ selected.risk_reward_score ?? 0 }} 风控{{ selected.risk_control_score ?? 0 }}</strong></div>
+        <div><span>市场过滤</span><strong>{{ selected.market_status || 'UNKNOWN' }} · {{ selected.enable_market_filter ? '开启' : '关闭' }} · {{ selected.market_filter_mode || '--' }}</strong></div>
+        <div><span>板块过滤</span><strong>{{ selected.sector_strength_status || 'UNKNOWN' }} · {{ selected.enable_sector_filter ? '开启' : '关闭' }} · {{ selected.sector_filter_mode || '--' }}</strong></div>
+        <div><span>相对强度</span><strong>RS20 {{ pct(selected.relative_strength_20) }} · 板块RS10 {{ pct(selected.relative_strength_10_sector) }}</strong></div>
+        <div><span>候选池</span><strong>首次入池 {{ selected.first_pool_date || '--' }} · 池龄 {{ selected.pool_age_trading_days ?? 0 }}日</strong></div>
         <div><span>量能</span><strong>V3 {{ fmt(selected.v3, 0) }} · V5 {{ fmt(selected.v5, 0) }} · V20 {{ fmt(selected.v20, 0) }} · V5/V20 {{ fmt(selected.volume_ratio_5_20, 3) }}</strong></div>
         <div><span>涨跌幅</span><strong>5日 {{ pct(selected.return_5) }} · 10日 {{ pct(selected.return_10) }} · 20日 {{ pct(selected.return_20) }}</strong></div>
         <div><span>建议</span><strong>{{ selected.suggestion || '--' }}</strong></div>
@@ -94,6 +112,7 @@
 
 <script>
 import { useApi } from '../composables/useApi.js'
+import { downloadCsv } from '../utils/csvExport.js'
 
 export default {
   name: 'Strategy6Results',
@@ -193,6 +212,63 @@ export default {
       if (c.candidate_type === 'WATCH_CANDIDATE') return 'watch'
       return 'rejected'
     },
+    exportCandidates() {
+      downloadCsv({
+        filename: `strategy6-candidates-${this.selectedTaskId || 'latest'}.csv`,
+        columns: [
+          { header: '代码', value: c => c.code },
+          { header: '名称', value: c => c.name },
+          { header: '板块', value: c => c.sector_name || '' },
+          { header: '候选类型', value: c => c.candidate_type || '' },
+          { header: '生命周期', value: c => c.lifecycle_status || '' },
+          { header: '首次入池', value: c => c.first_pool_date || '' },
+          { header: '池龄交易日', value: c => c.pool_age_trading_days ?? '' },
+          { header: '总分', value: c => c.total_score ?? '' },
+          { header: '市场过滤', value: c => c.enable_market_filter ? '开启' : '关闭' },
+          { header: '板块过滤', value: c => c.enable_sector_filter ? '开启' : '关闭' },
+          { header: '市场过滤模式', value: c => c.market_filter_mode || '' },
+          { header: '板块过滤模式', value: c => c.sector_filter_mode || '' },
+          { header: '市场状态', value: c => c.market_status || '' },
+          { header: '板块状态', value: c => c.sector_strength_status || '' },
+          { header: 'RS20', value: c => this.pct(c.relative_strength_20) },
+          { header: '板块RS10', value: c => this.pct(c.relative_strength_10_sector) },
+          { header: '现价', value: c => this.fmt(c.current_price) },
+          { header: '日涨跌', value: c => this.pct(c.daily_return) },
+          { header: '5日涨幅', value: c => this.pct(c.return_5) },
+          { header: '10日涨幅', value: c => this.pct(c.return_10) },
+          { header: '20日涨幅', value: c => this.pct(c.return_20) },
+          { header: '启动日', value: c => c.start_date || '' },
+          { header: '启动类型', value: c => c.start_type || '' },
+          { header: '启动等级', value: c => c.start_grade || '' },
+          { header: '支撑状态', value: c => c.support_status || '' },
+          { header: 'Key支撑', value: c => this.fmt(c.key_support_price) },
+          { header: '支撑区低', value: c => this.fmt(c.support_zone_low) },
+          { header: '支撑区高', value: c => this.fmt(c.support_zone_high) },
+          { header: '建议买入价', value: c => this.fmt(c.suggested_buy_price) },
+          { header: '买入区低', value: c => this.fmt(c.buy_zone_low) },
+          { header: '买入区高', value: c => this.fmt(c.buy_zone_high) },
+          { header: '止损', value: c => this.fmt(c.stop_loss_price) },
+          { header: '目标1', value: c => this.fmt(c.target_price_1) },
+          { header: '目标2', value: c => this.fmt(c.target_price_2) },
+          { header: '目标3', value: c => this.fmt(c.target_price_3) },
+          { header: 'RR1', value: c => this.fmt(c.risk_reward_ratio_1) },
+          { header: 'RR2', value: c => this.fmt(c.risk_reward_ratio_2) },
+          { header: 'RR3', value: c => this.fmt(c.risk_reward_ratio_3) },
+          { header: 'V5/V20', value: c => this.fmt(c.volume_ratio_5_20, 3) },
+          { header: '启动分', value: c => c.strong_start_score ?? '' },
+          { header: '支撑分', value: c => c.support_score ?? '' },
+          { header: '量干分', value: c => c.dry_stable_score ?? '' },
+          { header: '盈亏比分', value: c => c.risk_reward_score ?? '' },
+          { header: '风控分', value: c => c.risk_control_score ?? '' },
+          { header: '风险标签', value: c => (c.risk_tags || []).join('|') },
+          { header: '警告标签', value: c => (c.warn_tags || []).join('|') },
+          { header: '否决原因', value: c => (c.reject_reasons || []).join('|') },
+          { header: '建议', value: c => c.suggestion || '' },
+          { header: '数据日', value: c => c.kline_latest_date || c.evaluation_date || '' },
+        ],
+        rows: this.candidates,
+      })
+    },
   },
 }
 </script>
@@ -203,6 +279,9 @@ export default {
 h1 { margin: 0 0 6px; font-size: 22px; }
 p { margin: 0; color: var(--text-secondary); }
 select { background: var(--bg-panel); color: var(--text-primary); border: 1px solid var(--border); border-radius: 4px; padding: 8px; min-width: 340px; }
+.export-btn { background: transparent; color: var(--text-primary); border: 1px solid var(--border); border-radius: 4px; padding: 8px 12px; cursor: pointer; }
+.export-btn:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+.export-btn:disabled { opacity: 0.45; cursor: not-allowed; }
 .summary-bar { display: flex; gap: 12px; align-items: center; margin: 12px 0; color: var(--text-secondary); flex-wrap: wrap; }
 .chip, .type-badge, .tag { border-radius: 999px; padding: 2px 8px; font-size: 12px; display: inline-block; margin: 1px 3px 1px 0; }
 .chip.ready, .type-badge.ready { background: rgba(59, 130, 246, 0.18); color: #93c5fd; }
