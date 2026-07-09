@@ -1,0 +1,134 @@
+from datetime import date, timedelta
+
+from strategy6.engine import StrongVcpTailEngine
+from strategy6.validation import resolve_strategy6_config
+
+
+def _row(i, close=10.0, open_price=None, high=None, low=None, volume=1_000_000, amount=600_000_000):
+    day = date(2024, 1, 1) + timedelta(days=i)
+    open_price = close * 0.995 if open_price is None else open_price
+    return {
+        "date": day.isoformat(),
+        "open": round(open_price, 4),
+        "high": round(high if high is not None else max(open_price, close) * 1.01, 4),
+        "low": round(low if low is not None else min(open_price, close) * 0.99, 4),
+        "close": round(close, 4),
+        "volume": volume,
+        "amount": amount,
+    }
+
+
+def build_strategy6_candidate_data(length=760):
+    data = []
+    for i in range(length):
+        close = 10 + i * 0.008
+        data.append(_row(i, close=close, volume=1_000_000, amount=650_000_000))
+
+    base = data[-21]["close"]
+    close = base * 1.12
+    data[-20].update({
+        "open": round(close * 0.96, 4),
+        "high": round(close * 1.015, 4),
+        "low": round(close * 0.955, 4),
+        "close": round(close, 4),
+        "volume": 2_600_000,
+        "amount": 1_400_000_000,
+    })
+
+    pivot = data[-20]["close"]
+    closes = [pivot * v for v in (0.99, 1.005, 0.995, 1.0, 0.992, 1.003, 0.998, 1.001, 0.997, 1.002,
+                                  0.999, 1.004, 1.0, 1.003, 1.001, 1.002, 1.000, 1.003, 1.001)]
+    volumes = [1_400_000, 1_300_000, 1_200_000, 1_100_000, 1_000_000,
+               950_000, 900_000, 850_000, 800_000, 760_000,
+               720_000, 680_000, 640_000, 600_000, 560_000,
+               520_000, 500_000, 480_000, 460_000, 440_000]
+    for j, close in enumerate(closes):
+        data[-19 + j].update({
+            "open": round(close * 0.998, 4),
+            "high": round(close * 1.015, 4),
+            "low": round(close * 0.985, 4),
+            "close": round(close, 4),
+            "volume": volumes[j],
+            "amount": 1_200_000_000,
+        })
+    return data
+
+
+def test_engine_outputs_full_candidate_trade_plan():
+    result = StrongVcpTailEngine({}).evaluate_at(
+        build_strategy6_candidate_data(),
+        code="000001",
+        name="平安银行",
+        sector_name="银行",
+    )
+    candidate = result.to_candidate_dict()
+
+    assert result.passed is True
+    assert result.candidate_type in {"READY_CANDIDATE", "KEY_CANDIDATE", "WATCH_CANDIDATE"}
+    assert result.start.start_type in {"NORMAL_STRONG_BREAKOUT", "VOLUME_LIMIT_UP", "LOW_VOLUME_LIMIT_UP", "ONE_WORD_LIMIT_UP"}
+    assert result.start.start_grade in {"S", "A", "B"}
+    assert result.start.high_trigger in {"near_120d_high", "new_120d_high"}
+    assert result.support.support_status in {"MA5_SUPPORT", "MA10_SUPPORT", "MA20_SUPPORT", "MA50_TESTING"}
+    assert candidate["key_support_price"] > 0
+    assert candidate["support_zone_low"] < candidate["support_zone_high"]
+    assert candidate["suggested_buy_price"] is not None
+    assert candidate["stop_loss_price"] < candidate["suggested_buy_price"]
+    assert candidate["target_price_1"] > candidate["suggested_buy_price"]
+    assert candidate["target_price_2"] > candidate["suggested_buy_price"]
+    assert candidate["target_price_3"] > candidate["suggested_buy_price"]
+    assert candidate["risk_reward_ratio_2"] >= 1.5
+    assert 0 <= candidate["total_score"] <= 100
+    assert candidate["lifecycle_status"] in {"READY", "BUY_ZONE", "SETUP_FORMING", "BREAKOUT_CONFIRMED", "EXTENDED"}
+    assert candidate["sector_name"] == "银行"
+
+
+def test_rr2_below_minimum_rejects_candidate():
+    data = build_strategy6_candidate_data()
+    for row in data[-20:]:
+        row["high"] = round(row["close"] * 1.004, 4)
+        row["low"] = round(row["close"] * 0.99, 4)
+    cfg = {
+        "strategy6": {
+            "rr2_min_watch": 4.0,
+            "rr2_min_key": 4.5,
+            "rr2_min_ready": 5.0,
+        }
+    }
+
+    result = StrongVcpTailEngine(cfg).evaluate_at(data, code="000001", name="平安银行")
+
+    assert result.passed is False
+    assert result.candidate_type == "REJECTED"
+    assert "RR2_LT_4_0" in result.reject_reasons
+
+
+def test_big_down_volume_is_hard_rejected():
+    data = build_strategy6_candidate_data()
+    data[-1]["open"] = data[-2]["close"]
+    data[-1]["close"] = round(data[-2]["close"] * 0.92, 4)
+    data[-1]["high"] = round(data[-2]["close"] * 1.01, 4)
+    data[-1]["low"] = round(data[-1]["close"] * 0.99, 4)
+    data[-1]["volume"] = 3_000_000
+
+    result = StrongVcpTailEngine({}).evaluate_at(data, code="000001", name="平安银行")
+
+    assert result.passed is False
+    assert "BIG_DOWN_VOLUME" in result.reject_reasons
+
+
+def test_close_below_ma5_is_not_marked_ma5_support():
+    data = build_strategy6_candidate_data()
+    data[-1]["close"] = round(data[-1]["close"] * 0.96, 4)
+
+    result = StrongVcpTailEngine({}).evaluate_at(data, code="000001", name="平安银行")
+
+    assert result.support.support_status != "MA5_SUPPORT"
+
+
+def test_config_rejects_invalid_filter_mode():
+    try:
+        resolve_strategy6_config({"strategy6": {"market_filter_mode": "invalid"}})
+    except ValueError as exc:
+        assert "market_filter_mode" in str(exc)
+    else:
+        raise AssertionError("invalid market_filter_mode should fail")
