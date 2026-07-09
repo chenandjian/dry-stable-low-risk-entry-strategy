@@ -139,6 +139,7 @@ def init_db(path: str = "data/cuphandle.db"):
         _ensure_strategy4_tables(conn)
         _ensure_strategy5_candidates_table(conn)
         _ensure_strategy6_candidates_table(conn)
+        _ensure_strategy6_market_snapshots_table(conn)
         _ensure_strategy2_backtest_tables(conn)
         _ensure_strategy3_backtest_tables(conn)
         _ensure_strategy1_backtest_tables(conn)
@@ -2039,6 +2040,38 @@ def _ensure_strategy6_candidates_table(conn: sqlite3.Connection):
     )
 
 
+def _ensure_strategy6_market_snapshots_table(conn: sqlite3.Connection):
+    """Create Strategy6 task-level market snapshot table if not exists."""
+    conn.execute('''
+        CREATE TABLE IF NOT EXISTS strategy6_market_snapshots (
+            task_id TEXT NOT NULL,
+            symbol TEXT NOT NULL,
+            name TEXT,
+            latest_date TEXT,
+            latest_close REAL DEFAULT 0,
+            ma20 REAL DEFAULT 0,
+            ma50 REAL DEFAULT 0,
+            return_20 REAL DEFAULT 0,
+            above_ma20 INTEGER DEFAULT 0,
+            ma20_above_ma50 INTEGER DEFAULT 0,
+            volume_down_risk INTEGER DEFAULT 0,
+            weak INTEGER DEFAULT 0,
+            rows_count INTEGER DEFAULT 0,
+            source TEXT,
+            market_status TEXT,
+            market_reasons TEXT,
+            market_return_20 REAL DEFAULT 0,
+            fetched_at TEXT,
+            PRIMARY KEY (task_id, symbol),
+            FOREIGN KEY (task_id) REFERENCES scan_tasks(id)
+        )
+    ''')
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_strategy6_market_snapshots_task "
+        "ON strategy6_market_snapshots(task_id)"
+    )
+
+
 def _ensure_column(conn: sqlite3.Connection, table: str, column: str, col_type: str):
     """Compatible add-column-if-not-exists helper."""
     existing = [d[1] for d in conn.execute(f"PRAGMA table_info({table})").fetchall()]
@@ -3013,6 +3046,119 @@ def get_strategy6_candidate(code: str, task_id: str = None) -> dict | None:
         return None
     cols = [d[1] for d in conn.execute("PRAGMA table_info(strategy6_candidates)").fetchall()]
     return _deserialize_strategy6_row(dict(zip(cols, row)))
+
+
+def save_strategy6_market_snapshot(task_id: str, snapshot: dict):
+    """Persist task-level Strategy6 market index snapshot for frontend audit."""
+    conn = get_conn()
+    _ensure_strategy6_market_snapshots_table(conn)
+    now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    market_status = str(snapshot.get("market_status") or "UNKNOWN")
+    market_reasons = _json_any(snapshot.get("market_reasons", []))
+    market_return_20 = float(snapshot.get("market_return_20") or 0.0)
+    rows = snapshot.get("indexes") or []
+    with conn:
+        conn.execute("DELETE FROM strategy6_market_snapshots WHERE task_id=?", (task_id,))
+        for row in rows:
+            symbol = str(row.get("symbol") or "")
+            if not symbol:
+                continue
+            conn.execute(
+                """INSERT INTO strategy6_market_snapshots (
+                       task_id, symbol, name, latest_date, latest_close, ma20, ma50, return_20,
+                       above_ma20, ma20_above_ma50, volume_down_risk, weak, rows_count, source,
+                       market_status, market_reasons, market_return_20, fetched_at
+                   ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    task_id,
+                    symbol,
+                    row.get("name", ""),
+                    row.get("latest_date", ""),
+                    float(row.get("latest_close") or 0.0),
+                    float(row.get("ma20") or 0.0),
+                    float(row.get("ma50") or 0.0),
+                    float(row.get("return_20") or 0.0),
+                    1 if row.get("above_ma20") else 0,
+                    1 if row.get("ma20_above_ma50") else 0,
+                    1 if row.get("volume_down_risk") else 0,
+                    1 if row.get("weak") else 0,
+                    int(row.get("rows_count") or 0),
+                    row.get("source", ""),
+                    market_status,
+                    market_reasons,
+                    market_return_20,
+                    row.get("fetched_at") or now,
+                ),
+            )
+
+
+def get_strategy6_market_snapshot(task_id: str) -> dict:
+    """Return persisted Strategy6 market snapshot for a task."""
+    conn = get_conn()
+    _ensure_strategy6_market_snapshots_table(conn)
+    rows = conn.execute(
+        """SELECT task_id, symbol, name, latest_date, latest_close, ma20, ma50, return_20,
+                  above_ma20, ma20_above_ma50, volume_down_risk, weak, rows_count, source,
+                  market_status, market_reasons, market_return_20, fetched_at
+           FROM strategy6_market_snapshots
+           WHERE task_id=?
+           ORDER BY CASE symbol
+               WHEN 'sh000001' THEN 0
+               WHEN 'sz399001' THEN 1
+               WHEN 'sz399006' THEN 2
+               WHEN 'hs300' THEN 3
+               ELSE 9
+           END, symbol ASC""",
+        (task_id,),
+    ).fetchall()
+    if not rows:
+        return {
+            "task_id": task_id,
+            "market_status": "UNKNOWN",
+            "market_reasons": [],
+            "market_return_20": 0.0,
+            "indexes": [],
+        }
+    cols = [
+        "task_id", "symbol", "name", "latest_date", "latest_close", "ma20", "ma50", "return_20",
+        "above_ma20", "ma20_above_ma50", "volume_down_risk", "weak", "rows_count", "source",
+        "market_status", "market_reasons", "market_return_20", "fetched_at",
+    ]
+    items = [dict(zip(cols, row)) for row in rows]
+    first = items[0]
+    indexes = []
+    for item in items:
+        indexes.append({
+            "symbol": item["symbol"],
+            "name": item.get("name") or item["symbol"],
+            "latest_date": item.get("latest_date") or "",
+            "latest_close": item.get("latest_close") or 0.0,
+            "ma20": item.get("ma20") or 0.0,
+            "ma50": item.get("ma50") or 0.0,
+            "return_20": item.get("return_20") or 0.0,
+            "above_ma20": bool(item.get("above_ma20")),
+            "ma20_above_ma50": bool(item.get("ma20_above_ma50")),
+            "volume_down_risk": bool(item.get("volume_down_risk")),
+            "weak": bool(item.get("weak")),
+            "rows_count": item.get("rows_count") or 0,
+            "source": item.get("source") or "",
+            "fetched_at": item.get("fetched_at") or "",
+        })
+    reasons = []
+    raw_reasons = first.get("market_reasons")
+    if isinstance(raw_reasons, str) and raw_reasons:
+        try:
+            parsed = json.loads(raw_reasons)
+            reasons = parsed if isinstance(parsed, list) else []
+        except (json.JSONDecodeError, TypeError):
+            reasons = []
+    return {
+        "task_id": task_id,
+        "market_status": first.get("market_status") or "UNKNOWN",
+        "market_reasons": reasons,
+        "market_return_20": first.get("market_return_20") or 0.0,
+        "indexes": indexes,
+    }
 
 
 def save_strategy4_topic_index_ohlc(

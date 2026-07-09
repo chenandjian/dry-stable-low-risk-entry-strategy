@@ -5,6 +5,7 @@ import { nextTick } from 'vue'
 const api = {
   getStrategy6Tasks: vi.fn(),
   getStrategy6Candidates: vi.fn(),
+  getStrategy6MarketSnapshot: vi.fn(),
   downloadStrategy6Report: vi.fn(),
 }
 
@@ -108,6 +109,27 @@ describe('Strategy6Results', () => {
         },
       ],
     })
+    api.getStrategy6MarketSnapshot.mockResolvedValue({
+      snapshot: {
+        market_status: 'MARKET_STRONG',
+        market_reasons: ['above_ma20=2', 'ma20_above_ma50=1', 'risk_count=0'],
+        indexes: [
+          {
+            symbol: 'sh000001',
+            name: '上证指数',
+            latest_date: '2026-07-09',
+            latest_close: 3200.5,
+            ma20: 3150.2,
+            ma50: 3100.1,
+            return_20: 0.035,
+            above_ma20: true,
+            ma20_above_ma50: true,
+            volume_down_risk: false,
+            rows_count: 80,
+          },
+        ],
+      },
+    })
     api.downloadStrategy6Report.mockResolvedValue(new Blob(['xlsx-bytes'], {
       type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
     }))
@@ -144,6 +166,11 @@ describe('Strategy6Results', () => {
     expect(wrapper.text()).toContain('BUY_ZONE')
     expect(wrapper.text()).toContain('MARKET_WEAK')
     expect(wrapper.text()).toContain('RS20 18.00%')
+    expect(wrapper.text()).toContain('市场过滤数据')
+    expect(wrapper.text()).toContain('上证指数')
+    expect(wrapper.text()).toContain('3200.50')
+    expect(wrapper.text()).toContain('MA20')
+    expect(wrapper.text()).not.toContain('板块过滤')
     expect(wrapper.text()).toContain('首次入池 2026-07-01')
     expect(wrapper.text()).toContain('池龄 6日')
     expect(wrapper.text()).toContain('NEAR_120D_PRESSURE')
@@ -176,11 +203,12 @@ describe('Strategy6Results', () => {
     await flushUi()
 
     expect(api.getStrategy6Candidates).toHaveBeenCalledWith('s6-20260709-001')
+    expect(api.getStrategy6MarketSnapshot).toHaveBeenCalledWith('s6-20260709-001')
     expect(wrapper.text()).toContain('候选数 9')
     expect(wrapper.text()).toContain('就绪 2')
     expect(wrapper.text()).toContain('重点 4')
     expect(wrapper.text()).toContain('观察 3')
-    expect(wrapper.findAll('tbody tr')).toHaveLength(9)
+    expect(wrapper.findAll('.candidate-table tbody tr')).toHaveLength(9)
   })
 
   it('exports strategy6 candidates with market, lifecycle and trade plan fields', async () => {
@@ -202,11 +230,13 @@ describe('Strategy6Results', () => {
     const blob = mocks.createObjectURL.mock.calls[0][0]
     const csv = await blob.text()
     expect(csv).toContain('代码,名称,板块,候选类型,生命周期,首次入池,池龄交易日')
-    expect(csv).toContain('市场状态,板块状态,RS20,板块RS10')
+    expect(csv).toContain('市场状态,RS20')
+    expect(csv).not.toContain('板块状态')
+    expect(csv).not.toContain('板块RS10')
     expect(csv).toContain('启动日低点,启动后天数')
     expect(csv).toContain('Key支撑,前置支撑')
     expect(csv).toContain('000001,平安银行,,READY_CANDIDATE,BUY_ZONE,2026-07-01,6')
-    expect(csv).toContain('MARKET_WEAK,UNKNOWN,18.00%,3.00%')
+    expect(csv).toContain('downgrade,MARKET_WEAK,18.00%,12.34')
   })
 
   it('exports strategy6 daily report as excel from backend report endpoint', async () => {

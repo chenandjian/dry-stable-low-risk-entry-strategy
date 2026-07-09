@@ -2458,6 +2458,14 @@ async def strategy6_candidate_detail(task_id: str, code: str):
     return {"taskId": task_id, "candidate": candidate}
 
 
+@app.get("/api/strategy6/tasks/{task_id}/market-snapshot")
+async def strategy6_market_snapshot(task_id: str):
+    _, err = _require_task_strategy(task_id, STRATEGY6_TYPE)
+    if err:
+        return err
+    return {"taskId": task_id, "snapshot": db.get_strategy6_market_snapshot(task_id)}
+
+
 @app.get("/api/strategy6/tasks/{task_id}/report.xlsx")
 async def strategy6_excel_report(task_id: str):
     _, err = _require_task_strategy(task_id, STRATEGY6_TYPE)

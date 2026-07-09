@@ -87,6 +87,53 @@ def test_strategy6_api_returns_candidates_and_rejects_cross_strategy(tmp_path, m
     assert mismatch.json()["error"] == "TASK_STRATEGY_MISMATCH"
 
 
+def test_strategy6_api_returns_market_snapshot_for_task(tmp_path, monkeypatch):
+    db_path = str(tmp_path / "s6marketapi.db")
+    db.init_db(db_path)
+    monkeypatch.setattr(server_mod, "load_config", lambda path="config.yaml": {"data": {"database_path": db_path}, "strategy6": {}})
+    server_mod._running.update({"running": False, "task_id": None, "strategy_type": None, "stats": {}})
+
+    db.create_scan_task("s1-task", "2026-07-09 09:55:00", strategy_type="STRATEGY_1_CUP_HANDLE")
+    db.create_scan_task("s6-task", "2026-07-09 10:00:00", strategy_type=STRATEGY6_TYPE)
+    db.save_strategy6_market_snapshot(
+        "s6-task",
+        {
+            "market_status": "MARKET_STRONG",
+            "market_reasons": ["above_ma20=2", "ma20_above_ma50=1"],
+            "market_return_20": 0.04,
+            "indexes": [
+                {
+                    "symbol": "sh000001",
+                    "name": "上证指数",
+                    "latest_date": "2026-07-09",
+                    "latest_close": 3200.5,
+                    "ma20": 3150.2,
+                    "ma50": 3100.1,
+                    "return_20": 0.035,
+                    "above_ma20": True,
+                    "ma20_above_ma50": True,
+                    "volume_down_risk": False,
+                    "rows_count": 80,
+                    "source": "sina",
+                }
+            ],
+        },
+    )
+
+    client = TestClient(server_mod.app)
+    response = client.get("/api/strategy6/tasks/s6-task/market-snapshot")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["taskId"] == "s6-task"
+    assert body["snapshot"]["market_status"] == "MARKET_STRONG"
+    assert body["snapshot"]["indexes"][0]["symbol"] == "sh000001"
+    assert body["snapshot"]["indexes"][0]["latest_close"] == 3200.5
+
+    mismatch = client.get("/api/strategy6/tasks/s1-task/market-snapshot")
+    assert mismatch.status_code == 400
+    assert mismatch.json()["error"] == "TASK_STRATEGY_MISMATCH"
+
+
 def test_strategy6_api_exports_excel_report(tmp_path, monkeypatch):
     db_path = str(tmp_path / "s6report.db")
     db.init_db(db_path)

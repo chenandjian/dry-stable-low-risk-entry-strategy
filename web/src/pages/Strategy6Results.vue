@@ -39,6 +39,39 @@
     <div class="empty" v-if="!loading && !selectedTaskId">请选择一个策略6任务查看结果。</div>
     <div class="empty" v-else-if="!loading && selectedTaskId && !candidates.length">当前任务没有策略6候选。</div>
 
+    <section v-if="marketSnapshot" class="panel market-panel">
+      <div class="panel-header">市场过滤数据</div>
+      <div class="market-summary">
+        <span>状态 <strong>{{ marketSnapshot.market_status || 'UNKNOWN' }}</strong></span>
+        <span>20日市场涨幅 <strong>{{ pct(marketSnapshot.market_return_20) }}</strong></span>
+        <span v-for="reason in marketSnapshot.market_reasons || []" :key="reason" class="tag info">{{ reason }}</span>
+      </div>
+      <div class="table-scroll">
+        <table class="market-table">
+          <thead>
+            <tr>
+              <th>指数</th><th>日期</th><th>收盘</th><th>MA20</th><th>MA50</th>
+              <th>20日涨幅</th><th>MA20上方</th><th>MA20≥MA50</th><th>放量下跌风险</th><th>数据行数</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="idx in marketIndexes" :key="idx.symbol">
+              <td>{{ idx.name || idx.symbol }} <span class="muted">{{ idx.symbol }}</span></td>
+              <td>{{ idx.latest_date || '--' }}</td>
+              <td>{{ fmt(idx.latest_close) }}</td>
+              <td>MA20 {{ fmt(idx.ma20) }}</td>
+              <td>{{ fmt(idx.ma50) }}</td>
+              <td>{{ pct(idx.return_20) }}</td>
+              <td>{{ idx.above_ma20 ? '是' : '否' }}</td>
+              <td>{{ idx.ma20_above_ma50 ? '是' : '否' }}</td>
+              <td>{{ idx.volume_down_risk ? '是' : '否' }}</td>
+              <td>{{ idx.rows_count ?? 0 }}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
     <section v-for="group in candidateGroups" :key="group.type" class="panel">
       <div class="panel-header">{{ group.title }}</div>
       <div class="table-scroll">
@@ -98,8 +131,7 @@
         <div><span>盈亏比</span><strong>RR1 {{ fmt(selected.risk_reward_ratio_1) }} · RR2 {{ fmt(selected.risk_reward_ratio_2) }} · RR3 {{ fmt(selected.risk_reward_ratio_3) }}</strong></div>
         <div><span>评分</span><strong>启动{{ selected.strong_start_score ?? 0 }} 支撑{{ selected.support_score ?? 0 }} 量干{{ selected.dry_stable_score ?? 0 }} RR{{ selected.risk_reward_score ?? 0 }} 风控{{ selected.risk_control_score ?? 0 }}</strong></div>
         <div><span>市场过滤</span><strong>{{ selected.market_status || 'UNKNOWN' }} · {{ selected.enable_market_filter ? '开启' : '关闭' }} · {{ selected.market_filter_mode || '--' }}</strong></div>
-        <div><span>板块过滤</span><strong>{{ selected.sector_strength_status || 'UNKNOWN' }} · {{ selected.enable_sector_filter ? '开启' : '关闭' }} · {{ selected.sector_filter_mode || '--' }}</strong></div>
-        <div><span>相对强度</span><strong>RS20 {{ pct(selected.relative_strength_20) }} · 板块RS10 {{ pct(selected.relative_strength_10_sector) }}</strong></div>
+        <div><span>相对强度</span><strong>RS20 {{ pct(selected.relative_strength_20) }}</strong></div>
         <div><span>候选池</span><strong>首次入池 {{ selected.first_pool_date || '--' }} · 池龄 {{ selected.pool_age_trading_days ?? 0 }}日</strong></div>
         <div><span>量能</span><strong>V3 {{ fmt(selected.v3, 0) }} · V5 {{ fmt(selected.v5, 0) }} · V20 {{ fmt(selected.v20, 0) }} · V5/V20 {{ fmt(selected.volume_ratio_5_20, 3) }}</strong></div>
         <div><span>涨跌幅</span><strong>5日 {{ pct(selected.return_5) }} · 10日 {{ pct(selected.return_10) }} · 20日 {{ pct(selected.return_20) }}</strong></div>
@@ -129,6 +161,7 @@ export default {
       candidates: [],
       selectedTaskId: '',
       selected: null,
+      marketSnapshot: null,
       loading: false,
       error: '',
     }
@@ -160,6 +193,9 @@ export default {
       const best = this.sortedCandidates.reduce((max, c) => Math.max(max, Number(c.risk_reward_ratio_2 || 0)), 0)
       return best ? best.toFixed(2) : '--'
     },
+    marketIndexes() {
+      return this.marketSnapshot?.indexes || []
+    },
   },
   async mounted() {
     const api = useApi()
@@ -184,6 +220,7 @@ export default {
       if (!this.selectedTaskId) {
         this.candidates = []
         this.selected = null
+        this.marketSnapshot = null
         return
       }
       this.loading = true
@@ -193,6 +230,8 @@ export default {
         const res = await api.getStrategy6Candidates(this.selectedTaskId)
         this.candidates = res.candidates || []
         this.selected = this.candidates[0] || null
+        const snapshotRes = await api.getStrategy6MarketSnapshot(this.selectedTaskId)
+        this.marketSnapshot = snapshotRes.snapshot || null
       } catch (e) {
         this.error = '策略6候选加载失败'
       } finally {
@@ -232,13 +271,9 @@ export default {
           { header: '池龄交易日', value: c => c.pool_age_trading_days ?? '' },
           { header: '总分', value: c => c.total_score ?? '' },
           { header: '市场过滤', value: c => c.enable_market_filter ? '开启' : '关闭' },
-          { header: '板块过滤', value: c => c.enable_sector_filter ? '开启' : '关闭' },
           { header: '市场过滤模式', value: c => c.market_filter_mode || '' },
-          { header: '板块过滤模式', value: c => c.sector_filter_mode || '' },
           { header: '市场状态', value: c => c.market_status || '' },
-          { header: '板块状态', value: c => c.sector_strength_status || '' },
           { header: 'RS20', value: c => this.pct(c.relative_strength_20) },
-          { header: '板块RS10', value: c => this.pct(c.relative_strength_10_sector) },
           { header: '现价', value: c => this.fmt(c.current_price) },
           { header: '日涨跌', value: c => this.pct(c.daily_return) },
           { header: '5日涨幅', value: c => this.pct(c.return_5) },
@@ -309,6 +344,7 @@ select { background: var(--bg-panel); color: var(--text-primary); border: 1px so
 .export-btn:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
 .export-btn:disabled { opacity: 0.45; cursor: not-allowed; }
 .summary-bar { display: flex; gap: 12px; align-items: center; margin: 12px 0; color: var(--text-secondary); flex-wrap: wrap; }
+.market-summary { padding: 12px 14px; display: flex; gap: 12px; align-items: center; flex-wrap: wrap; color: var(--text-secondary); border-bottom: 1px solid var(--border); }
 .chip, .type-badge, .tag { border-radius: 999px; padding: 2px 8px; font-size: 12px; display: inline-block; margin: 1px 3px 1px 0; }
 .chip.ready, .type-badge.ready { background: rgba(59, 130, 246, 0.18); color: #93c5fd; }
 .chip.key, .type-badge.key { background: rgba(168, 85, 247, 0.18); color: #d8b4fe; }
@@ -317,6 +353,7 @@ select { background: var(--bg-panel); color: var(--text-primary); border: 1px so
 .panel-header { padding: 12px 14px; border-bottom: 1px solid var(--border); font-weight: 700; color: var(--text-secondary); }
 .table-scroll { overflow-x: auto; }
 .candidate-table { width: 100%; min-width: 1520px; border-collapse: collapse; font-size: 13px; }
+.market-table { width: 100%; min-width: 980px; border-collapse: collapse; font-size: 13px; }
 th, td { border-bottom: 1px solid var(--border); padding: 9px 10px; text-align: left; }
 th { color: var(--text-secondary); font-weight: 600; }
 td { vertical-align: top; }

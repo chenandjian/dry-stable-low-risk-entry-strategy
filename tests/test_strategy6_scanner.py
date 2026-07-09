@@ -102,6 +102,47 @@ def test_strategy6_scan_passes_market_context_when_market_filter_enabled(tmp_pat
     assert row["market_status"] in {"MARKET_WEAK", "MARKET_RISK", "MARKET_NEUTRAL", "MARKET_STRONG"}
 
 
+def test_strategy6_scan_persists_market_snapshot_for_frontend_audit(tmp_path, monkeypatch):
+    from tests.test_strategy6_core_rules import build_strategy6_candidate_data
+    import strategy6.scanner as scanner_mod
+
+    db_path = str(tmp_path / "s6marketsnapshot.db")
+    config = {
+        "data": {"database_path": db_path, "daily_sources": ["baidu", "sina", "tencent"], "worker_count": 1},
+        "strategy6": {"enable_market_filter": True, "market_filter_mode": "downgrade"},
+    }
+    stocks = [{"code": "000001", "name": "平安银行", "market": "SZ", "sector_name": "银行"}]
+
+    def fake_fetch_market(symbol=None, days=250):
+        if symbol == "sh000001":
+            return _market_rows([100 + i * 0.2 for i in range(80)])
+        if symbol == "sz399001":
+            return _market_rows([120 + i * 0.1 for i in range(80)])
+        if symbol == "sz399006":
+            return _market_rows([140 - i * 0.05 for i in range(80)])
+        return _market_rows([110 + i * 0.15 for i in range(80)])
+
+    def fake_fetch(*args, **kwargs):
+        return FetchResult(data=build_strategy6_candidate_data(), primary_source="baidu", fallback_source="baidu")
+
+    monkeypatch.setattr(scanner_mod, "fetch_market_index_daily", fake_fetch_market)
+
+    scan_strategy6_all(config, task_id="s6-market-snapshot", stocks=stocks, fetch_daily_fn=fake_fetch, worker_count=1)
+
+    snapshot = db.get_strategy6_market_snapshot("s6-market-snapshot")
+    assert snapshot["task_id"] == "s6-market-snapshot"
+    assert snapshot["market_status"] in {"MARKET_STRONG", "MARKET_NEUTRAL", "MARKET_WEAK", "MARKET_RISK"}
+    symbols = {row["symbol"] for row in snapshot["indexes"]}
+    assert {"sh000001", "sz399001", "sz399006", "hs300"} <= symbols
+    sh = next(row for row in snapshot["indexes"] if row["symbol"] == "sh000001")
+    assert sh["name"] == "上证指数"
+    assert sh["latest_date"]
+    assert sh["latest_close"] > 0
+    assert sh["ma20"] > 0
+    assert sh["ma50"] > 0
+    assert isinstance(sh["above_ma20"], bool)
+
+
 def test_strategy6_scan_reports_market_status_when_market_filter_disabled(tmp_path, monkeypatch):
     from tests.test_strategy6_core_rules import build_strategy6_candidate_data
     import strategy6.scanner as scanner_mod
@@ -171,7 +212,7 @@ def test_strategy6_scan_truncates_market_context_to_stock_evaluation_date(tmp_pa
     assert row["kline_latest_date"] == "2026-01-29"
 
 
-def test_strategy6_scan_uses_cached_topic_index_for_sector_strength(tmp_path, monkeypatch):
+def test_strategy6_scan_does_not_use_sector_context_even_when_strategy4_cache_exists(tmp_path, monkeypatch):
     from tests.test_strategy6_core_rules import build_strategy6_candidate_data
 
     _empty_market(monkeypatch)
@@ -243,91 +284,15 @@ def test_strategy6_scan_uses_cached_topic_index_for_sector_strength(tmp_path, mo
     scan_strategy6_all(config, task_id="s6-sector", stocks=stocks, fetch_daily_fn=fake_fetch, worker_count=1)
 
     row = db.get_strategy6_candidates("s6-sector")[0]
-    assert row["enable_sector_filter"] is True
-    assert row["sector_strength_status"] == "SECTOR_STRONG"
-    assert row["relative_strength_10_sector"] != 0
-
-
-def test_strategy6_scan_reports_sector_status_when_sector_filter_disabled(tmp_path, monkeypatch):
-    from tests.test_strategy6_core_rules import build_strategy6_candidate_data
-
-    _empty_market(monkeypatch)
-    db_path = str(tmp_path / "s6sectoroff.db")
-    config = {
-        "data": {"database_path": db_path, "daily_sources": ["baidu", "sina", "tencent"], "worker_count": 1},
-        "strategy6": {
-            "enable_market_filter": False,
-            "enable_sector_filter": False,
-            "sector_filter_mode": "downgrade",
-        },
-    }
-    db.init_db(db_path)
-    topic_rows = []
-    start_date = date(2025, 11, 11)
-    for i in range(80):
-        close = 100 + i * 0.1
-        if i >= 70:
-            close += (i - 69) * 1.2
-        topic_rows.append({
-            "date": (start_date + timedelta(days=i)).isoformat(),
-            "open": close * 0.99,
-            "high": close * 1.01,
-            "low": close * 0.98,
-            "close": close,
-            "amount": 10_000_000_000,
-        })
-    db.save_strategy4_topic_index_ohlc(
-        topic_id="industry:银行",
-        topic_name="银行",
-        topic_type="industry",
-        source="akshare_ths",
-        rows=topic_rows,
-    )
-    members = [
-        {"code": "000001", "name": "平安银行"},
-        {"code": "000002", "name": "宽度1"},
-        {"code": "000003", "name": "宽度2"},
-    ]
-    db.save_strategy4_topic_members(
-        topic_id="industry:银行",
-        topic_name="银行",
-        topic_type="industry",
-        source="akshare_ths",
-        membership_snapshot_date=(start_date + timedelta(days=79)).isoformat(),
-        membership_mode="historical_members",
-        members=members,
-    )
-    for member in members:
-        rows = []
-        for i in range(80):
-            close = 10 + i * 0.01
-            if i >= 76:
-                close = 13 + i * 0.02
-            rows.append({
-                "date": (start_date + timedelta(days=i)).isoformat(),
-                "open": close * 0.99,
-                "high": close * 1.01,
-                "low": close * 0.98,
-                "close": close,
-                "volume": 1_000_000,
-                "turnover": 600_000_000,
-            })
-        db.save_ohlc(member["code"], rows)
-    stocks = [{"code": "000001", "name": "平安银行", "market": "SZ", "sector_name": "银行"}]
-
-    def fake_fetch(*args, **kwargs):
-        return FetchResult(data=build_strategy6_candidate_data(), primary_source="baidu", fallback_source="baidu")
-
-    scan_strategy6_all(config, task_id="s6-sector-off", stocks=stocks, fetch_daily_fn=fake_fetch, worker_count=1)
-
-    row = db.get_strategy6_candidates("s6-sector-off")[0]
     assert row["enable_sector_filter"] is False
-    assert row["sector_strength_status"] == "SECTOR_STRONG"
+    assert row["sector_strength_status"] == "DISABLED"
+    assert row["relative_strength_10_sector"] == 0
+    assert row["sector_member_new_high_count"] == 0
     assert "SECTOR_WEAK_DOWNGRADED" not in row["warn_tags"]
     assert "SECTOR_WEAK_STRICT" not in row["warn_tags"]
 
 
-def test_strategy6_sector_strength_requires_member_new_high_breadth(tmp_path, monkeypatch):
+def test_strategy6_sector_weak_cache_no_longer_downgrades_candidate(tmp_path, monkeypatch):
     from tests.test_strategy6_core_rules import build_strategy6_candidate_data
 
     _empty_market(monkeypatch)
@@ -405,7 +370,6 @@ def test_strategy6_sector_strength_requires_member_new_high_breadth(tmp_path, mo
     scan_strategy6_all(config, task_id="s6-sector-breadth", stocks=stocks, fetch_daily_fn=fake_fetch, worker_count=1)
 
     row = db.get_strategy6_candidates("s6-sector-breadth")[0]
-    assert row["sector_strength_status"] != "SECTOR_STRONG"
-    assert row["sector_member_new_high_count"] == 2
-    assert row["candidate_type"] == "WATCH_CANDIDATE"
-    assert "SECTOR_WEAK_DOWNGRADED" in row["warn_tags"]
+    assert row["sector_strength_status"] == "DISABLED"
+    assert row["enable_sector_filter"] is False
+    assert "SECTOR_WEAK_DOWNGRADED" not in row["warn_tags"]

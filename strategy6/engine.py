@@ -46,13 +46,12 @@ class StrongVcpTailEngine:
         indicators.relative_strength_20_observed = has_relative_strength_20_market(market_data_by_symbol)
         indicators.relative_strength_20 = compute_relative_strength_20(indicators.return_20, market_data_by_symbol)
         indicators.market_filter_enabled = bool(self.config["enable_market_filter"])
-        indicators.sector_filter_enabled = bool(self.config["enable_sector_filter"])
+        indicators.sector_filter_enabled = False
         indicators.market_filter_mode = self.config["market_filter_mode"]
-        indicators.sector_filter_mode = self.config["sector_filter_mode"]
-        if sector_context:
-            indicators.sector_strength_status = str(sector_context.get("sector_strength_status") or "UNKNOWN")
-            indicators.relative_strength_10_sector = float(sector_context.get("relative_strength_10_sector") or 0.0)
-            indicators.sector_member_new_high_count = int(sector_context.get("sector_member_new_high_count") or 0)
+        indicators.sector_filter_mode = "disabled"
+        indicators.sector_strength_status = "DISABLED"
+        indicators.relative_strength_10_sector = 0.0
+        indicators.sector_member_new_high_count = 0
         start = evaluate_strong_start(rows, indicators, self.config, code)
         support = evaluate_support(rows, indicators, start)
         dry_tail = evaluate_dry_tail(rows, indicators, self.config)

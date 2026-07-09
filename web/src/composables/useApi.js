@@ -307,6 +307,11 @@ export function useApi() {
     return res.json().catch(() => ({ candidates: [] }))
   }
 
+  async function getStrategy6MarketSnapshot(taskId) {
+    const res = await fetch(`${API_BASE}/strategy6/tasks/${encodeURIComponent(taskId)}/market-snapshot`)
+    return res.json().catch(() => ({ snapshot: null }))
+  }
+
   async function getStrategy6Candidate(taskId, code) {
     const res = await fetch(`${API_BASE}/strategy6/tasks/${encodeURIComponent(taskId)}/candidates/${encodeURIComponent(code)}`)
     if (!res.ok) return null
@@ -451,7 +456,7 @@ export function useApi() {
     startStrategy5Scan, getStrategy5ScanStatus, getStrategy5Tasks,
     getStrategy5Candidates, getStrategy5Candidate,
     startStrategy6Scan, getStrategy6ScanStatus, getStrategy6Tasks,
-    getStrategy6Candidates, getStrategy6Candidate, downloadStrategy6Report,
+    getStrategy6Candidates, getStrategy6MarketSnapshot, getStrategy6Candidate, downloadStrategy6Report,
     startStrategy2Backtest, getStrategy2BacktestStatus,
     getStrategy2BacktestTasks, getStrategy2BacktestTask,
     getStrategy2BacktestOpportunities, getStrategy2BacktestInsufficientStocks,

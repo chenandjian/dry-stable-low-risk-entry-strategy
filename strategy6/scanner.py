@@ -21,8 +21,7 @@ from scanner.daily_data_service import (
 from scanner.data_source import DataSourceManager
 from strategy6 import STRATEGY6_TYPE
 from strategy6.engine import StrongVcpTailEngine
-from strategy6.indicators import calculate_indicators
-from strategy6.sector import evaluate_sector_context
+from strategy6.market import build_market_snapshot
 from strategy6.validation import resolve_strategy6_config
 
 logger = logging.getLogger(__name__)
@@ -67,8 +66,7 @@ def scan_strategy6_all(
     mgr = DataSourceManager()
     engine = StrongVcpTailEngine({"strategy6": cfg})
     market_data_by_symbol = _load_market_data_by_symbol(cfg)
-    sector_cache: dict[tuple[str, str], dict] = {}
-    sector_cache_lock = threading.Lock()
+    db.save_strategy6_market_snapshot(task_id, build_market_snapshot(market_data_by_symbol))
     candidate_by_code: dict[str, dict] = {}
     candidate_lock = threading.Lock()
     busy_retries_by_code: dict[str, int] = {}
@@ -195,7 +193,6 @@ def scan_strategy6_all(
                     kline_fetched_at=fetch_result.kline_fetched_at or "",
                     quote_status=fetch_result.quote_status or "",
                     market_data_by_symbol=_market_data_until(market_data_by_symbol, latest_trade_date or ""),
-                    sector_context=_load_sector_context(code, data, cfg, sector_cache, sector_cache_lock),
                 )
                 if evaluation.passed:
                     discovery = evaluation.to_candidate_dict()
@@ -289,86 +286,6 @@ def _market_data_until(market_data_by_symbol: dict[str, list[dict]], evaluation_
         symbol: [row for row in rows if str(row.get("date") or "") <= evaluation_date]
         for symbol, rows in market_data_by_symbol.items()
     }
-
-
-def _load_sector_context(
-    code: str,
-    data: list[dict],
-    cfg: dict,
-    cache: dict[tuple[str, str], dict],
-    cache_lock: threading.Lock,
-) -> dict:
-    try:
-        _, indicators = calculate_indicators(data, cfg)
-        evaluation_date = indicators.evaluation_date
-        cache_key = (code, evaluation_date)
-        with cache_lock:
-            if cache_key in cache:
-                return dict(cache[cache_key])
-        context = _derive_sector_context(code, indicators.return_10, evaluation_date, cfg)
-        with cache_lock:
-            cache[cache_key] = dict(context)
-        return context
-    except Exception as exc:
-        logger.warning("Strategy6 sector context failed for %s: %s", code, exc)
-        return {}
-
-
-def _derive_sector_context(code: str, stock_return_10: float, evaluation_date: str, cfg: dict) -> dict:
-    topics = db.get_strategy4_topics_for_member(code, evaluation_date=evaluation_date)
-    best_context: dict | None = None
-    best_score = -999.0
-    for topic in topics:
-        topic_id = str(topic.get("topic_id") or "")
-        rows = db.get_strategy4_topic_index_ohlc(topic_id, end_date=evaluation_date, max_rows=80)
-        members = db.get_strategy4_topic_members(topic_id, evaluation_date=evaluation_date)
-        member_new_high_count = _count_recent_member_new_highs(members, evaluation_date)
-        context = evaluate_sector_context(
-            stock_return_10,
-            rows,
-            member_new_high_count=member_new_high_count,
-            min_member_new_high_count=int(cfg.get("sector_min_member_new_high_count", 3)),
-        )
-        score = float(context.get("sector_return_10") or 0.0) + float(context.get("sector_return_20") or 0.0)
-        if context.get("sector_strength_status") == "SECTOR_STRONG":
-            score += 1.0
-        if score > best_score:
-            best_score = score
-            best_context = {
-                **context,
-                "sector_topic_id": topic_id,
-                "sector_topic_name": topic.get("topic_name", ""),
-                "sector_membership_mode": topic.get("membership_mode", ""),
-            }
-    return best_context or {}
-
-
-def _count_recent_member_new_highs(members: list[dict], evaluation_date: str) -> int:
-    count = 0
-    for member in members:
-        code = str(member.get("code") or "")
-        if not code:
-            continue
-        rows = db.get_ohlc(code, max_rows=40) or []
-        rows = [row for row in rows if str(row.get("date") or "") <= evaluation_date]
-        if _has_recent_20d_close_high(rows):
-            count += 1
-    return count
-
-
-def _has_recent_20d_close_high(rows: list[dict]) -> bool:
-    if len(rows) < 20:
-        return False
-    start = max(0, len(rows) - 5)
-    for idx in range(start, len(rows)):
-        lookback = rows[max(0, idx - 19):idx + 1]
-        if len(lookback) < 20:
-            continue
-        close = float(rows[idx].get("close") or 0.0)
-        prior_high = max(float(row.get("close") or 0.0) for row in lookback[:-1])
-        if close > prior_high:
-            return True
-    return False
 
 
 def _now() -> str:

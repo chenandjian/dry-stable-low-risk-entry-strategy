@@ -14,7 +14,7 @@ DEFAULT_STRATEGY6_CONFIG = {
     "min_avg_amount_10d_yi": 5,
     "amount10_vs_30_min_ratio": 0.8,
     "enable_market_filter": True,
-    "enable_sector_filter": True,
+    "enable_sector_filter": False,
     "market_filter_mode": "downgrade",
     "sector_filter_mode": "downgrade",
     "sector_min_member_new_high_count": 3,
@@ -84,10 +84,10 @@ def resolve_strategy6_config(config: dict | None) -> dict:
     for key in ("ready_min_score", "key_min_score", "watch_min_score"):
         _validate_number_range(raw, key, 0, 100)
     raw["enable_market_filter"] = bool(raw.get("enable_market_filter", False))
-    raw["enable_sector_filter"] = bool(raw.get("enable_sector_filter", False))
-    for key in ("market_filter_mode", "sector_filter_mode"):
-        if raw.get(key) not in {"strict", "downgrade", "score_only"}:
-            raise ValueError(f"{key} must be one of strict/downgrade/score_only")
+    raw["enable_sector_filter"] = False
+    raw["sector_filter_mode"] = "disabled"
+    if raw.get("market_filter_mode") not in {"strict", "downgrade", "score_only"}:
+        raise ValueError("market_filter_mode must be one of strict/downgrade/score_only")
     return raw
 
 

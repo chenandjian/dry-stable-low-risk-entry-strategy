@@ -4,6 +4,14 @@ from __future__ import annotations
 
 MARKET_INDEX_SYMBOLS = ("sh000001", "sz399001", "sz399006")
 HS300_ALIASES = ("hs300", "sh000300", "sz399300")
+MARKET_INDEX_NAMES = {
+    "sh000001": "上证指数",
+    "sz399001": "深证成指",
+    "sz399006": "创业板指",
+    "hs300": "沪深300",
+    "sh000300": "沪深300",
+    "sz399300": "沪深300",
+}
 
 
 def evaluate_market_context(market_data_by_symbol: dict[str, list[dict]] | None) -> dict:
@@ -40,6 +48,37 @@ def evaluate_market_context(market_data_by_symbol: dict[str, list[dict]] | None)
             f"risk_count={risk_count}",
         ],
         "market_return_20": _market_return_20(data),
+    }
+
+
+def build_market_snapshot(market_data_by_symbol: dict[str, list[dict]] | None) -> dict:
+    """Build a task-level market snapshot for audit display."""
+    data = market_data_by_symbol or {}
+    context = evaluate_market_context(data)
+    indexes = []
+    for symbol in ("sh000001", "sz399001", "sz399006", "hs300"):
+        rows = [row for row in data.get(symbol, []) if isinstance(row, dict)]
+        status = _index_status(rows)
+        indexes.append({
+            "symbol": symbol,
+            "name": MARKET_INDEX_NAMES.get(symbol, symbol),
+            "latest_date": str(rows[-1].get("date") or "") if rows else "",
+            "latest_close": _last_close(rows),
+            "ma20": _ma(rows, 20),
+            "ma50": _ma(rows, 50),
+            "return_20": _return(rows, 20),
+            "above_ma20": bool(status["above_ma20"]),
+            "ma20_above_ma50": bool(status["ma20_above_ma50"]),
+            "volume_down_risk": bool(status["volume_down_risk"]),
+            "weak": bool(status["weak"]),
+            "rows_count": len(rows),
+            "source": str(rows[-1].get("source") or "sina") if rows else "",
+        })
+    return {
+        "market_status": context["market_status"],
+        "market_reasons": context["market_reasons"],
+        "market_return_20": context["market_return_20"],
+        "indexes": indexes,
     }
 
 

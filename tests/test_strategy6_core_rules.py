@@ -356,8 +356,8 @@ def test_strategy6_defaults_enable_real_market_filter_only():
 
     assert cfg["enable_market_filter"] is True
     assert cfg["market_filter_mode"] == "downgrade"
-    assert cfg["enable_sector_filter"] is True
-    assert cfg["sector_filter_mode"] == "downgrade"
+    assert cfg["enable_sector_filter"] is False
+    assert cfg["sector_filter_mode"] == "disabled"
     assert cfg["sector_min_member_new_high_count"] == 3
     assert cfg["min_relative_strength_20"] == 0.10
 
@@ -450,9 +450,14 @@ def test_market_filter_score_only_deducts_score_without_downgrading_candidate_ty
     assert "MARKET_WEAK_DOWNGRADED" not in score_only.indicators.warn_tags
 
 
-def test_sector_filter_strict_blocks_ready_or_key_but_keeps_watch_candidate():
+def test_sector_filter_context_is_ignored_after_sector_filter_removal():
     data = build_strategy6_candidate_data()
 
+    baseline = StrongVcpTailEngine({"strategy6": {"enable_sector_filter": False}}).evaluate_at(
+        data,
+        code="000001",
+        name="平安银行",
+    )
     result = StrongVcpTailEngine({"strategy6": {"enable_sector_filter": True, "sector_filter_mode": "strict"}}).evaluate_at(
         data,
         code="000001",
@@ -462,14 +467,23 @@ def test_sector_filter_strict_blocks_ready_or_key_but_keeps_watch_candidate():
     candidate = result.to_candidate_dict()
 
     assert result.passed is True
-    assert result.candidate_type == "WATCH_CANDIDATE"
-    assert candidate["sector_filter_mode"] == "strict"
-    assert "SECTOR_WEAK_STRICT" in candidate["warn_tags"]
+    assert result.candidate_type == baseline.candidate_type
+    assert candidate["enable_sector_filter"] is False
+    assert candidate["sector_filter_mode"] == "disabled"
+    assert candidate["sector_strength_status"] == "DISABLED"
+    assert candidate["relative_strength_10_sector"] == 0.0
+    assert "SECTOR_WEAK_STRICT" not in candidate["warn_tags"]
+    assert "SECTOR_WEAK_DOWNGRADED" not in candidate["warn_tags"]
 
 
-def test_sector_filter_downgrade_moves_ready_or_key_to_watch():
+def test_sector_filter_downgrade_config_no_longer_moves_ready_or_key_to_watch():
     data = build_strategy6_candidate_data()
 
+    baseline = StrongVcpTailEngine({"strategy6": {"enable_sector_filter": False}}).evaluate_at(
+        data,
+        code="000001",
+        name="平安银行",
+    )
     result = StrongVcpTailEngine({"strategy6": {"enable_sector_filter": True, "sector_filter_mode": "downgrade"}}).evaluate_at(
         data,
         code="000001",
@@ -479,10 +493,11 @@ def test_sector_filter_downgrade_moves_ready_or_key_to_watch():
     candidate = result.to_candidate_dict()
 
     assert result.passed is True
-    assert result.candidate_type == "WATCH_CANDIDATE"
-    assert candidate["sector_strength_status"] == "SECTOR_WEAK"
-    assert candidate["enable_sector_filter"] is True
-    assert "SECTOR_WEAK_DOWNGRADED" in candidate["warn_tags"]
+    assert result.candidate_type == baseline.candidate_type
+    assert candidate["sector_strength_status"] == "DISABLED"
+    assert candidate["enable_sector_filter"] is False
+    assert candidate["sector_member_new_high_count"] == 0
+    assert "SECTOR_WEAK_DOWNGRADED" not in candidate["warn_tags"]
 
 
 def test_relative_strength_20_is_reported_against_hs300_index():
