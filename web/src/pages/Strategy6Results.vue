@@ -51,7 +51,7 @@
           <thead>
             <tr>
               <th>指数</th><th>日期</th><th>收盘</th><th>MA20</th><th>MA50</th>
-              <th>20日涨幅</th><th>MA20上方</th><th>MA20≥MA50</th><th>放量下跌风险</th><th>数据行数</th>
+              <th>数据状态</th><th>20日涨幅</th><th>MA20上方</th><th>MA20≥MA50</th><th>放量下跌风险</th><th>来源</th><th>抓取时间</th><th>数据行数</th>
             </tr>
           </thead>
           <tbody>
@@ -61,11 +61,35 @@
               <td>{{ fmt(idx.latest_close) }}</td>
               <td>MA20 {{ fmt(idx.ma20) }}</td>
               <td>{{ fmt(idx.ma50) }}</td>
+              <td>{{ marketDataStatusText(idx.data_status) }}</td>
               <td>{{ pct(idx.return_20) }}</td>
               <td>{{ idx.above_ma20 ? '是' : '否' }}</td>
               <td>{{ idx.ma20_above_ma50 ? '是' : '否' }}</td>
               <td>{{ idx.volume_down_risk ? '是' : '否' }}</td>
+              <td>{{ idx.source || '--' }}</td>
+              <td>{{ idx.fetched_at || '--' }}</td>
               <td>{{ idx.rows_count ?? 0 }}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section v-if="lifecycleAuditRows.length" class="panel">
+      <div class="panel-header">生命周期退出/冷却审计</div>
+      <div class="table-scroll">
+        <table class="lifecycle-table">
+          <thead><tr><th>股票</th><th>状态</th><th>首次入池</th><th>池龄</th><th>退出日期</th><th>退出原因</th><th>冷却至</th><th>重入次数</th></tr></thead>
+          <tbody>
+            <tr v-for="row in lifecycleAuditRows" :key="row.code">
+              <td><span class="code">{{ row.code }}</span> {{ row.name }}</td>
+              <td>{{ row.lifecycle_status }}</td>
+              <td>{{ row.first_seen_date || '--' }}</td>
+              <td>{{ row.days_in_pool ?? 0 }}日</td>
+              <td>{{ row.exit_date || '--' }}</td>
+              <td>{{ row.exit_reason || (row.reject_reasons || []).join(' / ') || '--' }}</td>
+              <td>{{ row.cooldown_until_date || '--' }}</td>
+              <td>{{ row.reentry_count ?? 0 }}</td>
             </tr>
           </tbody>
         </table>
@@ -80,7 +104,7 @@
             <tr>
               <th>股票</th><th>现价</th><th>总分</th><th>分类</th><th>生命周期</th>
               <th>启动类型/等级</th><th>支撑状态</th><th>Key/前置支撑</th><th>买入区</th>
-              <th>止损</th><th>目标1/2/3</th><th>RR2</th><th>V5/V20</th><th>市场/RS</th><th>入池</th><th>风险/警告</th><th>数据日</th>
+              <th>止损</th><th>客观目标1/2</th><th>客观RR2</th><th>形态</th><th>尾段/前20量比</th><th>市场/RS</th><th>入池</th><th>风险/警告</th><th>数据日</th>
             </tr>
           </thead>
           <tbody>
@@ -95,9 +119,10 @@
               <td>{{ fmt(c.key_support_price) }} / {{ fmt(c.prior_key_support_price) }}</td>
               <td>{{ priceRange(c.buy_zone_low, c.buy_zone_high) }}</td>
               <td>{{ fmt(c.stop_loss_price) }}</td>
-              <td>{{ fmt(c.target_price_1) }} / {{ fmt(c.target_price_2) }} / {{ fmt(c.target_price_3) }}</td>
-              <td class="rr">{{ fmt(c.risk_reward_ratio_2) }}</td>
-              <td>{{ fmt(c.volume_ratio_5_20, 3) }}</td>
+              <td>{{ fmt(c.objective_target_1 ?? c.target_price_1) }} / {{ fmt(c.objective_target_2 ?? c.target_price_2) }}</td>
+              <td class="rr">{{ fmt(c.objective_rr_2 ?? c.risk_reward_ratio_2) }}</td>
+              <td>{{ c.pattern_type || 'UNKNOWN' }}</td>
+              <td>{{ fmt(c.tail_volume_ratio ?? c.volume_ratio_5_20, 3) }}</td>
               <td>
                 <div>{{ c.market_status || 'UNKNOWN' }}</div>
                 <div class="muted">RS20 {{ pct(c.relative_strength_20) }}</div>
@@ -127,17 +152,25 @@
         <div><span>支撑</span><strong>{{ selected.support_status || '--' }} · {{ selected.main_support_ma || '--' }} · 测试{{ selected.support_test_count ?? 0 }}次</strong></div>
         <div><span>战术价格</span><strong>支撑 {{ fmt(selected.key_support_price) }} · 前置支撑 {{ fmt(selected.prior_key_support_price) }} · 止损 {{ fmt(selected.stop_loss_price) }}</strong></div>
         <div><span>买入区</span><strong>{{ priceRange(selected.buy_zone_low, selected.buy_zone_high) }}</strong></div>
-        <div><span>目标</span><strong>{{ fmt(selected.target_price_1) }} / {{ fmt(selected.target_price_2) }} / {{ fmt(selected.target_price_3) }}</strong></div>
-        <div><span>盈亏比</span><strong>RR1 {{ fmt(selected.risk_reward_ratio_1) }} · RR2 {{ fmt(selected.risk_reward_ratio_2) }} · RR3 {{ fmt(selected.risk_reward_ratio_3) }}</strong></div>
-        <div><span>评分</span><strong>启动{{ selected.strong_start_score ?? 0 }} 支撑{{ selected.support_score ?? 0 }} 量干{{ selected.dry_stable_score ?? 0 }} RR{{ selected.risk_reward_score ?? 0 }} 风控{{ selected.risk_control_score ?? 0 }}</strong></div>
+        <div><span>阶段</span><strong>{{ selected.phase_status || '--' }} · 整理 {{ selected.consolidation_start_date || '--' }} · 尾段 {{ selected.tail_start_date || '--' }}</strong></div>
+        <div><span>形态</span><strong>{{ selected.pattern_type || 'UNKNOWN' }} · {{ selected.pivot_source || '--' }} · 收缩{{ selected.contraction_count ?? 0 }}次</strong></div>
+        <div><span>支撑簇</span><strong>战术 {{ fmt(selected.tactical_support_price) }} · {{ (selected.support_cluster_sources || []).join(' / ') || '--' }}</strong></div>
+        <div><span>客观目标</span><strong>{{ fmt(selected.objective_target_1 ?? selected.target_price_1) }} / {{ fmt(selected.objective_target_2 ?? selected.target_price_2) }} · RR {{ fmt(selected.objective_rr_1 ?? selected.risk_reward_ratio_1) }} / {{ fmt(selected.objective_rr_2 ?? selected.risk_reward_ratio_2) }}</strong></div>
+        <div><span>执行R目标</span><strong>1.5R {{ fmt(selected.execution_target_1_5r) }} · 2R {{ fmt(selected.execution_target_2r) }} · 2.5R {{ fmt(selected.execution_target_2_5r) }} · 3.5R {{ fmt(selected.execution_target_3_5r) }}</strong></div>
+        <div><span>执行窗口</span><strong>{{ selected.valid_from_date || '--' }} 至 {{ selected.valid_until_date || '--' }} · 限价 {{ fmt(selected.suggested_limit_price) }}</strong></div>
+        <div><span>六维评分</span><strong>启动{{ selected.strong_start_score ?? 0 }} 形态{{ selected.pattern_score_component ?? 0 }} 支撑{{ selected.support_score ?? 0 }} 尾段{{ selected.tail_score ?? 0 }} 客观RR{{ selected.objective_rr_score ?? 0 }} RS/风险{{ selected.relative_strength_risk_score ?? 0 }}</strong></div>
         <div><span>市场过滤</span><strong>{{ selected.market_status || 'UNKNOWN' }} · {{ selected.enable_market_filter ? '开启' : '关闭' }} · {{ selected.market_filter_mode || '--' }}</strong></div>
         <div><span>相对强度</span><strong>RS20 {{ pct(selected.relative_strength_20) }}</strong></div>
         <div><span>候选池</span><strong>首次入池 {{ selected.first_pool_date || '--' }} · 池龄 {{ selected.pool_age_trading_days ?? 0 }}日</strong></div>
-        <div><span>量能</span><strong>V3 {{ fmt(selected.v3, 0) }} · V5 {{ fmt(selected.v5, 0) }} · V20 {{ fmt(selected.v20, 0) }} · V5/V20 {{ fmt(selected.volume_ratio_5_20, 3) }}</strong></div>
+        <div><span>退出/冷却</span><strong>{{ selected.exit_reason || '--' }} · 冷却至 {{ selected.cooldown_until_date || '--' }} · 重入 {{ selected.reentry_count ?? 0 }} 次</strong></div>
+        <div><span>量能</span><strong>尾段 {{ fmt(selected.tail_avg_volume, 0) }} · 前置20日 {{ fmt(selected.pre_tail_avg_volume_20, 0) }} · 比值 {{ fmt(selected.tail_volume_ratio, 3) }}</strong></div>
+        <div><span>版本</span><strong>{{ selected.strategy_version || '--' }} · {{ selected.config_hash || '--' }}</strong></div>
+        <div><span>价格口径</span><strong>{{ selected.price_basis || 'FORWARD_ADJUSTED' }} · 未复权报价 {{ fmt(selected.current_price_raw) }}</strong></div>
         <div><span>涨跌幅</span><strong>5日 {{ pct(selected.return_5) }} · 10日 {{ pct(selected.return_10) }} · 20日 {{ pct(selected.return_20) }}</strong></div>
         <div><span>建议</span><strong>{{ selected.suggestion || '--' }}</strong></div>
       </div>
       <div class="tags">
+        <span v-for="note in selected.execution_notes || []" :key="'e' + note" class="tag info">{{ note }}</span>
         <span v-for="tag in selected.risk_tags || []" :key="'r' + tag" class="tag risk">{{ tag }}</span>
         <span v-for="tag in selected.warn_tags || []" :key="'w' + tag" class="tag warn">{{ tag }}</span>
         <span v-for="tag in selected.reject_reasons || []" :key="'x' + tag" class="tag risk">{{ tag }}</span>
@@ -162,6 +195,7 @@ export default {
       selectedTaskId: '',
       selected: null,
       marketSnapshot: null,
+      lifecycleRows: [],
       loading: false,
       error: '',
     }
@@ -190,11 +224,14 @@ export default {
       return this.sortedCandidates[0]?.total_score ?? '--'
     },
     topRr2() {
-      const best = this.sortedCandidates.reduce((max, c) => Math.max(max, Number(c.risk_reward_ratio_2 || 0)), 0)
+      const best = this.sortedCandidates.reduce((max, c) => Math.max(max, Number(c.objective_rr_2 ?? c.risk_reward_ratio_2 ?? 0)), 0)
       return best ? best.toFixed(2) : '--'
     },
     marketIndexes() {
       return this.marketSnapshot?.indexes || []
+    },
+    lifecycleAuditRows() {
+      return this.lifecycleRows.filter(row => row.blocked || ['FAILED', 'EXPIRED', 'COOLDOWN'].includes(row.lifecycle_status))
     },
   },
   async mounted() {
@@ -221,22 +258,40 @@ export default {
         this.candidates = []
         this.selected = null
         this.marketSnapshot = null
+        this.lifecycleRows = []
         return
       }
       this.loading = true
       this.error = ''
       const api = useApi()
+      const taskId = this.selectedTaskId
       try {
-        const res = await api.getStrategy6Candidates(this.selectedTaskId)
+        const res = await api.getStrategy6Candidates(taskId)
+        if (this.selectedTaskId !== taskId) return
         this.candidates = res.candidates || []
         this.selected = this.candidates[0] || null
-        const snapshotRes = await api.getStrategy6MarketSnapshot(this.selectedTaskId)
+      } catch (e) {
+        if (this.selectedTaskId === taskId) {
+          this.error = '策略6候选加载失败'
+          this.loading = false
+        }
+        return
+      }
+      try {
+        const snapshotRes = await api.getStrategy6MarketSnapshot(taskId)
+        if (this.selectedTaskId !== taskId) return
         this.marketSnapshot = snapshotRes.snapshot || null
       } catch (e) {
-        this.error = '策略6候选加载失败'
-      } finally {
-        this.loading = false
+        if (this.selectedTaskId === taskId) this.error = '市场指数快照加载失败，候选数据已保留'
       }
+      try {
+        const lifecycleRes = await api.getStrategy6Lifecycle(taskId)
+        if (this.selectedTaskId !== taskId) return
+        this.lifecycleRows = lifecycleRes.lifecycle || []
+      } catch (e) {
+        if (this.selectedTaskId === taskId) this.error = '生命周期审计加载失败，候选数据已保留'
+      }
+      if (this.selectedTaskId === taskId) this.loading = false
     },
     fmt(v, digits = 2) {
       if (v == null || v === '') return '--'
@@ -258,6 +313,11 @@ export default {
       if (c.candidate_type === 'WATCH_CANDIDATE') return 'watch'
       return 'rejected'
     },
+    marketDataStatusText(status) {
+      if (status === 'FRESH') return '新鲜'
+      if (status === 'STALE') return '过期'
+      return '缺失'
+    },
     exportCandidates() {
       downloadCsv({
         filename: `strategy6-candidates-${this.selectedTaskId || 'latest'}.csv`,
@@ -269,6 +329,9 @@ export default {
           { header: '生命周期', value: c => c.lifecycle_status || '' },
           { header: '首次入池', value: c => c.first_pool_date || '' },
           { header: '池龄交易日', value: c => c.pool_age_trading_days ?? '' },
+          { header: '策略版本', value: c => c.strategy_version || '' },
+          { header: '阶段状态', value: c => c.phase_status || '' },
+          { header: '形态类型', value: c => c.pattern_type || '' },
           { header: '总分', value: c => c.total_score ?? '' },
           { header: '市场过滤', value: c => c.enable_market_filter ? '开启' : '关闭' },
           { header: '市场过滤模式', value: c => c.market_filter_mode || '' },
@@ -287,6 +350,7 @@ export default {
           { header: '支撑状态', value: c => c.support_status || '' },
           { header: 'Key支撑', value: c => this.fmt(c.key_support_price) },
           { header: '前置支撑', value: c => this.fmt(c.prior_key_support_price) },
+          { header: '战术支撑', value: c => this.fmt(c.tactical_support_price) },
           { header: '支撑区低', value: c => this.fmt(c.support_zone_low) },
           { header: '支撑区高', value: c => this.fmt(c.support_zone_high) },
           { header: '建议买入价', value: c => this.fmt(c.suggested_buy_price) },
@@ -296,6 +360,14 @@ export default {
           { header: '目标1', value: c => this.fmt(c.target_price_1) },
           { header: '目标2', value: c => this.fmt(c.target_price_2) },
           { header: '目标3', value: c => this.fmt(c.target_price_3) },
+          { header: '客观目标1', value: c => this.fmt(c.objective_target_1 ?? c.target_price_1) },
+          { header: '客观目标2', value: c => this.fmt(c.objective_target_2 ?? c.target_price_2) },
+          { header: '客观RR1', value: c => this.fmt(c.objective_rr_1 ?? c.risk_reward_ratio_1) },
+          { header: '客观RR2', value: c => this.fmt(c.objective_rr_2 ?? c.risk_reward_ratio_2) },
+          { header: '1.5R目标', value: c => this.fmt(c.execution_target_1_5r) },
+          { header: '2R目标', value: c => this.fmt(c.execution_target_2r) },
+          { header: '2.5R目标', value: c => this.fmt(c.execution_target_2_5r) },
+          { header: '3.5R目标', value: c => this.fmt(c.execution_target_3_5r) },
           { header: 'RR1', value: c => this.fmt(c.risk_reward_ratio_1) },
           { header: 'RR2', value: c => this.fmt(c.risk_reward_ratio_2) },
           { header: 'RR3', value: c => this.fmt(c.risk_reward_ratio_3) },
@@ -354,6 +426,7 @@ select { background: var(--bg-panel); color: var(--text-primary); border: 1px so
 .table-scroll { overflow-x: auto; }
 .candidate-table { width: 100%; min-width: 1520px; border-collapse: collapse; font-size: 13px; }
 .market-table { width: 100%; min-width: 980px; border-collapse: collapse; font-size: 13px; }
+.lifecycle-table { width: 100%; min-width: 980px; border-collapse: collapse; font-size: 13px; }
 th, td { border-bottom: 1px solid var(--border); padding: 9px 10px; text-align: left; }
 th { color: var(--text-secondary); font-weight: 600; }
 td { vertical-align: top; }

@@ -1,9 +1,11 @@
-"""Strategy6 scoring."""
+"""Strategy6 six-dimension scoring."""
 from __future__ import annotations
 
 from strategy6.models import (
     Strategy6DryTail,
     Strategy6Indicators,
+    Strategy6Pattern,
+    Strategy6Phase,
     Strategy6Score,
     Strategy6Start,
     Strategy6Support,
@@ -14,82 +16,82 @@ from strategy6.models import (
 def score_strategy6(
     ind: Strategy6Indicators,
     start: Strategy6Start,
+    phase: Strategy6Phase,
+    pattern: Strategy6Pattern,
     support: Strategy6Support,
     dry_tail: Strategy6DryTail,
     trade_plan: Strategy6TradePlan,
+    config: dict,
 ) -> Strategy6Score:
     strong = _strong_start_score(start)
-    support_score = support.support_score
-    dry = dry_tail.dry_stable_score
-    rr = _rr_score(trade_plan.risk_reward_ratio_2)
-    risk_control = _risk_control_score(ind, start, trade_plan)
-    total = min(100, strong + support_score + dry + rr + risk_control)
+    pattern_score = 20 if not config["pattern_filter_enabled"] else min(
+        20, pattern.pattern_score + (1 if phase.valid and pattern.pattern_score < 20 else 0)
+    )
+    support_score = min(20, support.support_cluster_score + (2 if support.support_test_count >= 2 else 1 if support.support_test_count else 0))
+    tail_score = min(20, dry_tail.dry_stable_score)
+    objective_rr_score = _rr_score(trade_plan.objective_rr_2)
+    relative_strength_risk_score = _relative_strength_risk_score(ind)
+    total = min(100, strong + pattern_score + support_score + tail_score + objective_rr_score + relative_strength_risk_score)
     reasons = [
         f"strong={strong}",
+        f"pattern={pattern_score}",
         f"support={support_score}",
-        f"dry={dry}",
-        f"rr={rr}",
-        f"risk={risk_control}",
+        f"tail={tail_score}",
+        f"objective_rr={objective_rr_score}",
+        f"rs_risk={relative_strength_risk_score}",
     ]
     return Strategy6Score(
         strong_start_score=strong,
+        pattern_score_component=pattern_score,
         support_score=support_score,
-        dry_stable_score=dry,
-        risk_reward_score=rr,
-        risk_control_score=risk_control,
+        tail_score=tail_score,
+        dry_stable_score=tail_score,
+        objective_rr_score=objective_rr_score,
+        risk_reward_score=objective_rr_score,
+        relative_strength_risk_score=relative_strength_risk_score,
+        risk_control_score=relative_strength_risk_score,
         total_score=total,
         score_reasons=reasons,
     )
 
 
 def _strong_start_score(start: Strategy6Start) -> int:
-    if start.start_grade == "S":
-        base = 22
-    elif start.start_grade == "A":
-        base = 17
-    elif start.start_grade == "B":
-        base = 12
-    else:
-        return 0
-    if start.start_type in {"VOLUME_LIMIT_UP", "ONE_WORD_LIMIT_UP"}:
-        base += 3
-    elif start.start_type == "LOW_VOLUME_LIMIT_UP":
-        base += 2
-    elif start.start_type == "NORMAL_STRONG_BREAKOUT":
-        base += 1
-    return min(25, base)
+    grade = {"S": 8, "A": 6, "B": 4}.get(start.start_grade, 0)
+    volume = 4 if start.start_day_volume_ratio >= 2.5 else 3 if start.start_day_volume_ratio >= 2.0 else 1
+    close_position = 2 if start.start_day_close_position >= 0.75 else 1 if start.start_day_close_position >= 0.65 else 0
+    attention = 3 if start.start_day_self_amount_percentile >= 0.90 else 0
+    high = 3 if start.high_trigger == "new_120d_high" else 2 if start.high_trigger else 0
+    return min(20, grade + volume + close_position + attention + high)
 
 
-def _rr_score(rr2: float) -> int:
-    if rr2 >= 3.0:
-        return 15
-    if rr2 >= 2.5:
-        return 12
-    if rr2 >= 2.0:
+def _rr_score(objective_rr_2: float) -> int:
+    if objective_rr_2 >= 3.0:
         return 10
-    if rr2 >= 1.5:
+    if objective_rr_2 >= 2.5:
+        return 8
+    if objective_rr_2 >= 2.0:
         return 6
+    if objective_rr_2 >= 1.5:
+        return 3
     return 0
 
 
-def _risk_control_score(ind: Strategy6Indicators, start: Strategy6Start, trade_plan: Strategy6TradePlan) -> int:
-    score = 10
-    if ind.daily_return <= -0.07:
-        score -= 5
-    if ind.range_5 > 0.22:
-        score -= 3
-    if ind.range_10 > 0.45:
-        score -= 3
-    if ind.pullback_from_20d_high < -0.30:
-        score -= 3
-    if start.start_type == "ONE_WORD_LIMIT_UP" and trade_plan.risk_reward_ratio_2 < 2.0:
-        score -= 5
-    if ind.volume_ratio_5_20 > 0.90:
-        score -= 5
-    if ind.market_filter_enabled and ind.market_filter_mode == "score_only" and ind.market_status in {"MARKET_WEAK", "MARKET_RISK"}:
-        score -= 5
-    if ind.sector_filter_enabled and ind.sector_filter_mode == "score_only" and ind.sector_strength_status in {"SECTOR_WEAK", "SECTOR_RISK"}:
-        score -= 5
+def _relative_strength_risk_score(ind: Strategy6Indicators) -> int:
+    rs = 0
+    if ind.relative_strength_20_observed:
+        if ind.relative_strength_20 >= 0.20:
+            rs = 5
+        elif ind.relative_strength_20 >= 0.15:
+            rs = 4
+        elif ind.relative_strength_20 >= 0.10:
+            rs = 3
+    risk = 5
+    if ind.has_big_down_volume:
+        risk -= 5
     if "UPPER_SHADOW_PRESSURE" in ind.warn_tags:
-        score -= 5
-    return max(0, score)
+        risk -= 2
+    if "PRESSURE_NEAR_HIGH" in ind.warn_tags:
+        risk -= 1
+    if ind.market_filter_enabled and ind.market_filter_mode == "score_only" and ind.market_status in {"MARKET_WEAK", "MARKET_RISK"}:
+        risk -= 2
+    return max(0, rs + risk)

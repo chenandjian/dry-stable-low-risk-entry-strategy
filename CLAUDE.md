@@ -43,6 +43,8 @@ npm --prefix web run preview
            scanner/strategy_engine.py (策略1统一入口 — CupHandleStrategyEngine)
            strategy2/scanner.py (策略2多线程扫描编排)
            strategy2/engine.py (策略2唯一入口 — ExtremeDryStableStrategyEngine)
+           strategy6/scanner.py (策略6全市场扫描编排)
+           strategy6/engine.py (策略6唯一入口 — StrongVcpTailEngine)
 数据层:    scanner/db.py (SQLite 持久化)
            scanner/data_source.py (互斥锁管理 — baidu/sina/tencent)
            scanner/daily_data_service.py (共享三源拉取 — fetch_with_retry / FetchResult)
@@ -78,6 +80,12 @@ npm --prefix web run preview
            strategy2/risk.py (风险计算)
            strategy2/engine.py (引擎入口)
            strategy2/scanner.py (扫描编排)
+策略6层:   strategy6/phase.py (启动/整理/尾段严格分段)
+           strategy6/pattern.py (VCP/杯柄/平台识别)
+           strategy6/support.py (支撑簇 + ATR 区间)
+           strategy6/trade_plan.py (客观目标与下一交易日计划)
+           strategy6/engine.py (策略6唯一评估入口)
+           strategy6/scanner.py (扫描、生命周期与市场快照)
 前端:      web/ (Vue 3 + lightweight-charts · 深色金融终端风格)
 ```
 
@@ -95,6 +103,10 @@ npm --prefix web run preview
 - **单只失败不中断：** 全市场扫描中，单只股票异常（超时/解析错误/停牌）记录日志后跳过，不中断整体任务。
 - **数据源锁必须释放：** `try...finally` 确保异常路径也释放锁。
 - **配置文件驱动：** 主要扫描阈值（杯体深度、柄部回撤、流动性等）在 `config.yaml` 中可调；部分策略阈值仍硬编码，新增配置项前先确认代码已接入。
+- **策略6 V4：** 启动、整理和尾段严格按时间分割；形态限定为 VCP/CUP_HANDLE/PLATFORM；客观目标与 1.5R/2R/2.5R/3.5R 执行目标分离，候选按客观盈亏比分层。
+- **策略6价格口径：** 当前生产日线均为前复权，策略6输出 `price_basis=FORWARD_ADJUSTED`、`current_price_adj`，`current_price_raw` 保持空值；本期不开发未复权双价格链、成交模拟或回测。
+- **策略6市场边界：** 板块过滤已完全移除，`sector_name` 仅用于展示；至少两个同日宽基指数才形成市场状态，RS20只使用同日沪深300。市场过滤开启且沪深300缺失时，最高只允许 WATCH。
+- **策略6生命周期：** 候选按股票维护 START_CONFIRMED/SETUP_FORMING/READY/BUY_ZONE/EXTENDED/FAILED/EXPIRED/COOLDOWN，FAILED 冷却10个交易日、EXPIRED冷却5个交易日，同事件只允许在支撑恢复并重新确认后入池。全局生命周期、任务审计快照和活跃候选必须在同一事务内写入。
 - **形态评分维度：** 杯体结构 35 + 柄部结构 25 + 成交量结构 20 + 前置趋势 10 + 突破确认 10 = 100 分。
 - **A股配色：** 红涨绿跌。金色仅用于 ≥80 分 A 级信号。
 - **SQLite 持久化：** 数据存储于 `data/cuphandle.db`（stock_pool, daily_ohlc, scan_tasks, candidates）。线程级连接 + WAL 模式。

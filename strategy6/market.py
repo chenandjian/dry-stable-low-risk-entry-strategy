@@ -14,16 +14,35 @@ MARKET_INDEX_NAMES = {
 }
 
 
-def evaluate_market_context(market_data_by_symbol: dict[str, list[dict]] | None) -> dict:
+def evaluate_market_context(
+    market_data_by_symbol: dict[str, list[dict]] | None,
+    *,
+    expected_trade_date: str = "",
+) -> dict:
     """Evaluate broad market status from already-truncated index rows."""
     data = market_data_by_symbol or {}
-    statuses = [_index_status(data.get(symbol) or []) for symbol in MARKET_INDEX_SYMBOLS]
+    statuses = [
+        _index_status(data.get(symbol) or [], expected_trade_date=expected_trade_date)
+        for symbol in MARKET_INDEX_SYMBOLS
+    ]
     observed = [status for status in statuses if status["observed"]]
     if not observed:
         return {
             "market_status": "UNKNOWN",
             "market_reasons": ["MARKET_DATA_UNAVAILABLE"],
-            "market_return_20": 0.0,
+            "market_return_20": _market_return_20(
+                data,
+                expected_trade_date=expected_trade_date,
+            ),
+        }
+    if len(observed) < 2:
+        return {
+            "market_status": "UNKNOWN",
+            "market_reasons": ["MARKET_DATA_PARTIAL", f"observed_indexes={len(observed)}"],
+            "market_return_20": _market_return_20(
+                data,
+                expected_trade_date=expected_trade_date,
+            ),
         }
 
     above_ma20 = sum(1 for status in observed if status["above_ma20"])
@@ -47,18 +66,22 @@ def evaluate_market_context(market_data_by_symbol: dict[str, list[dict]] | None)
             f"ma20_above_ma50={ma20_above_ma50}",
             f"risk_count={risk_count}",
         ],
-        "market_return_20": _market_return_20(data),
+        "market_return_20": _market_return_20(data, expected_trade_date=expected_trade_date),
     }
 
 
-def build_market_snapshot(market_data_by_symbol: dict[str, list[dict]] | None) -> dict:
+def build_market_snapshot(
+    market_data_by_symbol: dict[str, list[dict]] | None,
+    *,
+    expected_trade_date: str = "",
+) -> dict:
     """Build a task-level market snapshot for audit display."""
     data = market_data_by_symbol or {}
-    context = evaluate_market_context(data)
+    context = evaluate_market_context(data, expected_trade_date=expected_trade_date)
     indexes = []
     for symbol in ("sh000001", "sz399001", "sz399006", "hs300"):
         rows = [row for row in data.get(symbol, []) if isinstance(row, dict)]
-        status = _index_status(rows)
+        status = _index_status(rows, expected_trade_date=expected_trade_date)
         indexes.append({
             "symbol": symbol,
             "name": MARKET_INDEX_NAMES.get(symbol, symbol),
@@ -73,6 +96,7 @@ def build_market_snapshot(market_data_by_symbol: dict[str, list[dict]] | None) -
             "weak": bool(status["weak"]),
             "rows_count": len(rows),
             "source": str(rows[-1].get("source") or "sina") if rows else "",
+            "data_status": status["data_status"],
         })
     return {
         "market_status": context["market_status"],
@@ -82,32 +106,35 @@ def build_market_snapshot(market_data_by_symbol: dict[str, list[dict]] | None) -
     }
 
 
-def compute_relative_strength_20(stock_return_20: float, market_data_by_symbol: dict[str, list[dict]] | None) -> float:
-    market_return = _market_return_20(market_data_by_symbol or {})
+def compute_relative_strength_20(
+    stock_return_20: float,
+    market_data_by_symbol: dict[str, list[dict]] | None,
+    *,
+    expected_trade_date: str = "",
+) -> float:
+    rows = _hs300_rows(market_data_by_symbol or {}, expected_trade_date)
+    if not rows:
+        return 0.0
+    market_return = _return(rows, 20)
     return round(stock_return_20 - market_return, 6)
 
 
-def has_relative_strength_20_market(market_data_by_symbol: dict[str, list[dict]] | None) -> bool:
-    data = market_data_by_symbol or {}
-    for symbol in HS300_ALIASES:
-        rows = data.get(symbol)
-        if rows and len(rows) > 20:
-            return True
-    rows = data.get("sh000001") or []
-    return len(rows) > 20
+def has_relative_strength_20_market(
+    market_data_by_symbol: dict[str, list[dict]] | None,
+    *,
+    expected_trade_date: str = "",
+) -> bool:
+    return bool(_hs300_rows(market_data_by_symbol or {}, expected_trade_date))
 
 
-def _market_return_20(data: dict[str, list[dict]]) -> float:
-    for symbol in HS300_ALIASES:
-        rows = data.get(symbol)
-        if rows:
-            return _return(rows, 20)
-    rows = data.get("sh000001") or []
-    return _return(rows, 20)
+def _market_return_20(data: dict[str, list[dict]], *, expected_trade_date: str = "") -> float:
+    rows = _hs300_rows(data, expected_trade_date)
+    return _return(rows, 20) if rows else 0.0
 
 
-def _index_status(rows: list[dict]) -> dict:
+def _index_status(rows: list[dict], *, expected_trade_date: str = "") -> dict:
     normalized = [row for row in rows if isinstance(row, dict)]
+    data_status = _data_status(normalized, expected_trade_date)
     close = _last_close(normalized)
     ma20 = _ma(normalized, 20)
     ma50 = _ma(normalized, 50)
@@ -115,12 +142,29 @@ def _index_status(rows: list[dict]) -> dict:
     ma20_above_ma50 = ma20 > 0 and ma50 > 0 and ma20 >= ma50
     weak = close > 0 and ma20 > 0 and close < ma20 and _ma_slope_down(normalized, 20)
     return {
-        "observed": len(normalized) >= 50,
+        "observed": len(normalized) >= 50 and data_status == "FRESH",
+        "data_status": data_status,
         "above_ma20": above_ma20,
         "ma20_above_ma50": ma20_above_ma50,
         "weak": weak,
         "volume_down_risk": _volume_down_risk(normalized),
     }
+
+
+def _hs300_rows(data: dict[str, list[dict]], expected_trade_date: str) -> list[dict]:
+    for symbol in HS300_ALIASES:
+        rows = [row for row in (data.get(symbol) or []) if isinstance(row, dict)]
+        if len(rows) > 20 and _data_status(rows, expected_trade_date) == "FRESH":
+            return rows
+    return []
+
+
+def _data_status(rows: list[dict], expected_trade_date: str) -> str:
+    if not rows:
+        return "MISSING"
+    if expected_trade_date and str(rows[-1].get("date") or "") != expected_trade_date:
+        return "STALE"
+    return "FRESH"
 
 
 def _last_close(rows: list[dict]) -> float:

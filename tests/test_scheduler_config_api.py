@@ -2,6 +2,7 @@ import server
 import builtins
 import yaml
 from fastapi.testclient import TestClient
+from pathlib import Path
 
 
 def _valid_config() -> dict:
@@ -120,6 +121,69 @@ def test_update_config_reloads_scheduler_when_scheduler_changes(monkeypatch, tmp
     assert len(reloaded) == 1
     assert reloaded[0]["scheduler"]["enabled"] is True
     assert reloaded[0]["scheduler"]["serial_dual_scan"]["cron"] == "50 15 * * 1-5"
+
+
+def test_update_config_validates_strategy6_and_strips_legacy_sector_fields(monkeypatch, tmp_path):
+    cfg = _valid_config()
+    cfg["strategy6"] = {
+        "enabled": True,
+        "enable_sector_filter": True,
+        "sector_filter_mode": "strict",
+    }
+    written = {}
+    repository_config = Path("config.yaml")
+    repository_config_before = repository_config.read_bytes()
+    temporary_config = tmp_path / "config.yaml"
+    original_open = builtins.open
+
+    def fake_open(file, *args, **kwargs):
+        if file == "config.yaml":
+            return original_open(temporary_config, *args, **kwargs)
+        return original_open(file, *args, **kwargs)
+
+    monkeypatch.setattr(server, "load_config", lambda path="config.yaml": cfg.copy())
+    monkeypatch.setattr(builtins, "open", fake_open)
+    monkeypatch.setattr(server.yaml, "dump", lambda config, *args, **kwargs: written.update(config))
+
+    response = TestClient(server.app).put(
+        "/api/config",
+        json={"strategy6": {"rr2_min_watch": 1.5, "rr2_min_key": 2.0, "rr2_min_ready": 2.5}},
+    )
+
+    assert response.status_code == 200
+    assert "enable_sector_filter" not in written["strategy6"]
+    assert "sector_filter_mode" not in written["strategy6"]
+    assert written["strategy6"]["pattern_filter_mode"] == "score_only"
+    assert repository_config.read_bytes() == repository_config_before
+
+
+def test_update_config_rejects_invalid_strategy6_threshold_order(monkeypatch, tmp_path):
+    cfg = _valid_config()
+    cfg["strategy6"] = {"enabled": True}
+    writes = []
+    repository_config = Path("config.yaml")
+    repository_config_before = repository_config.read_bytes()
+    temporary_config = tmp_path / "config.yaml"
+    original_open = builtins.open
+
+    def fake_open(file, *args, **kwargs):
+        if file == "config.yaml":
+            return original_open(temporary_config, *args, **kwargs)
+        return original_open(file, *args, **kwargs)
+
+    monkeypatch.setattr(server, "load_config", lambda path="config.yaml": cfg.copy())
+    monkeypatch.setattr(builtins, "open", fake_open)
+    monkeypatch.setattr(server.yaml, "dump", lambda *args, **kwargs: writes.append(args))
+
+    response = TestClient(server.app).put(
+        "/api/config",
+        json={"strategy6": {"rr2_min_watch": 3.0, "rr2_min_key": 2.0, "rr2_min_ready": 2.5}},
+    )
+
+    assert response.status_code == 400
+    assert "Invalid strategy6 config" in response.json()["message"]
+    assert writes == []
+    assert repository_config.read_bytes() == repository_config_before
 
 
 def test_scheduler_logs_include_runtime_state(monkeypatch):

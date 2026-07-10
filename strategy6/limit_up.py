@@ -1,6 +1,8 @@
 """A-share limit-up helpers for Strategy6."""
 from __future__ import annotations
 
+from decimal import Decimal, ROUND_HALF_UP
+
 
 def get_limit_up_pct(stock_code: str, stock_name: str = "") -> float:
     code = str(stock_code or "").strip()
@@ -10,7 +12,8 @@ def get_limit_up_pct(stock_code: str, stock_name: str = "") -> float:
 
 
 def calc_limit_up_price(prev_close: float, limit_pct: float) -> float:
-    return round(float(prev_close) * (1 + float(limit_pct)), 2)
+    value = Decimal(str(prev_close)) * (Decimal("1") + Decimal(str(limit_pct)))
+    return float(value.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP))
 
 
 def is_limit_up_day(stock_code: str, prev_close: float, close: float) -> bool:
@@ -42,4 +45,3 @@ def is_touched_limit_up_failed(stock_code: str, prev_close: float, high: float, 
     touched = high >= limit_up_price - 0.01
     sealed = close >= limit_up_price - 0.01
     return touched and not sealed
-

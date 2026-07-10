@@ -66,7 +66,16 @@ def scan_strategy6_all(
     mgr = DataSourceManager()
     engine = StrongVcpTailEngine({"strategy6": cfg})
     market_data_by_symbol = _load_market_data_by_symbol(cfg)
-    db.save_strategy6_market_snapshot(task_id, build_market_snapshot(market_data_by_symbol))
+    market_target_date = build_cache_freshness_context(
+        now=datetime.strptime(_now(), "%Y-%m-%d %H:%M:%S")
+    ).target_trade_date
+    db.save_strategy6_market_snapshot(
+        task_id,
+        build_market_snapshot(
+            market_data_by_symbol,
+            expected_trade_date=market_target_date,
+        ),
+    )
     candidate_by_code: dict[str, dict] = {}
     candidate_lock = threading.Lock()
     busy_retries_by_code: dict[str, int] = {}
@@ -194,9 +203,36 @@ def scan_strategy6_all(
                     quote_status=fetch_result.quote_status or "",
                     market_data_by_symbol=_market_data_until(market_data_by_symbol, latest_trade_date or ""),
                 )
+                lifecycle, discovery = db.persist_strategy6_evaluation(
+                    task_id,
+                    code=code,
+                    name=name,
+                    evaluation_date=evaluation.indicators.evaluation_date,
+                    candidate_type=evaluation.candidate_type,
+                    lifecycle_status=evaluation.lifecycle_status,
+                    event_key=_strategy6_event_key(evaluation),
+                    reject_reasons=evaluation.reject_reasons,
+                    max_watch_days=int(cfg["max_watch_days"]),
+                    expired_cooldown_days=int(cfg["expired_cooldown_days"]),
+                    failed_cooldown_days=int(cfg["failed_cooldown_days"]),
+                    candidate=evaluation.to_candidate_dict() if evaluation.passed else None,
+                )
+                if lifecycle["blocked"] and evaluation.passed:
+                    _finish_stock(
+                        code,
+                        name,
+                        "scanned",
+                        status_reason=lifecycle["lifecycle_status"],
+                        error_detail=lifecycle["exit_reason"] or "LIFECYCLE_COOLDOWN",
+                        kline_latest_date=latest_trade_date,
+                        fetch_result=fetch_result,
+                    )
+                    with busy_retry_lock:
+                        busy_retries_by_code.pop(code, None)
+                    continue
                 if evaluation.passed:
-                    discovery = evaluation.to_candidate_dict()
-                    db.upsert_strategy6_candidate(task_id, discovery)
+                    if discovery is None:
+                        raise RuntimeError("Strategy6 candidate persistence returned no discovery")
                     with candidate_lock:
                         candidate_by_code[code] = discovery
                     _finish_stock(code, name, "candidate", kline_latest_date=latest_trade_date, fetch_result=fetch_result)
@@ -286,6 +322,19 @@ def _market_data_until(market_data_by_symbol: dict[str, list[dict]], evaluation_
         symbol: [row for row in rows if str(row.get("date") or "") <= evaluation_date]
         for symbol, rows in market_data_by_symbol.items()
     }
+
+
+def _strategy6_event_key(evaluation) -> str:
+    pattern = evaluation.pattern
+    lifecycle_event = "BREAKOUT_CONFIRMED" if evaluation.lifecycle_status == "BREAKOUT_CONFIRMED" else ""
+    return "|".join((
+        evaluation.start.start_date,
+        evaluation.start.start_type,
+        pattern.pattern_type,
+        pattern.pattern_start_date,
+        str(pattern.contraction_count),
+        lifecycle_event,
+    ))
 
 
 def _now() -> str:

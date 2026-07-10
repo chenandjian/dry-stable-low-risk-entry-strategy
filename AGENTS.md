@@ -18,12 +18,18 @@ Bug 修复优先使用 TDD：先写能稳定复现问题的失败测试，再做
 
 ## Project
 
-CupHandleScan 是 Python 3.10+ 的 A 股扫描系统，当前 worktree 包含两套独立策略：
+CupHandleScan 是 Python 3.10+ 的 A 股扫描系统，当前项目包含六套相互隔离的策略：
 
 - 策略1：杯柄/VCP 扫描，统一入口 `scanner/strategy_engine.py::CupHandleStrategyEngine.evaluate_at()`。
 - 策略2：极致量干价稳扫描，统一入口 `strategy2/engine.py::ExtremeDryStableStrategyEngine.evaluate_at()`。
+- 策略3：强回调二次突破，代码位于 `strategy3/`。
+- 策略4：热点龙头二波，代码位于 `strategy4/`。
+- 策略5：短线冲刺支撑，代码位于 `strategy5/`。
+- 策略6：强势启动后的 VCP/杯柄/平台尾段，统一入口 `strategy6/engine.py::StrongVcpTailEngine.evaluate_at()`。
 
 策略2不得导入策略1的形态检测、评分、分析或决策模块。允许复用共享数据层、流动性过滤、SQLite 基础能力和 `scanner/daily_data_service.py`。
+
+策略6必须保持启动、整理、尾段不重叠，使用客观目标计算盈亏比，并将执行R目标单独输出。策略6不得恢复板块过滤，`sector_name` 仅展示。当前策略6价格全部为前复权口径，禁止把 `current_price_raw` 伪填为前复权价格。
 
 ## Commands
 

@@ -1899,6 +1899,16 @@ async def update_config(data: dict):
                 {"status": "error", "message": f"Invalid strategy4 config: {e}"},
                 status_code=400,
             )
+    if "strategy6" in config:
+        try:
+            # Replace with the validated allow-listed snapshot so removed
+            # sector-filter keys from old clients cannot be persisted again.
+            config["strategy6"] = resolve_strategy6_config(config)
+        except ValueError as e:
+            return JSONResponse(
+                {"status": "error", "message": f"Invalid strategy6 config: {e}"},
+                status_code=400,
+            )
 
     # Write back to config.yaml
     with open("config.yaml", "w", encoding="utf-8") as f:
@@ -2466,13 +2476,22 @@ async def strategy6_market_snapshot(task_id: str):
     return {"taskId": task_id, "snapshot": db.get_strategy6_market_snapshot(task_id)}
 
 
+@app.get("/api/strategy6/tasks/{task_id}/lifecycle")
+async def strategy6_lifecycle_audit(task_id: str):
+    _, err = _require_task_strategy(task_id, STRATEGY6_TYPE)
+    if err:
+        return err
+    rows = db.get_strategy6_task_lifecycle(task_id)
+    return {"taskId": task_id, "lifecycle": rows, "total": len(rows)}
+
+
 @app.get("/api/strategy6/tasks/{task_id}/report.xlsx")
 async def strategy6_excel_report(task_id: str):
     _, err = _require_task_strategy(task_id, STRATEGY6_TYPE)
     if err:
         return err
     candidates = db.get_strategy6_candidates(task_id)
-    content = build_strategy6_report_xlsx(candidates)
+    content = build_strategy6_report_xlsx(candidates, db.get_strategy6_task_lifecycle(task_id))
     return Response(
         content=content,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",

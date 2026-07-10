@@ -1,7 +1,13 @@
 from datetime import date, timedelta
+from dataclasses import replace
 
 from strategy6.engine import StrongVcpTailEngine
-from strategy6.sector import evaluate_sector_context
+from strategy6.filters import classify_candidate
+from strategy6.indicators import calculate_indicators
+from strategy6.market import build_market_snapshot
+from strategy6.models import Strategy6Indicators
+from strategy6.strong_start import evaluate_strong_start
+from strategy6.scorer import _relative_strength_risk_score
 from strategy6.validation import resolve_strategy6_config
 
 
@@ -37,12 +43,16 @@ def build_strategy6_candidate_data(length=760):
     })
 
     pivot = data[-20]["close"]
-    closes = [pivot * v for v in (0.99, 1.005, 0.995, 1.0, 0.992, 1.003, 0.998, 1.001, 0.997, 1.002,
-                                  0.999, 1.004, 1.0, 1.003, 1.001, 1.002, 1.000, 1.003, 1.001)]
-    volumes = [1_400_000, 1_300_000, 1_200_000, 1_100_000, 1_000_000,
-               950_000, 900_000, 850_000, 800_000, 760_000,
-               720_000, 680_000, 640_000, 600_000, 560_000,
-               520_000, 500_000, 480_000, 460_000, 440_000]
+    closes = [pivot * v for v in (
+        0.90, 0.93, 0.96, 0.99, 1.02, 0.99, 0.96, 0.92, 0.96,
+        0.97, 0.99, 1.01, 1.03, 1.05, 1.07, 1.06, 1.07, 1.08, 1.07,
+    )]
+    volumes = [
+        1_600_000, 1_550_000, 1_450_000, 1_400_000, 1_300_000,
+        1_250_000, 1_150_000, 1_100_000, 1_000_000,
+        900_000, 850_000, 800_000, 750_000, 700_000,
+        550_000, 500_000, 460_000, 430_000, 400_000,
+    ]
     for j, close in enumerate(closes):
         data[-19 + j].update({
             "open": round(close * 0.998, 4),
@@ -50,6 +60,33 @@ def build_strategy6_candidate_data(length=760):
             "low": round(close * 0.985, 4),
             "close": round(close, 4),
             "volume": volumes[j],
+            "amount": 1_200_000_000,
+        })
+    return data
+
+
+def build_strategy6_pattern_candidate_data():
+    data = build_strategy6_candidate_data()
+    pivot = data[-20]["close"]
+    factors = [
+        1.02, 0.90, 1.00, 0.92, 0.99, 0.94, 0.985,
+        0.95, 0.98, 0.96, 0.975, 0.965, 0.975, 0.97,
+        0.972, 0.973, 0.974, 0.973, 0.974,
+    ]
+    volumes = [
+        1_800_000, 1_700_000, 1_450_000, 1_350_000, 1_100_000,
+        1_000_000, 800_000, 730_000, 580_000, 520_000, 410_000,
+        370_000, 330_000, 300_000, 280_000, 260_000, 240_000,
+        220_000, 200_000,
+    ]
+    for offset, (factor, volume) in enumerate(zip(factors, volumes)):
+        close = pivot * factor
+        data[-19 + offset].update({
+            "open": round(close * 0.998, 4),
+            "high": round(close * 1.01, 4),
+            "low": round(close * 0.99, 4),
+            "close": round(close, 4),
+            "volume": volume,
             "amount": 1_200_000_000,
         })
     return data
@@ -69,7 +106,14 @@ def test_engine_outputs_full_candidate_trade_plan():
     assert result.start.start_type in {"NORMAL_STRONG_BREAKOUT", "VOLUME_LIMIT_UP", "LOW_VOLUME_LIMIT_UP", "ONE_WORD_LIMIT_UP"}
     assert result.start.start_grade in {"S", "A", "B"}
     assert result.start.high_trigger in {"near_120d_high", "new_120d_high"}
-    assert result.support.support_status in {"MA5_SUPPORT", "MA10_SUPPORT", "MA20_SUPPORT", "MA50_TESTING"}
+    assert result.support.support_status in {
+        "PATTERN_SUPPORT",
+        "MA5_SUPPORT",
+        "MA10_SUPPORT",
+        "MA20_SUPPORT",
+        "MA50_TESTING",
+        "KEY_SUPPORT_VALID",
+    }
     assert candidate["key_support_price"] > 0
     assert candidate["support_zone_low"] < candidate["support_zone_high"]
     assert candidate["suggested_buy_price"] is not None
@@ -115,6 +159,27 @@ def test_big_down_volume_is_hard_rejected():
 
     assert result.passed is False
     assert "BIG_DOWN_VOLUME" in result.reject_reasons
+
+
+def test_suspended_quote_reuses_history_but_cannot_become_candidate():
+    result = StrongVcpTailEngine({}).evaluate_at(
+        build_strategy6_candidate_data(),
+        code="000001",
+        name="平安银行",
+        quote_status="suspended",
+    )
+
+    assert result.passed is False
+    assert result.quote_status == "suspended"
+    assert "LATEST_TRADE_SUSPENDED" in result.reject_reasons
+
+    no_trade = StrongVcpTailEngine({}).evaluate_at(
+        build_strategy6_candidate_data(),
+        code="000001",
+        quote_status="no_trade",
+    )
+    assert no_trade.passed is False
+    assert "LATEST_TRADE_NO_TRADE" in no_trade.reject_reasons
 
 
 def test_consolidation_limits_are_hard_filters_by_start_grade():
@@ -184,20 +249,26 @@ def test_one_word_limit_up_without_followup_confirmation_is_watch_only():
 
 
 def test_upper_shadow_pressure_downgrades_key_candidate_to_watch():
-    data = build_strategy6_candidate_data()
-    pressure = data[-8]
-    pressure["high"] = round(data[-1]["close"] * 1.02, 4)
-    pressure["open"] = round(pressure["high"] * 0.90, 4)
-    pressure["close"] = round(pressure["high"] * 0.91, 4)
-    pressure["low"] = round(pressure["high"] * 0.89, 4)
-    pressure["volume"] = 2_000_000
+    engine = StrongVcpTailEngine({"strategy6": {"enable_market_filter": False}})
+    result = engine.evaluate_at(build_strategy6_candidate_data(), code="000001", name="平安银行")
+    result.indicators.current_price = (
+        result.support.support_zone_low + result.support.support_zone_high
+    ) / 2
+    result.indicators.warn_tags = []
+    result.score = replace(result.score, total_score=90, pattern_score_component=20)
 
-    result = StrongVcpTailEngine({}).evaluate_at(data, code="000001", name="平安银行")
-    candidate = result.to_candidate_dict()
+    baseline_type, *_ = classify_candidate(
+        result.indicators, result.start, result.phase, result.pattern, result.support,
+        result.dry_tail, result.trade_plan, result.score, [], engine.config,
+    )
+    result.indicators.warn_tags = ["UPPER_SHADOW_PRESSURE"]
+    pressured_type, *_ = classify_candidate(
+        result.indicators, result.start, result.phase, result.pattern, result.support,
+        result.dry_tail, result.trade_plan, result.score, [], engine.config,
+    )
 
-    assert result.passed is True
-    assert result.candidate_type == "WATCH_CANDIDATE"
-    assert "UPPER_SHADOW_PRESSURE" in candidate["warn_tags"]
+    assert baseline_type in {"READY_CANDIDATE", "KEY_CANDIDATE"}
+    assert pressured_type == "WATCH_CANDIDATE"
 
 
 def test_one_word_limit_up_confirmation_requires_close_above_start_low():
@@ -235,7 +306,7 @@ def test_one_word_limit_up_confirmation_requires_close_above_start_low():
 
 
 def test_breakout_confirmation_requires_quality_breakout_not_extended_chase():
-    data = build_strategy6_candidate_data()
+    data = build_strategy6_pattern_candidate_data()
     current = data[-1]["close"]
     for row in data[-20:-1]:
         row["high"] = round(current * 1.005, 4)
@@ -277,44 +348,25 @@ def test_close_below_key_support_shape_failure_marks_failed():
 
 def test_b_grade_strong_start_is_watch_only_even_with_high_score():
     data = build_strategy6_candidate_data()
-    base = data[-21]["close"]
-    close = base * 1.03
-    data[-20].update({
-        "open": round(close * 0.995, 4),
-        "high": round(close * 1.015, 4),
-        "low": round(close * 0.985, 4),
-        "close": round(close, 4),
-        "volume": 1_200_000,
-        "amount": 1_400_000_000,
-    })
-    pivot = data[-20]["close"]
-    closes = [pivot * v for v in (1.06, 1.08, 1.10, 1.12, 1.135, 1.15, 1.16, 1.17, 1.178, 1.184,
-                                  1.188, 1.191, 1.194, 1.197, 1.199, 1.201, 1.202, 1.203, 1.204)]
-    volumes = [1_400_000, 1_300_000, 1_200_000, 1_100_000, 1_000_000,
-               950_000, 900_000, 850_000, 800_000, 760_000,
-               720_000, 680_000, 640_000, 600_000, 560_000,
-               520_000, 500_000, 480_000, 460_000]
-    for j, close in enumerate(closes):
-        data[-19 + j].update({
-            "open": round(close * 0.998, 4),
-            "high": round(close * 1.01, 4),
-            "low": round(close * 0.985, 4),
-            "close": round(close, 4),
-            "volume": volumes[j],
-            "amount": 1_200_000_000,
-        })
-    result = StrongVcpTailEngine({
-        "strategy6": {
-            "tail_close_range_5": 0.12,
-            "tail_volume_ratio_5_20": 0.90,
-            "ready_min_score": 60,
-            "key_min_score": 60,
-        }
-    }).evaluate_at(data, code="000001", name="平安银行")
+    engine = StrongVcpTailEngine({})
+    result = engine.evaluate_at(data, code="000001", name="平安银行")
+    b_start = replace(result.start, start_type="B_GRADE_MOMENTUM", start_grade="B")
 
-    assert result.start.start_grade == "B"
-    assert result.passed is True
-    assert result.candidate_type == "WATCH_CANDIDATE"
+    candidate_type, *_ = classify_candidate(
+        result.indicators,
+        b_start,
+        result.phase,
+        result.pattern,
+        result.support,
+        result.dry_tail,
+        result.trade_plan,
+        result.score,
+        [],
+        engine.config,
+    )
+
+    assert result.trade_plan.objective_rr_2 >= engine.config["rr2_min_ready"]
+    assert candidate_type == "WATCH_CANDIDATE"
 
 
 def test_upper_shadow_pressure_deducts_risk_control_score():
@@ -330,7 +382,7 @@ def test_upper_shadow_pressure_deducts_risk_control_score():
     pressured = StrongVcpTailEngine({}).evaluate_at(data, code="000001", name="平安银行")
 
     assert "UPPER_SHADOW_PRESSURE" in pressured.indicators.warn_tags
-    assert pressured.score.risk_control_score == clean.score.risk_control_score - 5
+    assert pressured.score.risk_control_score == clean.score.risk_control_score - 2
 
 
 def test_close_below_ma5_is_not_marked_ma5_support():
@@ -356,17 +408,19 @@ def test_strategy6_defaults_enable_real_market_filter_only():
 
     assert cfg["enable_market_filter"] is True
     assert cfg["market_filter_mode"] == "downgrade"
-    assert cfg["enable_sector_filter"] is False
-    assert cfg["sector_filter_mode"] == "disabled"
-    assert cfg["sector_min_member_new_high_count"] == 3
+    assert "enable_sector_filter" not in cfg
+    assert "sector_filter_mode" not in cfg
+    assert "sector_min_member_new_high_count" not in cfg
     assert cfg["min_relative_strength_20"] == 0.10
+    assert cfg["breakout_extended_max_pct"] == 0.08
 
 
-def _market_rows(closes):
+def _market_rows(closes, end_date=date(2026, 1, 29)):
     rows = []
+    start_date = end_date - timedelta(days=len(closes) - 1)
     for i, close in enumerate(closes):
         rows.append({
-            "date": (date(2024, 1, 1) + timedelta(days=i)).isoformat(),
+            "date": (start_date + timedelta(days=i)).isoformat(),
             "open": close,
             "high": close * 1.01,
             "low": close * 0.99,
@@ -446,58 +500,8 @@ def test_market_filter_score_only_deducts_score_without_downgrading_candidate_ty
 
     assert score_only.passed is True
     assert score_only.candidate_type == filter_off.candidate_type
-    assert score_only.score.risk_control_score == filter_off.score.risk_control_score - 5
+    assert score_only.score.risk_control_score == filter_off.score.risk_control_score - 2
     assert "MARKET_WEAK_DOWNGRADED" not in score_only.indicators.warn_tags
-
-
-def test_sector_filter_context_is_ignored_after_sector_filter_removal():
-    data = build_strategy6_candidate_data()
-
-    baseline = StrongVcpTailEngine({"strategy6": {"enable_sector_filter": False}}).evaluate_at(
-        data,
-        code="000001",
-        name="平安银行",
-    )
-    result = StrongVcpTailEngine({"strategy6": {"enable_sector_filter": True, "sector_filter_mode": "strict"}}).evaluate_at(
-        data,
-        code="000001",
-        name="平安银行",
-        sector_context={"sector_strength_status": "SECTOR_WEAK", "relative_strength_10_sector": -0.05},
-    )
-    candidate = result.to_candidate_dict()
-
-    assert result.passed is True
-    assert result.candidate_type == baseline.candidate_type
-    assert candidate["enable_sector_filter"] is False
-    assert candidate["sector_filter_mode"] == "disabled"
-    assert candidate["sector_strength_status"] == "DISABLED"
-    assert candidate["relative_strength_10_sector"] == 0.0
-    assert "SECTOR_WEAK_STRICT" not in candidate["warn_tags"]
-    assert "SECTOR_WEAK_DOWNGRADED" not in candidate["warn_tags"]
-
-
-def test_sector_filter_downgrade_config_no_longer_moves_ready_or_key_to_watch():
-    data = build_strategy6_candidate_data()
-
-    baseline = StrongVcpTailEngine({"strategy6": {"enable_sector_filter": False}}).evaluate_at(
-        data,
-        code="000001",
-        name="平安银行",
-    )
-    result = StrongVcpTailEngine({"strategy6": {"enable_sector_filter": True, "sector_filter_mode": "downgrade"}}).evaluate_at(
-        data,
-        code="000001",
-        name="平安银行",
-        sector_context={"sector_strength_status": "SECTOR_WEAK", "relative_strength_10_sector": -0.05},
-    )
-    candidate = result.to_candidate_dict()
-
-    assert result.passed is True
-    assert result.candidate_type == baseline.candidate_type
-    assert candidate["sector_strength_status"] == "DISABLED"
-    assert candidate["enable_sector_filter"] is False
-    assert candidate["sector_member_new_high_count"] == 0
-    assert "SECTOR_WEAK_DOWNGRADED" not in candidate["warn_tags"]
 
 
 def test_relative_strength_20_is_reported_against_hs300_index():
@@ -520,7 +524,7 @@ def test_relative_strength_20_is_reported_against_hs300_index():
 def test_relative_strength_20_below_minimum_rejects_candidate():
     data = build_strategy6_candidate_data()
     market = {
-        "hs300": _market_rows([100 + i * 0.5 for i in range(80)]),
+        "hs300": _market_rows([100 * (1.015 ** i) for i in range(80)]),
     }
 
     result = StrongVcpTailEngine({}).evaluate_at(
@@ -549,15 +553,248 @@ def test_missing_market_data_does_not_apply_rs20_filter():
     assert "RS20_LT_0_1" not in result.reject_reasons
 
 
-def test_sector_context_classifies_strength_and_relative_strength():
-    strong_rows = _market_rows([100 + i * 0.2 for i in range(80)])
-    for idx, row in enumerate(strong_rows[-20:]):
-        row["close"] += idx * 0.8
+def test_stale_hs300_does_not_apply_relative_strength_filter():
+    data = build_strategy6_candidate_data()
+    stale_hs300 = {
+        "hs300": _market_rows(
+            [100 + i * 0.02 for i in range(80)],
+            end_date=date(2026, 1, 28),
+        ),
+    }
 
-    context = evaluate_sector_context(0.20, strong_rows)
+    result = StrongVcpTailEngine({}).evaluate_at(
+        data,
+        code="000001",
+        market_data_by_symbol=stale_hs300,
+    )
 
-    assert context["sector_strength_status"] == "SECTOR_STRONG"
-    assert context["relative_strength_10_sector"] > 0
+    assert result.indicators.relative_strength_20_observed is False
+    assert result.indicators.relative_strength_20 == 0
+    assert "RS20_LT_0_1" not in result.reject_reasons
 
-    weak_context = evaluate_sector_context(0.03, _market_rows([100 - i * 0.2 for i in range(80)]))
-    assert weak_context["sector_strength_status"] == "SECTOR_WEAK"
+
+def test_relative_strength_does_not_fallback_to_shanghai_index():
+    result = StrongVcpTailEngine({}).evaluate_at(
+        build_strategy6_candidate_data(),
+        code="000001",
+        market_data_by_symbol={
+            "sh000001": _market_rows([100 + i * 0.02 for i in range(80)]),
+        },
+    )
+
+    assert result.indicators.relative_strength_20_observed is False
+    assert result.indicators.relative_strength_20 == 0
+
+
+def test_market_snapshot_keeps_hs300_return_when_broad_indexes_are_missing():
+    snapshot = build_market_snapshot(
+        {"hs300": _market_rows([100 + i * 0.1 for i in range(80)])},
+        expected_trade_date="2026-01-29",
+    )
+
+    assert snapshot["market_status"] == "UNKNOWN"
+    assert snapshot["market_return_20"] > 0
+
+
+def test_partial_broad_market_data_is_unknown_not_neutral():
+    snapshot = build_market_snapshot(
+        {
+            "sh000001": _market_rows([100 + i * 0.1 for i in range(80)]),
+            "hs300": _market_rows([100 + i * 0.05 for i in range(80)]),
+        },
+        expected_trade_date="2026-01-29",
+    )
+
+    assert snapshot["market_status"] == "UNKNOWN"
+    assert "MARKET_DATA_PARTIAL" in snapshot["market_reasons"]
+
+
+def test_two_fresh_broad_indexes_are_enough_for_market_context():
+    snapshot = build_market_snapshot(
+        {
+            "sh000001": _market_rows([100 + i * 0.1 for i in range(80)]),
+            "sz399001": _market_rows([120 + i * 0.1 for i in range(80)]),
+            "hs300": _market_rows([100 + i * 0.05 for i in range(80)]),
+        },
+        expected_trade_date="2026-01-29",
+    )
+
+    assert snapshot["market_status"] in {"MARKET_STRONG", "MARKET_NEUTRAL", "MARKET_WEAK", "MARKET_RISK"}
+
+
+def test_market_filter_blocks_key_ready_when_hs300_is_missing():
+    broad_market = {
+        symbol: _market_rows([100 + i * 0.05 for i in range(80)])
+        for symbol in ("sh000001", "sz399001", "sz399006")
+    }
+    engine = StrongVcpTailEngine({})
+    result = engine.evaluate_at(
+        build_strategy6_candidate_data(),
+        code="000001",
+        market_data_by_symbol=broad_market,
+    )
+    result.indicators.warn_tags = []
+    result.indicators.current_price = (
+        result.support.support_zone_low + result.support.support_zone_high
+    ) / 2
+    result.score = replace(result.score, total_score=95)
+
+    candidate_type, *_ = classify_candidate(
+        result.indicators, result.start, result.phase, result.pattern, result.support,
+        result.dry_tail, result.trade_plan, result.score, [], engine.config,
+    )
+
+    assert result.indicators.market_status != "UNKNOWN"
+    assert result.indicators.relative_strength_20_observed is False
+    assert candidate_type == "WATCH_CANDIDATE"
+    assert "RS20_DATA_UNAVAILABLE" in result.indicators.warn_tags
+
+
+def test_missing_market_data_cannot_receive_relative_strength_points():
+    score = _relative_strength_risk_score(
+        Strategy6Indicators(
+            relative_strength_20=0.20,
+            relative_strength_20_observed=False,
+        )
+    )
+
+    assert score == 5
+
+
+def test_enabled_market_filter_prevents_key_or_ready_without_market_data():
+    engine = StrongVcpTailEngine({})
+    result = engine.evaluate_at(build_strategy6_candidate_data(), code="000001", name="平安银行")
+    result.indicators.warn_tags = []
+    result.indicators.current_price = (
+        result.support.support_zone_low + result.support.support_zone_high
+    ) / 2
+
+    candidate_type, *_ = classify_candidate(
+        result.indicators,
+        result.start,
+        result.phase,
+        result.pattern,
+        result.support,
+        result.dry_tail,
+        result.trade_plan,
+        result.score,
+        [],
+        engine.config,
+    )
+
+    assert candidate_type == "WATCH_CANDIDATE"
+    assert "MARKET_DATA_UNAVAILABLE" in result.indicators.warn_tags
+
+
+def test_signal_day_breakout_reaches_breakout_confirmed_lifecycle():
+    data = build_strategy6_pattern_candidate_data()
+    engine = StrongVcpTailEngine({"strategy6": {"enable_market_filter": False}})
+    pivot = engine.evaluate_at(data, code="000001").pattern.pivot_price
+    prior_volume = sum(row["volume"] for row in data[-21:-1]) / 20
+    data[-1].update({
+        "open": round(pivot * 0.995, 4),
+        "high": round(pivot * 1.025, 4),
+        "low": round(pivot * 0.99, 4),
+        "close": round(pivot * 1.02, 4),
+        "volume": round(prior_volume * 1.5),
+    })
+
+    result = engine.evaluate_at(data, code="000001")
+
+    assert result.pattern.pivot_price == pivot
+    assert result.indicators.current_volume_ratio_20 >= 1.3
+    assert result.lifecycle_status == "BREAKOUT_CONFIRMED"
+
+
+def test_signal_day_extended_breakout_reaches_extended_lifecycle():
+    data = build_strategy6_pattern_candidate_data()
+    engine = StrongVcpTailEngine({"strategy6": {"enable_market_filter": False}})
+    pivot = engine.evaluate_at(data, code="000001").pattern.pivot_price
+    data[-1].update({
+        "open": round(pivot * 1.07, 4),
+        "high": round(pivot * 1.11, 4),
+        "low": round(pivot * 1.06, 4),
+        "close": round(pivot * 1.09, 4),
+    })
+
+    result = engine.evaluate_at(data, code="000001")
+
+    assert result.lifecycle_status == "EXTENDED"
+
+
+def test_unknown_pattern_can_pass_when_filter_is_disabled_or_score_only():
+    data = build_strategy6_candidate_data()
+    unknown_pattern = {
+        "vcp_min_first_range": 0.50,
+        "cup_depth_min": 0.40,
+        "cup_depth_max": 0.50,
+        "platform_max_range": 0.01,
+        "enable_market_filter": False,
+    }
+
+    disabled = StrongVcpTailEngine({
+        "strategy6": {
+            **unknown_pattern,
+            "pattern_filter_enabled": False,
+        }
+    }).evaluate_at(data, code="000001")
+    score_only = StrongVcpTailEngine({
+        "strategy6": {
+            **unknown_pattern,
+            "pattern_filter_enabled": True,
+            "pattern_filter_mode": "score_only",
+        }
+    }).evaluate_at(data, code="000001")
+
+    for result in (disabled, score_only):
+        assert result.pattern.pattern_type == "UNKNOWN"
+        assert result.trade_plan.objective_rr_2 >= 1.5
+        assert result.passed is True
+        assert not any(reason.startswith("PATTERN_UNKNOWN") for reason in result.reject_reasons)
+        assert not any(reason.startswith("RR2_LT_") for reason in result.reject_reasons)
+
+
+def test_newer_strong_start_restarts_the_setup_event():
+    data = build_strategy6_candidate_data()
+    newer = len(data) - 8
+    previous_close = data[newer - 1]["close"]
+    close = previous_close * 1.10
+    data[newer].update({
+        "open": round(previous_close * 1.02, 4),
+        "high": round(close, 4),
+        "low": round(previous_close * 1.01, 4),
+        "close": round(close, 4),
+        "volume": 5_000_000,
+        "amount": 1_500_000_000,
+    })
+    engine = StrongVcpTailEngine({})
+    rows, ind = calculate_indicators(data, engine.config)
+
+    start = evaluate_strong_start(rows, ind, engine.config, "000001")
+
+    assert start.start_date == rows[newer]["date"]
+    assert start.days_since_start == 7
+
+
+def test_normal_start_requires_two_yi_and_top_ten_percent_self_amount():
+    data = build_strategy6_candidate_data()
+    idx = len(data) - 10
+    previous_close = data[idx - 1]["close"]
+    close = previous_close * 1.08
+    data[idx].update({
+        "open": round(previous_close * 1.01, 4),
+        "high": round(close * 1.005, 4),
+        "low": round(previous_close, 4),
+        "close": round(close, 4),
+        "volume": 5_000_000,
+        "amount": 2_000_000_000,
+    })
+    engine = StrongVcpTailEngine({})
+    rows, ind = calculate_indicators(data, engine.config)
+
+    start = evaluate_strong_start(rows, ind, engine.config, "000001")
+
+    assert start.start_date == rows[idx]["date"]
+    assert start.start_type == "NORMAL_STRONG_BREAKOUT"
+    assert start.start_day_amount >= 2
+    assert start.start_day_self_amount_percentile >= 0.90

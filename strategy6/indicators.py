@@ -45,6 +45,7 @@ def calculate_indicators(
     ind.ma50 = _ma(rows, 50)
     ind.ma120 = _ma(rows, 120)
     ind.ma250 = _ma(rows, 250)
+    ind.atr14 = _atr(rows, 14)
     ind.return_5 = _return_over(rows, 5)
     ind.return_10 = _return_over(rows, 10)
     ind.return_20 = _return_over(rows, 20)
@@ -56,6 +57,8 @@ def calculate_indicators(
     ind.v10 = _avg_volume(rows, 10)
     ind.v20 = _avg_volume(rows, 20)
     ind.volume_ratio_5_20 = round(ind.v5 / ind.v20, 6) if ind.v20 > 0 else 0.0
+    prior_v20 = _mean(row["volume"] for row in rows[-21:-1]) if len(rows) >= 21 else 0.0
+    ind.current_volume_ratio_20 = round(rows[-1]["volume"] / prior_v20, 6) if prior_v20 > 0 else 0.0
     ind.highest_close_20 = max((r["close"] for r in rows[-20:]), default=0.0)
     ind.highest_close_120 = max((r["close"] for r in rows[-120:]), default=0.0)
     ind.highest_close_250 = max((r["close"] for r in rows[-250:]), default=0.0)
@@ -111,6 +114,19 @@ def _avg_amount_yi(rows: list[dict], days: int) -> float:
 def _avg_volume(rows: list[dict], days: int) -> float:
     selected = rows[-days:]
     return round(_mean(row["volume"] for row in selected), 4) if selected else 0.0
+
+
+def _atr(rows: list[dict], days: int) -> float:
+    if len(rows) < days + 1:
+        return 0.0
+    values = []
+    for prev, curr in zip(rows[-days - 1:-1], rows[-days:]):
+        values.append(max(
+            curr["high"] - curr["low"],
+            abs(curr["high"] - prev["close"]),
+            abs(curr["low"] - prev["close"]),
+        ))
+    return round(_mean(values), 4)
 
 
 def _range(rows: list[dict], days: int) -> float:

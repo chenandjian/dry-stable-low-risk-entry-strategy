@@ -202,9 +202,15 @@ describe('StrategyConfig scheduler controls', () => {
     expect(wrapper.text()).not.toContain('板块过滤模式')
     expect(wrapper.text()).toContain('板块过滤已移除')
     expect(wrapper.text()).not.toContain('真实过滤留到二期接入')
+    expect(wrapper.find('[data-test="strategy6-start-age-min"]').element.value).toBe('5')
+    expect(wrapper.find('[data-test="strategy6-pattern-mode"]').element.value).toBe('score_only')
+    expect(wrapper.find('[data-test="strategy6-pattern-pivot-proximity"]').element.value).toBe('0.05')
+    expect(wrapper.find('[data-test="strategy6-breakout-extended-max"]').element.value).toBe('0.08')
+    expect(wrapper.find('[data-test="strategy6-stop-atr-multiplier"]').element.value).toBe('0.8')
+    expect(wrapper.find('[data-test="strategy6-max-watch-days"]').element.value).toBe('10')
   })
 
-  it('saves strategy6 market filter mode and keeps sector filter disabled', async () => {
+  it('saves strategy6 market filter mode without legacy sector filter fields', async () => {
     const wrapper = mount(StrategyConfig)
     await flushUi()
 
@@ -214,8 +220,15 @@ describe('StrategyConfig scheduler controls', () => {
 
     const payload = api.updateConfig.mock.calls[0][0]
     expect(payload.strategy6.market_filter_mode).toBe('strict')
-    expect(payload.strategy6.enable_sector_filter).toBe(false)
-    expect(payload.strategy6.sector_filter_mode).toBe('disabled')
+    expect(payload.strategy6).not.toHaveProperty('enable_sector_filter')
+    expect(payload.strategy6).not.toHaveProperty('sector_filter_mode')
+    expect(payload.strategy6).not.toHaveProperty('sector_min_member_new_high_count')
     expect(payload.strategy6.min_relative_strength_20).toBe(0.10)
+    expect(payload.strategy6.start_age_min_days).toBe(5)
+    expect(payload.strategy6.pattern_filter_mode).toBe('score_only')
+    expect(payload.strategy6.pattern_pivot_proximity_pct).toBe(0.05)
+    expect(payload.strategy6.breakout_extended_max_pct).toBe(0.08)
+    expect(payload.strategy6.stop_atr_multiplier).toBe(0.8)
+    expect(payload.strategy6.max_watch_days).toBe(10)
   })
 })

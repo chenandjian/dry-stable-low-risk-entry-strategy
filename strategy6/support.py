@@ -1,121 +1,204 @@
-"""Strategy6 support price and zone calculation."""
+"""Strategy6 support clusters and ATR-adaptive support zones."""
 from __future__ import annotations
 
-from strategy6.models import Strategy6Indicators, Strategy6Start, Strategy6Support
+from strategy6.models import (
+    Strategy6Indicators,
+    Strategy6Pattern,
+    Strategy6Start,
+    Strategy6Support,
+)
 
 
-def evaluate_support(rows: list[dict], ind: Strategy6Indicators, start: Strategy6Start) -> Strategy6Support:
-    status, ma_label, ma_price = _support_status(ind)
-    if status == "SUPPORT_FAILED":
-        return Strategy6Support(support_status=status)
+SOURCE_WEIGHTS = {
+    "PATTERN_LOW": 1.5,
+    "PLATFORM_LOW": 1.5,
+    "MA20": 1.3,
+    "RECENT_10_CLOSE_LOW": 1.2,
+    "RECENT_10_LOW": 1.2,
+    "RECENT_20_CLOSE_LOW": 1.2,
+    "START_LOW": 1.2,
+    "MA10": 1.0,
+    "MA5": 0.8,
+}
+STRUCTURAL_SOURCES = {
+    "PATTERN_LOW", "PLATFORM_LOW", "MA20", "RECENT_10_CLOSE_LOW",
+    "RECENT_10_LOW", "RECENT_20_CLOSE_LOW", "START_LOW",
+}
 
-    key_support = _select_key_support(rows, ind, ma_price, start)
-    prior_key_support = _prior_key_support(rows, ma_price)
-    zone_low, zone_high = _support_zone(key_support, status)
-    support_tests = _support_test_count(rows, key_support)
-    history = rows[:-1] if len(rows) > 1 else rows
-    pivot = max((r["close"] for r in history[-20:]), default=ind.current_price)
-    box_height = max(0.0, pivot - key_support)
-    score = _support_score(ind.current_price, status, key_support, support_tests)
+
+def evaluate_support(
+    rows: list[dict],
+    ind: Strategy6Indicators,
+    start: Strategy6Start,
+    pattern: Strategy6Pattern,
+    config: dict,
+) -> Strategy6Support:
+    if ind.current_price <= 0:
+        return Strategy6Support()
+    candidates = _support_candidates(rows, ind, start, pattern)
+    tolerance = max(
+        ind.current_price * float(config["support_cluster_price_pct"]),
+        ind.atr14 * float(config["support_cluster_atr_multiplier"]),
+    )
+    clusters = _cluster_candidates(candidates, tolerance)
+    key_cluster = _select_key_cluster(clusters, rows, ind, config)
+    if not key_cluster:
+        return Strategy6Support()
+
+    key_support = key_cluster["price"]
+    zone_width = max(
+        ind.current_price * float(config["support_zone_price_pct"]),
+        ind.atr14 * float(config["support_zone_atr_multiplier"]),
+    )
+    zone_low = key_support - zone_width
+    zone_high = key_support + zone_width
+    tests = _support_test_count(
+        rows,
+        key_support,
+        zone_width,
+        int(config["support_test_lookback"]),
+    )
+    sources = sorted(key_cluster["sources"])
+    status = _support_status(sources, ind, key_support)
+    tactical = _tactical_support(ind)
+    defense = _defense_support(ind, start, key_support)
+    cluster_score = _cluster_score(key_cluster, rows, ind, config)
+    support_score = min(25, cluster_score + (4 if tests >= 2 else 2 if tests >= 1 else 0))
     return Strategy6Support(
         support_status=status,
-        main_support_ma=ma_label,
+        main_support_ma=_main_support_ma(sources),
+        tactical_support_price=round(tactical, 4),
         key_support_price=round(key_support, 4),
-        prior_key_support_price=round(prior_key_support, 4),
+        prior_key_support_price=round(_prior_key_support(rows, ind), 4),
         support_zone_low=round(zone_low, 4),
         support_zone_high=round(zone_high, 4),
-        defense_support_price=round(ind.ma50 if ind.ma50 > 0 else key_support, 4),
-        support_test_count=support_tests,
-        pivot_price=round(pivot, 4),
-        box_height=round(box_height, 4),
-        support_score=score,
+        defense_support_price=round(defense, 4),
+        support_test_count=tests,
+        pivot_price=round(pattern.pivot_price, 4),
+        box_height=round(pattern.pattern_height, 4),
+        support_score=support_score,
+        support_cluster_sources=sources,
+        support_cluster_score=cluster_score,
     )
 
 
-def _support_status(ind: Strategy6Indicators) -> tuple[str, str, float]:
-    close = ind.current_price
-    candidates = (
-        ("MA5_SUPPORT", "MA5", ind.ma5, 0.04, 1.0),
-        ("MA10_SUPPORT", "MA10", ind.ma10, 0.05, 1.0),
-        ("MA20_SUPPORT", "MA20", ind.ma20, 0.08, 0.94),
-        ("MA50_TESTING", "MA50", ind.ma50, 0.10, 0.92),
-    )
-    for status, label, price, max_dist, min_ratio in candidates:
-        if close <= 0 or price <= 0:
-            continue
-        dist = abs(close - price) / close
-        if close >= price * min_ratio and dist <= max_dist:
-            return status, label, price
-    return "SUPPORT_FAILED", "", 0.0
-
-
-def _select_key_support(rows: list[dict], ind: Strategy6Indicators, ma_price: float, start: Strategy6Start) -> float:
-    values = [ma_price]
+def _support_candidates(
+    rows: list[dict],
+    ind: Strategy6Indicators,
+    start: Strategy6Start,
+    pattern: Strategy6Pattern,
+) -> list[tuple[str, float, float]]:
     history = rows[:-1] if len(rows) > 1 else rows
+    values = [
+        ("MA5", ind.ma5),
+        ("MA10", ind.ma10),
+        ("MA20", ind.ma20),
+        ("PATTERN_LOW", pattern.pattern_low),
+        ("START_LOW", start.start_low),
+    ]
     if history[-10:]:
-        values.append(min(r["close"] for r in history[-10:]))
-        values.append(min(r["low"] for r in history[-10:]))
+        values.extend([
+            ("RECENT_10_CLOSE_LOW", min(row["close"] for row in history[-10:])),
+            ("RECENT_10_LOW", min(row["low"] for row in history[-10:])),
+        ])
     if history[-20:]:
-        values.append(min(r["close"] for r in history[-20:]))
-        values.append(min(r["low"] for r in history[-20:]))
-    for row in history[-20:]:
-        if row["date"] == start.start_date:
-            values.append(row["low"])
-            break
-    valid = [value for value in values if value > 0 and value <= ind.current_price * 1.03]
-    if not valid:
-        return ma_price if ma_price > 0 else ind.current_price
-    return max(valid, key=lambda value: _support_candidate_score(rows, ind.current_price, value, ma_price))
+        values.append(("RECENT_20_CLOSE_LOW", min(row["close"] for row in history[-20:])))
+    return [
+        (source, float(price), SOURCE_WEIGHTS[source])
+        for source, price in values
+        if price and price > 0 and price <= ind.current_price * 1.03
+    ]
 
 
-def _prior_key_support(rows: list[dict], ma_price: float) -> float:
+def _cluster_candidates(
+    candidates: list[tuple[str, float, float]],
+    tolerance: float,
+) -> list[dict]:
+    clusters: list[dict] = []
+    for source, price, weight in sorted(candidates, key=lambda item: item[1]):
+        target = next(
+            (cluster for cluster in clusters if abs(price - cluster["price"]) <= tolerance),
+            None,
+        )
+        if target is None:
+            clusters.append({
+                "price": price,
+                "weighted_sum": price * weight,
+                "weight": weight,
+                "sources": {source},
+            })
+            continue
+        target["weighted_sum"] += price * weight
+        target["weight"] += weight
+        target["sources"].add(source)
+        target["price"] = target["weighted_sum"] / target["weight"]
+    return clusters
+
+
+def _select_key_cluster(clusters: list[dict], rows: list[dict], ind: Strategy6Indicators, config: dict) -> dict | None:
+    structural = [
+        cluster for cluster in clusters
+        if cluster["sources"] & STRUCTURAL_SOURCES and cluster["price"] <= ind.current_price * 1.03
+    ]
+    if not structural:
+        return None
+    return max(structural, key=lambda cluster: _cluster_score(cluster, rows, ind, config))
+
+
+def _cluster_score(cluster: dict, rows: list[dict], ind: Strategy6Indicators, config: dict) -> int:
+    distance = abs(ind.current_price - cluster["price"]) / ind.current_price
+    source_score = min(12, int(round(cluster["weight"] * 3)))
+    overlap_score = min(5, max(0, len(cluster["sources"]) - 1) * 2)
+    distance_score = 5 if distance <= 0.03 else 3 if distance <= 0.06 else 1
+    width = max(
+        ind.current_price * float(config["support_zone_price_pct"]),
+        ind.atr14 * float(config["support_zone_atr_multiplier"]),
+    )
+    tests = _support_test_count(rows, cluster["price"], width, int(config["support_test_lookback"]))
+    test_score = 3 if tests >= 2 else 2 if tests == 1 else 0
+    return min(20, source_score + overlap_score + distance_score + test_score)
+
+
+def _support_test_count(rows: list[dict], support: float, width: float, lookback: int) -> int:
+    return sum(
+        1 for row in rows[-lookback:]
+        if row["low"] <= support + width and row["close"] >= support - width
+    )
+
+
+def _support_status(sources: list[str], ind: Strategy6Indicators, support: float) -> str:
+    if "PATTERN_LOW" in sources:
+        return "PATTERN_SUPPORT"
+    if "MA20" in sources:
+        return "MA20_SUPPORT"
+    if support >= ind.ma50 * 0.92 if ind.ma50 > 0 else True:
+        return "KEY_SUPPORT_VALID"
+    return "SUPPORT_FAILED"
+
+
+def _tactical_support(ind: Strategy6Indicators) -> float:
+    if ind.ma5 > 0 and abs(ind.current_price - ind.ma5) / ind.current_price <= 0.04:
+        return ind.ma5
+    if ind.ma10 > 0 and abs(ind.current_price - ind.ma10) / ind.current_price <= 0.05:
+        return ind.ma10
+    return 0.0
+
+
+def _defense_support(ind: Strategy6Indicators, start: Strategy6Start, key_support: float) -> float:
+    values = [value for value in (ind.ma50, start.start_low, key_support) if value > 0]
+    return min(values) if values else key_support
+
+
+def _prior_key_support(rows: list[dict], ind: Strategy6Indicators) -> float:
     history = rows[:-1] if len(rows) > 1 else rows
-    values = [_ma(history, 5), _ma(history, 10), _ma(history, 20), _ma(history, 50)]
-    if history[-10:]:
-        values.append(min(r["close"] for r in history[-10:]))
-    valid = [value for value in values if value > 0]
-    return max(valid) if valid else 0.0
+    values = [ind.ma20]
+    if history[-20:]:
+        values.append(min(row["close"] for row in history[-20:]))
+    return max((value for value in values if value > 0), default=0.0)
 
 
-def _ma(rows: list[dict], days: int) -> float:
-    if len(rows) < days:
-        return 0.0
-    selected = rows[-days:]
-    return sum(row["close"] for row in selected) / len(selected)
-
-
-def _support_candidate_score(rows: list[dict], close: float, value: float, ma_price: float) -> float:
-    distance = abs(close - value) / close if close > 0 else 1
-    score = max(0.0, 20 - distance * 400)
-    score += min(20, _support_test_count(rows, value) * 10)
-    if abs(value - ma_price) / close <= 0.02 if close > 0 else False:
-        score += 15
-    recent_idx_bonus = 10
-    return score + recent_idx_bonus
-
-
-def _support_zone(key_support: float, status: str) -> tuple[float, float]:
-    if status in {"MA5_SUPPORT", "MA10_SUPPORT"}:
-        return key_support * 0.99, key_support * 1.03
-    if status == "MA20_SUPPORT":
-        return key_support * 0.97, key_support * 1.04
-    if status == "MA50_TESTING":
-        return key_support * 0.92, key_support * 1.05
-    return key_support * 0.98, key_support * 1.03
-
-
-def _support_test_count(rows: list[dict], key_support: float) -> int:
-    if key_support <= 0:
-        return 0
-    return sum(1 for row in rows[-10:] if row["low"] <= key_support * 1.02 and row["close"] >= key_support * 0.98)
-
-
-def _support_score(close: float, status: str, key_support: float, support_tests: int) -> int:
-    base = {"MA5_SUPPORT": 18, "MA10_SUPPORT": 17, "MA20_SUPPORT": 15, "MA50_TESTING": 9}.get(status, 0)
-    if close > 0 and key_support > 0 and key_support * 0.98 <= close <= key_support * 1.04:
-        base += 4
-    if support_tests >= 2:
-        base += 3
-    elif support_tests >= 1:
-        base += 2
-    return min(25, base)
+def _main_support_ma(sources: list[str]) -> str:
+    for source in ("MA20", "MA10", "MA5"):
+        if source in sources:
+            return source
+    return ""

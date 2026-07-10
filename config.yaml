@@ -297,15 +297,34 @@ strategy6:
   min_avg_amount_10d_yi: 5
   amount10_vs_30_min_ratio: 0.8
   enable_market_filter: true
-  enable_sector_filter: true
   market_filter_mode: downgrade
-  sector_filter_mode: downgrade
-  sector_min_member_new_high_count: 3
+  start_lookback_days: 60
+  start_age_min_days: 5
+  start_age_max_days: 60
+  consolidation_min_days: 5
+  consolidation_max_days: 40
+  tail_window_days: 5
+  pattern_filter_enabled: true
+  pattern_filter_mode: score_only
+  pattern_pivot_proximity_pct: 0.05
+  breakout_extended_max_pct: 0.08
+  vcp_contraction_range_ratio: 0.9
+  vcp_contraction_volume_ratio: 0.9
+  vcp_min_first_range: 0.08
+  cup_depth_min: 0.12
+  cup_depth_max: 0.35
+  platform_max_range: 0.12
+  support_cluster_price_pct: 0.015
+  support_cluster_atr_multiplier: 0.5
+  support_zone_price_pct: 0.01
+  support_zone_atr_multiplier: 0.3
+  support_test_lookback: 10
   min_relative_strength_20: 0.10
   normal_start_return: 0.07
   normal_start_volume_ratio: 2.0
   normal_start_close_position: 0.65
-  normal_start_min_amount_yi: 8
+  normal_start_min_amount_yi: 2
+  normal_start_self_amount_percentile: 0.9
   limit_up_volume_ratio: 1.5
   low_volume_limit_up_min_ratio: 0.6
   near_120d_high_ratio: 0.98
@@ -331,6 +350,13 @@ strategy6:
   rr2_min_watch: 1.5
   rr2_min_key: 2.0
   rr2_min_ready: 2.5
+  target_2_cap_pct: 0.35
+  stop_key_support_pct: 0.03
+  stop_atr_multiplier: 0.8
+  buy_zone_valid_days: 3
+  max_watch_days: 10
+  expired_cooldown_days: 5
+  failed_cooldown_days: 10
   ready_min_score: 85
   key_min_score: 75
   watch_min_score: 60

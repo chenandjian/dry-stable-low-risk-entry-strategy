@@ -4,6 +4,8 @@ from __future__ import annotations
 from strategy6.models import (
     Strategy6DryTail,
     Strategy6Indicators,
+    Strategy6Phase,
+    Strategy6Pattern,
     Strategy6Score,
     Strategy6Start,
     Strategy6Support,
@@ -16,12 +18,22 @@ def hard_filter_reasons(
     rows: list[dict],
     ind: Strategy6Indicators,
     start: Strategy6Start,
+    phase: Strategy6Phase,
+    pattern: Strategy6Pattern,
     support: Strategy6Support,
     dry_tail: Strategy6DryTail,
     trade_plan: Strategy6TradePlan,
     config: dict,
 ) -> list[str]:
     reasons: list[str] = []
+    if not phase.valid and phase.status != "START_TOO_RECENT":
+        reasons.append(phase.status)
+    if (
+        config["pattern_filter_enabled"]
+        and config["pattern_filter_mode"] == "strict"
+        and pattern.pattern_type == "UNKNOWN"
+    ):
+        reasons.append("PATTERN_UNKNOWN")
     if ind.trading_days < config["minimum_trading_days"]:
         reasons.append(f"TRADING_DAYS_LT_{config['minimum_trading_days']}")
     if min(ind.ma5, ind.ma10, ind.ma20, ind.ma50, ind.ma120, ind.ma250) <= 0:
@@ -45,6 +57,11 @@ def hard_filter_reasons(
         reasons.append("NO_STRONG_START")
     if not start.high_trigger:
         reasons.append("NO_NEW_HIGH_CONFIRMATION")
+    # A valid start younger than the minimum consolidation age is a lifecycle
+    # observation; mature support, tail and objective-target filters do not
+    # have an independent phase to evaluate yet.
+    if phase.status == "START_TOO_RECENT":
+        return _dedupe(reasons)
     reasons.extend(_consolidation_filter_reasons(ind, start, config))
     if support.support_status == "SUPPORT_FAILED":
         reasons.append("SUPPORT_FAILED")
@@ -54,7 +71,7 @@ def hard_filter_reasons(
     if ind.ma50 > 0 and ind.current_price < ind.ma50 * config["ma50_min_ratio"]:
         reasons.append("CLOSE_LT_MA50_0_92")
     reasons.extend(dry_tail.rejects)
-    if trade_plan.risk_reward_ratio_2 < config["rr2_min_watch"]:
+    if trade_plan.objective_rr_2 < config["rr2_min_watch"]:
         threshold = str(config["rr2_min_watch"]).replace(".", "_")
         reasons.append(f"RR2_LT_{threshold}")
     return _dedupe(reasons)
@@ -63,6 +80,8 @@ def hard_filter_reasons(
 def classify_candidate(
     ind: Strategy6Indicators,
     start: Strategy6Start,
+    phase: Strategy6Phase,
+    pattern: Strategy6Pattern,
     support: Strategy6Support,
     dry_tail: Strategy6DryTail,
     trade_plan: Strategy6TradePlan,
@@ -70,18 +89,26 @@ def classify_candidate(
     reject_reasons: list[str],
     config: dict,
 ) -> tuple[str, str, str, str]:
-    lifecycle = _lifecycle_status(ind, support, dry_tail, trade_plan, reject_reasons)
+    lifecycle = _lifecycle_status(ind, phase, support, dry_tail, trade_plan, reject_reasons, config)
     if reject_reasons:
         return "REJECTED", "rejected", lifecycle, "排除：存在硬性风险或盈亏比不足"
     major_risk = any(tag in ind.risk_tags for tag in {"BIG_DOWN_VOLUME"})
     environment_blocks_ready = _environment_blocks_ready(ind)
     tactical_blocks_ready = _tactical_blocks_ready(ind, start, support)
+    if phase.status == "START_TOO_RECENT":
+        return "WATCH_CANDIDATE", "observe", "START_CONFIRMED", "观察：强势启动已确认，等待独立整理阶段"
+    if (
+        config["pattern_filter_enabled"]
+        and config["pattern_filter_mode"] == "downgrade"
+        and pattern.pattern_type == "UNKNOWN"
+    ):
+        return "WATCH_CANDIDATE", "observe", lifecycle, "观察：形态尚未明确"
     if (
         score.total_score >= config["ready_min_score"]
-        and trade_plan.risk_reward_ratio_2 >= config["rr2_min_ready"]
+        and trade_plan.objective_rr_2 >= config["rr2_min_ready"]
         and support.support_zone_low <= ind.current_price <= support.support_zone_high
-        and ind.volume_ratio_5_20 <= config["tail_strong_volume_ratio_5_20"]
-        and support.support_status in {"MA5_SUPPORT", "MA10_SUPPORT", "MA20_SUPPORT"}
+        and dry_tail.tail_volume_ratio <= config["tail_strong_volume_ratio_5_20"]
+        and support.support_status in {"PATTERN_SUPPORT", "MA20_SUPPORT", "KEY_SUPPORT_VALID"}
         and start.start_grade != "B"
         and not major_risk
         and not environment_blocks_ready
@@ -90,8 +117,8 @@ def classify_candidate(
         return "READY_CANDIDATE", "ready", lifecycle, "低吸候选：支撑区内，量干价稳，盈亏比较好"
     if (
         score.total_score >= config["key_min_score"]
-        and trade_plan.risk_reward_ratio_2 >= config["rr2_min_key"]
-        and support.support_status in {"MA5_SUPPORT", "MA10_SUPPORT", "MA20_SUPPORT"}
+        and trade_plan.objective_rr_2 >= config["rr2_min_key"]
+        and support.support_status in {"PATTERN_SUPPORT", "MA20_SUPPORT", "KEY_SUPPORT_VALID"}
         and dry_tail.dry_stable_score >= 15
         and start.start_grade != "B"
         and not major_risk
@@ -99,26 +126,28 @@ def classify_candidate(
         and not tactical_blocks_ready
     ):
         return "KEY_CANDIDATE", "highlight", lifecycle, "重点观察：等待支撑低吸或突破确认"
-    if score.total_score >= config["watch_min_score"] or trade_plan.risk_reward_ratio_2 >= config["rr2_min_watch"]:
+    if score.total_score >= config["watch_min_score"] or trade_plan.objective_rr_2 >= config["rr2_min_watch"]:
         return "WATCH_CANDIDATE", "observe", lifecycle, "观察：形态部分满足，等待进一步确认"
     return "REJECTED", "rejected", lifecycle, "排除：评分不足"
 
 
 def _lifecycle_status(
     ind: Strategy6Indicators,
+    phase: Strategy6Phase,
     support: Strategy6Support,
     dry_tail: Strategy6DryTail,
     trade_plan: Strategy6TradePlan,
     reject_reasons: list[str],
+    config: dict,
 ) -> str:
-    if _is_extended_breakout(ind, support):
+    if phase.lifecycle_status in {"START_CONFIRMED", "EXPIRED"}:
+        return phase.lifecycle_status
+    if _is_extended_breakout(ind, support, config):
         if "BREAKOUT_EXTENDED" not in ind.warn_tags:
             ind.warn_tags.append("BREAKOUT_EXTENDED")
         return "EXTENDED"
     if _has_shape_failure(reject_reasons):
         return "FAILED"
-    if trade_plan.suggested_buy_price and ind.current_price > support.pivot_price * 1.08:
-        return "EXTENDED"
     if _is_quality_breakout(ind, support):
         return "BREAKOUT_CONFIRMED"
     if trade_plan.suggested_buy_price and support.support_zone_low <= ind.current_price <= support.support_zone_high:
@@ -129,21 +158,25 @@ def _lifecycle_status(
 
 
 def _environment_blocks_ready(ind: Strategy6Indicators) -> bool:
+    blocked = False
+    if ind.market_filter_enabled and not ind.relative_strength_20_observed:
+        if "RS20_DATA_UNAVAILABLE" not in ind.warn_tags:
+            ind.warn_tags.append("RS20_DATA_UNAVAILABLE")
+        blocked = True
+    if ind.market_filter_enabled and ind.market_status == "UNKNOWN":
+        if "MARKET_DATA_UNAVAILABLE" not in ind.warn_tags:
+            ind.warn_tags.append("MARKET_DATA_UNAVAILABLE")
+        blocked = True
     if ind.market_filter_enabled and ind.market_filter_mode in {"strict", "downgrade"}:
         if ind.market_status in {"MARKET_WEAK", "MARKET_RISK"}:
             if ind.market_filter_mode == "strict":
-                ind.warn_tags.append("MARKET_WEAK_STRICT")
+                if "MARKET_WEAK_STRICT" not in ind.warn_tags:
+                    ind.warn_tags.append("MARKET_WEAK_STRICT")
             else:
-                ind.warn_tags.append("MARKET_WEAK_DOWNGRADED")
-            return True
-    if ind.sector_filter_enabled and ind.sector_filter_mode in {"strict", "downgrade"}:
-        if ind.sector_strength_status in {"SECTOR_WEAK", "SECTOR_RISK"}:
-            if ind.sector_filter_mode == "strict":
-                ind.warn_tags.append("SECTOR_WEAK_STRICT")
-            else:
-                ind.warn_tags.append("SECTOR_WEAK_DOWNGRADED")
-            return True
-    return False
+                if "MARKET_WEAK_DOWNGRADED" not in ind.warn_tags:
+                    ind.warn_tags.append("MARKET_WEAK_DOWNGRADED")
+            blocked = True
+    return blocked
 
 
 def _tactical_blocks_ready(ind: Strategy6Indicators, start: Strategy6Start, support: Strategy6Support) -> bool:
@@ -173,6 +206,10 @@ def _one_word_limit_up_confirmed(ind: Strategy6Indicators, start: Strategy6Start
 
 def _shape_failure_reasons(rows: list[dict], ind: Strategy6Indicators, support: Strategy6Support, config: dict) -> list[str]:
     reasons: list[str] = []
+    if support.pivot_price > 0 and ind.current_price > support.pivot_price * (
+        1 + float(config["breakout_extended_max_pct"])
+    ):
+        reasons.append("BREAKOUT_EXTENDED")
     failure_support = support.prior_key_support_price or support.key_support_price
     if failure_support > 0 and ind.current_price < failure_support * 0.96:
         reasons.append("CLOSE_LT_KEY_SUPPORT_0_96")
@@ -196,6 +233,7 @@ def _has_shape_failure(reject_reasons: list[str]) -> bool:
         "CLOSE_LT_KEY_SUPPORT_0_96",
         "TWO_CLOSES_LT_KEY_SUPPORT",
         "CLOSE_LT_MA50_0_92",
+        "BREAKOUT_EXTENDED",
     })
 
 
@@ -204,17 +242,17 @@ def _is_quality_breakout(ind: Strategy6Indicators, support: Strategy6Support) ->
         return False
     distance = ind.current_price / support.pivot_price - 1
     return (
-        ind.volume_ratio_5_20 >= 1.3
+        ind.current_volume_ratio_20 >= 1.3
         and _close_position_is_strong(ind)
         and ind.daily_return <= 0.09
         and distance <= 0.05
     )
 
 
-def _is_extended_breakout(ind: Strategy6Indicators, support: Strategy6Support) -> bool:
+def _is_extended_breakout(ind: Strategy6Indicators, support: Strategy6Support, config: dict) -> bool:
     if support.pivot_price <= 0 or ind.current_price <= support.pivot_price:
         return False
-    return ind.current_price > support.pivot_price * 1.08
+    return ind.current_price > support.pivot_price * (1 + float(config["breakout_extended_max_pct"]))
 
 
 def _close_position_is_strong(ind: Strategy6Indicators) -> bool:

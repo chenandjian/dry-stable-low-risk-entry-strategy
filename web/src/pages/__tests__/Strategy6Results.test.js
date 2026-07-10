@@ -6,6 +6,7 @@ const api = {
   getStrategy6Tasks: vi.fn(),
   getStrategy6Candidates: vi.fn(),
   getStrategy6MarketSnapshot: vi.fn(),
+  getStrategy6Lifecycle: vi.fn(),
   downloadStrategy6Report: vi.fn(),
 }
 
@@ -65,9 +66,7 @@ describe('Strategy6Results', () => {
           risk_reward_ratio_2: 3.4,
           volume_ratio_5_20: 0.52,
           relative_strength_20: 0.18,
-          relative_strength_10_sector: 0.03,
           market_status: 'MARKET_WEAK',
-          sector_strength_status: 'UNKNOWN',
           first_pool_date: '2026-07-01',
           pool_age_trading_days: 6,
           enable_market_filter: true,
@@ -75,6 +74,33 @@ describe('Strategy6Results', () => {
           risk_tags: [],
           warn_tags: ['NEAR_120D_PRESSURE'],
           evaluation_date: '2026-07-09',
+          strategy_version: '4.0.0',
+          phase_status: 'PHASE_VALID',
+          consolidation_start_date: '2026-06-20',
+          tail_start_date: '2026-07-03',
+          pattern_type: 'VCP',
+          pivot_source: 'VCP_LAST_CONTRACTION',
+          tactical_support_price: 11.9,
+          support_cluster_sources: ['MA10', 'PATTERN_LOW'],
+          objective_target_1: 13.2,
+          objective_target_2: 14.8,
+          objective_rr_1: 1.8,
+          objective_rr_2: 3.4,
+          execution_target_1_5r: 13.68,
+          execution_target_2r: 14.43,
+          execution_target_2_5r: 15.18,
+          execution_target_3_5r: 16.68,
+          valid_from_date: '2026-07-10',
+          valid_until_date: '2026-07-14',
+          suggested_limit_price: 12.2,
+          execution_notes: ['NEXT_TRADING_DAY_ONLY', 'T1_STOP_UNAVAILABLE_ON_BUY_DAY'],
+          pattern_score_component: 18,
+          tail_score: 19,
+          objective_rr_score: 9,
+          relative_strength_risk_score: 8,
+          tail_avg_volume: 500000,
+          pre_tail_avg_volume_20: 1000000,
+          tail_volume_ratio: 0.5,
         },
         {
           code: '000002',
@@ -126,9 +152,20 @@ describe('Strategy6Results', () => {
             ma20_above_ma50: true,
             volume_down_risk: false,
             rows_count: 80,
+            source: 'sina',
+            fetched_at: '2026-07-09 15:20:00',
+            data_status: 'FRESH',
           },
         ],
       },
+    })
+    api.getStrategy6Lifecycle.mockResolvedValue({
+      lifecycle: [{
+        code: '600001', name: '退出样本', lifecycle_status: 'FAILED',
+        exit_reason: 'SUPPORT_FAILED', cooldown_until_date: '2026-07-23',
+        first_seen_date: '2026-07-01', days_in_pool: 8, reentry_count: 1,
+        blocked: true,
+      }],
     })
     api.downloadStrategy6Report.mockResolvedValue(new Blob(['xlsx-bytes'], {
       type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
@@ -170,10 +207,24 @@ describe('Strategy6Results', () => {
     expect(wrapper.text()).toContain('上证指数')
     expect(wrapper.text()).toContain('3200.50')
     expect(wrapper.text()).toContain('MA20')
+    expect(wrapper.text()).toContain('数据状态')
+    expect(wrapper.text()).toContain('新鲜')
+    expect(wrapper.text()).toContain('sina')
+    expect(wrapper.text()).toContain('2026-07-09 15:20:00')
     expect(wrapper.text()).not.toContain('板块过滤')
     expect(wrapper.text()).toContain('首次入池 2026-07-01')
     expect(wrapper.text()).toContain('池龄 6日')
     expect(wrapper.text()).toContain('NEAR_120D_PRESSURE')
+    expect(wrapper.text()).toContain('VCP')
+    expect(wrapper.text()).toContain('客观目标')
+    expect(wrapper.text()).toContain('执行R目标')
+    expect(wrapper.text()).toContain('2026-07-10 至 2026-07-14')
+    expect(wrapper.text()).toContain('NEXT_TRADING_DAY_ONLY')
+    expect(wrapper.text()).toContain('4.0.0')
+    expect(api.getStrategy6Lifecycle).toHaveBeenCalledWith('s6-task')
+    expect(wrapper.text()).toContain('生命周期退出/冷却审计')
+    expect(wrapper.text()).toContain('退出样本')
+    expect(wrapper.text()).toContain('SUPPORT_FAILED')
   })
 
   it('loads all candidates for a URL task even when task list is stale', async () => {
@@ -211,6 +262,20 @@ describe('Strategy6Results', () => {
     expect(wrapper.findAll('.candidate-table tbody tr')).toHaveLength(9)
   })
 
+  it('keeps candidates visible when only the market snapshot fails', async () => {
+    api.getStrategy6MarketSnapshot.mockRejectedValue(new Error('snapshot unavailable'))
+
+    const wrapper = mount(Strategy6Results, {
+      global: { mocks: { $route: { query: { task: 's6-task' } } } },
+    })
+    await flushUi()
+
+    expect(wrapper.text()).toContain('READY_CANDIDATE')
+    expect(wrapper.findAll('.candidate-table tbody tr')).toHaveLength(3)
+    expect(wrapper.text()).toContain('市场指数快照加载失败')
+    expect(wrapper.text()).not.toContain('策略6候选加载失败')
+  })
+
   it('exports strategy6 candidates with market, lifecycle and trade plan fields', async () => {
     const wrapper = mount(Strategy6Results, {
       global: {
@@ -235,6 +300,9 @@ describe('Strategy6Results', () => {
     expect(csv).not.toContain('板块RS10')
     expect(csv).toContain('启动日低点,启动后天数')
     expect(csv).toContain('Key支撑,前置支撑')
+    expect(csv).toContain('策略版本,阶段状态,形态类型')
+    expect(csv).toContain('客观目标1,客观目标2,客观RR1,客观RR2')
+    expect(csv).toContain('1.5R目标,2R目标,2.5R目标,3.5R目标')
     expect(csv).toContain('000001,平安银行,,READY_CANDIDATE,BUY_ZONE,2026-07-01,6')
     expect(csv).toContain('downgrade,MARKET_WEAK,18.00%,12.34')
   })

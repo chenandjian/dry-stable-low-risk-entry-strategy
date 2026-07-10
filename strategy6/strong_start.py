@@ -11,7 +11,7 @@ PASSING_START_TYPES = {"NORMAL_STRONG_BREAKOUT", "VOLUME_LIMIT_UP", "LOW_VOLUME_
 
 def evaluate_strong_start(rows: list[dict], ind: Strategy6Indicators, config: dict, code: str) -> Strategy6Start:
     best = Strategy6Start(limit_up_pct=get_limit_up_pct(code))
-    start_idx = max(1, len(rows) - 20)
+    start_idx = max(1, len(rows) - int(config["start_lookback_days"]) - 1)
     for idx in range(start_idx, len(rows)):
         prev = rows[idx - 1]
         row = rows[idx]
@@ -20,6 +20,7 @@ def evaluate_strong_start(rows: list[dict], ind: Strategy6Indicators, config: di
         volume_ratio = row["volume"] / v20 if v20 > 0 else 0.0
         close_position = _close_position(row)
         amount_yi = row["amount"] / 100_000_000
+        self_amount_percentile = _prior_amount_percentile(rows, idx, 60)
         one_word = is_one_word_limit_up(code, prev["close"], row["open"], row["high"], row["low"], row["close"])
         limit_up = is_limit_up_day(code, prev["close"], row["close"])
         touched_failed = is_touched_limit_up_failed(code, prev["close"], row["high"], row["close"])
@@ -35,6 +36,7 @@ def evaluate_strong_start(rows: list[dict], ind: Strategy6Indicators, config: di
             and volume_ratio >= config["normal_start_volume_ratio"]
             and close_position >= config["normal_start_close_position"]
             and amount_yi >= config["normal_start_min_amount_yi"]
+            and self_amount_percentile >= config["normal_start_self_amount_percentile"]
         ):
             start_type = "NORMAL_STRONG_BREAKOUT"
         elif touched_failed:
@@ -47,21 +49,45 @@ def evaluate_strong_start(rows: list[dict], ind: Strategy6Indicators, config: di
             start_day_volume_ratio=round(volume_ratio, 6),
             start_day_amount=round(amount_yi, 4),
             start_day_close_position=round(close_position, 6),
+            start_day_self_amount_percentile=round(self_amount_percentile, 6),
             start_low=row["low"],
             is_limit_up=limit_up,
             is_one_word_limit_up=one_word,
             limit_up_pct=get_limit_up_pct(code),
             days_since_start=len(rows) - idx - 1,
         )
-        candidate.start_grade = _grade(candidate, ind)
-        if _rank(candidate) > _rank(best):
+        candidate.start_grade = _grade(candidate, ind) if start_type in PASSING_START_TYPES else "NONE"
+        # A newer valid S/A event restarts phase segmentation and lifecycle.
+        # This prevents an old high-ranked limit-up from masking a fresh start.
+        if candidate.start_type in PASSING_START_TYPES and candidate.start_grade in {"S", "A"}:
+            best = candidate
+        elif best.start_type not in PASSING_START_TYPES and _rank(candidate) >= _rank(best):
             best = candidate
     best.high_trigger = _high_trigger(ind, config)
-    if best.start_type == "NONE":
-        best.start_grade = _grade(best, ind)
-        if best.start_grade == "B":
-            best.start_type = "B_GRADE_MOMENTUM"
+    if best.start_type not in PASSING_START_TYPES:
+        momentum_grade, momentum_index = _momentum_start(rows, ind)
+        if momentum_grade == "B" and momentum_index >= 0:
+            row = rows[momentum_index]
+            best = Strategy6Start(
+                start_date=row["date"],
+                start_type="B_GRADE_MOMENTUM",
+                start_grade="B",
+                start_low=row["low"],
+                days_since_start=len(rows) - momentum_index - 1,
+                limit_up_pct=get_limit_up_pct(code),
+                high_trigger=_high_trigger(ind, config),
+            )
     return best
+
+
+def _momentum_start(rows: list[dict], ind: Strategy6Indicators) -> tuple[str, int]:
+    if ind.return_5 >= 0.08 and len(rows) > 5:
+        return "B", len(rows) - 6
+    if ind.return_10 >= 0.12 and len(rows) > 10:
+        return "B", len(rows) - 11
+    if ind.return_20 >= 0.20 and len(rows) > 20:
+        return "B", len(rows) - 21
+    return "NONE", -1
 
 
 def _grade(start: Strategy6Start, ind: Strategy6Indicators) -> str:
@@ -118,3 +144,12 @@ def _avg_prior_volume(rows: list[dict], idx: int, days: int) -> float:
     start = max(0, idx - days)
     selected = rows[start:idx]
     return sum(r["volume"] for r in selected) / len(selected) if selected else 0.0
+
+
+def _prior_amount_percentile(rows: list[dict], idx: int, days: int) -> float:
+    start = max(0, idx - days)
+    selected = [float(row.get("amount") or 0.0) for row in rows[start:idx]]
+    current = float(rows[idx].get("amount") or 0.0)
+    if not selected or current <= 0:
+        return 0.0
+    return sum(1 for value in selected if value <= current) / len(selected)

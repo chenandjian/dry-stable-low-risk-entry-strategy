@@ -17,6 +17,7 @@ class Strategy6Indicators:
     ma50: float = 0.0
     ma120: float = 0.0
     ma250: float = 0.0
+    atr14: float = 0.0
     return_5: float = 0.0
     return_10: float = 0.0
     return_20: float = 0.0
@@ -28,6 +29,7 @@ class Strategy6Indicators:
     v10: float = 0.0
     v20: float = 0.0
     volume_ratio_5_20: float = 0.0
+    current_volume_ratio_20: float = 0.0
     highest_close_20: float = 0.0
     highest_close_120: float = 0.0
     highest_close_250: float = 0.0
@@ -37,14 +39,9 @@ class Strategy6Indicators:
     close_range_5: float = 0.0
     relative_strength_20: float = 0.0
     relative_strength_20_observed: bool = False
-    relative_strength_10_sector: float = 0.0
-    sector_member_new_high_count: int = 0
     market_status: str = "UNKNOWN"
-    sector_strength_status: str = "UNKNOWN"
     market_filter_enabled: bool = False
-    sector_filter_enabled: bool = False
     market_filter_mode: str = "downgrade"
-    sector_filter_mode: str = "downgrade"
     has_big_down_volume: bool = False
     risk_tags: list[str] = field(default_factory=list)
     warn_tags: list[str] = field(default_factory=list)
@@ -59,6 +56,7 @@ class Strategy6Start:
     start_day_volume_ratio: float = 0.0
     start_day_amount: float = 0.0
     start_day_close_position: float = 0.0
+    start_day_self_amount_percentile: float = 0.0
     start_low: float = 0.0
     is_limit_up: bool = False
     is_one_word_limit_up: bool = False
@@ -68,10 +66,44 @@ class Strategy6Start:
 
 
 @dataclass
+class Strategy6Phase:
+    status: str = "START_NOT_FOUND"
+    valid: bool = False
+    lifecycle_status: str = "SETUP_FORMING"
+    start_index: int = -1
+    consolidation_start_index: int = -1
+    tail_start_index: int = -1
+    signal_index: int = -1
+    start_date: str = ""
+    consolidation_start_date: str = ""
+    tail_start_date: str = ""
+    signal_date: str = ""
+    start_age_days: int = 0
+    consolidation_days: int = 0
+    tail_days: int = 0
+
+
+@dataclass
+class Strategy6Pattern:
+    pattern_type: str = "UNKNOWN"
+    pattern_score: int = 0
+    pattern_start_date: str = ""
+    pattern_end_date: str = ""
+    pivot_source: str = ""
+    pivot_price: float = 0.0
+    pattern_low: float = 0.0
+    pattern_height: float = 0.0
+    depth_pct: float = 0.0
+    contraction_count: int = 0
+    reasons: list[str] = field(default_factory=list)
+
+
+@dataclass
 class Strategy6Support:
     support_status: str = "SUPPORT_FAILED"
     main_support_ma: str = ""
     key_support_price: float = 0.0
+    tactical_support_price: float = 0.0
     prior_key_support_price: float = 0.0
     support_zone_low: float = 0.0
     support_zone_high: float = 0.0
@@ -80,6 +112,8 @@ class Strategy6Support:
     pivot_price: float = 0.0
     box_height: float = 0.0
     support_score: int = 0
+    support_cluster_sources: list[str] = field(default_factory=list)
+    support_cluster_score: int = 0
 
 
 @dataclass
@@ -88,6 +122,10 @@ class Strategy6DryTail:
     dry_tail_pass: bool = False
     reasons: list[str] = field(default_factory=list)
     rejects: list[str] = field(default_factory=list)
+    tail_avg_volume: float = 0.0
+    pre_tail_avg_volume_20: float = 0.0
+    tail_volume_ratio: float = 0.0
+    volume_slope_10: float = 0.0
 
 
 @dataclass
@@ -99,6 +137,12 @@ class Strategy6TradePlan:
     target_price_1: float = 0.0
     target_price_2: float = 0.0
     target_price_3: float = 0.0
+    objective_target_1: float = 0.0
+    objective_target_2: float = 0.0
+    execution_target_1_5r: float = 0.0
+    execution_target_2r: float = 0.0
+    execution_target_2_5r: float = 0.0
+    execution_target_3_5r: float = 0.0
     risk_amount: float = 0.0
     reward_amount_1: float = 0.0
     reward_amount_2: float = 0.0
@@ -106,6 +150,14 @@ class Strategy6TradePlan:
     risk_reward_ratio_1: float = 0.0
     risk_reward_ratio_2: float = 0.0
     risk_reward_ratio_3: float = 0.0
+    objective_rr_1: float = 0.0
+    objective_rr_2: float = 0.0
+    signal_date: str = ""
+    valid_from_date: str = ""
+    valid_until_date: str = ""
+    buy_zone_valid_days: int = 0
+    suggested_limit_price: float | None = None
+    execution_notes: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -117,6 +169,10 @@ class Strategy6Score:
     risk_control_score: int = 0
     total_score: int = 0
     score_reasons: list[str] = field(default_factory=list)
+    pattern_score_component: int = 0
+    tail_score: int = 0
+    objective_rr_score: int = 0
+    relative_strength_risk_score: int = 0
 
 
 @dataclass
@@ -126,10 +182,14 @@ class Strategy6Evaluation:
     sector_name: str
     indicators: Strategy6Indicators
     start: Strategy6Start
+    phase: Strategy6Phase
+    pattern: Strategy6Pattern
     support: Strategy6Support
     dry_tail: Strategy6DryTail
     trade_plan: Strategy6TradePlan
     score: Strategy6Score
+    strategy_version: str = ""
+    config_hash: str = ""
     candidate_type: str = "REJECTED"
     classification: str = "rejected"
     lifecycle_status: str = "FAILED"
@@ -150,6 +210,11 @@ class Strategy6Evaluation:
         plan = self.trade_plan
         score = self.score
         return {
+            "strategy_version": self.strategy_version,
+            "config_hash": self.config_hash,
+            "price_basis": "FORWARD_ADJUSTED",
+            "current_price_adj": ind.current_price,
+            "current_price_raw": None,
             "code": self.code,
             "name": self.name,
             "sector_name": self.sector_name,
@@ -165,13 +230,12 @@ class Strategy6Evaluation:
             "ma50": ind.ma50,
             "ma120": ind.ma120,
             "ma250": ind.ma250,
+            "atr14": ind.atr14,
             "return_5": ind.return_5,
             "return_10": ind.return_10,
             "return_20": ind.return_20,
             "relative_strength_20": ind.relative_strength_20,
             "relative_strength_20_observed": ind.relative_strength_20_observed,
-            "relative_strength_10_sector": ind.relative_strength_10_sector,
-            "sector_member_new_high_count": ind.sector_member_new_high_count,
             "amount_avg_10": ind.amount_avg_10,
             "amount_avg_30": ind.amount_avg_30,
             "amount_avg_60": ind.amount_avg_60,
@@ -180,6 +244,11 @@ class Strategy6Evaluation:
             "v10": ind.v10,
             "v20": ind.v20,
             "volume_ratio_5_20": ind.volume_ratio_5_20,
+            "current_volume_ratio_20": ind.current_volume_ratio_20,
+            "tail_avg_volume": self.dry_tail.tail_avg_volume,
+            "pre_tail_avg_volume_20": self.dry_tail.pre_tail_avg_volume_20,
+            "tail_volume_ratio": self.dry_tail.tail_volume_ratio,
+            "volume_slope_10": self.dry_tail.volume_slope_10,
             "highest_close_20": ind.highest_close_20,
             "highest_close_120": ind.highest_close_120,
             "pullback_from_20d_high": ind.pullback_from_20d_high,
@@ -193,13 +262,32 @@ class Strategy6Evaluation:
             "start_day_volume_ratio": start.start_day_volume_ratio,
             "start_day_amount": start.start_day_amount,
             "start_day_close_position": start.start_day_close_position,
+            "start_day_self_amount_percentile": start.start_day_self_amount_percentile,
             "start_low": start.start_low,
             "is_limit_up": start.is_limit_up,
             "is_one_word_limit_up": start.is_one_word_limit_up,
             "limit_up_pct": start.limit_up_pct,
             "days_since_start": start.days_since_start,
             "high_trigger": start.high_trigger,
+            "phase_status": self.phase.status,
+            "consolidation_start_date": self.phase.consolidation_start_date,
+            "tail_start_date": self.phase.tail_start_date,
+            "signal_date": self.phase.signal_date,
+            "start_age_days": self.phase.start_age_days,
+            "consolidation_days": self.phase.consolidation_days,
+            "tail_days": self.phase.tail_days,
+            "pattern_type": self.pattern.pattern_type,
+            "pattern_score": self.pattern.pattern_score,
+            "pattern_start_date": self.pattern.pattern_start_date,
+            "pattern_end_date": self.pattern.pattern_end_date,
+            "pivot_source": self.pattern.pivot_source,
+            "pivot_price": self.pattern.pivot_price,
+            "pattern_low": self.pattern.pattern_low,
+            "pattern_height": self.pattern.pattern_height,
+            "pattern_depth_pct": self.pattern.depth_pct,
+            "contraction_count": self.pattern.contraction_count,
             "key_support_price": support.key_support_price,
+            "tactical_support_price": support.tactical_support_price,
             "prior_key_support_price": support.prior_key_support_price,
             "support_zone_low": support.support_zone_low,
             "support_zone_high": support.support_zone_high,
@@ -210,6 +298,8 @@ class Strategy6Evaluation:
             "pivot_price": support.pivot_price,
             "box_height": support.box_height,
             "support_score": score.support_score,
+            "support_cluster_sources": support.support_cluster_sources,
+            "support_cluster_score": support.support_cluster_score,
             "suggested_buy_price": plan.suggested_buy_price,
             "buy_zone_low": plan.buy_zone_low,
             "buy_zone_high": plan.buy_zone_high,
@@ -217,6 +307,12 @@ class Strategy6Evaluation:
             "target_price_1": plan.target_price_1,
             "target_price_2": plan.target_price_2,
             "target_price_3": plan.target_price_3,
+            "objective_target_1": plan.objective_target_1,
+            "objective_target_2": plan.objective_target_2,
+            "execution_target_1_5r": plan.execution_target_1_5r,
+            "execution_target_2r": plan.execution_target_2r,
+            "execution_target_2_5r": plan.execution_target_2_5r,
+            "execution_target_3_5r": plan.execution_target_3_5r,
             "risk_amount": plan.risk_amount,
             "reward_amount_1": plan.reward_amount_1,
             "reward_amount_2": plan.reward_amount_2,
@@ -224,22 +320,38 @@ class Strategy6Evaluation:
             "risk_reward_ratio_1": plan.risk_reward_ratio_1,
             "risk_reward_ratio_2": plan.risk_reward_ratio_2,
             "risk_reward_ratio_3": plan.risk_reward_ratio_3,
+            "objective_rr_1": plan.objective_rr_1,
+            "objective_rr_2": plan.objective_rr_2,
+            "signal_date": plan.signal_date or self.phase.signal_date,
+            "valid_from_date": plan.valid_from_date,
+            "valid_until_date": plan.valid_until_date,
+            "buy_zone_valid_days": plan.buy_zone_valid_days,
+            "suggested_limit_price": plan.suggested_limit_price,
+            "execution_notes": plan.execution_notes,
             "strong_start_score": score.strong_start_score,
             "dry_stable_score": score.dry_stable_score,
             "risk_reward_score": score.risk_reward_score,
             "risk_control_score": score.risk_control_score,
             "total_score": score.total_score,
+            "pattern_score_component": score.pattern_score_component,
+            "tail_score": score.tail_score,
+            "objective_rr_score": score.objective_rr_score,
+            "relative_strength_risk_score": score.relative_strength_risk_score,
             "candidate_type": self.candidate_type,
             "classification": self.classification,
             "lifecycle_status": self.lifecycle_status,
             "first_pool_date": ind.evaluation_date,
             "pool_age_trading_days": 0,
+            "first_seen_date": ind.evaluation_date,
+            "last_seen_date": ind.evaluation_date,
+            "days_in_pool": 0,
+            "exit_date": "",
+            "exit_reason": "",
+            "cooldown_until_date": "",
+            "reentry_count": 0,
             "market_status": ind.market_status,
-            "sector_strength_status": ind.sector_strength_status,
             "enable_market_filter": ind.market_filter_enabled,
-            "enable_sector_filter": ind.sector_filter_enabled,
             "market_filter_mode": ind.market_filter_mode,
-            "sector_filter_mode": ind.sector_filter_mode,
             "risk_tags": ind.risk_tags,
             "warn_tags": ind.warn_tags,
             "reject_reasons": self.reject_reasons,
