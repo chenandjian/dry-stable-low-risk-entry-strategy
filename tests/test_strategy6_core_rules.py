@@ -125,6 +125,17 @@ def test_engine_outputs_full_candidate_trade_plan():
     assert 0 <= candidate["total_score"] <= 100
     assert candidate["lifecycle_status"] in {"READY", "BUY_ZONE", "SETUP_FORMING", "BREAKOUT_CONFIRMED", "EXTENDED"}
     assert candidate["sector_name"] == "银行"
+    assert candidate["original_tail_pass"] == result.dry_tail.dry_tail_pass
+    assert candidate["original_tail_score"] == result.dry_tail.dry_stable_score
+    assert candidate["box_tail_enabled"] is True
+    assert candidate["tail_pass"] == (candidate["original_tail_pass"] or candidate["box_tail_pass"])
+    assert candidate["tail_path"] in {"ORIGINAL", "BOX", "BOTH", "NONE"}
+    if candidate["tail_path"] == "BOTH":
+        assert candidate["tail_score"] == max(candidate["original_tail_score"], candidate["box_tail_score"])
+    elif candidate["tail_path"] == "BOX":
+        assert candidate["tail_score"] == candidate["box_tail_score"]
+    else:
+        assert candidate["tail_score"] == candidate["original_tail_score"]
 
 
 def test_rr2_below_minimum_rejects_candidate():

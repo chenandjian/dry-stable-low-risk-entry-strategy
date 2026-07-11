@@ -101,6 +101,34 @@ describe('Strategy6Results', () => {
           tail_avg_volume: 500000,
           pre_tail_avg_volume_20: 1000000,
           tail_volume_ratio: 0.5,
+          original_tail_pass: false,
+          original_tail_score: 12,
+          box_tail_enabled: true,
+          box_tail_pass: true,
+          box_tail_score: 18,
+          box_status: 'BOX_SUPPORT_READY',
+          tail_pass: true,
+          tail_path: 'BOX',
+          box_start_date: '2026-06-25',
+          box_end_date: '2026-07-09',
+          box_days: 11,
+          box_high: 12.5,
+          box_low: 11.8,
+          box_width: 0.0593,
+          box_position: 0.35,
+          box_low_test_count: 2,
+          box_high_test_count: 2,
+          box_volume_contraction_ratio: 0.65,
+          box_center_shift: 0.0083,
+          compact_kline_enabled: true,
+          compact_kline_pass: true,
+          compact_kline_score: 9,
+          box_quality_score: 27,
+          box_quality_tag: 'BOX_COMPACT_READY',
+          avg_body_ratio_5: 0.016,
+          compact_close_range_5: 0.028,
+          kline_overlap_pair_count: 3,
+          atr_contraction_ratio: 0.60,
         },
         {
           code: '000002',
@@ -218,6 +246,13 @@ describe('Strategy6Results', () => {
     expect(wrapper.text()).toContain('VCP')
     expect(wrapper.text()).toContain('客观目标')
     expect(wrapper.text()).toContain('执行R目标')
+    expect(wrapper.text()).toContain('尾部路径')
+    expect(wrapper.text()).toContain('BOX')
+    expect(wrapper.text()).toContain('BOX_SUPPORT_READY')
+    expect(wrapper.text()).toContain('BOX_COMPACT_READY')
+    expect(wrapper.text()).toContain('11.80 - 12.50')
+    expect(wrapper.text()).toContain('下沿测试2次')
+    expect(wrapper.text()).toContain('紧密排列')
     expect(wrapper.text()).toContain('2026-07-10 至 2026-07-14')
     expect(wrapper.text()).toContain('NEXT_TRADING_DAY_ONLY')
     expect(wrapper.text()).toContain('4.0.0')

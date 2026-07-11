@@ -360,3 +360,37 @@ strategy6:
   ready_min_score: 85
   key_min_score: 75
   watch_min_score: 60
+  box_tail:
+    enabled: true
+    min_box_days: 5
+    max_box_days: 30
+    premium_box_width_max: 0.12
+    normal_box_width_max: 0.18
+    low_test_tolerance_up: 0.02
+    low_test_close_tolerance_down: 0.02
+    broken_close_tolerance: 0.03
+    min_box_low_test_count: 2
+    min_center_shift: -0.03
+    premium_center_shift: 0.0
+    max_volume_contraction_ratio: 0.85
+    premium_volume_contraction_ratio: 0.70
+    current_close_low_tolerance: 0.03
+    current_close_high_tolerance: 0.03
+    tail_volume_ratio_max: 0.75
+    premium_tail_volume_ratio_max: 0.60
+    support_ready_position_max: 0.40
+    breakout_ready_position_min: 0.75
+    compact_kline:
+      enabled: true
+      window_days: 5
+      avg_body_ratio_max: 0.025
+      premium_avg_body_ratio_max: 0.018
+      max_body_ratio_max: 0.04
+      close_range_max: 0.05
+      premium_close_range_max: 0.03
+      min_overlap_ratio: 0.50
+      premium_overlap_ratio: 0.65
+      min_overlap_pair_count: 3
+      max_gap_ratio: 0.03
+      atr_contraction_ratio_max: 0.80
+      premium_atr_contraction_ratio_max: 0.65

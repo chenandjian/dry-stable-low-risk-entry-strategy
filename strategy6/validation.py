@@ -79,6 +79,42 @@ DEFAULT_STRATEGY6_CONFIG = {
     "ready_min_score": 85,
     "key_min_score": 75,
     "watch_min_score": 60,
+    "box_tail": {
+        "enabled": True,
+        "min_box_days": 5,
+        "max_box_days": 30,
+        "premium_box_width_max": 0.12,
+        "normal_box_width_max": 0.18,
+        "low_test_tolerance_up": 0.02,
+        "low_test_close_tolerance_down": 0.02,
+        "broken_close_tolerance": 0.03,
+        "min_box_low_test_count": 2,
+        "min_center_shift": -0.03,
+        "premium_center_shift": 0.0,
+        "max_volume_contraction_ratio": 0.85,
+        "premium_volume_contraction_ratio": 0.70,
+        "current_close_low_tolerance": 0.03,
+        "current_close_high_tolerance": 0.03,
+        "tail_volume_ratio_max": 0.75,
+        "premium_tail_volume_ratio_max": 0.60,
+        "support_ready_position_max": 0.40,
+        "breakout_ready_position_min": 0.75,
+        "compact_kline": {
+            "enabled": True,
+            "window_days": 5,
+            "avg_body_ratio_max": 0.025,
+            "premium_avg_body_ratio_max": 0.018,
+            "max_body_ratio_max": 0.04,
+            "close_range_max": 0.05,
+            "premium_close_range_max": 0.03,
+            "min_overlap_ratio": 0.50,
+            "premium_overlap_ratio": 0.65,
+            "min_overlap_pair_count": 3,
+            "max_gap_ratio": 0.03,
+            "atr_contraction_ratio_max": 0.80,
+            "premium_atr_contraction_ratio_max": 0.65,
+        },
+    },
 }
 
 
@@ -87,7 +123,24 @@ def resolve_strategy6_config(config: dict | None) -> dict:
     raw = copy.deepcopy(DEFAULT_STRATEGY6_CONFIG)
     overrides = config.get("strategy6") if "strategy6" in config else config
     if overrides:
-        raw.update({key: value for key, value in overrides.items() if key in raw})
+        for key, value in overrides.items():
+            if key not in raw:
+                continue
+            if key == "box_tail" and isinstance(value, dict):
+                compact_override = value.get("compact_kline")
+                raw["box_tail"].update({
+                    nested_key: nested_value
+                    for nested_key, nested_value in value.items()
+                    if nested_key in raw["box_tail"] and nested_key != "compact_kline"
+                })
+                if isinstance(compact_override, dict):
+                    raw["box_tail"]["compact_kline"].update({
+                        nested_key: nested_value
+                        for nested_key, nested_value in compact_override.items()
+                        if nested_key in raw["box_tail"]["compact_kline"]
+                    })
+            else:
+                raw[key] = value
 
     raw["enabled"] = bool(raw.get("enabled", True))
     _validate_int_range(raw, "kline_days", 260, 3000)
@@ -148,6 +201,7 @@ def resolve_strategy6_config(config: dict | None) -> dict:
         raise ValueError("rr2 thresholds must satisfy watch <= key <= ready")
     if not raw["watch_min_score"] <= raw["key_min_score"] <= raw["ready_min_score"]:
         raise ValueError("score thresholds must satisfy watch <= key <= ready")
+    _validate_box_tail_config(raw["box_tail"])
     return raw
 
 
@@ -191,3 +245,63 @@ def _validate_between(
     if lower_invalid or value > max_v:
         bracket = "(" if lower_exclusive else "["
         raise ValueError(f"{key} must be in {bracket}{min_v}, {max_v}]")
+
+
+def _validate_box_tail_config(config: dict) -> None:
+    config["enabled"] = bool(config.get("enabled", True))
+    _validate_int_range(config, "min_box_days", 5, 30)
+    _validate_int_range(config, "max_box_days", config["min_box_days"], 30)
+    _validate_int_range(config, "min_box_low_test_count", 1, 10)
+    for key in (
+        "premium_box_width_max", "normal_box_width_max",
+        "low_test_tolerance_up", "low_test_close_tolerance_down",
+        "broken_close_tolerance", "min_center_shift", "premium_center_shift",
+        "max_volume_contraction_ratio", "premium_volume_contraction_ratio",
+        "current_close_low_tolerance", "current_close_high_tolerance",
+        "tail_volume_ratio_max", "premium_tail_volume_ratio_max",
+        "support_ready_position_max", "breakout_ready_position_min",
+    ):
+        _validate_number(config, key)
+    for key in (
+        "premium_box_width_max", "normal_box_width_max",
+        "low_test_tolerance_up", "low_test_close_tolerance_down",
+        "broken_close_tolerance", "current_close_low_tolerance",
+        "current_close_high_tolerance", "support_ready_position_max",
+        "breakout_ready_position_min",
+    ):
+        _validate_between(config, key, 0, 1)
+    _validate_between(config, "min_center_shift", -1, 1)
+    _validate_between(config, "premium_center_shift", -1, 1)
+    for key in (
+        "max_volume_contraction_ratio", "premium_volume_contraction_ratio",
+        "tail_volume_ratio_max", "premium_tail_volume_ratio_max",
+    ):
+        _validate_between(config, key, 0, 2, lower_exclusive=True)
+    if config["premium_box_width_max"] > config["normal_box_width_max"]:
+        raise ValueError("premium_box_width_max must be <= normal_box_width_max")
+    if config["premium_volume_contraction_ratio"] > config["max_volume_contraction_ratio"]:
+        raise ValueError("premium_volume_contraction_ratio must be <= max_volume_contraction_ratio")
+    if config["premium_tail_volume_ratio_max"] > config["tail_volume_ratio_max"]:
+        raise ValueError("premium_tail_volume_ratio_max must be <= tail_volume_ratio_max")
+    if config["support_ready_position_max"] >= config["breakout_ready_position_min"]:
+        raise ValueError("support_ready_position_max must be < breakout_ready_position_min")
+
+    compact = config["compact_kline"]
+    compact["enabled"] = bool(compact.get("enabled", True))
+    _validate_int_range(compact, "window_days", 3, 10)
+    _validate_int_range(compact, "min_overlap_pair_count", 1, compact["window_days"] - 1)
+    for key in (
+        "avg_body_ratio_max", "premium_avg_body_ratio_max", "max_body_ratio_max",
+        "close_range_max", "premium_close_range_max", "min_overlap_ratio",
+        "premium_overlap_ratio", "max_gap_ratio", "atr_contraction_ratio_max",
+        "premium_atr_contraction_ratio_max",
+    ):
+        _validate_between(compact, key, 0, 2)
+    if compact["premium_avg_body_ratio_max"] > compact["avg_body_ratio_max"]:
+        raise ValueError("premium_avg_body_ratio_max must be <= avg_body_ratio_max")
+    if compact["premium_close_range_max"] > compact["close_range_max"]:
+        raise ValueError("premium_close_range_max must be <= close_range_max")
+    if compact["premium_overlap_ratio"] < compact["min_overlap_ratio"]:
+        raise ValueError("premium_overlap_ratio must be >= min_overlap_ratio")
+    if compact["premium_atr_contraction_ratio_max"] > compact["atr_contraction_ratio_max"]:
+        raise ValueError("premium_atr_contraction_ratio_max must be <= atr_contraction_ratio_max")

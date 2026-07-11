@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from strategy6.dry_tail import evaluate_dry_tail
+from strategy6.box_tail import combine_tail_paths, evaluate_box_tail
 from strategy6.filters import classify_candidate, hard_filter_reasons
 from strategy6.indicators import calculate_indicators
 from strategy6.market import compute_relative_strength_20, evaluate_market_context, has_relative_strength_20_market
@@ -64,11 +65,24 @@ class StrongVcpTailEngine:
         pattern = detect_pattern(rows, phase, self.config)
         support = evaluate_support(rows, indicators, start, pattern, self.config)
         dry_tail = evaluate_dry_tail(rows, indicators, phase, self.config)
+        box_tail = evaluate_box_tail(
+            rows,
+            phase,
+            support,
+            dry_tail,
+            has_volume_selloff=indicators.has_big_down_volume,
+            config=self.config["box_tail"],
+        )
+        tail_paths = combine_tail_paths(dry_tail, box_tail)
         apply_pressure_tags(rows, indicators)
         trade_plan = calculate_trade_plan(indicators, support, self.config)
-        score = score_strategy6(indicators, start, phase, pattern, support, dry_tail, trade_plan, self.config)
+        score = score_strategy6(
+            indicators, start, phase, pattern, support, dry_tail, trade_plan, self.config,
+            box_tail=box_tail,
+        )
         reject_reasons = hard_filter_reasons(
-            rows, indicators, start, phase, pattern, support, dry_tail, trade_plan, self.config
+            rows, indicators, start, phase, pattern, support, dry_tail, trade_plan, self.config,
+            box_tail=box_tail,
         )
         normalized_quote_status = str(quote_status or "").lower()
         if normalized_quote_status == "suspended":
@@ -86,6 +100,7 @@ class StrongVcpTailEngine:
             score,
             reject_reasons,
             self.config,
+            box_tail=box_tail,
         )
         return Strategy6Evaluation(
             code=code,
@@ -97,6 +112,8 @@ class StrongVcpTailEngine:
             pattern=pattern,
             support=support,
             dry_tail=dry_tail,
+            box_tail=box_tail,
+            tail_paths=tail_paths,
             trade_plan=trade_plan,
             score=score,
             strategy_version=STRATEGY6_VERSION,

@@ -73,6 +73,49 @@ def _candidate():
         "tail_avg_volume": 500000,
         "pre_tail_avg_volume_20": 1000000,
         "tail_volume_ratio": 0.5,
+        "original_tail_pass": False,
+        "original_tail_score": 12,
+        "box_tail_enabled": True,
+        "box_tail_pass": True,
+        "box_tail_score": 18,
+        "box_status": "BOX_SUPPORT_READY",
+        "tail_pass": True,
+        "tail_path": "BOX",
+        "box_start_date": "2026-06-25",
+        "box_end_date": "2026-07-09",
+        "box_days": 11,
+        "box_high": 12.5,
+        "box_low": 11.8,
+        "box_width": 0.059322,
+        "box_position": 0.35,
+        "box_position_raw": 0.35,
+        "box_low_test_count": 2,
+        "box_high_test_count": 2,
+        "box_first_half_volume": 1000000,
+        "box_second_half_volume": 650000,
+        "box_volume_contraction_ratio": 0.65,
+        "first_half_median_close": 12.0,
+        "second_half_median_close": 12.1,
+        "box_center_shift": 0.008333,
+        "box_break_reason": "",
+        "box_selection_reason": "highest_box_quality_score_then_days_width_volume_contraction",
+        "compact_kline_enabled": True,
+        "compact_kline_pass": True,
+        "compact_kline_score": 9,
+        "box_quality_score": 27,
+        "box_quality_tag": "BOX_COMPACT_READY",
+        "avg_body_ratio_5": 0.016,
+        "max_body_ratio_5": 0.032,
+        "compact_close_range_5": 0.028,
+        "kline_overlap_pair_count": 3,
+        "avg_kline_overlap_ratio": 0.70,
+        "gap_count_5": 0,
+        "max_gap_ratio_5": 0.015,
+        "atr5": 0.12,
+        "atr20": 0.20,
+        "atr_contraction_ratio": 0.60,
+        "compact_kline_reasons": ["compact:range_overlap"],
+        "compact_kline_risk_tags": [],
     }
 
 
@@ -102,11 +145,45 @@ def test_strategy6_candidate_table_is_independent(tmp_path):
     assert detail["current_price_adj"] == 12.34
     assert detail["current_price_raw"] is None
     assert detail["start_day_self_amount_percentile"] == 0.95
+    assert detail["original_tail_pass"] is False
+    assert detail["box_tail_enabled"] is True
+    assert detail["box_tail_pass"] is True
+    assert detail["tail_pass"] is True
+    assert detail["tail_path"] == "BOX"
+    assert detail["box_status"] == "BOX_SUPPORT_READY"
+    assert detail["box_quality_tag"] == "BOX_COMPACT_READY"
+    assert detail["box_low_test_count"] == 2
+    assert detail["compact_kline_reasons"] == ["compact:range_overlap"]
+    assert detail["compact_kline_risk_tags"] == []
     assert db.get_candidates(task_id="s6-task") == []
     assert db.get_strategy2_candidates(task_id="s6-task") == []
     assert db.get_strategy3_candidates(task_id="s6-task") == []
     assert db.get_strategy4_candidates("s6-task") == []
     assert db.get_strategy5_candidates("s6-task") == []
+
+
+def test_strategy6_candidate_schema_contains_all_box_tail_output_fields(tmp_path):
+    db.init_db(str(tmp_path / "s6-box-schema.db"))
+    columns = {
+        row[1] for row in db.get_conn().execute("PRAGMA table_info(strategy6_candidates)").fetchall()
+    }
+    required = {
+        "original_tail_pass", "original_tail_score", "box_tail_enabled",
+        "box_tail_pass", "box_tail_score", "box_status", "tail_pass", "tail_path",
+        "box_start_date", "box_end_date", "box_days", "box_high", "box_low",
+        "box_width", "box_position", "box_position_raw", "box_low_test_count",
+        "box_high_test_count", "box_first_half_volume", "box_second_half_volume",
+        "box_volume_contraction_ratio", "first_half_median_close",
+        "second_half_median_close", "box_center_shift", "box_break_reason",
+        "box_selection_reason", "compact_kline_enabled", "compact_kline_pass",
+        "compact_kline_score", "box_quality_score", "box_quality_tag",
+        "avg_body_ratio_5", "max_body_ratio_5", "compact_close_range_5",
+        "kline_overlap_pair_count", "avg_kline_overlap_ratio", "gap_count_5",
+        "max_gap_ratio_5", "atr5", "atr20", "atr_contraction_ratio",
+        "compact_kline_reasons", "compact_kline_risk_tags",
+    }
+
+    assert required <= columns
 
 
 def test_strategy6_legacy_sector_columns_are_not_returned_by_new_api_rows(tmp_path):

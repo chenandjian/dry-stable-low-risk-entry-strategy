@@ -946,6 +946,56 @@
         </div>
       </div>
 
+      <h4 class="subsection-title">稳定箱体尾部路径</h4>
+      <div class="toggle-row">
+        <div class="toggle-item">
+          <span>启用稳定箱体路径</span>
+          <button data-test="strategy6-box-tail-enabled" class="toggle" :class="{ active: config.strategy6.box_tail.enabled }"
+            @click="toggleStrategy6BoxTail('enabled')">{{ config.strategy6.box_tail.enabled ? '开' : '关' }}</button>
+        </div>
+        <div class="toggle-item">
+          <span>K线紧密排列确认</span>
+          <button data-test="strategy6-compact-enabled" class="toggle" :class="{ active: config.strategy6.box_tail.compact_kline.enabled }"
+            @click="toggleStrategy6CompactKline('enabled')">{{ config.strategy6.box_tail.compact_kline.enabled ? '开' : '关' }}</button>
+        </div>
+      </div>
+      <div class="param-grid">
+        <div class="param"><label>箱体最短天数</label><input data-test="strategy6-box-min-days" type="number" v-model.number="config.strategy6.box_tail.min_box_days" @input="markDirty" min="5" max="30" /><span class="default">默认 5</span></div>
+        <div class="param"><label>箱体最长天数</label><input data-test="strategy6-box-max-days" type="number" v-model.number="config.strategy6.box_tail.max_box_days" @input="markDirty" min="5" max="30" /><span class="default">默认 30</span></div>
+        <div class="param"><label>优质箱体宽度</label><input type="number" v-model.number="config.strategy6.box_tail.premium_box_width_max" @input="markDirty" min="0" max="1" step="0.01" /><span class="default">默认 0.12</span></div>
+        <div class="param"><label>普通箱体宽度</label><input data-test="strategy6-box-width-normal" type="number" v-model.number="config.strategy6.box_tail.normal_box_width_max" @input="markDirty" min="0" max="1" step="0.01" /><span class="default">默认 0.18</span></div>
+        <div class="param"><label>下沿测试向上容差</label><input type="number" v-model.number="config.strategy6.box_tail.low_test_tolerance_up" @input="markDirty" min="0" max="1" step="0.01" /><span class="default">默认 0.02</span></div>
+        <div class="param"><label>测试收盘向下容差</label><input type="number" v-model.number="config.strategy6.box_tail.low_test_close_tolerance_down" @input="markDirty" min="0" max="1" step="0.01" /><span class="default">默认 0.02</span></div>
+        <div class="param"><label>有效跌破容差</label><input type="number" v-model.number="config.strategy6.box_tail.broken_close_tolerance" @input="markDirty" min="0" max="1" step="0.01" /><span class="default">默认 0.03</span></div>
+        <div class="param"><label>最少下沿测试</label><input type="number" v-model.number="config.strategy6.box_tail.min_box_low_test_count" @input="markDirty" min="1" max="10" /><span class="default">默认 2</span></div>
+        <div class="param"><label>最低中枢变化</label><input type="number" v-model.number="config.strategy6.box_tail.min_center_shift" @input="markDirty" min="-1" max="1" step="0.01" /><span class="default">默认 -0.03</span></div>
+        <div class="param"><label>优质中枢变化</label><input type="number" v-model.number="config.strategy6.box_tail.premium_center_shift" @input="markDirty" min="-1" max="1" step="0.01" /><span class="default">默认 0</span></div>
+        <div class="param"><label>最大箱体量缩比</label><input type="number" v-model.number="config.strategy6.box_tail.max_volume_contraction_ratio" @input="markDirty" min="0" max="2" step="0.01" /><span class="default">默认 0.85</span></div>
+        <div class="param"><label>优质箱体量缩比</label><input type="number" v-model.number="config.strategy6.box_tail.premium_volume_contraction_ratio" @input="markDirty" min="0" max="2" step="0.01" /><span class="default">默认 0.70</span></div>
+        <div class="param"><label>当前收盘下沿容差</label><input type="number" v-model.number="config.strategy6.box_tail.current_close_low_tolerance" @input="markDirty" min="0" max="1" step="0.01" /><span class="default">默认 0.03</span></div>
+        <div class="param"><label>当前收盘上沿容差</label><input type="number" v-model.number="config.strategy6.box_tail.current_close_high_tolerance" @input="markDirty" min="0" max="1" step="0.01" /><span class="default">默认 0.03</span></div>
+        <div class="param"><label>箱体尾部最大量比</label><input type="number" v-model.number="config.strategy6.box_tail.tail_volume_ratio_max" @input="markDirty" min="0" max="2" step="0.01" /><span class="default">默认 0.75</span></div>
+        <div class="param"><label>优质尾部最大量比</label><input type="number" v-model.number="config.strategy6.box_tail.premium_tail_volume_ratio_max" @input="markDirty" min="0" max="2" step="0.01" /><span class="default">默认 0.60</span></div>
+        <div class="param"><label>支撑就绪位置</label><input type="number" v-model.number="config.strategy6.box_tail.support_ready_position_max" @input="markDirty" min="0" max="1" step="0.01" /><span class="default">默认 0.40</span></div>
+        <div class="param"><label>突破就绪位置</label><input type="number" v-model.number="config.strategy6.box_tail.breakout_ready_position_min" @input="markDirty" min="0" max="1" step="0.01" /><span class="default">默认 0.75</span></div>
+      </div>
+
+      <h4 class="subsection-title">K线紧密排列参数</h4>
+      <div class="param-grid">
+        <div class="param"><label>紧密排列窗口</label><input data-test="strategy6-compact-window" type="number" v-model.number="config.strategy6.box_tail.compact_kline.window_days" @input="markDirty" min="3" max="10" /><span class="default">默认 5</span></div>
+        <div class="param"><label>平均实体上限</label><input type="number" v-model.number="config.strategy6.box_tail.compact_kline.avg_body_ratio_max" @input="markDirty" min="0" max="1" step="0.001" /><span class="default">默认 0.025</span></div>
+        <div class="param"><label>优质平均实体</label><input type="number" v-model.number="config.strategy6.box_tail.compact_kline.premium_avg_body_ratio_max" @input="markDirty" min="0" max="1" step="0.001" /><span class="default">默认 0.018</span></div>
+        <div class="param"><label>最大实体上限</label><input type="number" v-model.number="config.strategy6.box_tail.compact_kline.max_body_ratio_max" @input="markDirty" min="0" max="1" step="0.001" /><span class="default">默认 0.04</span></div>
+        <div class="param"><label>收盘集中区间</label><input type="number" v-model.number="config.strategy6.box_tail.compact_kline.close_range_max" @input="markDirty" min="0" max="1" step="0.001" /><span class="default">默认 0.05</span></div>
+        <div class="param"><label>优质收盘区间</label><input type="number" v-model.number="config.strategy6.box_tail.compact_kline.premium_close_range_max" @input="markDirty" min="0" max="1" step="0.001" /><span class="default">默认 0.03</span></div>
+        <div class="param"><label>最小K线重叠比</label><input type="number" v-model.number="config.strategy6.box_tail.compact_kline.min_overlap_ratio" @input="markDirty" min="0" max="1" step="0.01" /><span class="default">默认 0.50</span></div>
+        <div class="param"><label>优质K线重叠比</label><input type="number" v-model.number="config.strategy6.box_tail.compact_kline.premium_overlap_ratio" @input="markDirty" min="0" max="1" step="0.01" /><span class="default">默认 0.65</span></div>
+        <div class="param"><label>最少重叠组数</label><input type="number" v-model.number="config.strategy6.box_tail.compact_kline.min_overlap_pair_count" @input="markDirty" min="1" max="9" /><span class="default">默认 3</span></div>
+        <div class="param"><label>最大跳空比例</label><input type="number" v-model.number="config.strategy6.box_tail.compact_kline.max_gap_ratio" @input="markDirty" min="0" max="1" step="0.01" /><span class="default">默认 0.03</span></div>
+        <div class="param"><label>ATR收缩比上限</label><input type="number" v-model.number="config.strategy6.box_tail.compact_kline.atr_contraction_ratio_max" @input="markDirty" min="0" max="2" step="0.01" /><span class="default">默认 0.80</span></div>
+        <div class="param"><label>优质ATR收缩比</label><input type="number" v-model.number="config.strategy6.box_tail.compact_kline.premium_atr_contraction_ratio_max" @input="markDirty" min="0" max="2" step="0.01" /><span class="default">默认 0.65</span></div>
+      </div>
+
       <div class="info-msg strategy6-info">
         ⓘ 策略6保留真实市场过滤，并在结果页展示扫描时使用的指数快照；板块过滤已移除，不再参与降级或扣分。
       </div>
@@ -1133,6 +1183,43 @@ const defaultStrategy5Config = {
   volume_dry_direction_efficiency: 0.35,
 }
 
+const defaultStrategy6BoxTailConfig = {
+  enabled: true,
+  min_box_days: 5,
+  max_box_days: 30,
+  premium_box_width_max: 0.12,
+  normal_box_width_max: 0.18,
+  low_test_tolerance_up: 0.02,
+  low_test_close_tolerance_down: 0.02,
+  broken_close_tolerance: 0.03,
+  min_box_low_test_count: 2,
+  min_center_shift: -0.03,
+  premium_center_shift: 0.0,
+  max_volume_contraction_ratio: 0.85,
+  premium_volume_contraction_ratio: 0.70,
+  current_close_low_tolerance: 0.03,
+  current_close_high_tolerance: 0.03,
+  tail_volume_ratio_max: 0.75,
+  premium_tail_volume_ratio_max: 0.60,
+  support_ready_position_max: 0.40,
+  breakout_ready_position_min: 0.75,
+  compact_kline: {
+    enabled: true,
+    window_days: 5,
+    avg_body_ratio_max: 0.025,
+    premium_avg_body_ratio_max: 0.018,
+    max_body_ratio_max: 0.04,
+    close_range_max: 0.05,
+    premium_close_range_max: 0.03,
+    min_overlap_ratio: 0.50,
+    premium_overlap_ratio: 0.65,
+    min_overlap_pair_count: 3,
+    max_gap_ratio: 0.03,
+    atr_contraction_ratio_max: 0.80,
+    premium_atr_contraction_ratio_max: 0.65,
+  },
+}
+
 const defaultStrategy6Config = {
   enabled: true,
   kline_days: 1100,
@@ -1205,6 +1292,7 @@ const defaultStrategy6Config = {
   ready_min_score: 85,
   key_min_score: 75,
   watch_min_score: 60,
+  box_tail: defaultStrategy6BoxTailConfig,
 }
 
 const config = reactive({
@@ -1235,7 +1323,7 @@ const config = reactive({
   strategy3: { ...defaultStrategy3Config },
   strategy4: { ...defaultStrategy4Config },
   strategy5: { ...defaultStrategy5Config },
-  strategy6: { ...defaultStrategy6Config },
+  strategy6: sanitizeStrategy6Config({}),
 })
 
 const dirty = ref(false)
@@ -1397,7 +1485,19 @@ function sanitizeStrategy6Config(value) {
   const known = Object.fromEntries(
     Object.entries(value || {}).filter(([key]) => Object.prototype.hasOwnProperty.call(defaultStrategy6Config, key))
   )
-  return { ...defaultStrategy6Config, ...known }
+  const boxTail = known.box_tail || {}
+  return {
+    ...defaultStrategy6Config,
+    ...known,
+    box_tail: {
+      ...defaultStrategy6BoxTailConfig,
+      ...boxTail,
+      compact_kline: {
+        ...defaultStrategy6BoxTailConfig.compact_kline,
+        ...(boxTail.compact_kline || {}),
+      },
+    },
+  }
 }
 
 function mergeStrategy4Config(value) {
@@ -1502,6 +1602,18 @@ function toggleStrategy5(key) {
 function toggleStrategy6(key) {
   ensureStrategy6Config()
   config.strategy6[key] = !config.strategy6[key]
+  markDirty()
+}
+
+function toggleStrategy6BoxTail(key) {
+  ensureStrategy6Config()
+  config.strategy6.box_tail[key] = !config.strategy6.box_tail[key]
+  markDirty()
+}
+
+function toggleStrategy6CompactKline(key) {
+  ensureStrategy6Config()
+  config.strategy6.box_tail.compact_kline[key] = !config.strategy6.box_tail.compact_kline[key]
   markDirty()
 }
 
@@ -1699,6 +1811,22 @@ function validate() {
   if (s6.key_min_score < s6.watch_min_score || s6.key_min_score > s6.ready_min_score) errors.push('策略6: 重点最低分需在观察和就绪之间')
   if (s6.ready_min_score < s6.key_min_score || s6.ready_min_score > 100) errors.push('策略6: 就绪最低分需不低于重点且不超过100')
   if (s6.max_watch_days < 1 || s6.max_watch_days > 60) errors.push('策略6: 最大观察天数需在 1-60')
+  const box = s6.box_tail || {}
+  const compact = box.compact_kline || {}
+  if (box.min_box_days < 5 || box.min_box_days > box.max_box_days) errors.push('策略6箱体: 最短天数需在 5 到最长天数之间')
+  if (box.max_box_days > 30) errors.push('策略6箱体: 最长天数不能超过 30')
+  if (box.premium_box_width_max < 0 || box.premium_box_width_max > box.normal_box_width_max) errors.push('策略6箱体: 优质宽度不能高于普通宽度')
+  if (box.normal_box_width_max <= 0 || box.normal_box_width_max > 1) errors.push('策略6箱体: 普通宽度需在 (0,1]')
+  if (box.min_box_low_test_count < 1 || box.min_box_low_test_count > 10) errors.push('策略6箱体: 最少下沿测试需在 1-10')
+  if (box.premium_volume_contraction_ratio > box.max_volume_contraction_ratio) errors.push('策略6箱体: 优质量缩比不能高于普通量缩比')
+  if (box.premium_tail_volume_ratio_max > box.tail_volume_ratio_max) errors.push('策略6箱体: 优质尾部量比不能高于普通量比')
+  if (box.support_ready_position_max >= box.breakout_ready_position_min) errors.push('策略6箱体: 支撑位置阈值必须低于突破位置阈值')
+  if (compact.window_days < 3 || compact.window_days > 10) errors.push('策略6紧密K线: 窗口需在 3-10')
+  if (compact.min_overlap_pair_count < 1 || compact.min_overlap_pair_count >= compact.window_days) errors.push('策略6紧密K线: 最少重叠组数必须小于窗口天数')
+  if (compact.premium_avg_body_ratio_max > compact.avg_body_ratio_max) errors.push('策略6紧密K线: 优质平均实体阈值不能高于普通阈值')
+  if (compact.premium_close_range_max > compact.close_range_max) errors.push('策略6紧密K线: 优质收盘区间不能高于普通区间')
+  if (compact.premium_overlap_ratio < compact.min_overlap_ratio) errors.push('策略6紧密K线: 优质重叠比例不能低于普通比例')
+  if (compact.premium_atr_contraction_ratio_max > compact.atr_contraction_ratio_max) errors.push('策略6紧密K线: 优质ATR收缩比不能高于普通比例')
 
   return errors
 }

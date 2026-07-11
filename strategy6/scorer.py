@@ -1,7 +1,9 @@
 """Strategy6 six-dimension scoring."""
 from __future__ import annotations
 
+from strategy6.box_tail import combine_tail_paths
 from strategy6.models import (
+    Strategy6BoxTail,
     Strategy6DryTail,
     Strategy6Indicators,
     Strategy6Pattern,
@@ -22,13 +24,18 @@ def score_strategy6(
     dry_tail: Strategy6DryTail,
     trade_plan: Strategy6TradePlan,
     config: dict,
+    *,
+    box_tail: Strategy6BoxTail | None = None,
 ) -> Strategy6Score:
     strong = _strong_start_score(start)
     pattern_score = 20 if not config["pattern_filter_enabled"] else min(
         20, pattern.pattern_score + (1 if phase.valid and pattern.pattern_score < 20 else 0)
     )
     support_score = min(20, support.support_cluster_score + (2 if support.support_test_count >= 2 else 1 if support.support_test_count else 0))
-    tail_score = min(20, dry_tail.dry_stable_score)
+    tail_score = min(20, combine_tail_paths(
+        dry_tail,
+        box_tail or Strategy6BoxTail(),
+    ).score)
     objective_rr_score = _rr_score(trade_plan.objective_rr_2)
     relative_strength_risk_score = _relative_strength_risk_score(ind)
     total = min(100, strong + pattern_score + support_score + tail_score + objective_rr_score + relative_strength_risk_score)
@@ -45,7 +52,7 @@ def score_strategy6(
         pattern_score_component=pattern_score,
         support_score=support_score,
         tail_score=tail_score,
-        dry_stable_score=tail_score,
+        dry_stable_score=min(20, dry_tail.dry_stable_score),
         objective_rr_score=objective_rr_score,
         risk_reward_score=objective_rr_score,
         relative_strength_risk_score=relative_strength_risk_score,

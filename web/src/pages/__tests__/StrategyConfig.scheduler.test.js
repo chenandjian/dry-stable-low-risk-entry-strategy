@@ -231,4 +231,27 @@ describe('StrategyConfig scheduler controls', () => {
     expect(payload.strategy6.stop_atr_multiplier).toBe(0.8)
     expect(payload.strategy6.max_watch_days).toBe(10)
   })
+
+  it('renders and saves nested strategy6 box-tail and compact-kline controls', async () => {
+    const wrapper = mount(StrategyConfig)
+    await flushUi()
+
+    expect(wrapper.text()).toContain('稳定箱体尾部路径')
+    expect(wrapper.find('[data-test="strategy6-box-tail-enabled"]').exists()).toBe(true)
+    expect(wrapper.find('[data-test="strategy6-box-min-days"]').element.value).toBe('5')
+    expect(wrapper.find('[data-test="strategy6-box-max-days"]').element.value).toBe('30')
+    expect(wrapper.find('[data-test="strategy6-compact-enabled"]').exists()).toBe(true)
+    expect(wrapper.find('[data-test="strategy6-compact-window"]').element.value).toBe('5')
+
+    await wrapper.find('[data-test="strategy6-compact-enabled"]').trigger('click')
+    await wrapper.find('[data-test="strategy6-box-width-normal"]').setValue('0.16')
+    await wrapper.find('.btn-save').trigger('click')
+    await flushUi()
+
+    const payload = api.updateConfig.mock.calls[0][0]
+    expect(payload.strategy6.box_tail.enabled).toBe(true)
+    expect(payload.strategy6.box_tail.normal_box_width_max).toBe(0.16)
+    expect(payload.strategy6.box_tail.compact_kline.enabled).toBe(false)
+    expect(payload.strategy6.box_tail.compact_kline.min_overlap_pair_count).toBe(3)
+  })
 })

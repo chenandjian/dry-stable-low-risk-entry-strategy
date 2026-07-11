@@ -147,13 +147,22 @@ def test_update_config_validates_strategy6_and_strips_legacy_sector_fields(monke
 
     response = TestClient(server.app).put(
         "/api/config",
-        json={"strategy6": {"rr2_min_watch": 1.5, "rr2_min_key": 2.0, "rr2_min_ready": 2.5}},
+        json={"strategy6": {
+            "rr2_min_watch": 1.5,
+            "rr2_min_key": 2.0,
+            "rr2_min_ready": 2.5,
+            "box_tail": {"normal_box_width_max": 0.16, "compact_kline": {"enabled": False}},
+        }},
     )
 
     assert response.status_code == 200
     assert "enable_sector_filter" not in written["strategy6"]
     assert "sector_filter_mode" not in written["strategy6"]
     assert written["strategy6"]["pattern_filter_mode"] == "score_only"
+    assert written["strategy6"]["box_tail"]["normal_box_width_max"] == 0.16
+    assert written["strategy6"]["box_tail"]["min_box_days"] == 5
+    assert written["strategy6"]["box_tail"]["compact_kline"]["enabled"] is False
+    assert written["strategy6"]["box_tail"]["compact_kline"]["window_days"] == 5
     assert repository_config.read_bytes() == repository_config_before
 
 

@@ -107,6 +107,8 @@ npm --prefix web run preview
 - **策略6价格口径：** 当前生产日线均为前复权，策略6输出 `price_basis=FORWARD_ADJUSTED`、`current_price_adj`，`current_price_raw` 保持空值；本期不开发未复权双价格链、成交模拟或回测。
 - **策略6市场边界：** 板块过滤已完全移除，`sector_name` 仅用于展示；至少两个同日宽基指数才形成市场状态，RS20只使用同日沪深300。市场过滤开启且沪深300缺失时，最高只允许 WATCH。
 - **策略6生命周期：** 候选按股票维护 START_CONFIRMED/SETUP_FORMING/READY/BUY_ZONE/EXTENDED/FAILED/EXPIRED/COOLDOWN，FAILED 冷却10个交易日、EXPIRED冷却5个交易日，同事件只允许在支撑恢复并重新确认后入池。全局生命周期、任务审计快照和活跃候选必须在同一事务内写入。
+- **策略6稳定箱体双路径（V4.1）：** 原 `evaluate_dry_tail()` 零改动；`strategy6/box_tail.py` 在整理阶段枚举5-30日箱体，结构边界排除最后两日，最后两日用于跌破和当前位置确认。`tail_pass=original OR box`，`BOTH` 取较高路径分，失败箱体不得改变原路径分数。
+- **策略6紧密K线：** 最近配置窗口（默认5日）的实体、收盘集中、相邻重叠、跳空、ATR收缩和现有放量下跌共同生成 `BOX_COMPACT_READY`。该结果不是箱体硬条件，`compact_kline_score` 只参与箱体窗口择优，禁止进入最终 `tail_score`。
 - **形态评分维度：** 杯体结构 35 + 柄部结构 25 + 成交量结构 20 + 前置趋势 10 + 突破确认 10 = 100 分。
 - **A股配色：** 红涨绿跌。金色仅用于 ≥80 分 A 级信号。
 - **SQLite 持久化：** 数据存储于 `data/cuphandle.db`（stock_pool, daily_ohlc, scan_tasks, candidates）。线程级连接 + WAL 模式。

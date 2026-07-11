@@ -104,7 +104,7 @@
             <tr>
               <th>股票</th><th>现价</th><th>总分</th><th>分类</th><th>生命周期</th>
               <th>启动类型/等级</th><th>支撑状态</th><th>Key/前置支撑</th><th>买入区</th>
-              <th>止损</th><th>客观目标1/2</th><th>客观RR2</th><th>形态</th><th>尾段/前20量比</th><th>市场/RS</th><th>入池</th><th>风险/警告</th><th>数据日</th>
+              <th>止损</th><th>客观目标1/2</th><th>客观RR2</th><th>形态</th><th>尾部路径/箱体</th><th>尾段/前20量比</th><th>市场/RS</th><th>入池</th><th>风险/警告</th><th>数据日</th>
             </tr>
           </thead>
           <tbody>
@@ -122,6 +122,7 @@
               <td>{{ fmt(c.objective_target_1 ?? c.target_price_1) }} / {{ fmt(c.objective_target_2 ?? c.target_price_2) }}</td>
               <td class="rr">{{ fmt(c.objective_rr_2 ?? c.risk_reward_ratio_2) }}</td>
               <td>{{ c.pattern_type || 'UNKNOWN' }}</td>
+              <td>{{ c.tail_path || 'NONE' }} / {{ c.box_status || 'NO_BOX' }}</td>
               <td>{{ fmt(c.tail_volume_ratio ?? c.volume_ratio_5_20, 3) }}</td>
               <td>
                 <div>{{ c.market_status || 'UNKNOWN' }}</div>
@@ -159,6 +160,12 @@
         <div><span>执行R目标</span><strong>1.5R {{ fmt(selected.execution_target_1_5r) }} · 2R {{ fmt(selected.execution_target_2r) }} · 2.5R {{ fmt(selected.execution_target_2_5r) }} · 3.5R {{ fmt(selected.execution_target_3_5r) }}</strong></div>
         <div><span>执行窗口</span><strong>{{ selected.valid_from_date || '--' }} 至 {{ selected.valid_until_date || '--' }} · 限价 {{ fmt(selected.suggested_limit_price) }}</strong></div>
         <div><span>六维评分</span><strong>启动{{ selected.strong_start_score ?? 0 }} 形态{{ selected.pattern_score_component ?? 0 }} 支撑{{ selected.support_score ?? 0 }} 尾段{{ selected.tail_score ?? 0 }} 客观RR{{ selected.objective_rr_score ?? 0 }} RS/风险{{ selected.relative_strength_risk_score ?? 0 }}</strong></div>
+        <div><span>尾部路径</span><strong>{{ selected.tail_path || 'NONE' }} · 原路径 {{ selected.original_tail_pass ? '通过' : '未通过' }}/{{ selected.original_tail_score ?? 0 }} · 箱体 {{ selected.box_tail_pass ? '通过' : '未通过' }}/{{ selected.box_tail_score ?? 0 }}</strong></div>
+        <div><span>稳定箱体</span><strong>{{ selected.box_status || 'NO_BOX' }} · {{ selected.box_start_date || '--' }} 至 {{ selected.box_end_date || '--' }} · {{ selected.box_days ?? 0 }}日</strong></div>
+        <div><span>箱体区间</span><strong>{{ priceRange(selected.box_low, selected.box_high) }} · 宽度 {{ pct(selected.box_width) }} · 位置 {{ pct(selected.box_position) }}</strong></div>
+        <div><span>箱体承接</span><strong>下沿测试{{ selected.box_low_test_count ?? 0 }}次 · 上沿测试{{ selected.box_high_test_count ?? 0 }}次 · 中枢 {{ pct(selected.box_center_shift) }} · 后/前量 {{ fmt(selected.box_volume_contraction_ratio, 3) }}</strong></div>
+        <div><span>紧密排列</span><strong>{{ selected.box_quality_tag || 'NONE' }} · {{ selected.compact_kline_pass ? '通过' : '未通过' }} · {{ selected.compact_kline_score ?? 0 }}/10 · 箱体质量 {{ selected.box_quality_score ?? 0 }}</strong></div>
+        <div><span>紧密指标</span><strong>平均实体 {{ pct(selected.avg_body_ratio_5) }} · 收盘区间 {{ pct(selected.compact_close_range_5) }} · 重叠{{ selected.kline_overlap_pair_count ?? 0 }}组 · ATR比 {{ fmt(selected.atr_contraction_ratio, 3) }}</strong></div>
         <div><span>市场过滤</span><strong>{{ selected.market_status || 'UNKNOWN' }} · {{ selected.enable_market_filter ? '开启' : '关闭' }} · {{ selected.market_filter_mode || '--' }}</strong></div>
         <div><span>相对强度</span><strong>RS20 {{ pct(selected.relative_strength_20) }}</strong></div>
         <div><span>候选池</span><strong>首次入池 {{ selected.first_pool_date || '--' }} · 池龄 {{ selected.pool_age_trading_days ?? 0 }}日</strong></div>
@@ -372,6 +379,49 @@ export default {
           { header: 'RR2', value: c => this.fmt(c.risk_reward_ratio_2) },
           { header: 'RR3', value: c => this.fmt(c.risk_reward_ratio_3) },
           { header: 'V5/V20', value: c => this.fmt(c.volume_ratio_5_20, 3) },
+          { header: '原尾部通过', value: c => c.original_tail_pass ? '是' : '否' },
+          { header: '原尾部分', value: c => c.original_tail_score ?? '' },
+          { header: '箱体路径启用', value: c => c.box_tail_enabled ? '是' : '否' },
+          { header: '箱体通过', value: c => c.box_tail_pass ? '是' : '否' },
+          { header: '箱体分', value: c => c.box_tail_score ?? '' },
+          { header: '箱体状态', value: c => c.box_status || '' },
+          { header: '尾部通过', value: c => c.tail_pass ? '是' : '否' },
+          { header: '尾部路径', value: c => c.tail_path || '' },
+          { header: '箱体开始', value: c => c.box_start_date || '' },
+          { header: '箱体结束', value: c => c.box_end_date || '' },
+          { header: '箱体天数', value: c => c.box_days ?? '' },
+          { header: '箱体上沿', value: c => this.fmt(c.box_high) },
+          { header: '箱体下沿', value: c => this.fmt(c.box_low) },
+          { header: '箱体宽度', value: c => this.pct(c.box_width) },
+          { header: '箱体位置', value: c => this.pct(c.box_position) },
+          { header: '箱体原始位置', value: c => this.pct(c.box_position_raw) },
+          { header: '下沿测试数', value: c => c.box_low_test_count ?? '' },
+          { header: '上沿测试数', value: c => c.box_high_test_count ?? '' },
+          { header: '箱体前半量', value: c => c.box_first_half_volume ?? '' },
+          { header: '箱体后半量', value: c => c.box_second_half_volume ?? '' },
+          { header: '箱体量缩比', value: c => this.fmt(c.box_volume_contraction_ratio, 3) },
+          { header: '前半中枢', value: c => this.fmt(c.first_half_median_close) },
+          { header: '后半中枢', value: c => this.fmt(c.second_half_median_close) },
+          { header: '箱体中枢变化', value: c => this.pct(c.box_center_shift) },
+          { header: '箱体跌破原因', value: c => c.box_break_reason || '' },
+          { header: '箱体选择原因', value: c => c.box_selection_reason || '' },
+          { header: '紧密排列启用', value: c => c.compact_kline_enabled ? '是' : '否' },
+          { header: '紧密排列通过', value: c => c.compact_kline_pass ? '是' : '否' },
+          { header: '紧密排列分', value: c => c.compact_kline_score ?? '' },
+          { header: '箱体质量分', value: c => c.box_quality_score ?? '' },
+          { header: '箱体质量标签', value: c => c.box_quality_tag || '' },
+          { header: '平均实体比', value: c => this.pct(c.avg_body_ratio_5) },
+          { header: '最大实体比', value: c => this.pct(c.max_body_ratio_5) },
+          { header: '紧密收盘区间', value: c => this.pct(c.compact_close_range_5) },
+          { header: 'K线重叠组数', value: c => c.kline_overlap_pair_count ?? '' },
+          { header: '平均K线重叠比', value: c => this.pct(c.avg_kline_overlap_ratio) },
+          { header: '跳空数', value: c => c.gap_count_5 ?? '' },
+          { header: '最大跳空比', value: c => this.pct(c.max_gap_ratio_5) },
+          { header: 'ATR5', value: c => this.fmt(c.atr5) },
+          { header: 'ATR20', value: c => this.fmt(c.atr20) },
+          { header: 'ATR收缩比', value: c => this.fmt(c.atr_contraction_ratio, 3) },
+          { header: '紧密排列原因', value: c => (c.compact_kline_reasons || []).join('|') },
+          { header: '紧密排列风险', value: c => (c.compact_kline_risk_tags || []).join('|') },
           { header: '启动分', value: c => c.strong_start_score ?? '' },
           { header: '支撑分', value: c => c.support_score ?? '' },
           { header: '量干分', value: c => c.dry_stable_score ?? '' },

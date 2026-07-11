@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from strategy6.models import (
+    Strategy6BoxTail,
     Strategy6DryTail,
     Strategy6Indicators,
     Strategy6Phase,
@@ -24,6 +25,8 @@ def hard_filter_reasons(
     dry_tail: Strategy6DryTail,
     trade_plan: Strategy6TradePlan,
     config: dict,
+    *,
+    box_tail: Strategy6BoxTail | None = None,
 ) -> list[str]:
     reasons: list[str] = []
     if not phase.valid and phase.status != "START_TOO_RECENT":
@@ -70,7 +73,8 @@ def hard_filter_reasons(
     reasons.extend(_shape_failure_reasons(rows, ind, support, config))
     if ind.ma50 > 0 and ind.current_price < ind.ma50 * config["ma50_min_ratio"]:
         reasons.append("CLOSE_LT_MA50_0_92")
-    reasons.extend(dry_tail.rejects)
+    if box_tail is None or not box_tail.passed:
+        reasons.extend(dry_tail.rejects)
     if trade_plan.objective_rr_2 < config["rr2_min_watch"]:
         threshold = str(config["rr2_min_watch"]).replace(".", "_")
         reasons.append(f"RR2_LT_{threshold}")
@@ -88,8 +92,13 @@ def classify_candidate(
     score: Strategy6Score,
     reject_reasons: list[str],
     config: dict,
+    *,
+    box_tail: Strategy6BoxTail | None = None,
 ) -> tuple[str, str, str, str]:
-    lifecycle = _lifecycle_status(ind, phase, support, dry_tail, trade_plan, reject_reasons, config)
+    lifecycle = _lifecycle_status(
+        ind, phase, support, dry_tail, trade_plan, reject_reasons, config,
+        box_tail=box_tail,
+    )
     if reject_reasons:
         return "REJECTED", "rejected", lifecycle, "排除：存在硬性风险或盈亏比不足"
     major_risk = any(tag in ind.risk_tags for tag in {"BIG_DOWN_VOLUME"})
@@ -119,7 +128,7 @@ def classify_candidate(
         score.total_score >= config["key_min_score"]
         and trade_plan.objective_rr_2 >= config["rr2_min_key"]
         and support.support_status in {"PATTERN_SUPPORT", "MA20_SUPPORT", "KEY_SUPPORT_VALID"}
-        and dry_tail.dry_stable_score >= 15
+        and score.tail_score >= 15
         and start.start_grade != "B"
         and not major_risk
         and not environment_blocks_ready
@@ -139,6 +148,8 @@ def _lifecycle_status(
     trade_plan: Strategy6TradePlan,
     reject_reasons: list[str],
     config: dict,
+    *,
+    box_tail: Strategy6BoxTail | None = None,
 ) -> str:
     if phase.lifecycle_status in {"START_CONFIRMED", "EXPIRED"}:
         return phase.lifecycle_status
@@ -152,7 +163,7 @@ def _lifecycle_status(
         return "BREAKOUT_CONFIRMED"
     if trade_plan.suggested_buy_price and support.support_zone_low <= ind.current_price <= support.support_zone_high:
         return "BUY_ZONE"
-    if dry_tail.dry_tail_pass:
+    if dry_tail.dry_tail_pass or (box_tail is not None and box_tail.passed):
         return "READY"
     return "SETUP_FORMING"
 

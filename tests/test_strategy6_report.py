@@ -22,6 +22,16 @@ def test_strategy6_report_xlsx_handles_empty_candidates():
     assert "valid_from_date" in shared
     assert "price_basis" in shared
     assert "start_day_self_amount_percentile" in shared
+    for header in (
+        "original_tail_pass", "box_tail_enabled", "box_tail_pass", "box_status",
+        "tail_path", "box_start_date", "box_high", "box_low", "box_width",
+        "box_low_test_count", "box_volume_contraction_ratio", "box_center_shift",
+        "compact_kline_enabled", "compact_kline_pass", "compact_kline_score",
+        "box_quality_score", "box_quality_tag", "avg_body_ratio_5",
+        "compact_close_range_5", "kline_overlap_pair_count", "atr_contraction_ratio",
+        "compact_kline_reasons", "compact_kline_risk_tags",
+    ):
+        assert header in shared
     assert '<row r="1">' in sheet
     assert '<row r="2">' not in sheet
 

@@ -129,6 +129,71 @@ class Strategy6DryTail:
 
 
 @dataclass
+class Strategy6CompactKline:
+    enabled: bool = False
+    passed: bool = False
+    premium: bool = False
+    score: int = 0
+    quality_tag: str = "NONE"
+    avg_body_ratio: float | None = None
+    max_body_ratio: float | None = None
+    close_range: float | None = None
+    overlap_pair_count: int = 0
+    premium_overlap_pair_count: int = 0
+    valid_overlap_pair_count: int = 0
+    avg_overlap_ratio: float | None = None
+    gap_count: int = 0
+    max_gap_ratio: float | None = None
+    atr5: float | None = None
+    atr20: float | None = None
+    atr_contraction_ratio: float | None = None
+    reasons: list[str] = field(default_factory=list)
+    risk_tags: list[str] = field(default_factory=list)
+
+
+@dataclass
+class Strategy6BoxTail:
+    enabled: bool = False
+    passed: bool = False
+    score: int = 0
+    status: str = "NO_BOX"
+    start_date: str = ""
+    end_date: str = ""
+    days: int = 0
+    box_high: float | None = None
+    box_low: float | None = None
+    box_width: float | None = None
+    box_position: float | None = None
+    box_position_raw: float | None = None
+    low_test_count: int = 0
+    high_test_count: int = 0
+    first_half_volume: float | None = None
+    second_half_volume: float | None = None
+    volume_contraction_ratio: float | None = None
+    first_half_median_close: float | None = None
+    second_half_median_close: float | None = None
+    center_shift: float | None = None
+    break_reason: str = ""
+    selection_reason: str = ""
+    compact_kline: Strategy6CompactKline = field(default_factory=Strategy6CompactKline)
+    quality_score: int = 0
+    quality_tag: str = "NONE"
+    reasons: list[str] = field(default_factory=list)
+    risk_tags: list[str] = field(default_factory=list)
+
+
+@dataclass
+class Strategy6TailPaths:
+    original_pass: bool = False
+    original_score: int = 0
+    box_pass: bool = False
+    box_score: int = 0
+    passed: bool = False
+    path: str = "NONE"
+    score: int = 0
+
+
+@dataclass
 class Strategy6TradePlan:
     suggested_buy_price: float | None = None
     buy_zone_low: float = 0.0
@@ -186,6 +251,8 @@ class Strategy6Evaluation:
     pattern: Strategy6Pattern
     support: Strategy6Support
     dry_tail: Strategy6DryTail
+    box_tail: Strategy6BoxTail
+    tail_paths: Strategy6TailPaths
     trade_plan: Strategy6TradePlan
     score: Strategy6Score
     strategy_version: str = ""
@@ -209,6 +276,9 @@ class Strategy6Evaluation:
         support = self.support
         plan = self.trade_plan
         score = self.score
+        box = self.box_tail
+        compact = box.compact_kline
+        tail = self.tail_paths
         return {
             "strategy_version": self.strategy_version,
             "config_hash": self.config_hash,
@@ -249,6 +319,49 @@ class Strategy6Evaluation:
             "pre_tail_avg_volume_20": self.dry_tail.pre_tail_avg_volume_20,
             "tail_volume_ratio": self.dry_tail.tail_volume_ratio,
             "volume_slope_10": self.dry_tail.volume_slope_10,
+            "original_tail_pass": tail.original_pass,
+            "original_tail_score": tail.original_score,
+            "box_tail_enabled": box.enabled,
+            "box_tail_pass": tail.box_pass,
+            "box_tail_score": tail.box_score,
+            "box_status": box.status,
+            "tail_pass": tail.passed,
+            "tail_path": tail.path,
+            "box_start_date": box.start_date,
+            "box_end_date": box.end_date,
+            "box_days": box.days,
+            "box_high": box.box_high,
+            "box_low": box.box_low,
+            "box_width": box.box_width,
+            "box_position": box.box_position,
+            "box_position_raw": box.box_position_raw,
+            "box_low_test_count": box.low_test_count,
+            "box_high_test_count": box.high_test_count,
+            "box_first_half_volume": box.first_half_volume,
+            "box_second_half_volume": box.second_half_volume,
+            "box_volume_contraction_ratio": box.volume_contraction_ratio,
+            "first_half_median_close": box.first_half_median_close,
+            "second_half_median_close": box.second_half_median_close,
+            "box_center_shift": box.center_shift,
+            "box_break_reason": box.break_reason,
+            "box_selection_reason": box.selection_reason,
+            "compact_kline_enabled": compact.enabled,
+            "compact_kline_pass": compact.passed,
+            "compact_kline_score": compact.score,
+            "box_quality_score": box.quality_score,
+            "box_quality_tag": box.quality_tag,
+            "avg_body_ratio_5": compact.avg_body_ratio,
+            "max_body_ratio_5": compact.max_body_ratio,
+            "compact_close_range_5": compact.close_range,
+            "kline_overlap_pair_count": compact.overlap_pair_count,
+            "avg_kline_overlap_ratio": compact.avg_overlap_ratio,
+            "gap_count_5": compact.gap_count,
+            "max_gap_ratio_5": compact.max_gap_ratio,
+            "atr5": compact.atr5,
+            "atr20": compact.atr20,
+            "atr_contraction_ratio": compact.atr_contraction_ratio,
+            "compact_kline_reasons": compact.reasons,
+            "compact_kline_risk_tags": compact.risk_tags,
             "highest_close_20": ind.highest_close_20,
             "highest_close_120": ind.highest_close_120,
             "pullback_from_20d_high": ind.pullback_from_20d_high,
