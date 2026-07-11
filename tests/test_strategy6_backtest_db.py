@@ -76,3 +76,23 @@ def test_strategy6_backtest_metric_query_blocks_oos_by_default(tmp_path):
         assert "OOS" in str(exc)
     else:
         raise AssertionError("OOS metrics must remain locked")
+
+
+def test_same_business_order_and_trade_ids_can_be_saved_in_different_runs(tmp_path):
+    conn = _init(tmp_path)
+    order = {
+        "order_id": "order-setup-1", "setup_id": "setup-1", "code": "000001",
+        "signal_date": "2025-06-03", "status": "FILLED",
+    }
+    trade = {
+        "trade_id": "trade-setup-1", "setup_id": "setup-1", "code": "000001",
+        "signal_date": "2025-06-03", "entry_date": "2025-06-04",
+        "exit_date": "2025-06-10", "net_return": 0.1, "r_multiple": 2.0,
+    }
+
+    for run_id in ("s6bt-a", "s6bt-b"):
+        db.replace_strategy6_backtest_orders(run_id, "s6ps-same", "000001", [order])
+        db.replace_strategy6_backtest_trades(run_id, "s6ps-same", "000001", [trade])
+
+    assert conn.execute("SELECT COUNT(*) FROM strategy6_backtest_orders").fetchone()[0] == 2
+    assert conn.execute("SELECT COUNT(*) FROM strategy6_backtest_trades").fetchone()[0] == 2

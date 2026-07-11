@@ -391,7 +391,8 @@ def replace_strategy6_backtest_orders(
                VALUES (?, ?, ?, ?, ?, ?, ?, ?)''',
             [
                 (
-                    item["order_id"], run_id, parameter_set_id, item["setup_id"], code,
+                    f"{run_id}:{parameter_set_id}:{item['order_id']}",
+                    run_id, parameter_set_id, item["setup_id"], code,
                     item["signal_date"], item["status"],
                     json.dumps(item, ensure_ascii=False, sort_keys=True),
                 )
@@ -424,7 +425,8 @@ def replace_strategy6_backtest_trades(
                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
             [
                 (
-                    item["trade_id"], run_id, parameter_set_id, item["setup_id"], code,
+                    f"{run_id}:{parameter_set_id}:{item['trade_id']}",
+                    run_id, parameter_set_id, item["setup_id"], code,
                     item["signal_date"], item.get("entry_date", ""), item.get("exit_date", ""),
                     item.get("net_return", 0), item.get("r_multiple", 0),
                     json.dumps(item, ensure_ascii=False, sort_keys=True),
