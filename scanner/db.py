@@ -764,6 +764,50 @@ def save_market_index_ohlc(
     conn.commit()
 
 
+def upsert_market_index_ohlc(
+    symbol: str,
+    data: list[dict],
+    *,
+    source: str = "sina",
+    fetched_at: str | None = None,
+):
+    """Merge index OHLC rows without deleting older cached history."""
+    if not data:
+        return
+    conn = get_conn()
+    fetched_at = fetched_at or datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    conn.executemany(
+        """INSERT INTO market_index_ohlc
+           (symbol, date, open, high, low, close, volume, turnover, source, fetched_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+           ON CONFLICT(symbol, date) DO UPDATE SET
+             open=excluded.open,
+             high=excluded.high,
+             low=excluded.low,
+             close=excluded.close,
+             volume=excluded.volume,
+             turnover=excluded.turnover,
+             source=excluded.source,
+             fetched_at=excluded.fetched_at""",
+        [
+            (
+                symbol,
+                d["date"],
+                d.get("open"),
+                d.get("high"),
+                d.get("low"),
+                d.get("close"),
+                d.get("volume"),
+                d.get("turnover", 0.0),
+                source,
+                fetched_at,
+            )
+            for d in data
+        ],
+    )
+    conn.commit()
+
+
 def get_market_index_ohlc(
     symbol: str,
     *,

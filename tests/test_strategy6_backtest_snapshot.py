@@ -1,4 +1,5 @@
 from strategy6.backtest.snapshot import build_setup_id, rebuild_stock_signals
+from strategy6.engine import StrongVcpTailEngine
 
 
 class FakeEvaluation:
@@ -93,3 +94,33 @@ def test_failed_box_never_raises_original_path_score_in_snapshot():
         engine=OriginalEngine(), minimum_history=1,
     )[0]
     assert signal.snapshot["tail_score"] == signal.snapshot["original_tail_score"] == 16
+
+
+def test_asof_rebuild_normalizes_raw_database_rows_before_real_engine_evaluation():
+    from tests.test_strategy6_core_rules import build_strategy6_candidate_data
+
+    rows = build_strategy6_candidate_data()
+    raw_rows = [
+        {
+            "date": row["date"],
+            "open": row["open"],
+            "high": row["high"],
+            "low": row["low"],
+            "close": row["close"],
+            "volume": row["volume"],
+            "turnover": row.get("amount", 0),
+        }
+        for row in rows
+    ]
+    evaluation_date = raw_rows[-1]["date"]
+
+    rebuild_stock_signals(
+        code="000001",
+        name="样本",
+        rows=raw_rows,
+        evaluation_dates=[evaluation_date],
+        market_data_by_symbol={},
+        parameter_set_id="s6ps-raw-db",
+        engine=StrongVcpTailEngine({"strategy6": {"enable_market_filter": False}}),
+        minimum_history=1,
+    )

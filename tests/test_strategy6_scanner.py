@@ -181,6 +181,7 @@ def test_strategy6_scan_persists_market_snapshot_for_frontend_audit(tmp_path, mo
     assert sh["ma50"] > 0
     assert isinstance(sh["above_ma20"], bool)
     assert sh["data_status"] == "FRESH"
+    assert db.get_market_index_coverage("sh000300")["rows"] == 80
 
 
 def test_strategy6_scan_reports_market_status_when_market_filter_disabled(tmp_path, monkeypatch):

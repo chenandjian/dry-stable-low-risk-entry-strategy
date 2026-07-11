@@ -311,6 +311,8 @@ def _load_market_data_by_symbol(cfg: dict) -> dict[str, list[dict]]:
         except Exception as exc:
             logger.warning("Strategy6 market index fetch failed for %s: %s", fetch_symbol, exc)
             rows = []
+        if rows:
+            db.upsert_market_index_ohlc(fetch_symbol, rows, source="sina")
         result[symbol] = rows
     return result
 

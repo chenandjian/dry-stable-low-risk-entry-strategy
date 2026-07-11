@@ -57,5 +57,5 @@ def ensure_index_history(
     for stored_symbol in INDEX_SYMBOLS.values():
         rows = fetcher(stored_symbol, days) or []
         if rows:
-            db.save_market_index_ohlc(stored_symbol, rows, source="sina")
+            db.upsert_market_index_ohlc(stored_symbol, rows, source="sina")
     return load_index_history(start_date, end_date)

@@ -47,7 +47,6 @@ def rebuild_stock_signals(
             code=code,
             name=name,
             trading_days_override=len(visible_rows),
-            rows_normalized=True,
             market_data_by_symbol=visible_market,
         )
         snapshot = evaluation.to_candidate_dict()
