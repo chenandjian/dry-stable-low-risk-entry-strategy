@@ -45,6 +45,9 @@ def run_parameter_research(
                 **signal.snapshot,
                 "parameter_set_id": signal.parameter_set_id,
                 "setup_id": signal.setup_id,
+                "code": signal.code,
+                "name": signal.name,
+                "evaluation_date": signal.evaluation_date,
             }
             signals.append(signal_record)
             if signal.setup_id in seen_setups:

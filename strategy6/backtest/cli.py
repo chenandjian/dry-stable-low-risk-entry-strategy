@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 from pathlib import Path
 
 from scanner import db
@@ -21,6 +22,12 @@ def build_parser() -> argparse.ArgumentParser:
         child.add_argument("--output", default="docs/reviews/strategy6-backtest")
         child.add_argument("--config", default="config.yaml")
         child.add_argument("--max-trials", type=int, default=2000)
+        child.add_argument(
+            "--workers",
+            type=int,
+            default=max(1, min(8, (os.cpu_count() or 2) - 1)),
+            help="parallel stock evaluation processes; SQLite writes remain in the parent process",
+        )
     return parser
 
 

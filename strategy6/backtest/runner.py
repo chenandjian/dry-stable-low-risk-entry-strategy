@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import copy
+from concurrent.futures import FIRST_COMPLETED, ProcessPoolExecutor, wait
 import json
 from pathlib import Path
 import subprocess
@@ -41,6 +42,35 @@ OPTIMIZATION_SPACE = {
     "box_tail.max_volume_contraction_ratio": [0.70, 0.80, 0.85, 0.90],
     "box_tail.tail_volume_ratio_max": [0.60, 0.70, 0.75, 0.80],
 }
+
+_STOCK_WORKER_CONTEXT: dict = {}
+
+
+def _initialize_stock_worker(context: dict) -> None:
+    global _STOCK_WORKER_CONTEXT
+    _STOCK_WORKER_CONTEXT = context
+
+
+def _evaluate_stock_payload(payload: dict) -> dict:
+    context = _STOCK_WORKER_CONTEXT
+    code = str(payload["code"])
+    name = str(payload.get("name") or "")
+    try:
+        result = run_parameter_research(
+            parameter_set_id=context["parameter_set_id"],
+            data_by_code={code: {"name": name, "rows": payload["rows"]}},
+            evaluation_dates=context["evaluation_dates"],
+            market_data_by_symbol=context["market_data_by_symbol"],
+            backtest_config=context["backtest_config"],
+            engine_factory=lambda: StrongVcpTailEngine({
+                "strategy6": copy.deepcopy(context["strategy_config"]),
+            }),
+            minimum_history=context["minimum_history"],
+            oos_start=context["oos_start"],
+        )
+        return {"code": code, "name": name, "status": "COMPLETED", "result": result}
+    except Exception as exc:
+        return {"code": code, "name": name, "status": "FAILED", "error_message": str(exc)}
 
 
 def run_cli_research(args, coverage) -> int:
@@ -167,52 +197,81 @@ def run_local_parameter_set(
     stocks = conn.execute("SELECT code, name FROM stock_pool ORDER BY code").fetchall()
     completed = db.get_completed_strategy6_backtest_codes(run.run_id, parameter.parameter_set_id)
     started = time.time()
-    for index, (code, name) in enumerate(stocks, start=1):
+    minimum_history = int(strategy_config.get("minimum_trading_days", 500))
+    worker_context = {
+        "parameter_set_id": parameter.parameter_set_id,
+        "evaluation_dates": dates,
+        "market_data_by_symbol": coverage.data_by_symbol,
+        "backtest_config": backtest_config,
+        "strategy_config": strategy_config,
+        "minimum_history": minimum_history,
+        "oos_start": args.oos_start,
+    }
+    row_counts = dict(conn.execute(
+        "SELECT code, COUNT(*) FROM daily_ohlc WHERE date<=? GROUP BY code",
+        (args.end,),
+    ).fetchall())
+    eligible_stocks: list[tuple[str, str]] = []
+    for code, name in stocks:
         if code in completed:
             continue
-        rows = _load_stock_rows(conn, code, args.end)
-        minimum_history = int(strategy_config.get("minimum_trading_days", 500))
-        if len(rows) < minimum_history:
+        available = int(row_counts.get(code, 0))
+        if available < minimum_history:
             db.save_strategy6_backtest_stock_progress(
                 run.run_id, parameter.parameter_set_id, code, name=name,
                 status="SKIPPED_INSUFFICIENT_HISTORY",
-                error_message=f"available={len(rows)}, required={minimum_history}",
+                error_message=f"available={available}, required={minimum_history}",
             )
             continue
-        try:
-            stock_result = run_parameter_research(
-                parameter_set_id=parameter.parameter_set_id,
-                data_by_code={code: {"name": name, "rows": rows}},
-                evaluation_dates=dates,
-                market_data_by_symbol=coverage.data_by_symbol,
-                backtest_config=backtest_config,
-                engine_factory=lambda cfg=copy.deepcopy(strategy_config): StrongVcpTailEngine({"strategy6": cfg}),
-                minimum_history=minimum_history,
-                oos_start=args.oos_start,
-            )
-            db.replace_strategy6_backtest_signals(
-                run.run_id, parameter.parameter_set_id, code,
-                [_signal_record(item) for item in stock_result["signals"]],
-            )
-            db.replace_strategy6_backtest_orders(
-                run.run_id, parameter.parameter_set_id, code, stock_result["orders"],
-            )
-            db.replace_strategy6_backtest_trades(
-                run.run_id, parameter.parameter_set_id, code, stock_result["trades"],
-            )
-            db.save_strategy6_backtest_stock_progress(
-                run.run_id, parameter.parameter_set_id, code, name=name, status="COMPLETED",
-                signals_count=len(stock_result["signals"]), orders_count=len(stock_result["orders"]),
-                trades_count=len(stock_result["trades"]),
-            )
-        except Exception as exc:
-            db.save_strategy6_backtest_stock_progress(
-                run.run_id, parameter.parameter_set_id, code, name=name, status="FAILED",
-                error_message=str(exc),
-            )
-        if index % 100 == 0:
-            elapsed = max(0.001, time.time() - started)
-            print(f"[{experiment_id}] {index}/{len(stocks)} stocks, {index / elapsed:.2f} stocks/s", flush=True)
+        eligible_stocks.append((code, name))
+
+    def next_payload(stock_iter):
+        stock = next(stock_iter, None)
+        if stock is None:
+            return None
+        code, name = stock
+        return {"code": code, "name": name, "rows": _load_stock_rows(conn, code, args.end)}
+
+    workers = max(1, int(getattr(args, "workers", 1)))
+    processed = len(completed) + (len(stocks) - len(completed) - len(eligible_stocks))
+    job_iter = iter(eligible_stocks)
+    if workers == 1:
+        _initialize_stock_worker(worker_context)
+        while True:
+            payload = next_payload(job_iter)
+            if payload is None:
+                break
+            _persist_stock_worker_result(run.run_id, parameter.parameter_set_id, _evaluate_stock_payload(payload))
+            processed += 1
+            _print_stock_progress(experiment_id, processed, len(stocks), started)
+    else:
+        with ProcessPoolExecutor(
+            max_workers=workers,
+            initializer=_initialize_stock_worker,
+            initargs=(worker_context,),
+        ) as executor:
+            pending = {}
+            for _ in range(min(len(eligible_stocks), workers * 2)):
+                payload = next_payload(job_iter)
+                if payload is not None:
+                    pending[executor.submit(_evaluate_stock_payload, payload)] = payload
+            while pending:
+                done, _ = wait(pending, return_when=FIRST_COMPLETED)
+                for future in done:
+                    source_payload = pending.pop(future)
+                    try:
+                        worker_result = future.result()
+                    except Exception as exc:
+                        worker_result = {
+                            "code": source_payload["code"], "name": source_payload["name"],
+                            "status": "FAILED", "error_message": f"WORKER_PROCESS_FAILED: {exc}",
+                        }
+                    _persist_stock_worker_result(run.run_id, parameter.parameter_set_id, worker_result)
+                    processed += 1
+                    _print_stock_progress(experiment_id, processed, len(stocks), started)
+                    payload = next_payload(job_iter)
+                    if payload is not None:
+                        pending[executor.submit(_evaluate_stock_payload, payload)] = payload
     signals = db.get_strategy6_backtest_signals(run.run_id, parameter.parameter_set_id)
     orders = _load_json_details(conn, "strategy6_backtest_orders", run.run_id, parameter.parameter_set_id)
     trades = _load_json_details(conn, "strategy6_backtest_trades", run.run_id, parameter.parameter_set_id)
@@ -306,6 +365,68 @@ def _signal_record(item: dict) -> dict:
         "tail_path": item["tail_path"], "candidate_type": item["candidate_type"],
         "snapshot": item,
     }
+
+
+def _persist_stock_worker_result(run_id: str, parameter_set_id: str, item: dict) -> None:
+    code = item["code"]
+    name = item.get("name", "")
+    if item["status"] != "COMPLETED":
+        db.save_strategy6_backtest_stock_progress(
+            run_id, parameter_set_id, code, name=name, status="FAILED",
+            error_message=item.get("error_message", "unknown worker failure"),
+        )
+        return
+    stock_result = item["result"]
+    validation_error = _stock_result_validation_error(code, stock_result)
+    if validation_error:
+        db.save_strategy6_backtest_stock_progress(
+            run_id, parameter_set_id, code, name=name, status="FAILED",
+            error_message=validation_error,
+        )
+        return
+    db.replace_strategy6_backtest_signals(
+        run_id, parameter_set_id, code,
+        [_signal_record(signal) for signal in stock_result["signals"]],
+    )
+    db.replace_strategy6_backtest_orders(
+        run_id, parameter_set_id, code, stock_result["orders"],
+    )
+    db.replace_strategy6_backtest_trades(
+        run_id, parameter_set_id, code, stock_result["trades"],
+    )
+    db.save_strategy6_backtest_stock_progress(
+        run_id, parameter_set_id, code, name=name, status="COMPLETED",
+        signals_count=len(stock_result["signals"]),
+        orders_count=len(stock_result["orders"]),
+        trades_count=len(stock_result["trades"]),
+    )
+
+
+def _stock_result_validation_error(code: str, stock_result: dict) -> str:
+    seen_dates: dict[str, str] = {}
+    for signal in stock_result.get("signals") or []:
+        signal_code = str(signal.get("code") or "")
+        evaluation_date = str(signal.get("evaluation_date") or "")
+        setup_id = str(signal.get("setup_id") or "")
+        if signal_code != code:
+            return f"SIGNAL_CODE_MISMATCH: expected={code}, actual={signal_code}, date={evaluation_date}"
+        if evaluation_date in seen_dates:
+            return (
+                f"DUPLICATE_SIGNAL_DATE: code={code}, date={evaluation_date}, "
+                f"setups={seen_dates[evaluation_date]},{setup_id}"
+            )
+        seen_dates[evaluation_date] = setup_id
+    return ""
+
+
+def _print_stock_progress(experiment_id: str, processed: int, total: int, started: float) -> None:
+    if processed % 100 != 0 and processed != total:
+        return
+    elapsed = max(0.001, time.time() - started)
+    print(
+        f"[{experiment_id}] {processed}/{total} stocks, {processed / elapsed:.2f} stocks/s",
+        flush=True,
+    )
 
 
 def _load_json_details(conn, table: str, run_id: str, parameter_set_id: str) -> list[dict]:

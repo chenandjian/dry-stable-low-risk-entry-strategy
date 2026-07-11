@@ -38,6 +38,8 @@ def rebuild_stock_signals(
         visible_rows = slice_visible_rows(rows, evaluation_date)
         if len(visible_rows) < minimum_history or not visible_rows:
             continue
+        if str(visible_rows[-1].get("date") or "") != evaluation_date:
+            continue
         visible_market = {
             symbol: slice_visible_rows(values, evaluation_date)
             for symbol, values in market_data_by_symbol.items()

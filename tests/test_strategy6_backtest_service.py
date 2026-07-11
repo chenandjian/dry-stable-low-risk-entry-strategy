@@ -2,7 +2,12 @@ import copy
 
 from strategy6.backtest.config import resolve_backtest_config
 from strategy6.backtest.service import run_parameter_research
-from strategy6.backtest.runner import resolve_run_completion_status
+from strategy6.backtest.runner import (
+    _evaluate_stock_payload,
+    _initialize_stock_worker,
+    _stock_result_validation_error,
+    resolve_run_completion_status,
+)
 
 
 def _rows():
@@ -76,3 +81,32 @@ def test_run_with_any_failed_stock_is_not_marked_clean_completed():
     assert resolve_run_completion_status(total=100, completed=99, skipped=0, failed=1) == "COMPLETED_WITH_ERRORS"
     assert resolve_run_completion_status(total=100, completed=90, skipped=10, failed=0) == "COMPLETED_WITH_SKIPS"
     assert resolve_run_completion_status(total=100, completed=90, skipped=0, failed=0) == "INCOMPLETE"
+
+
+def test_process_worker_evaluates_raw_stock_rows_without_database_access():
+    _initialize_stock_worker({
+        "parameter_set_id": "s6ps-worker",
+        "evaluation_dates": ["2025-01-03"],
+        "market_data_by_symbol": {},
+        "backtest_config": resolve_backtest_config({}),
+        "strategy_config": {"enable_market_filter": False},
+        "minimum_history": 1,
+        "oos_start": "2026-01-01",
+    })
+
+    result = _evaluate_stock_payload({"code": "000001", "name": "样本", "rows": _rows()})
+
+    assert result["code"] == "000001"
+    assert result["status"] == "COMPLETED"
+    assert set(result["result"]) >= {"signals", "orders", "trades"}
+
+
+def test_worker_result_validation_reports_duplicate_signal_dates():
+    error = _stock_result_validation_error("000001", {
+        "signals": [
+            {"code": "000001", "evaluation_date": "2025-01-03", "setup_id": "a"},
+            {"code": "000001", "evaluation_date": "2025-01-03", "setup_id": "b"},
+        ]
+    })
+    assert "DUPLICATE_SIGNAL_DATE" in error
+    assert "2025-01-03" in error

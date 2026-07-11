@@ -11,6 +11,12 @@ def test_cli_exposes_audit_fetch_baseline_experiments_and_optimize_commands():
         assert args.command == command
 
 
+def test_cli_accepts_bounded_parallel_worker_count():
+    parser = build_parser()
+    assert parser.parse_args(["baseline", "--workers", "3"]).workers == 3
+    assert parser.parse_args(["baseline"]).workers >= 1
+
+
 def test_database_audit_reports_stock_and_index_coverage(tmp_path):
     path = tmp_path / "audit.db"
     db.init_db(str(path))

@@ -124,3 +124,20 @@ def test_asof_rebuild_normalizes_raw_database_rows_before_real_engine_evaluation
         engine=StrongVcpTailEngine({"strategy6": {"enable_market_filter": False}}),
         minimum_history=1,
     )
+
+
+def test_asof_rebuild_does_not_repeat_last_signal_when_stock_has_no_bar_on_market_date():
+    engine = CapturingEngine()
+    signals = rebuild_stock_signals(
+        code="000001",
+        name="样本",
+        rows=_rows()[:5],
+        evaluation_dates=["2025-01-05", "2025-01-06"],
+        market_data_by_symbol={"hs300": _rows()},
+        parameter_set_id="s6ps-no-bar",
+        engine=engine,
+        minimum_history=1,
+    )
+
+    assert [signal.evaluation_date for signal in signals] == ["2025-01-05"]
+    assert [call[0] for call in engine.calls] == ["2025-01-05"]
