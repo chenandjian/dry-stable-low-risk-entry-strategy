@@ -33,6 +33,8 @@ CupHandleScan 是 Python 3.10+ 的 A 股扫描系统，当前项目包含六套�
 
 策略6尾部采用双路径：原 `strategy6/dry_tail.py::evaluate_dry_tail()` 必须保持业务逻辑和阈值不变；新增稳定箱体路径位于 `strategy6/box_tail.py`。最终通过使用 OR，`BOTH` 才对两个已通过路径取较高分；`ORIGINAL` 和 `NONE` 必须保留原尾部分，失败箱体不得抬高旧结果。紧密K线评分仅用于箱体窗口择优和质量标签，不得累加到最终 `tail_score`。
 
+策略6历史研究位于 `strategy6/backtest/`，只能通过冻结 `StrongVcpTailEngine.evaluate_at()` 按历史日期重建信号。个股和交易统一使用本地前复权日线；四个真实宽基指数必须覆盖研究区间，缺少沪深300时回测必须返回 `BLOCKED_INDEX_HISTORY`。P0-P3不得读取OOS收益、不得写生产配置，当前股票池结果必须标记 `RESEARCH_ONLY_CURRENT_UNIVERSE`。
+
 ## Commands
 
 后端常规验证：

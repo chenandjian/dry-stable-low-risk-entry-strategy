@@ -1,0 +1,82 @@
+"""Command-line entry points for Strategy6 research."""
+from __future__ import annotations
+
+import argparse
+import json
+from pathlib import Path
+
+from scanner import db
+from strategy6.backtest.index_history import ensure_index_history, load_index_history
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description="Strategy6 dual-path historical research")
+    sub = parser.add_subparsers(dest="command", required=True)
+    for command in ("audit-data", "fetch-index", "baseline", "experiments", "optimize"):
+        child = sub.add_parser(command)
+        child.add_argument("--db", default="data/cuphandle.db")
+        child.add_argument("--start", default="2023-01-01")
+        child.add_argument("--end", default="2025-12-31")
+        child.add_argument("--oos-start", default="2026-01-01")
+        child.add_argument("--output", default="docs/reviews/strategy6-backtest")
+        child.add_argument("--config", default="config.yaml")
+        child.add_argument("--max-trials", type=int, default=2000)
+    return parser
+
+
+def audit_database(path: str) -> dict:
+    db.init_db(path)
+    conn = db.get_conn()
+    stock = conn.execute("SELECT COUNT(*) FROM stock_pool").fetchone()[0]
+    row = conn.execute(
+        "SELECT COUNT(*), COUNT(DISTINCT code), MIN(date), MAX(date) FROM daily_ohlc"
+    ).fetchone()
+    index = {
+        symbol: db.get_market_index_coverage(stored)
+        for symbol, stored in {
+            "sh000001": "sh000001", "sz399001": "sz399001",
+            "sz399006": "sz399006", "hs300": "sh000300",
+        }.items()
+    }
+    return {
+        "database": str(Path(path).resolve()),
+        "stocks": stock,
+        "ohlc_rows": row[0],
+        "ohlc_stocks": row[1],
+        "min_date": row[2],
+        "max_date": row[3],
+        "index_coverage": index,
+        "survivorship_bias": True,
+        "historical_security_status_complete": False,
+        "confidence_label": "RESEARCH_ONLY_CURRENT_UNIVERSE",
+    }
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = build_parser().parse_args(argv)
+    if args.command == "audit-data":
+        print(json.dumps(audit_database(args.db), ensure_ascii=False, indent=2, default=str))
+        return 0
+    db.init_db(args.db)
+    if args.command == "fetch-index":
+        result = ensure_index_history(args.start, args.end, days=1500)
+        print(json.dumps({
+            "status": result.status,
+            "missing_symbols": result.missing_symbols,
+            "coverage": result.coverage,
+        }, ensure_ascii=False, indent=2, default=str))
+        return 0 if result.status == "READY" else 2
+    coverage = load_index_history(args.start, args.end)
+    if coverage.status != "READY":
+        print(json.dumps({
+            "status": coverage.status,
+            "missing_symbols": coverage.missing_symbols,
+            "message": "Run fetch-index before historical research.",
+        }, ensure_ascii=False, indent=2))
+        return 2
+    from strategy6.backtest.runner import run_cli_research
+    return run_cli_research(args, coverage)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

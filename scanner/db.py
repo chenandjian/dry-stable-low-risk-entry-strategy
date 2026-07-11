@@ -142,10 +142,383 @@ def init_db(path: str = "data/cuphandle.db"):
         _ensure_strategy6_market_snapshots_table(conn)
         _ensure_strategy6_lifecycle_table(conn)
         _ensure_strategy6_task_lifecycle_table(conn)
+        _ensure_strategy6_backtest_tables(conn)
         _ensure_strategy2_backtest_tables(conn)
         _ensure_strategy3_backtest_tables(conn)
         _ensure_strategy1_backtest_tables(conn)
         conn.commit()
+
+
+def _ensure_strategy6_backtest_tables(conn: sqlite3.Connection):
+    """Create traceable Strategy6 research tables without changing production tables."""
+    conn.executescript('''
+        CREATE TABLE IF NOT EXISTS strategy6_backtest_runs (
+            run_id TEXT PRIMARY KEY,
+            experiment_id TEXT NOT NULL,
+            strategy_version TEXT NOT NULL,
+            strategy_git_commit TEXT,
+            strategy_config_hash TEXT NOT NULL,
+            backtest_config_hash TEXT NOT NULL,
+            data_version TEXT NOT NULL,
+            confidence_label TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'PENDING',
+            split_json TEXT NOT NULL DEFAULT '{}',
+            error_message TEXT,
+            created_at TEXT DEFAULT (datetime('now')),
+            completed_at TEXT
+        );
+        CREATE TABLE IF NOT EXISTS strategy6_backtest_parameter_sets (
+            run_id TEXT NOT NULL,
+            parameter_set_id TEXT NOT NULL,
+            config_hash TEXT NOT NULL,
+            parameter_json TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'PENDING',
+            reject_reason TEXT,
+            created_at TEXT DEFAULT (datetime('now')),
+            PRIMARY KEY (run_id, parameter_set_id)
+        );
+        CREATE TABLE IF NOT EXISTS strategy6_backtest_signals (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            run_id TEXT NOT NULL,
+            parameter_set_id TEXT NOT NULL,
+            code TEXT NOT NULL,
+            name TEXT,
+            evaluation_date TEXT NOT NULL,
+            setup_id TEXT NOT NULL,
+            tail_path TEXT NOT NULL,
+            candidate_type TEXT NOT NULL,
+            snapshot_json TEXT NOT NULL,
+            created_at TEXT DEFAULT (datetime('now')),
+            UNIQUE (run_id, parameter_set_id, code, evaluation_date)
+        );
+        CREATE TABLE IF NOT EXISTS strategy6_backtest_orders (
+            order_id TEXT PRIMARY KEY,
+            run_id TEXT NOT NULL,
+            parameter_set_id TEXT NOT NULL,
+            setup_id TEXT NOT NULL,
+            code TEXT NOT NULL,
+            signal_date TEXT NOT NULL,
+            status TEXT NOT NULL,
+            detail_json TEXT NOT NULL DEFAULT '{}'
+        );
+        CREATE TABLE IF NOT EXISTS strategy6_backtest_trades (
+            trade_id TEXT PRIMARY KEY,
+            run_id TEXT NOT NULL,
+            parameter_set_id TEXT NOT NULL,
+            setup_id TEXT NOT NULL,
+            code TEXT NOT NULL,
+            signal_date TEXT NOT NULL,
+            entry_date TEXT,
+            exit_date TEXT,
+            net_return REAL DEFAULT 0,
+            r_multiple REAL DEFAULT 0,
+            detail_json TEXT NOT NULL DEFAULT '{}'
+        );
+        CREATE TABLE IF NOT EXISTS strategy6_backtest_metrics (
+            run_id TEXT NOT NULL,
+            parameter_set_id TEXT NOT NULL,
+            phase TEXT NOT NULL,
+            scope TEXT NOT NULL,
+            metric_json TEXT NOT NULL,
+            PRIMARY KEY (run_id, parameter_set_id, phase, scope)
+        );
+        CREATE TABLE IF NOT EXISTS strategy6_backtest_walk_forward (
+            run_id TEXT NOT NULL,
+            window_id TEXT NOT NULL,
+            train_start TEXT NOT NULL,
+            train_end TEXT NOT NULL,
+            validation_start TEXT NOT NULL,
+            validation_end TEXT NOT NULL,
+            selected_parameter_set_id TEXT,
+            result_json TEXT NOT NULL DEFAULT '{}',
+            PRIMARY KEY (run_id, window_id)
+        );
+        CREATE TABLE IF NOT EXISTS strategy6_backtest_stock_progress (
+            run_id TEXT NOT NULL,
+            parameter_set_id TEXT NOT NULL,
+            code TEXT NOT NULL,
+            name TEXT,
+            status TEXT NOT NULL DEFAULT 'PENDING',
+            signals_count INTEGER DEFAULT 0,
+            orders_count INTEGER DEFAULT 0,
+            trades_count INTEGER DEFAULT 0,
+            error_message TEXT,
+            updated_at TEXT DEFAULT (datetime('now')),
+            PRIMARY KEY (run_id, parameter_set_id, code)
+        );
+        CREATE INDEX IF NOT EXISTS idx_s6_bt_signal_run_date
+            ON strategy6_backtest_signals(run_id, parameter_set_id, evaluation_date);
+        CREATE INDEX IF NOT EXISTS idx_s6_bt_signal_setup
+            ON strategy6_backtest_signals(run_id, parameter_set_id, setup_id);
+        CREATE INDEX IF NOT EXISTS idx_s6_bt_trade_run
+            ON strategy6_backtest_trades(run_id, parameter_set_id, entry_date);
+    ''')
+
+
+def save_strategy6_backtest_run(item: dict) -> None:
+    conn = get_conn()
+    conn.execute(
+        '''INSERT INTO strategy6_backtest_runs
+           (run_id, experiment_id, strategy_version, strategy_git_commit,
+            strategy_config_hash, backtest_config_hash, data_version,
+            confidence_label, status, split_json, error_message, completed_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+           ON CONFLICT(run_id) DO UPDATE SET
+             status=excluded.status, error_message=excluded.error_message,
+             completed_at=excluded.completed_at''',
+        (
+            item["run_id"], item["experiment_id"], item["strategy_version"],
+            item.get("strategy_git_commit", ""), item["strategy_config_hash"],
+            item["backtest_config_hash"], item["data_version"],
+            item.get("confidence_label", "RESEARCH_ONLY_CURRENT_UNIVERSE"),
+            item.get("status", "PENDING"),
+            json.dumps(item.get("split_json") or {}, ensure_ascii=False, sort_keys=True),
+            item.get("error_message"), item.get("completed_at"),
+        ),
+    )
+    conn.commit()
+
+
+def get_strategy6_backtest_run(run_id: str) -> dict | None:
+    row = get_conn().execute(
+        '''SELECT run_id, experiment_id, strategy_version, strategy_git_commit,
+                  strategy_config_hash, backtest_config_hash, data_version,
+                  confidence_label, status, split_json, error_message,
+                  created_at, completed_at
+           FROM strategy6_backtest_runs WHERE run_id=?''',
+        (run_id,),
+    ).fetchone()
+    if not row:
+        return None
+    keys = (
+        "run_id", "experiment_id", "strategy_version", "strategy_git_commit",
+        "strategy_config_hash", "backtest_config_hash", "data_version",
+        "confidence_label", "status", "split_json", "error_message",
+        "created_at", "completed_at",
+    )
+    item = dict(zip(keys, row))
+    item["split_json"] = json.loads(item["split_json"] or "{}")
+    return item
+
+
+def save_strategy6_backtest_parameter_set(run_id: str, item: dict) -> None:
+    conn = get_conn()
+    conn.execute(
+        '''INSERT INTO strategy6_backtest_parameter_sets
+           (run_id, parameter_set_id, config_hash, parameter_json, status, reject_reason)
+           VALUES (?, ?, ?, ?, ?, ?)
+           ON CONFLICT(run_id, parameter_set_id) DO UPDATE SET
+             status=excluded.status, reject_reason=excluded.reject_reason''',
+        (
+            run_id, item["parameter_set_id"], item["config_hash"],
+            json.dumps(item.get("parameters") or {}, ensure_ascii=False, sort_keys=True),
+            item.get("status", "PENDING"), item.get("reject_reason"),
+        ),
+    )
+    conn.commit()
+
+
+def replace_strategy6_backtest_signals(
+    run_id: str,
+    parameter_set_id: str,
+    code: str,
+    signals: list[dict],
+) -> None:
+    conn = get_conn()
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        conn.execute(
+            "DELETE FROM strategy6_backtest_signals WHERE run_id=? AND parameter_set_id=? AND code=?",
+            (run_id, parameter_set_id, code),
+        )
+        conn.executemany(
+            '''INSERT INTO strategy6_backtest_signals
+               (run_id, parameter_set_id, code, name, evaluation_date,
+                setup_id, tail_path, candidate_type, snapshot_json)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+            [
+                (
+                    run_id, parameter_set_id, code, item.get("name", ""),
+                    item["evaluation_date"], item["setup_id"], item["tail_path"],
+                    item["candidate_type"],
+                    json.dumps(item.get("snapshot") or {}, ensure_ascii=False, sort_keys=True),
+                )
+                for item in signals
+            ],
+        )
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+
+
+def get_strategy6_backtest_signals(run_id: str, parameter_set_id: str) -> list[dict]:
+    rows = get_conn().execute(
+        '''SELECT code, name, evaluation_date, setup_id, tail_path,
+                  candidate_type, snapshot_json
+           FROM strategy6_backtest_signals
+           WHERE run_id=? AND parameter_set_id=?
+           ORDER BY evaluation_date, code''',
+        (run_id, parameter_set_id),
+    ).fetchall()
+    result = []
+    for row in rows:
+        result.append({
+            "code": row[0], "name": row[1], "evaluation_date": row[2],
+            "setup_id": row[3], "tail_path": row[4], "candidate_type": row[5],
+            "snapshot": json.loads(row[6] or "{}"),
+        })
+    return result
+
+
+def replace_strategy6_backtest_orders(
+    run_id: str,
+    parameter_set_id: str,
+    code: str,
+    orders: list[dict],
+) -> None:
+    conn = get_conn()
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        conn.execute(
+            "DELETE FROM strategy6_backtest_orders WHERE run_id=? AND parameter_set_id=? AND code=?",
+            (run_id, parameter_set_id, code),
+        )
+        conn.executemany(
+            '''INSERT INTO strategy6_backtest_orders
+               (order_id, run_id, parameter_set_id, setup_id, code,
+                signal_date, status, detail_json)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)''',
+            [
+                (
+                    item["order_id"], run_id, parameter_set_id, item["setup_id"], code,
+                    item["signal_date"], item["status"],
+                    json.dumps(item, ensure_ascii=False, sort_keys=True),
+                )
+                for item in orders
+            ],
+        )
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+
+
+def replace_strategy6_backtest_trades(
+    run_id: str,
+    parameter_set_id: str,
+    code: str,
+    trades: list[dict],
+) -> None:
+    conn = get_conn()
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        conn.execute(
+            "DELETE FROM strategy6_backtest_trades WHERE run_id=? AND parameter_set_id=? AND code=?",
+            (run_id, parameter_set_id, code),
+        )
+        conn.executemany(
+            '''INSERT INTO strategy6_backtest_trades
+               (trade_id, run_id, parameter_set_id, setup_id, code,
+                signal_date, entry_date, exit_date, net_return, r_multiple, detail_json)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+            [
+                (
+                    item["trade_id"], run_id, parameter_set_id, item["setup_id"], code,
+                    item["signal_date"], item.get("entry_date", ""), item.get("exit_date", ""),
+                    item.get("net_return", 0), item.get("r_multiple", 0),
+                    json.dumps(item, ensure_ascii=False, sort_keys=True),
+                )
+                for item in trades
+            ],
+        )
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+
+
+def save_strategy6_backtest_stock_progress(
+    run_id: str,
+    parameter_set_id: str,
+    code: str,
+    *,
+    name: str = "",
+    status: str,
+    signals_count: int = 0,
+    orders_count: int = 0,
+    trades_count: int = 0,
+    error_message: str = "",
+) -> None:
+    conn = get_conn()
+    conn.execute(
+        '''INSERT INTO strategy6_backtest_stock_progress
+           (run_id, parameter_set_id, code, name, status, signals_count,
+            orders_count, trades_count, error_message, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+           ON CONFLICT(run_id, parameter_set_id, code) DO UPDATE SET
+             name=excluded.name, status=excluded.status,
+             signals_count=excluded.signals_count,
+             orders_count=excluded.orders_count,
+             trades_count=excluded.trades_count,
+             error_message=excluded.error_message,
+             updated_at=datetime('now')''',
+        (
+            run_id, parameter_set_id, code, name, status,
+            signals_count, orders_count, trades_count, error_message,
+        ),
+    )
+    conn.commit()
+
+
+def get_completed_strategy6_backtest_codes(run_id: str, parameter_set_id: str) -> set[str]:
+    rows = get_conn().execute(
+        '''SELECT code FROM strategy6_backtest_stock_progress
+           WHERE run_id=? AND parameter_set_id=?
+             AND (status='COMPLETED' OR status LIKE 'SKIPPED_%') ''',
+        (run_id, parameter_set_id),
+    ).fetchall()
+    return {row[0] for row in rows}
+
+
+def save_strategy6_backtest_metric(
+    run_id: str,
+    parameter_set_id: str,
+    phase: str,
+    scope: str,
+    metrics: dict,
+) -> None:
+    conn = get_conn()
+    conn.execute(
+        '''INSERT INTO strategy6_backtest_metrics
+           (run_id, parameter_set_id, phase, scope, metric_json)
+           VALUES (?, ?, ?, ?, ?)
+           ON CONFLICT(run_id, parameter_set_id, phase, scope) DO UPDATE SET
+             metric_json=excluded.metric_json''',
+        (
+            run_id, parameter_set_id, phase, scope,
+            json.dumps(metrics or {}, ensure_ascii=False, sort_keys=True),
+        ),
+    )
+    conn.commit()
+
+
+def get_strategy6_backtest_metrics(run_id: str, *, allow_oos: bool = False) -> list[dict]:
+    rows = get_conn().execute(
+        '''SELECT parameter_set_id, phase, scope, metric_json
+           FROM strategy6_backtest_metrics WHERE run_id=?
+           ORDER BY parameter_set_id, phase, scope''',
+        (run_id,),
+    ).fetchall()
+    if not allow_oos and any(str(row[1]).upper().startswith("OOS") for row in rows):
+        raise PermissionError("OOS metrics are locked")
+    return [
+        {
+            "parameter_set_id": row[0], "phase": row[1], "scope": row[2],
+            "metrics": json.loads(row[3] or "{}"),
+        }
+        for row in rows
+    ]
 
 
 def _ensure_candidate_columns(conn: sqlite3.Connection):

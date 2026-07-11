@@ -109,6 +109,8 @@ npm --prefix web run preview
 - **策略6生命周期：** 候选按股票维护 START_CONFIRMED/SETUP_FORMING/READY/BUY_ZONE/EXTENDED/FAILED/EXPIRED/COOLDOWN，FAILED 冷却10个交易日、EXPIRED冷却5个交易日，同事件只允许在支撑恢复并重新确认后入池。全局生命周期、任务审计快照和活跃候选必须在同一事务内写入。
 - **策略6稳定箱体双路径（V4.1）：** 原 `evaluate_dry_tail()` 零改动；`strategy6/box_tail.py` 在整理阶段枚举5-30日箱体，结构边界排除最后两日，最后两日用于跌破和当前位置确认。`tail_pass=original OR box`，`BOTH` 取较高路径分，失败箱体不得改变原路径分数。
 - **策略6紧密K线：** 最近配置窗口（默认5日）的实体、收盘集中、相邻重叠、跳空、ATR收缩和现有放量下跌共同生成 `BOX_COMPACT_READY`。该结果不是箱体硬条件，`compact_kline_score` 只参与箱体窗口择优，禁止进入最终 `tail_score`。
+- **策略6回测研究：** `strategy6/backtest/` 使用 `AS_OF_REBUILD` 和冻结正式入口，保存参数集、信号、订单、交易、指标与逐股进度。信号日不成交，执行T+1、一字涨跌停、缺失K线、费用、滑点和组合资金约束；同日止损目标按止损优先。当前股票池存在幸存者偏差，只能输出 `RESEARCH_ONLY_CURRENT_UNIVERSE`。
+- **策略6OOS与指数门禁：** 2026年起为锁定OOS，P0-P3不得读取收益。历史回测必须使用真实上证、深证、创业板和沪深300同日数据；任何指数覆盖不足均返回 `BLOCKED_INDEX_HISTORY`，禁止关闭市场过滤冒充生产基线。
 - **形态评分维度：** 杯体结构 35 + 柄部结构 25 + 成交量结构 20 + 前置趋势 10 + 突破确认 10 = 100 分。
 - **A股配色：** 红涨绿跌。金色仅用于 ≥80 分 A 级信号。
 - **SQLite 持久化：** 数据存储于 `data/cuphandle.db`（stock_pool, daily_ohlc, scan_tasks, candidates）。线程级连接 + WAL 模式。
