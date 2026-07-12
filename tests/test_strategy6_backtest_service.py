@@ -6,6 +6,7 @@ from strategy6.backtest.runner import (
     _evaluate_stock_payload,
     _initialize_stock_worker,
     _stock_result_validation_error,
+    _is_research_run_complete,
     resolve_run_completion_status,
 )
 
@@ -81,6 +82,9 @@ def test_run_with_any_failed_stock_is_not_marked_clean_completed():
     assert resolve_run_completion_status(total=100, completed=99, skipped=0, failed=1) == "COMPLETED_WITH_ERRORS"
     assert resolve_run_completion_status(total=100, completed=90, skipped=10, failed=0) == "COMPLETED_WITH_SKIPS"
     assert resolve_run_completion_status(total=100, completed=90, skipped=0, failed=0) == "INCOMPLETE"
+    assert _is_research_run_complete("COMPLETED") is True
+    assert _is_research_run_complete("COMPLETED_WITH_SKIPS") is True
+    assert _is_research_run_complete("COMPLETED_WITH_ERRORS") is False
 
 
 def test_process_worker_evaluates_raw_stock_rows_without_database_access():

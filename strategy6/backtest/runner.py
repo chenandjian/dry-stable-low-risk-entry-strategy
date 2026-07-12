@@ -136,7 +136,7 @@ def run_cli_research(args, coverage) -> int:
                 "parameter_set_id": result["parameter_set_id"],
                 **selector_metrics,
                 **robust,
-                "constraint_passed": constraint["passed"] and result["run"]["status"] == "COMPLETED",
+                "constraint_passed": constraint["passed"] and _is_research_run_complete(result["run"]["status"]),
                 "constraint_checks": constraint["checks"],
                 "parameters": strategy_config.get("box_tail", {}),
             })
@@ -470,3 +470,7 @@ def resolve_run_completion_status(*, total: int, completed: int, skipped: int, f
     if skipped > 0:
         return "COMPLETED_WITH_SKIPS"
     return "COMPLETED"
+
+
+def _is_research_run_complete(status: str) -> bool:
+    return status in {"COMPLETED", "COMPLETED_WITH_SKIPS"}
