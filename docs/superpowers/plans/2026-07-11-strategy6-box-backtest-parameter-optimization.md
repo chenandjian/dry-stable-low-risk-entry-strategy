@@ -8,6 +8,8 @@
 
 **技术栈：** Python 3.10+、dataclasses、SQLite、pytest、现有Strategy6引擎、JSON/CSV/Markdown。
 
+**完成状态（2026-07-12）：** P0-P3已完成实现、真实全市场运行、压力验证和报告交付；P4 OOS按设计保持锁定，未运行。真实结论为 `KEEP_DEFAULT / REJECT_BOX_EXPANSION`，详见 `docs/reviews/2026-07-12-strategy6-box-backtest-parameter-optimization-final-report.md`。
+
 ---
 
 ### 任务1：数据模型、运行配置与OOS保护
@@ -168,4 +170,3 @@
 - [ ] 运行全部策略6回测测试、策略6测试、后端全量回归和compileall。
 - [ ] 验证真实报告可追溯到策略提交、参数、数据指纹和信号快照。
 - [ ] 提交并推送 `codex/strategy6-strong-vcp-tail`，保持工作区干净。
-
