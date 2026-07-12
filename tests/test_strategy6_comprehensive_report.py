@@ -3,6 +3,7 @@ import json
 
 from scanner import db
 from strategy6.backtest.comprehensive_report import (
+    build_coarse_gate_audit,
     determine_recommendation,
     write_comprehensive_report,
 )
@@ -82,3 +83,22 @@ def test_completed_campaign_rejects_upgrade_when_validation_or_stress_fails():
         all_frozen=True,
         execution={"validation_confirmed": True, "stress_passed": True},
     ) == "RECOMMEND"
+
+
+def test_coarse_gate_audit_reports_stage_and_campaign_pass_counts():
+    passing = {
+        "trades": 6, "expectancy_r": 0.05, "profit_factor": 1.10,
+        "avg_win_r": 2.0, "avg_loss_r": 1.0, "max_drawdown": 0.25,
+    }
+    trials = [
+        {"stage_id": "one", "trial_kind": "OAT", "status": "COMPLETED", "selection_metrics": passing},
+        {"stage_id": "one", "trial_kind": "OAT", "status": "COMPLETED", "selection_metrics": {**passing, "trades": 5}},
+        {"stage_id": "two", "trial_kind": "JOINT", "status": "COMPLETED", "selection_metrics": passing},
+    ]
+
+    audit = build_coarse_gate_audit(trials, evaluation_step=5)
+
+    assert audit["oat_trial_count"] == 2
+    assert audit["passed_count"] == 1
+    assert audit["stage_counts"] == {"one": {"total": 2, "passed": 1}}
+    assert audit["concentration_deferred"] is True

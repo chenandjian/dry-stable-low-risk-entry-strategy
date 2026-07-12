@@ -45,6 +45,9 @@ def initialize_campaign(
             manifest.get("base_config") != base_config
             or existing["strategy_git_commit"] != strategy_git_commit
             or existing["data_version"] != data_version
+            or int(manifest.get("random_seed", -1)) != int(random_seed)
+            or int(manifest.get("max_joint_trials", -1)) != int(max_joint_trials)
+            or int(manifest.get("evaluation_step", -1)) != int(evaluation_step)
         ):
             raise ValueError("campaign identity conflicts with existing campaign")
         return campaign_status(campaign_id)
@@ -100,6 +103,15 @@ def assert_campaign_data_version(campaign: dict, current_data_version: str) -> N
             "strategy6 optimization data version changed; create a new campaign "
             "instead of mixing snapshots"
         )
+
+
+def assert_campaign_run_identity(campaign: dict, args) -> None:
+    manifest = campaign.get("manifest") or {}
+    if (
+        int(manifest.get("evaluation_step", -1)) != int(args.evaluation_step)
+        or int(manifest.get("max_joint_trials", -1)) != int(args.max_joint_trials)
+    ):
+        raise ValueError("campaign identity conflicts with run arguments")
 
 
 def assert_stage_can_start(stages: list[dict], stage_id: str) -> None:
@@ -492,6 +504,7 @@ def run_comprehensive_cli(args, coverage) -> int:
         return 0
 
     current = campaign_status(args.campaign_id)
+    assert_campaign_run_identity(current["campaign"], args)
     assert_campaign_data_version(current["campaign"], data_version)
     stage_id = str(args.stage_id or "")
     if not stage_id:
@@ -668,6 +681,7 @@ def execute_campaign_execution_tuning(
         "validation_metrics": validation_metrics,
         "validation_confirmation": confirmation,
         "stress_acceptance": stress_acceptance,
+        "stress_results": stress,
         "trial_count": len(candidates),
     }
     _save_execution_manifest(status["campaign"], result)

@@ -5,6 +5,7 @@ import pytest
 from scanner import db
 from strategy6.backtest.cli import build_parser
 from strategy6.backtest.comprehensive_runner import (
+    assert_campaign_run_identity,
     assert_stage_can_start,
     campaign_status,
     execute_campaign_stage,
@@ -50,6 +51,34 @@ def test_campaign_initialization_is_idempotent_and_creates_seven_pending_stages(
     assert len(status["stages"]) == 7
     assert [item["stage_order"] for item in status["stages"]] == list(range(1, 8))
     assert len({item["stage_id"] for item in status["stages"]}) == 7
+
+
+def test_campaign_resume_rejects_different_search_identity(tmp_path):
+    db.init_db(str(tmp_path / "identity.db"))
+    kwargs = dict(
+        campaign_id="c1", base_config=DEFAULT_STRATEGY6_CONFIG,
+        strategy_git_commit="abc", data_version="v1", random_seed=7,
+        max_joint_trials=12, evaluation_step=5,
+    )
+    initialize_campaign(**kwargs)
+
+    for changed in (
+        {**kwargs, "evaluation_step": 1},
+        {**kwargs, "random_seed": 8},
+        {**kwargs, "max_joint_trials": 24},
+    ):
+        with pytest.raises(ValueError, match="campaign identity"):
+            initialize_campaign(**changed)
+
+
+def test_campaign_run_rejects_cli_budget_or_step_different_from_manifest():
+    campaign = {"manifest": {"evaluation_step": 5, "max_joint_trials": 24}}
+
+    assert_campaign_run_identity(campaign, Namespace(evaluation_step=5, max_joint_trials=24))
+    with pytest.raises(ValueError, match="campaign identity"):
+        assert_campaign_run_identity(campaign, Namespace(evaluation_step=1, max_joint_trials=24))
+    with pytest.raises(ValueError, match="campaign identity"):
+        assert_campaign_run_identity(campaign, Namespace(evaluation_step=5, max_joint_trials=12))
 
 
 def test_stage_cannot_start_until_all_previous_stages_are_frozen():

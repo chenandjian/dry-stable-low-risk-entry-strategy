@@ -39,6 +39,22 @@ def load_index_history(start_date: str, end_date: str) -> IndexHistoryResult:
             or str(info.get("max_date") or "") < end_date
         ):
             missing.append(logical_symbol)
+    expected_dates = {
+        str(row.get("date") or "")
+        for rows in data.values()
+        for row in rows
+        if start_date <= str(row.get("date") or "") <= end_date
+    }
+    for logical_symbol, rows in data.items():
+        actual_dates = {
+            str(row.get("date") or "")
+            for row in rows
+            if start_date <= str(row.get("date") or "") <= end_date
+        }
+        missing_dates = sorted(expected_dates - actual_dates)
+        coverage[logical_symbol] = {**coverage[logical_symbol], "missing_dates": missing_dates}
+        if missing_dates and logical_symbol not in missing:
+            missing.append(logical_symbol)
     return IndexHistoryResult(
         status="READY" if not missing else "BLOCKED_INDEX_HISTORY",
         data_by_symbol=data,

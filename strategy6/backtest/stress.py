@@ -65,9 +65,6 @@ def build_stress_scenarios(base_config: dict) -> list[dict]:
     delayed["execution"]["entry_delay_days"] = 1
     scenarios.append({"name": "ONE_DAY_DELAY", "config": delayed})
 
-    perturbed = copy.deepcopy(base_config)
-    perturbed["parameter_perturbation_pct"] = 0.05
-    scenarios.append({"name": "PARAMETER_PERTURBATION", "config": perturbed})
     return scenarios
 
 
@@ -75,9 +72,6 @@ def replay_stress_scenarios(signals, *, load_rows, market_dates: list[str], base
     results = {}
     for scenario in build_stress_scenarios(base_config):
         name = scenario["name"]
-        if name == "PARAMETER_PERTURBATION":
-            results[name] = {"status": "COVERED_BY_PARAMETER_TRIALS", "orders": 0, "metrics": {}}
-            continue
         orders = 0
         trades = []
         seen: set[str] = set()

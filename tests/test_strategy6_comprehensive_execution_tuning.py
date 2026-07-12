@@ -7,6 +7,7 @@ from strategy6.backtest.stress import (
     build_execution_tuning_configs,
     evaluate_stress_acceptance,
     replay_frozen_signals,
+    replay_stress_scenarios,
     validate_replay_config,
 )
 from strategy6.backtest.models import BacktestSignal
@@ -88,3 +89,34 @@ def test_execution_replay_uses_frozen_signals_without_strategy_reevaluation():
     assert result["metrics"]["trades"] == 1
     assert result["trades"][0]["signal_date"] == "2025-01-02"
     assert result["setup_ids"] == ["frozen-setup"]
+
+
+def test_stress_replay_returns_auditable_metrics_for_exactly_three_scenarios():
+    signal = BacktestSignal(
+        parameter_set_id="p1", code="000001", name="样本",
+        evaluation_date="2025-01-02", setup_id="stress-setup",
+        tail_path="BOX", candidate_type="KEY_CANDIDATE",
+        snapshot={
+            "buy_zone_low": 9.8, "buy_zone_high": 10.2,
+            "suggested_limit_price": 10.0, "stop_loss_price": 9.5,
+            "objective_target_2": 11.5,
+        },
+    )
+    rows = [
+        {"date": "2025-01-02", "open": 10, "high": 10, "low": 10, "close": 10, "volume": 1000},
+        {"date": "2025-01-03", "open": 10, "high": 10.2, "low": 9.8, "close": 10, "volume": 1000},
+        {"date": "2025-01-06", "open": 11.5, "high": 11.6, "low": 11.4, "close": 11.5, "volume": 1000},
+    ]
+
+    result = replay_stress_scenarios(
+        [signal], load_rows=lambda code: rows,
+        market_dates=[item["date"] for item in rows],
+        base_config=resolve_backtest_config({}),
+    )
+
+    assert set(result) == {"BASE", "HIGH_COST", "LOW_FILL", "ONE_DAY_DELAY"}
+    for scenario in result.values():
+        assert scenario["status"] == "COMPLETED"
+        assert "orders" in scenario
+        assert "unfilled_rate" in scenario
+        assert "metrics" in scenario

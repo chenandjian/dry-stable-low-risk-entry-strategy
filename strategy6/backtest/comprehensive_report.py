@@ -9,6 +9,7 @@ from pathlib import Path
 from scanner import db
 from strategy6.backtest.comprehensive_runner import campaign_status
 from strategy6.backtest.parameter_registry import build_comprehensive_registry
+from strategy6.backtest.selector import evaluate_coarse_gates
 
 
 FIXED_PARAMETER_REASONS = {
@@ -33,6 +34,29 @@ def determine_recommendation(*, all_frozen: bool, execution: dict) -> str:
     return "RECOMMEND"
 
 
+def build_coarse_gate_audit(trials: list[dict], *, evaluation_step: int) -> dict:
+    stage_counts: dict[str, dict[str, int]] = {}
+    for trial in trials:
+        if trial.get("trial_kind") != "OAT":
+            continue
+        if trial.get("status") not in {"COMPLETED", "COMPLETED_WITH_SKIPS"}:
+            continue
+        stage_id = str(trial.get("stage_id") or "")
+        counts = stage_counts.setdefault(stage_id, {"total": 0, "passed": 0})
+        counts["total"] += 1
+        if evaluate_coarse_gates(
+            trial.get("selection_metrics") or {}, evaluation_step=evaluation_step,
+        )["passed"]:
+            counts["passed"] += 1
+    return {
+        "evaluation_step": evaluation_step,
+        "oat_trial_count": sum(item["total"] for item in stage_counts.values()),
+        "passed_count": sum(item["passed"] for item in stage_counts.values()),
+        "stage_counts": stage_counts,
+        "concentration_deferred": True,
+    }
+
+
 def write_comprehensive_report(
     campaign_id: str,
     output_dir: str | Path,
@@ -44,6 +68,7 @@ def write_comprehensive_report(
     trials = db.get_strategy6_optimization_trials(campaign_id)
     all_frozen = bool(status["stages"]) and all(item["status"] == "FROZEN" for item in status["stages"])
     execution = (status["campaign"].get("manifest") or {}).get("execution_tuning") or {}
+    evaluation_step = int((status["campaign"].get("manifest") or {}).get("evaluation_step", 5))
     recommendation = determine_recommendation(all_frozen=all_frozen, execution=execution)
 
     selected_config = _selected_config(status, production_config)
@@ -56,11 +81,13 @@ def write_comprehensive_report(
         "production_config_diff": config_diff,
         "production_config_modified": False,
         "oos_locked": True,
+        "coarse_gate_audit": build_coarse_gate_audit(trials, evaluation_step=evaluation_step),
     }
     _write_parameter_dictionary(output / "parameter_dictionary.csv", production_config)
     _write_csv(output / "stage_trials.csv", [_trial_csv_row(item) for item in trials])
 
     run_id, parameter_set_id = _selected_full_run(status, trials)
+    payload["selected_run"] = db.get_strategy6_backtest_run(run_id) if run_id else None
     payload["selected_run_metrics"] = db.get_strategy6_backtest_metrics(run_id) if run_id else []
     (output / "campaign.json").write_text(
         json.dumps(_json_safe(payload), ensure_ascii=False, indent=2, default=str, allow_nan=False),
@@ -243,7 +270,8 @@ def _render_markdown(payload: dict, run_id: str) -> str:
         "",
         f"- 结论：`{payload['recommendation']}`",
         f"- Campaign：`{campaign['campaign_id']}`",
-        f"- Git：`{campaign['strategy_git_commit']}`",
+        f"- 原始七阶段实验 Git：`{campaign['strategy_git_commit']}`",
+        f"- 最终审计重跑 Git：`{(payload.get('selected_run') or {}).get('strategy_git_commit') or '无'}`",
         f"- 数据版本：`{campaign['data_version']}`",
         f"- 最终完整回测：`{run_id or '无'}`",
         "- 生产配置未自动修改。",
@@ -260,6 +288,13 @@ def _render_markdown(payload: dict, run_id: str) -> str:
             f"{stage.get('decision') or ''} | {stage.get('selected_parameter_set_id') or ''} |"
         )
     lines.extend([
+        "",
+        "## 修正后粗筛门槛复核",
+        "",
+        f"- 步长：`{payload['coarse_gate_audit']['evaluation_step']}` 个交易日。",
+        f"- OAT试验：`{payload['coarse_gate_audit']['oat_trial_count']}` 组。",
+        f"- 通过修正后粗筛门槛：`{payload['coarse_gate_audit']['passed_count']}` 组。",
+        "- 粗筛阶段按步长折算最低交易样本；集中度门槛延后到逐日完整验证。",
         "",
         "## 参数差异",
         "",
@@ -285,17 +320,39 @@ def _render_markdown(payload: dict, run_id: str) -> str:
             )
     else:
         lines.append("- 尚无完整训练/验证指标。")
+    execution = (payload["campaign"].get("manifest") or {}).get("execution_tuning") or {}
+    stress_checks = (execution.get("stress_acceptance") or {}).get("checks") or {}
+    stress_results = execution.get("stress_results") or {}
     lines.extend([
         "",
         "## 执行参数与压力测试",
         "",
-        f"- `{json.dumps((payload['campaign'].get('manifest') or {}).get('execution_tuning') or {}, ensure_ascii=False, default=str)}`",
+        f"- 执行参数试验：`{execution.get('trial_count', 0)}` 组。",
+        f"- 保留默认买入有效期：`{execution.get('buy_zone_valid_days', '--')}` 个交易日。",
+        f"- 保留默认最大持有期：`{execution.get('max_holding_days', '--')}` 个交易日。",
+        f"- 2025验证确认：`{'通过' if execution.get('validation_confirmed') else '未通过'}`。",
+        f"- 高成本压力：`{'通过' if stress_checks.get('HIGH_COST') else '未通过'}`。",
+        f"- 70%成交率压力：`{'通过' if stress_checks.get('LOW_FILL') else '未通过'}`。",
+        f"- 延迟一个交易日压力：`{'通过' if stress_checks.get('ONE_DAY_DELAY') else '未通过'}`。",
+        "",
+        "| 场景 | 订单 | 未成交率 | 闭合交易 | 期望R | PF |",
+        "| --- | ---: | ---: | ---: | ---: | ---: |",
+    ])
+    for name in ("BASE", "HIGH_COST", "LOW_FILL", "ONE_DAY_DELAY"):
+        item = stress_results.get(name) or {}
+        metrics = item.get("metrics") or {}
+        lines.append(
+            f"| {name} | {item.get('orders', 0)} | {float(item.get('unfilled_rate', 0)):.2%} | "
+            f"{metrics.get('trades', 0)} | {float(metrics.get('expectancy_r', 0)):.4f} | "
+            f"{float(metrics.get('profit_factor', 0)):.4f} |"
+        )
+    lines.extend([
         "",
         "## 风险披露",
         "",
         "- 股票池为当前股票池，存在幸存者偏差。",
         "- 历史证券状态信息不完整。",
-        "- 只有全部阶段、验证和压力测试完成后，结论才可升级为正式推荐。",
+        "- 七阶段、验证和压力测试均已执行，但验证与三类压力未通过，因此拒绝正式参数升级。",
         "",
     ])
     return "\n".join(lines)

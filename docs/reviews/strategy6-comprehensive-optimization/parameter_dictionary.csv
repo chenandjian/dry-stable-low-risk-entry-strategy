@@ -1,0 +1,105 @@
+﻿stage,key,default,candidates,type,reason
+4-支撑、振幅和回撤,absolute_max_amp_10d,0.5,"[0.4, 0.45, 0.5]",float,本轮直接调优
+4-支撑、振幅和回撤,absolute_max_pullback_20d,-0.35,"[-0.25, -0.3, -0.35]",float,本轮直接调优
+1-流动性与相对强度,amount10_vs_30_min_ratio,0.8,"[0.7, 0.8, 0.9, 1.0]",float,本轮直接调优
+5-原尾部量干价稳,big_down_return,-0.07,"[-0.05, -0.06, -0.07]",float,本轮直接调优
+5-原尾部量干价稳,big_down_volume_ratio,1.5,"[1.2, 1.5, 2.0]",float,本轮直接调优
+6-箱体与紧密K线,box_tail.breakout_ready_position_min,0.75,"[0.65, 0.75, 0.85]",float,本轮直接调优
+6-箱体与紧密K线,box_tail.broken_close_tolerance,0.03,"[0.02, 0.03, 0.05]",float,本轮直接调优
+6-箱体与紧密K线,box_tail.compact_kline.atr_contraction_ratio_max,0.8,"[0.65, 0.8, 0.95]",float,本轮直接调优
+6-箱体与紧密K线,box_tail.compact_kline.avg_body_ratio_max,0.025,"[0.018, 0.025, 0.035]",float,本轮直接调优
+6-箱体与紧密K线,box_tail.compact_kline.close_range_max,0.05,"[0.03, 0.05, 0.07]",float,本轮直接调优
+固定参数,box_tail.compact_kline.enabled,true,,fixed,本轮设计未列入搜索空间，保持生产语义
+6-箱体与紧密K线,box_tail.compact_kline.max_body_ratio_max,0.04,"[0.03, 0.04, 0.05]",float,本轮直接调优
+6-箱体与紧密K线,box_tail.compact_kline.max_gap_ratio,0.03,"[0.02, 0.03, 0.05]",float,本轮直接调优
+6-箱体与紧密K线,box_tail.compact_kline.min_overlap_pair_count,3,"[1, 2, 3, 4, 5, 6]",int,本轮直接调优
+6-箱体与紧密K线,box_tail.compact_kline.min_overlap_ratio,0.5,"[0.4, 0.5, 0.6]",float,本轮直接调优
+固定参数,box_tail.compact_kline.premium_atr_contraction_ratio_max,0.65,,fixed,本轮设计未列入搜索空间，保持生产语义
+固定参数,box_tail.compact_kline.premium_avg_body_ratio_max,0.018,,fixed,本轮设计未列入搜索空间，保持生产语义
+固定参数,box_tail.compact_kline.premium_close_range_max,0.03,,fixed,本轮设计未列入搜索空间，保持生产语义
+固定参数,box_tail.compact_kline.premium_overlap_ratio,0.65,,fixed,本轮设计未列入搜索空间，保持生产语义
+6-箱体与紧密K线,box_tail.compact_kline.window_days,5,"[3, 5, 7]",int,本轮直接调优
+6-箱体与紧密K线,box_tail.current_close_high_tolerance,0.03,"[0.02, 0.03, 0.05]",float,本轮直接调优
+6-箱体与紧密K线,box_tail.current_close_low_tolerance,0.03,"[0.02, 0.03, 0.05]",float,本轮直接调优
+固定参数,box_tail.enabled,true,,fixed,本轮设计未列入搜索空间，保持生产语义
+6-箱体与紧密K线,box_tail.low_test_close_tolerance_down,0.02,"[0.01, 0.02, 0.03]",float,本轮直接调优
+6-箱体与紧密K线,box_tail.low_test_tolerance_up,0.02,"[0.01, 0.02, 0.03]",float,本轮直接调优
+6-箱体与紧密K线,box_tail.max_box_days,30,"[20, 25, 30]",int,本轮直接调优
+6-箱体与紧密K线,box_tail.max_volume_contraction_ratio,0.85,"[0.7, 0.8, 0.85, 0.9]",float,本轮直接调优
+6-箱体与紧密K线,box_tail.min_box_days,5,"[5, 7, 10]",int,本轮直接调优
+6-箱体与紧密K线,box_tail.min_box_low_test_count,2,"[2, 3]",int,本轮直接调优
+6-箱体与紧密K线,box_tail.min_center_shift,-0.03,"[-0.01, -0.02, -0.03]",float,本轮直接调优
+6-箱体与紧密K线,box_tail.normal_box_width_max,0.18,"[0.12, 0.15, 0.18, 0.2]",float,本轮直接调优
+6-箱体与紧密K线,box_tail.premium_box_width_max,0.12,"[0.08, 0.1, 0.12]",float,本轮直接调优
+6-箱体与紧密K线,box_tail.premium_center_shift,0.0,"[-0.01, 0.0, 0.01]",float,本轮直接调优
+6-箱体与紧密K线,box_tail.premium_tail_volume_ratio_max,0.6,"[0.5, 0.6, 0.7]",float,本轮直接调优
+6-箱体与紧密K线,box_tail.premium_volume_contraction_ratio,0.7,"[0.6, 0.7, 0.8]",float,本轮直接调优
+6-箱体与紧密K线,box_tail.support_ready_position_max,0.4,"[0.3, 0.4, 0.5]",float,本轮直接调优
+6-箱体与紧密K线,box_tail.tail_volume_ratio_max,0.75,"[0.6, 0.7, 0.75, 0.8]",float,本轮直接调优
+固定参数,breakout_extended_max_pct,0.08,,fixed,本轮设计未列入搜索空间，保持生产语义
+固定参数,buy_zone_valid_days,3,,fixed,本轮设计未列入搜索空间，保持生产语义
+固定参数,consolidation_max_days,40,,fixed,本轮设计未列入搜索空间，保持生产语义
+固定参数,consolidation_min_days,5,,fixed,本轮设计未列入搜索空间，保持生产语义
+3-形态,cup_depth_max,0.35,"[0.3, 0.35, 0.4]",float,本轮直接调优
+3-形态,cup_depth_min,0.12,"[0.1, 0.12, 0.15]",float,本轮直接调优
+固定参数,enable_market_filter,true,,fixed,市场环境语义固定
+固定参数,enabled,true,,fixed,系统开关，不参与收益调优
+固定参数,expired_cooldown_days,5,,fixed,候选生命周期语义固定
+固定参数,failed_cooldown_days,10,,fixed,候选生命周期语义固定
+7-评分、盈亏比和交易计划,key_min_score,75,"[70, 75, 80]",int,本轮直接调优
+固定参数,kline_days,1100,,fixed,数据覆盖边界，不参与收益调优
+2-强势启动与有效年龄,limit_up_volume_ratio,1.5,"[1.2, 1.5, 2.0]",float,本轮直接调优
+2-强势启动与有效年龄,low_volume_limit_up_min_ratio,0.6,"[0.5, 0.6, 0.75]",float,本轮直接调优
+1-流动性与相对强度,ma50_min_ratio,0.92,"[0.9, 0.92, 0.95, 0.98]",float,本轮直接调优
+固定参数,market_filter_mode,"""downgrade""",,fixed,市场环境语义固定
+4-支撑、振幅和回撤,max_amp_10d_a,0.4,由 grade_risk_profile 成组生成,group_member,禁止单独变化，避免S/A/B规则交叉
+4-支撑、振幅和回撤,max_amp_10d_b,0.35,由 grade_risk_profile 成组生成,group_member,禁止单独变化，避免S/A/B规则交叉
+4-支撑、振幅和回撤,max_amp_10d_s,0.45,由 grade_risk_profile 成组生成,group_member,禁止单独变化，避免S/A/B规则交叉
+4-支撑、振幅和回撤,max_amp_5d_a,0.22,由 grade_risk_profile 成组生成,group_member,禁止单独变化，避免S/A/B规则交叉
+4-支撑、振幅和回撤,max_amp_5d_b,0.18,由 grade_risk_profile 成组生成,group_member,禁止单独变化，避免S/A/B规则交叉
+4-支撑、振幅和回撤,max_amp_5d_s,0.25,由 grade_risk_profile 成组生成,group_member,禁止单独变化，避免S/A/B规则交叉
+4-支撑、振幅和回撤,max_pullback_20d_a,-0.26,由 grade_risk_profile 成组生成,group_member,禁止单独变化，避免S/A/B规则交叉
+4-支撑、振幅和回撤,max_pullback_20d_b,-0.22,由 grade_risk_profile 成组生成,group_member,禁止单独变化，避免S/A/B规则交叉
+4-支撑、振幅和回撤,max_pullback_20d_s,-0.3,由 grade_risk_profile 成组生成,group_member,禁止单独变化，避免S/A/B规则交叉
+固定参数,max_watch_days,10,,fixed,候选生命周期语义固定
+1-流动性与相对强度,min_avg_amount_10d_yi,5,"[3, 5, 7, 10]",int,本轮直接调优
+1-流动性与相对强度,min_avg_amount_30d_yi,5,"[3, 5, 7, 10]",int,本轮直接调优
+1-流动性与相对强度,min_avg_amount_60d_yi,3,"[2, 3, 4, 5]",int,本轮直接调优
+1-流动性与相对强度,min_relative_strength_20,0.1,"[0.0, 0.05, 0.1, 0.15]",float,本轮直接调优
+固定参数,minimum_trading_days,500,,fixed,数据可信度边界，不参与收益调优
+2-强势启动与有效年龄,near_120d_high_ratio,0.98,"[0.95, 0.98, 1.0]",float,本轮直接调优
+2-强势启动与有效年龄,normal_start_close_position,0.65,"[0.6, 0.65, 0.7, 0.75]",float,本轮直接调优
+2-强势启动与有效年龄,normal_start_min_amount_yi,2,"[2, 3, 5]",int,本轮直接调优
+2-强势启动与有效年龄,normal_start_return,0.07,"[0.06, 0.07, 0.08, 0.09]",float,本轮直接调优
+2-强势启动与有效年龄,normal_start_self_amount_percentile,0.9,"[0.8, 0.85, 0.9, 0.95]",float,本轮直接调优
+2-强势启动与有效年龄,normal_start_volume_ratio,2.0,"[1.5, 2.0, 2.5, 3.0]",float,本轮直接调优
+固定参数,pattern_filter_enabled,true,,fixed,形态入口语义固定
+固定参数,pattern_filter_mode,"""score_only""",,fixed,形态入口语义固定
+3-形态,pattern_pivot_proximity_pct,0.05,"[0.03, 0.05, 0.07]",float,本轮直接调优
+3-形态,platform_max_range,0.12,"[0.08, 0.1, 0.12, 0.15]",float,本轮直接调优
+7-评分、盈亏比和交易计划,ready_min_score,85,"[80, 85, 90]",int,本轮直接调优
+7-评分、盈亏比和交易计划,rr2_min_key,2.0,"[2.0, 2.5, 3.0]",float,本轮直接调优
+7-评分、盈亏比和交易计划,rr2_min_ready,2.5,"[2.5, 3.0, 3.5]",float,本轮直接调优
+7-评分、盈亏比和交易计划,rr2_min_watch,1.5,"[1.5, 2.0, 2.5]",float,本轮直接调优
+2-强势启动与有效年龄,start_age_max_days,60,"[40, 50, 60, 80]",int,本轮直接调优
+2-强势启动与有效年龄,start_age_min_days,5,"[3, 5, 8]",int,本轮直接调优
+2-强势启动与有效年龄,start_lookback_days,60,"[40, 60, 80]",int,本轮直接调优
+7-评分、盈亏比和交易计划,stop_atr_multiplier,0.8,"[0.6, 0.8, 1.0, 1.2]",float,本轮直接调优
+7-评分、盈亏比和交易计划,stop_key_support_pct,0.03,"[0.02, 0.03, 0.04]",float,本轮直接调优
+4-支撑、振幅和回撤,support_cluster_atr_multiplier,0.5,"[0.3, 0.5, 0.8]",float,本轮直接调优
+4-支撑、振幅和回撤,support_cluster_price_pct,0.015,"[0.01, 0.015, 0.02]",float,本轮直接调优
+4-支撑、振幅和回撤,support_test_lookback,10,"[5, 10, 15, 20]",int,本轮直接调优
+4-支撑、振幅和回撤,support_zone_atr_multiplier,0.3,"[0.2, 0.3, 0.5]",float,本轮直接调优
+4-支撑、振幅和回撤,support_zone_price_pct,0.01,"[0.005, 0.01, 0.015]",float,本轮直接调优
+5-原尾部量干价稳,tail_close_range_5,0.08,"[0.04, 0.06, 0.08, 0.1]",float,本轮直接调优
+5-原尾部量干价稳,tail_min_return_3,-0.04,"[-0.02, -0.03, -0.04, -0.05]",float,本轮直接调优
+5-原尾部量干价稳,tail_min_return_5,-0.06,"[-0.03, -0.05, -0.06, -0.08]",float,本轮直接调优
+5-原尾部量干价稳,tail_strong_volume_ratio_5_20,0.6,"[0.45, 0.55, 0.6, 0.7]",float,本轮直接调优
+5-原尾部量干价稳,tail_volume_ratio_5_20,0.75,"[0.55, 0.65, 0.75, 0.85]",float,本轮直接调优
+5-原尾部量干价稳,tail_window_days,5,"[3, 5, 7, 10]",int,本轮直接调优
+7-评分、盈亏比和交易计划,target_2_cap_pct,0.35,"[0.25, 0.35, 0.45]",float,本轮直接调优
+3-形态,vcp_contraction_range_ratio,0.9,"[0.75, 0.85, 0.9, 0.95]",float,本轮直接调优
+3-形态,vcp_contraction_volume_ratio,0.9,"[0.75, 0.85, 0.9, 0.95]",float,本轮直接调优
+3-形态,vcp_min_first_range,0.08,"[0.06, 0.08, 0.1, 0.12]",float,本轮直接调优
+7-评分、盈亏比和交易计划,watch_min_score,60,"[60, 65, 70]",int,本轮直接调优
+4-支撑、振幅和回撤,grade_risk_profile,"""default""","[""default"", ""strict_5"", ""strict_10""]",group,S/A/B amplitude and pullback thresholds move together
