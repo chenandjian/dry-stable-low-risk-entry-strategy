@@ -125,7 +125,9 @@ def simulate_frozen_trade(
         intraday_stop_breach=float(entry_row["low"]) <= stop_price,
     )
     entry_index = dates.index(trade.entry_date)
-    holding_dates = dates[entry_index + 1: entry_index + 1 + int(execution["max_holding_days"])]
+    max_holding_days = int(execution["max_holding_days"])
+    holding_dates = dates[entry_index + 1: entry_index + 1 + max_holding_days]
+    holding_window_complete = len(holding_dates) >= max_holding_days
     last_observed = None
     exit_previous_close = float(entry_row["close"])
     for trade_date in holding_dates:
@@ -154,7 +156,7 @@ def simulate_frozen_trade(
             _finish_trade(trade, row, _sell_with_slippage(target_price, costs), "TARGET", shares, costs, stop_price)
             break
         exit_previous_close = float(row["close"])
-    if not trade.exit_date and last_observed:
+    if not trade.exit_date and last_observed and holding_window_complete:
         _finish_trade(
             trade, last_observed,
             _sell_with_slippage(float(last_observed["close"]), costs),

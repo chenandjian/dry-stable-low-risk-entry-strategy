@@ -22,6 +22,21 @@ DEFAULT_HARD_GATES = {
 }
 
 
+def evaluate_coarse_gates(metrics: dict, *, evaluation_step: int) -> dict:
+    min_trades = max(1, math.ceil(DEFAULT_HARD_GATES["min_trades"] / max(1, evaluation_step)))
+    avg_win = float(metrics.get("avg_win_r", 0))
+    avg_loss = abs(float(metrics.get("avg_loss_r", 0)))
+    win_loss_ratio = avg_win / avg_loss if avg_loss > 0 else (float("inf") if avg_win > 0 else 0.0)
+    checks = {
+        "min_trades": int(metrics.get("trades", 0)) >= min_trades,
+        "min_expectancy_r": float(metrics.get("expectancy_r", 0)) >= 0.05,
+        "min_profit_factor": float(metrics.get("profit_factor", 0)) >= 1.10,
+        "min_win_loss_ratio": win_loss_ratio >= 2.0,
+        "max_drawdown": float(metrics.get("max_drawdown", float("inf"))) <= 0.25,
+    }
+    return {"passed": all(checks.values()), "checks": checks, "win_loss_ratio": win_loss_ratio}
+
+
 def build_selection_metrics(
     *,
     trade_metrics: dict,
@@ -59,7 +74,12 @@ def evaluate_hard_gates(metrics: dict, gates: dict | None = None) -> dict:
     }
 
 
-def select_stage_trials(trials: list[dict], *, max_finalists: int = 3) -> dict:
+def select_stage_trials(
+    trials: list[dict],
+    *,
+    max_finalists: int = 3,
+    coarse_evaluation_step: int | None = None,
+) -> dict:
     _assert_training_only(trials)
     eligible = []
     rejections: dict[str, list[str]] = {}
@@ -69,7 +89,11 @@ def select_stage_trials(trials: list[dict], *, max_finalists: int = 3) -> dict:
         if trial.get("status") not in {"COMPLETED", "COMPLETED_WITH_SKIPS"}:
             reasons.append("INCOMPLETE_OR_FAILED_TRIAL")
         metrics = trial.get("training_metrics") or {}
-        gate_result = evaluate_hard_gates(metrics)
+        gate_result = (
+            evaluate_coarse_gates(metrics, evaluation_step=coarse_evaluation_step)
+            if coarse_evaluation_step is not None
+            else evaluate_hard_gates(metrics)
+        )
         reasons.extend(key.upper() for key, passed in gate_result["checks"].items() if not passed)
         robust = calculate_robust_score(metrics)
         neighbor = evaluate_neighbor_stability(

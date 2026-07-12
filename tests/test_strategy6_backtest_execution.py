@@ -132,3 +132,20 @@ def test_zero_fill_multiplier_rejects_fill_deterministically():
     outcome = simulate_frozen_trade(_signal(), rows, [row["date"] for row in rows], config)
     assert outcome.order.status == "EXPIRED_NO_FILL"
     assert outcome.order.fill_reason == "STRESS_FILL_RATE_REJECTED"
+
+
+def test_truncated_calendar_does_not_fake_max_holding_exit_before_holding_period():
+    rows = [
+        _row("2024-12-18", 10, 10, 10, 10),
+        _row("2024-12-19", 10, 10.2, 9.8, 10),
+        _row("2024-12-20", 10.1, 10.3, 9.9, 10.1),
+        _row("2024-12-31", 10.2, 10.4, 10.0, 10.2),
+    ]
+    signal = _signal()
+    signal.evaluation_date = "2024-12-18"
+    outcome = simulate_frozen_trade(
+        signal, rows, [row["date"] for row in rows], resolve_backtest_config({}),
+    )
+
+    assert outcome.trade.exit_date == ""
+    assert outcome.trade.exit_reason == "UNRESOLVED_NO_EXIT_BAR"

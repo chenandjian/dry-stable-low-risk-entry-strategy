@@ -3,6 +3,7 @@ import pytest
 from strategy6.backtest.selector import (
     build_selection_metrics,
     confirm_validation_metrics,
+    evaluate_coarse_gates,
     evaluate_hard_gates,
     select_stage_trials,
 )
@@ -165,3 +166,20 @@ def test_infinite_training_profit_factor_does_not_require_infinite_validation_pf
     )
 
     assert result["checks"]["profit_factor_retention_60pct"] is True
+
+
+def test_coarse_gates_scale_sample_floor_and_defer_concentration_to_full_validation():
+    coarse = {
+        **PASSING,
+        "trades": 6,
+        "expectancy_r": 0.05,
+        "profit_factor": 1.10,
+        "avg_win_r": 2.0,
+        "avg_loss_r": 1.0,
+        "max_drawdown": 0.25,
+        "top5_profit_concentration": 1.0,
+        "single_month_profit_concentration": 1.0,
+    }
+
+    assert evaluate_coarse_gates(coarse, evaluation_step=5)["passed"] is True
+    assert evaluate_coarse_gates({**coarse, "trades": 5}, evaluation_step=5)["passed"] is False

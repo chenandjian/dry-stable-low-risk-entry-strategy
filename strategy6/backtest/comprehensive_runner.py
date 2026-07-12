@@ -20,6 +20,7 @@ from strategy6.backtest.optimization import calculate_robust_score
 from strategy6.backtest.parameter_registry import build_comprehensive_registry
 from strategy6.backtest.selector import (
     confirm_validation_metrics,
+    evaluate_coarse_gates,
     evaluate_hard_gates,
     select_stage_trials,
 )
@@ -35,6 +36,7 @@ def initialize_campaign(
     data_version: str,
     random_seed: int,
     max_joint_trials: int,
+    evaluation_step: int = 5,
 ) -> dict:
     existing = db.get_strategy6_optimization_campaign(campaign_id)
     if existing is not None:
@@ -54,6 +56,7 @@ def initialize_campaign(
         "base_parameter_set_id": base_parameter.parameter_set_id,
         "random_seed": int(random_seed),
         "max_joint_trials": int(max_joint_trials),
+        "evaluation_step": int(evaluation_step),
         "stage_ids": [stage.stage_id for stage in registry],
         "oos_start": "2026-01-01",
         "production_config_modified": False,
@@ -162,7 +165,10 @@ def execute_campaign_stage(
     oat_rows = db.get_selectable_strategy6_optimization_trials(campaign_id, stage_id)
     overrides = stage_detail.get("joint_candidate_overrides")
     if not isinstance(overrides, dict):
-        overrides = _approved_joint_candidates(stage_spec, oat_manifest, oat_rows)
+        overrides = _approved_joint_candidates(
+            stage_spec, oat_manifest, oat_rows,
+            evaluation_step=int(manifest_cfg.get("evaluation_step", 5)),
+        )
         stage_detail["joint_candidate_overrides"] = overrides
         db.save_strategy6_optimization_stage({
             **stage_row,
@@ -187,8 +193,14 @@ def execute_campaign_stage(
     stage_detail["trial_count"] = len(manifest)
     selection = stage_detail.get("selector")
     if not isinstance(selection, dict):
-        selector_input = _build_selector_input(completed_rows)
-        selection = select_stage_trials(selector_input)
+        selector_input = _build_selector_input(
+            completed_rows,
+            evaluation_step=int(manifest_cfg.get("evaluation_step", 5)),
+        )
+        selection = select_stage_trials(
+            selector_input,
+            coarse_evaluation_step=int(manifest_cfg.get("evaluation_step", 5)),
+        )
         stage_detail["selector"] = selection
         stage_detail["full_confirmations"] = {}
         db.save_strategy6_optimization_stage({
@@ -386,6 +398,8 @@ def _approved_joint_candidates(
     stage_spec,
     oat_manifest: tuple[OptimizationTrial, ...],
     rows: list[dict],
+    *,
+    evaluation_step: int,
 ) -> dict[str, list]:
     trial_by_id = {item.trial_id: item for item in oat_manifest}
     approved = {spec.key: [spec.default] for spec in stage_spec.parameters}
@@ -393,7 +407,9 @@ def _approved_joint_candidates(
         trial = trial_by_id.get(row["trial_id"])
         if trial is None or trial.trial_kind != "OAT":
             continue
-        if not evaluate_hard_gates(row.get("selection_metrics") or {})["passed"]:
+        if not evaluate_coarse_gates(
+            row.get("selection_metrics") or {}, evaluation_step=evaluation_step,
+        )["passed"]:
             continue
         for key, value in trial.changed_parameters.items():
             if value not in approved[key]:
@@ -401,11 +417,11 @@ def _approved_joint_candidates(
     return approved
 
 
-def _build_selector_input(rows: list[dict]) -> list[dict]:
+def _build_selector_input(rows: list[dict], *, evaluation_step: int = 5) -> list[dict]:
     result = []
     for row in rows:
         metrics = row.get("selection_metrics") or {}
-        neighbors = _nearest_neighbor_metrics(row, rows)
+        neighbors = _nearest_neighbor_metrics(row, rows, evaluation_step=evaluation_step)
         result.append({
             "parameter_set_id": row["parameter_set_id"],
             "status": row["status"],
@@ -415,7 +431,7 @@ def _build_selector_input(rows: list[dict]) -> list[dict]:
     return result
 
 
-def _nearest_neighbor_metrics(target: dict, rows: list[dict]) -> list[dict]:
+def _nearest_neighbor_metrics(target: dict, rows: list[dict], *, evaluation_step: int) -> list[dict]:
     target_flat = _flatten(target.get("parameters") or {})
     distances = []
     for other in rows:
@@ -434,7 +450,7 @@ def _nearest_neighbor_metrics(target: dict, rows: list[dict]) -> list[dict]:
             continue
         metrics = item.get("selection_metrics") or {}
         neighbors.append({
-            "passed": evaluate_hard_gates(metrics)["passed"],
+            "passed": evaluate_coarse_gates(metrics, evaluation_step=evaluation_step)["passed"],
             "robust_score": calculate_robust_score(metrics)["robust_score"],
         })
     return neighbors
@@ -467,6 +483,7 @@ def run_comprehensive_cli(args, coverage) -> int:
             data_version=data_version,
             random_seed=20260712,
             max_joint_trials=args.max_joint_trials,
+            evaluation_step=args.evaluation_step,
         )
         print(json.dumps(result, ensure_ascii=False, indent=2, default=str))
         return 0

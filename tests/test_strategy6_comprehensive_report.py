@@ -2,7 +2,10 @@ import copy
 import json
 
 from scanner import db
-from strategy6.backtest.comprehensive_report import write_comprehensive_report
+from strategy6.backtest.comprehensive_report import (
+    determine_recommendation,
+    write_comprehensive_report,
+)
 from strategy6.backtest.comprehensive_runner import initialize_campaign
 from strategy6.validation import DEFAULT_STRATEGY6_CONFIG
 
@@ -64,3 +67,18 @@ def test_report_records_keep_previous_stage_and_parameter_dictionary_reasons(tmp
     assert "本轮设计未列入搜索空间" in dictionary
     assert "max_amp_5d_s" in dictionary
     assert "grade_risk_profile" in dictionary
+
+
+def test_completed_campaign_rejects_upgrade_when_validation_or_stress_fails():
+    assert determine_recommendation(
+        all_frozen=True,
+        execution={"validation_confirmed": False, "stress_passed": False},
+    ) == "REJECT"
+    assert determine_recommendation(
+        all_frozen=True,
+        execution={"validation_confirmed": True, "stress_passed": False},
+    ) == "REJECT"
+    assert determine_recommendation(
+        all_frozen=True,
+        execution={"validation_confirmed": True, "stress_passed": True},
+    ) == "RECOMMEND"

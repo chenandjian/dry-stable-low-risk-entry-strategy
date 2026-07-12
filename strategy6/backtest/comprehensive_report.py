@@ -25,6 +25,14 @@ FIXED_PARAMETER_REASONS = {
 }
 
 
+def determine_recommendation(*, all_frozen: bool, execution: dict) -> str:
+    if not all_frozen:
+        return "INCOMPLETE"
+    if not execution.get("stress_passed") or not execution.get("validation_confirmed"):
+        return "REJECT"
+    return "RECOMMEND"
+
+
 def write_comprehensive_report(
     campaign_id: str,
     output_dir: str | Path,
@@ -36,12 +44,7 @@ def write_comprehensive_report(
     trials = db.get_strategy6_optimization_trials(campaign_id)
     all_frozen = bool(status["stages"]) and all(item["status"] == "FROZEN" for item in status["stages"])
     execution = (status["campaign"].get("manifest") or {}).get("execution_tuning") or {}
-    if not all_frozen:
-        recommendation = "INCOMPLETE"
-    elif not execution.get("stress_passed") or not execution.get("validation_confirmed"):
-        recommendation = "CONDITIONAL"
-    else:
-        recommendation = "RECOMMEND"
+    recommendation = determine_recommendation(all_frozen=all_frozen, execution=execution)
 
     selected_config = _selected_config(status, production_config)
     config_diff = _config_diff(production_config, selected_config)
