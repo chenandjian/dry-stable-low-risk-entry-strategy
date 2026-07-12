@@ -36,6 +36,12 @@ class BacktestRunSpec:
     data_version: str
     confidence_label: str
     random_seed: int
+    run_mode: str = "LEGACY_DAILY"
+    stage_id: str = ""
+    parent_parameter_set_id: str = ""
+    evaluation_step: int = 1
+    start_date: str = ""
+    end_date: str = ""
 
     @classmethod
     def create(
@@ -47,7 +53,9 @@ class BacktestRunSpec:
         strategy_config: dict,
         backtest_config: dict,
         data_version: str,
+        research_context: dict | None = None,
     ) -> "BacktestRunSpec":
+        context = dict(research_context or {})
         identity = {
             "experiment_id": experiment_id,
             "strategy_version": strategy_version,
@@ -55,6 +63,7 @@ class BacktestRunSpec:
             "strategy_config": strategy_config,
             "backtest_config": backtest_config,
             "data_version": data_version,
+            "research_context": context,
         }
         digest = stable_hash(identity)
         return cls(
@@ -68,6 +77,12 @@ class BacktestRunSpec:
             data_version=data_version,
             confidence_label=str(backtest_config.get("confidence_label") or "RESEARCH_ONLY_CURRENT_UNIVERSE"),
             random_seed=int((backtest_config.get("optimization") or {}).get("random_seed", 20260711)),
+            run_mode=str(context.get("run_mode") or "LEGACY_DAILY"),
+            stage_id=str(context.get("stage_id") or ""),
+            parent_parameter_set_id=str(context.get("parent_parameter_set_id") or ""),
+            evaluation_step=int(context.get("evaluation_step", 1)),
+            start_date=str(context.get("start_date") or ""),
+            end_date=str(context.get("end_date") or ""),
         )
 
 
@@ -109,4 +124,3 @@ class BacktestTrade:
     tax: float = 0.0
     slippage: float = 0.0
     intraday_stop_breach: bool = False
-

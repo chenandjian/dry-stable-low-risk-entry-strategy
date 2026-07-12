@@ -27,7 +27,7 @@ from strategy6.backtest.portfolio import simulate_portfolio
 from strategy6.backtest.report import write_backtest_report
 from strategy6.backtest.service import run_parameter_research
 from strategy6.backtest.snapshot import signal_to_record
-from strategy6.backtest.validation import TimeSplit
+from strategy6.backtest.validation import TimeSplit, build_evaluation_schedule
 from strategy6.backtest.walk_forward import lock_oos
 from strategy6.engine import StrongVcpTailEngine
 from strategy6.version import STRATEGY6_VERSION
@@ -168,6 +168,18 @@ def run_local_parameter_set(
     audit = audit_database(args.db)
     data_version = _database_version(audit, coverage.coverage)
     parameter = ParameterSet.create({"strategy6": strategy_config})
+    run_mode = str(getattr(args, "run_mode", "LEGACY_DAILY"))
+    evaluation_step = int(getattr(args, "evaluation_step", 1))
+    research_context = {}
+    if run_mode != "LEGACY_DAILY":
+        research_context = {
+            "run_mode": run_mode,
+            "stage_id": str(getattr(args, "stage_id", "")),
+            "parent_parameter_set_id": str(getattr(args, "parent_parameter_set_id", "")),
+            "evaluation_step": evaluation_step,
+            "start_date": args.start,
+            "end_date": args.end,
+        }
     run = BacktestRunSpec.create(
         experiment_id=experiment_id,
         strategy_version=STRATEGY6_VERSION,
@@ -175,13 +187,40 @@ def run_local_parameter_set(
         strategy_config=strategy_config,
         backtest_config=backtest_config,
         data_version=data_version,
+        research_context=research_context,
     )
     split = TimeSplit(
         "2023-01-01", "2024-12-31", "2025-01-01", "2025-12-31",
         args.oos_start, "2099-12-31",
     )
+    calendar = market_calendar_from_indexes(coverage.data_by_symbol)
+    schedule = None
+    if run_mode == "LEGACY_DAILY":
+        dates = [
+            date for date in calendar
+            if args.start <= date <= args.end and date < args.oos_start
+        ]
+        effective_end = args.end
+    else:
+        schedule = build_evaluation_schedule(
+            calendar,
+            mode=run_mode,
+            start=args.start,
+            end=args.end,
+            evaluation_step=evaluation_step,
+            oos_start=args.oos_start,
+        )
+        dates = list(schedule.dates)
+        effective_end = schedule.end_date
+    split_payload = {
+        **split.__dict__,
+        "run_mode": run_mode,
+        "evaluation_step": evaluation_step,
+        "evaluation_date_count": len(dates),
+        "final_eligible": bool(schedule.final_eligible) if schedule else True,
+    }
     db.save_strategy6_backtest_run({
-        **run.__dict__, "status": "RUNNING", "split_json": split.__dict__,
+        **run.__dict__, "status": "RUNNING", "split_json": split_payload,
     })
     db.save_strategy6_backtest_parameter_set(run.run_id, {
         "parameter_set_id": parameter.parameter_set_id,
@@ -189,10 +228,6 @@ def run_local_parameter_set(
         "parameters": parameter.parameters,
         "status": "RUNNING",
     })
-    dates = [
-        date for date in market_calendar_from_indexes(coverage.data_by_symbol)
-        if args.start <= date <= args.end and date < args.oos_start
-    ]
     conn = db.get_conn()
     stocks = conn.execute("SELECT code, name FROM stock_pool ORDER BY code").fetchall()
     completed = db.get_completed_strategy6_backtest_codes(run.run_id, parameter.parameter_set_id)
@@ -209,7 +244,7 @@ def run_local_parameter_set(
     }
     row_counts = dict(conn.execute(
         "SELECT code, COUNT(*) FROM daily_ohlc WHERE date<=? GROUP BY code",
-        (args.end,),
+        (effective_end,),
     ).fetchall())
     eligible_stocks: list[tuple[str, str]] = []
     for code, name in stocks:
@@ -230,7 +265,7 @@ def run_local_parameter_set(
         if stock is None:
             return None
         code, name = stock
-        return {"code": code, "name": name, "rows": _load_stock_rows(conn, code, args.end)}
+        return {"code": code, "name": name, "rows": _load_stock_rows(conn, code, effective_end)}
 
     workers = max(1, int(getattr(args, "workers", 1)))
     processed = len(completed) + (len(stocks) - len(completed) - len(eligible_stocks))
@@ -309,7 +344,7 @@ def run_local_parameter_set(
     summary["fixed_risk_portfolio"] = risk_portfolio["metrics"]
     db.save_strategy6_backtest_metric(run.run_id, parameter.parameter_set_id, "TRAIN_VALIDATION", "trade", summary)
     db.save_strategy6_backtest_run({
-        **run.__dict__, "status": final_status, "split_json": split.__dict__,
+        **run.__dict__, "status": final_status, "split_json": split_payload,
         "completed_at": time.strftime("%Y-%m-%d %H:%M:%S"),
     })
     db.save_strategy6_backtest_parameter_set(run.run_id, {
@@ -321,7 +356,11 @@ def run_local_parameter_set(
     })
     oos = lock_oos(split, data_fingerprint=data_version, strategy_commit=run.strategy_git_commit)
     return {
-        "run": {**run.__dict__, "status": final_status, "progress_counts": progress_counts},
+        "run": {
+            **run.__dict__, "status": final_status, "progress_counts": progress_counts,
+            "evaluation_date_count": len(dates),
+            "final_eligible": bool(schedule.final_eligible) if schedule else True,
+        },
         "parameter_set_id": parameter.parameter_set_id,
         "data_audit": audit,
         "oos_lock": oos,

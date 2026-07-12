@@ -9,6 +9,65 @@ class OOSAccessError(RuntimeError):
 
 
 @dataclass(frozen=True)
+class EvaluationSchedule:
+    mode: str
+    evaluation_step: int
+    start_date: str
+    end_date: str
+    dates: tuple[str, ...]
+    final_eligible: bool
+
+
+def build_evaluation_schedule(
+    market_calendar: list[str],
+    *,
+    mode: str,
+    start: str,
+    end: str,
+    evaluation_step: int,
+    oos_start: str,
+) -> EvaluationSchedule:
+    """Build a locked coarse-train or full-confirmation evaluation schedule."""
+    if evaluation_step < 1:
+        raise ValueError("evaluation_step must be at least 1")
+    if mode == "COARSE_TRAIN":
+        if start >= "2025-01-01" or end < "2023-01-01":
+            raise ValueError("coarse schedule must overlap the 2023-2024 training period")
+        effective_start = max(start, "2023-01-01")
+        effective_end = min(end, "2024-12-31", _day_before(oos_start))
+        all_dates = sorted({date for date in market_calendar if effective_start <= date <= effective_end})
+        dates = tuple(all_dates[::evaluation_step])
+        final_eligible = False
+    elif mode == "FULL_CONFIRMATION":
+        if evaluation_step != 1:
+            raise ValueError("full confirmation must use a daily evaluation step")
+        effective_start = max(start, "2023-01-01")
+        effective_end = min(end, "2025-12-31", _day_before(oos_start))
+        dates = tuple(sorted({date for date in market_calendar if effective_start <= date <= effective_end}))
+        final_eligible = True
+    else:
+        raise ValueError("mode must be COARSE_TRAIN or FULL_CONFIRMATION")
+    if effective_start > effective_end:
+        raise ValueError("evaluation schedule has no legal date range")
+    if not dates:
+        raise ValueError("evaluation schedule has no evaluation dates from the real index calendar")
+    return EvaluationSchedule(
+        mode=mode,
+        evaluation_step=evaluation_step,
+        start_date=effective_start,
+        end_date=effective_end,
+        dates=dates,
+        final_eligible=final_eligible,
+    )
+
+
+def _day_before(value: str) -> str:
+    from datetime import date, timedelta
+
+    return (date.fromisoformat(value) - timedelta(days=1)).isoformat()
+
+
+@dataclass(frozen=True)
 class TimeSplit:
     train_start: str
     train_end: str
