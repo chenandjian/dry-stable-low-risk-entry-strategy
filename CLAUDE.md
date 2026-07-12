@@ -111,6 +111,9 @@ npm --prefix web run preview
 - **策略6紧密K线：** 最近配置窗口（默认5日）的实体、收盘集中、相邻重叠、跳空、ATR收缩和现有放量下跌共同生成 `BOX_COMPACT_READY`。该结果不是箱体硬条件，`compact_kline_score` 只参与箱体窗口择优，禁止进入最终 `tail_score`。
 - **策略6回测研究：** `strategy6/backtest/` 使用 `AS_OF_REBUILD` 和冻结正式入口，保存参数集、信号、订单、交易、指标与逐股进度。信号日不成交，执行T+1、一字涨跌停、缺失K线、费用、滑点和组合资金约束；同日止损目标按止损优先。当前股票池存在幸存者偏差，只能输出 `RESEARCH_ONLY_CURRENT_UNIVERSE`。
 - **策略6OOS与指数门禁：** 2026年起为锁定OOS，P0-P3不得读取收益。历史回测必须使用真实上证、深证、创业板和沪深300同日数据；任何指数覆盖不足均返回 `BLOCKED_INDEX_HISTORY`，禁止关闭市场过滤冒充生产基线。
+- **策略6回测无K线语义：** 市场交易日缺少个股当日K线时，不得沿用上一根K线重复生成信号；成交重放记录 `UNKNOWN_NO_BAR` 并保守不成交或延迟退出。
+- **策略6回测压力参数：** `entry_delay_days` 和 `fill_rate_multiplier` 由成交引擎真实执行，低成交率使用setup稳定哈希确定性抽样，保证重复运行一致。
+- **策略6双路径研究结论：** 2023-2025真实研究中默认BOX-only负期望，参数试验无一通过硬约束；当前结论为 `KEEP_DEFAULT / REJECT_BOX_EXPANSION`，生产配置未修改，OOS未运行。
 - **形态评分维度：** 杯体结构 35 + 柄部结构 25 + 成交量结构 20 + 前置趋势 10 + 突破确认 10 = 100 分。
 - **A股配色：** 红涨绿跌。金色仅用于 ≥80 分 A 级信号。
 - **SQLite 持久化：** 数据存储于 `data/cuphandle.db`（stock_pool, daily_ohlc, scan_tasks, candidates）。线程级连接 + WAL 模式。

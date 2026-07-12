@@ -40,7 +40,8 @@ def simulate_frozen_trade(
     execution = config["execution"]
     costs = config["costs"]
     dates = sorted(date for date in set(market_dates) if date > signal.evaluation_date)
-    valid_dates = dates[: int(execution["buy_zone_valid_days"])]
+    entry_delay_days = max(0, int(execution.get("entry_delay_days", 0)))
+    valid_dates = dates[entry_delay_days:entry_delay_days + int(execution["buy_zone_valid_days"])]
     order = BacktestOrder(
         order_id=f"s6order-{stable_hash([signal.parameter_set_id, signal.setup_id, signal.evaluation_date])[:20]}",
         signal=signal,
@@ -48,6 +49,13 @@ def simulate_frozen_trade(
         expire_date=valid_dates[-1] if valid_dates else signal.evaluation_date,
     )
     outcome = ExecutionOutcome(order=order)
+    fill_rate = max(0.0, min(1.0, float(execution.get("fill_rate_multiplier", 1.0))))
+    fill_bucket = int(stable_hash([signal.parameter_set_id, signal.setup_id, signal.evaluation_date])[:8], 16) / 0xFFFFFFFF
+    if fill_rate < 1.0 and fill_bucket >= fill_rate:
+        order.status = "EXPIRED_NO_FILL"
+        order.fill_reason = "STRESS_FILL_RATE_REJECTED"
+        outcome.audit_tags.append("STRESS_FILL_RATE_REJECTED")
+        return outcome
     row_by_date = {str(row.get("date") or ""): row for row in stock_rows}
     snapshot = signal.snapshot
     buy_low = float(snapshot.get("buy_zone_low") or 0)

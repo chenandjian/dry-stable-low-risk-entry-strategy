@@ -119,6 +119,16 @@ python -m pytest tests/test_tushare_hist.py -v
 
 ## Database Rules
 
+## Strategy6 回测规则
+
+- 策略6历史研究只允许按日期截断调用 `StrongVcpTailEngine.evaluate_at()`，不得复制策略逻辑。
+- 个股在市场交易日没有当日K线时不得沿用上一根K线重复生成信号；成交阶段记录 `UNKNOWN_NO_BAR`。
+- 策略6回测订单和交易的数据库存储键必须包含run与参数集，业务ID保留在明细JSON中。
+- E0/E1及参数试验允许历史不足股票记为 `COMPLETED_WITH_SKIPS`，但任何FAILED均不得进入参数选择。
+- 压力测试必须真实重放冻结信号；`entry_delay_days` 与 `fill_rate_multiplier` 必须由成交引擎执行。
+- 2026年起OOS保持锁定，P0-P3优化器和报告不得读取其收益。
+- 当前真实结论是 `KEEP_DEFAULT / REJECT_BOX_EXPANSION`，不得自动写生产配置。
+
 - SQLite 使用线程级连接和 WAL。
 - `PRAGMA table_info` 取列名必须用 `d[1]`。
 - 兼容迁移使用 `_ensure_column()`；不得执行破坏性 schema 变更。

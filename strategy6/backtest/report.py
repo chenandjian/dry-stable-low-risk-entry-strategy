@@ -35,6 +35,11 @@ def write_backtest_report(result: dict, output_dir) -> dict[str, Path]:
     oos = result.get("oos_lock") or {}
     summary = result.get("summary") or {}
     experiments = result.get("experiments") or {}
+    phase_metrics = result.get("phase_metrics") or {}
+    stress_tests = result.get("stress_tests") or {}
+    walk_forward = result.get("walk_forward") or {}
+    optimization = result.get("optimization") or {}
+    recommendation = result.get("recommendation") or {}
     lines = [
         "# 策略6双路径历史回测与参数调优报告",
         "",
@@ -54,6 +59,24 @@ def write_backtest_report(result: dict, output_dir) -> dict[str, Path]:
         "## 实验对比",
         "",
         _experiment_table(experiments),
+        "",
+        "## 训练与验证",
+        "",
+        _experiment_table(phase_metrics),
+        "",
+        "## 压力测试",
+        "",
+        _experiment_table(stress_tests),
+        "",
+        "## 滚动验证",
+        "",
+        f"`{json.dumps(walk_forward, ensure_ascii=False, sort_keys=True)}`",
+        "",
+        "## 参数优化与建议",
+        "",
+        f"- 优化结论：`{optimization.get('recommendation', 'INSUFFICIENT_DATA')}`",
+        f"- 最终决策：`{recommendation.get('decision', 'INSUFFICIENT_DATA')}`",
+        f"- 生产配置已修改：`{bool(recommendation.get('production_config_modified', False))}`",
         "",
         "## 明细文件",
         "",

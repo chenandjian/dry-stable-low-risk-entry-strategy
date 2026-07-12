@@ -108,3 +108,27 @@ def test_transaction_costs_include_minimum_commission_tax_transfer_and_slippage(
     assert costs["sell_commission"] == 5.0
     assert costs["sell_tax"] == 0.55
     assert costs["total"] > 10.55
+
+
+def test_one_day_entry_delay_starts_buy_window_on_second_market_day():
+    rows = [
+        _row("2025-01-02", 10, 10, 10, 10),
+        _row("2025-01-03", 10.5, 10.6, 10.4, 10.5),
+        _row("2025-01-06", 10.0, 10.2, 9.8, 10.0),
+        _row("2025-01-07", 11.6, 11.7, 11.4, 11.6),
+    ]
+    config = resolve_backtest_config({"execution": {"entry_delay_days": 1}})
+    outcome = simulate_frozen_trade(_signal(), rows, [row["date"] for row in rows], config)
+    assert outcome.order.status == "FILLED"
+    assert outcome.trade.entry_date == "2025-01-06"
+
+
+def test_zero_fill_multiplier_rejects_fill_deterministically():
+    rows = [
+        _row("2025-01-02", 10, 10, 10, 10),
+        _row("2025-01-03", 10, 10.2, 9.8, 10),
+    ]
+    config = resolve_backtest_config({"execution": {"fill_rate_multiplier": 0.0}})
+    outcome = simulate_frozen_trade(_signal(), rows, [row["date"] for row in rows], config)
+    assert outcome.order.status == "EXPIRED_NO_FILL"
+    assert outcome.order.fill_reason == "STRESS_FILL_RATE_REJECTED"
