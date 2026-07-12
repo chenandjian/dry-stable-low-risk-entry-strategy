@@ -75,6 +75,8 @@ def run_parameter_research(
                 "setup_id": signal.setup_id,
                 "tail_path": signal.tail_path,
                 "candidate_type": signal.candidate_type,
+                "pattern_type": signal.snapshot.get("pattern_type", "UNKNOWN"),
+                "market_status": signal.snapshot.get("market_status", "UNKNOWN"),
                 "total_score": signal.snapshot.get("total_score", 0),
                 "box_status": signal.snapshot.get("box_status", ""),
                 "box_quality_tag": signal.snapshot.get("box_quality_tag", ""),
@@ -83,7 +85,7 @@ def run_parameter_research(
                 "stop_loss_price": signal.snapshot.get("stop_loss_price", 0),
             })
             trades.append(trade_record)
-    metrics = calculate_trade_metrics(trades)
+    metrics = calculate_trade_metrics([item for item in trades if item.get("exit_date")])
     metrics["unfilled_rate"] = (
         sum(item["status"] != "FILLED" for item in orders) / len(orders) if orders else 0.0
     )

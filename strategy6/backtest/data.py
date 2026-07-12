@@ -46,6 +46,39 @@ def build_data_fingerprint(data_by_code: dict[str, list[dict]]) -> str:
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
+def build_database_fingerprint(conn, *, batch_size: int = 10_000) -> str:
+    """Hash the actual local universe and OHLC contents without loading them all."""
+    digest = hashlib.sha256()
+    queries = (
+        (
+            "stock_pool",
+            "SELECT code, name, market FROM stock_pool ORDER BY code",
+        ),
+        (
+            "daily_ohlc",
+            """SELECT code, date, open, high, low, close, volume, turnover
+               FROM daily_ohlc ORDER BY code, date""",
+        ),
+        (
+            "market_index_ohlc",
+            """SELECT symbol, date, open, high, low, close, volume, turnover, source
+               FROM market_index_ohlc ORDER BY symbol, date""",
+        ),
+    )
+    for table, query in queries:
+        digest.update(f"table:{table}\n".encode("utf-8"))
+        cursor = conn.execute(query)
+        while True:
+            rows = cursor.fetchmany(batch_size)
+            if not rows:
+                break
+            for row in rows:
+                payload = json.dumps(row, ensure_ascii=False, separators=(",", ":"), default=str)
+                digest.update(payload.encode("utf-8"))
+                digest.update(b"\n")
+    return digest.hexdigest()
+
+
 def slice_visible_rows(rows: list[dict], as_of_date: str) -> list[dict]:
     return [row for row in rows if str(row.get("date") or "") <= as_of_date]
 
@@ -55,4 +88,3 @@ def market_calendar_from_indexes(data_by_symbol: dict[str, list[dict]]) -> list[
     for rows in data_by_symbol.values():
         dates.update(str(row.get("date") or "") for row in rows if row.get("date"))
     return sorted(dates)
-

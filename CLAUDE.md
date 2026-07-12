@@ -104,7 +104,7 @@ npm --prefix web run preview
 - **数据源锁必须释放：** `try...finally` 确保异常路径也释放锁。
 - **配置文件驱动：** 主要扫描阈值（杯体深度、柄部回撤、流动性等）在 `config.yaml` 中可调；部分策略阈值仍硬编码，新增配置项前先确认代码已接入。
 - **策略6 V4：** 启动、整理和尾段严格按时间分割；形态限定为 VCP/CUP_HANDLE/PLATFORM；客观目标与 1.5R/2R/2.5R/3.5R 执行目标分离，候选按客观盈亏比分层。
-- **策略6价格口径：** 当前生产日线均为前复权，策略6输出 `price_basis=FORWARD_ADJUSTED`、`current_price_adj`，`current_price_raw` 保持空值；本期不开发未复权双价格链、成交模拟或回测。
+- **策略6价格口径：** 当前生产日线和历史研究均使用前复权价格，策略6输出 `price_basis=FORWARD_ADJUSTED`、`current_price_adj`，`current_price_raw` 保持空值；未复权双价格链仍不在当前范围。成交模拟仅用于本地历史研究，不能伪装成真实成交回报。
 - **策略6市场边界：** 板块过滤已完全移除，`sector_name` 仅用于展示；至少两个同日宽基指数才形成市场状态，RS20只使用同日沪深300。市场过滤开启且沪深300缺失时，最高只允许 WATCH。
 - **策略6生命周期：** 候选按股票维护 START_CONFIRMED/SETUP_FORMING/READY/BUY_ZONE/EXTENDED/FAILED/EXPIRED/COOLDOWN，FAILED 冷却10个交易日、EXPIRED冷却5个交易日，同事件只允许在支撑恢复并重新确认后入池。全局生命周期、任务审计快照和活跃候选必须在同一事务内写入。
 - **策略6稳定箱体双路径（V4.1）：** 原 `evaluate_dry_tail()` 零改动；`strategy6/box_tail.py` 在整理阶段枚举5-30日箱体，结构边界排除最后两日，最后两日用于跌破和当前位置确认。`tail_pass=original OR box`，`BOTH` 取较高路径分，失败箱体不得改变原路径分数。
@@ -114,6 +114,11 @@ npm --prefix web run preview
 - **策略6回测无K线语义：** 市场交易日缺少个股当日K线时，不得沿用上一根K线重复生成信号；成交重放记录 `UNKNOWN_NO_BAR` 并保守不成交或延迟退出。
 - **策略6回测压力参数：** `entry_delay_days` 和 `fill_rate_multiplier` 由成交引擎真实执行，低成交率使用setup稳定哈希确定性抽样，保证重复运行一致。
 - **策略6双路径研究结论：** 2023-2025真实研究中默认BOX-only负期望，参数试验无一通过硬约束；当前结论为 `KEEP_DEFAULT / REJECT_BOX_EXPANSION`，生产配置未修改，OOS未运行。
+- **策略6全面调优：** `strategy6/backtest/parameter_registry.py` 将可调参数分为流动性RS、强势启动、形态、支撑风险、原尾部、箱体紧密K线、评分交易计划七层。粗筛只读2023-2024并使用真实交易日步长5；最多3个训练入围参数逐日重跑2023-2025，2025只确认，2026+ OOS锁定。
+- **策略6全面调优恢复：** `strategy6_optimization_campaigns/stages/trials` 保存campaign、父参数、阶段选择、粗筛/完整run和淘汰原因。训练选择器不得接收包含validation/OOS字段的对象；首次训练入围清单在完整重跑前持久化，中断后原样复用。
+- **策略6全面调优门槛：** 验证期交易不少于30、期望R不低于0.10、PF不低于1.20、平均盈利R/平均亏损R不低于2.5、固定风险最大回撤不超过20%、前五股票盈利贡献不超过55%、单月不超过35%，并要求关键指标至少保留训练期60%。
+- **策略6执行调优：** 信号参数冻结后，买入有效期和最大持有期仅对冻结信号重放。费用不得低于BASE，T+1、一字涨跌停、缺失K线和STOP_FIRST固定；高成本、70%成交率和延迟一天必须实际重放。
+- **策略6全面调优CLI：** `comprehensive-plan` 创建身份，`comprehensive-run` 串行推进一层，`comprehensive-status` 查看恢复状态，`comprehensive-report` 输出Markdown/JSON及参数、候选、订单、交易CSV。所有结论只供人工审批，禁止自动写生产配置。
 - **形态评分维度：** 杯体结构 35 + 柄部结构 25 + 成交量结构 20 + 前置趋势 10 + 突破确认 10 = 100 分。
 - **A股配色：** 红涨绿跌。金色仅用于 ≥80 分 A 级信号。
 - **SQLite 持久化：** 数据存储于 `data/cuphandle.db`（stock_pool, daily_ohlc, scan_tasks, candidates）。线程级连接 + WAL 模式。

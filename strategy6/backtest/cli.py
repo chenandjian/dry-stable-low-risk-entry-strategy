@@ -13,7 +13,11 @@ from strategy6.backtest.index_history import ensure_index_history, load_index_hi
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Strategy6 dual-path historical research")
     sub = parser.add_subparsers(dest="command", required=True)
-    for command in ("audit-data", "fetch-index", "baseline", "experiments", "optimize"):
+    for command in (
+        "audit-data", "fetch-index", "baseline", "experiments", "optimize",
+        "comprehensive-plan", "comprehensive-run", "comprehensive-status",
+        "comprehensive-report",
+    ):
         child = sub.add_parser(command)
         child.add_argument("--db", default="data/cuphandle.db")
         child.add_argument("--start", default="2023-01-01")
@@ -22,6 +26,10 @@ def build_parser() -> argparse.ArgumentParser:
         child.add_argument("--output", default="docs/reviews/strategy6-backtest")
         child.add_argument("--config", default="config.yaml")
         child.add_argument("--max-trials", type=int, default=2000)
+        child.add_argument("--campaign-id", default="s6opt-20260712")
+        child.add_argument("--stage-id", default="")
+        child.add_argument("--max-joint-trials", type=int, default=24)
+        child.add_argument("--evaluation-step", type=int, default=5)
         child.add_argument(
             "--workers",
             type=int,
@@ -65,6 +73,20 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps(audit_database(args.db), ensure_ascii=False, indent=2, default=str))
         return 0
     db.init_db(args.db)
+    if args.command == "comprehensive-status":
+        from strategy6.backtest.comprehensive_runner import campaign_status
+        print(json.dumps(campaign_status(args.campaign_id), ensure_ascii=False, indent=2, default=str))
+        return 0
+    if args.command == "comprehensive-report":
+        import yaml
+        from strategy6.backtest.comprehensive_report import write_comprehensive_report
+        from strategy6.validation import resolve_strategy6_config
+        with open(args.config, "r", encoding="utf-8") as handle:
+            root_config = yaml.safe_load(handle) or {}
+        production_config = resolve_strategy6_config({"strategy6": root_config.get("strategy6") or {}})
+        result = write_comprehensive_report(args.campaign_id, args.output, production_config)
+        print(json.dumps(result, ensure_ascii=False, indent=2, default=str))
+        return 0
     if args.command == "fetch-index":
         result = ensure_index_history(args.start, args.end, days=1500)
         print(json.dumps({
@@ -81,6 +103,9 @@ def main(argv: list[str] | None = None) -> int:
             "message": "Run fetch-index before historical research.",
         }, ensure_ascii=False, indent=2))
         return 2
+    if args.command in {"comprehensive-plan", "comprehensive-run"}:
+        from strategy6.backtest.comprehensive_runner import run_comprehensive_cli
+        return run_comprehensive_cli(args, coverage)
     from strategy6.backtest.runner import run_cli_research
     return run_cli_research(args, coverage)
 

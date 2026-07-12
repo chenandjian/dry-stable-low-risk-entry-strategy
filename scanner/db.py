@@ -367,6 +367,7 @@ def save_strategy6_optimization_stage(item: dict) -> None:
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
            ON CONFLICT(campaign_id, stage_id) DO UPDATE SET
              status=excluded.status,
+             parent_parameter_set_id=excluded.parent_parameter_set_id,
              selected_parameter_set_id=excluded.selected_parameter_set_id,
              decision=excluded.decision,
              detail_json=excluded.detail_json,

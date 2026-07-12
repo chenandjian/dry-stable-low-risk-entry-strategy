@@ -25,6 +25,7 @@ from strategy6.backtest.optimization import (
 )
 from strategy6.backtest.portfolio import simulate_portfolio
 from strategy6.backtest.report import write_backtest_report
+from strategy6.backtest.selector import build_selection_metrics
 from strategy6.backtest.service import run_parameter_research
 from strategy6.backtest.snapshot import signal_to_record
 from strategy6.backtest.validation import TimeSplit, build_evaluation_schedule
@@ -166,7 +167,7 @@ def run_local_parameter_set(
     args,
 ) -> dict:
     audit = audit_database(args.db)
-    data_version = _database_version(audit, coverage.coverage)
+    data_version = str(getattr(args, "data_version_override", "")) or _database_version(audit, coverage.coverage)
     parameter = ParameterSet.create({"strategy6": strategy_config})
     run_mode = str(getattr(args, "run_mode", "LEGACY_DAILY"))
     evaluation_step = int(getattr(args, "evaluation_step", 1))
@@ -321,11 +322,12 @@ def run_local_parameter_set(
         skipped=sum(int(count) for status, count in progress_counts.items() if str(status).startswith("SKIPPED_")),
         failed=int(progress_counts.get("FAILED", 0)),
     )
-    summary = calculate_trade_metrics(trades)
+    closed_trades = [item for item in trades if item.get("exit_date")]
+    summary = calculate_trade_metrics(closed_trades)
     summary["unfilled_rate"] = sum(item.get("status") != "FILLED" for item in orders) / len(orders) if orders else 0.0
     position = backtest_config["position"]
     equal_portfolio = simulate_portfolio(
-        trades,
+        closed_trades,
         initial_equity=float(position["initial_equity"]),
         mode="EQUAL_WEIGHT",
         risk_per_trade=float(position["risk_per_trade"]),
@@ -333,7 +335,7 @@ def run_local_parameter_set(
         max_concurrent_positions=int(position["max_concurrent_positions"]),
     )
     risk_portfolio = simulate_portfolio(
-        trades,
+        closed_trades,
         initial_equity=float(position["initial_equity"]),
         mode="FIXED_RISK",
         risk_per_trade=float(position["risk_per_trade"]),
@@ -342,6 +344,16 @@ def run_local_parameter_set(
     )
     summary["equal_weight_portfolio"] = equal_portfolio["metrics"]
     summary["fixed_risk_portfolio"] = risk_portfolio["metrics"]
+    phase_results = build_phase_selection_results(closed_trades, position)
+    for phase, phase_result in phase_results.items():
+        db.save_strategy6_backtest_metric(
+            run.run_id, parameter.parameter_set_id, phase, "selection",
+            phase_result["selection_metrics"],
+        )
+        db.save_strategy6_backtest_metric(
+            run.run_id, parameter.parameter_set_id, phase, "breakdowns",
+            phase_result["breakdowns"],
+        )
     db.save_strategy6_backtest_metric(run.run_id, parameter.parameter_set_id, "TRAIN_VALIDATION", "trade", summary)
     db.save_strategy6_backtest_run({
         **run.__dict__, "status": final_status, "split_json": split_payload,
@@ -368,8 +380,9 @@ def run_local_parameter_set(
         "orders": orders,
         "trades": trades,
         "summary": summary,
-        "path_metrics": group_trade_metrics(trades, "tail_path"),
-        "concentration": calculate_concentration(trades),
+        "phase_results": phase_results,
+        "path_metrics": group_trade_metrics(closed_trades, "tail_path"),
+        "concentration": calculate_concentration(closed_trades),
         "portfolios": {
             "EQUAL_WEIGHT": equal_portfolio,
             "FIXED_RISK": risk_portfolio,
@@ -377,6 +390,58 @@ def run_local_parameter_set(
         "experiments": {},
         "parameter_trials": [],
     }
+
+
+def build_phase_selection_results(trades: list[dict], position: dict) -> dict:
+    result = {}
+    ranges = {
+        "TRAIN": ("2023-01-01", "2024-12-31"),
+        "VALIDATION": ("2025-01-01", "2025-12-31"),
+    }
+    for phase, (start, end) in ranges.items():
+        phase_trades = [
+            item for item in trades
+            if start <= str(item.get("signal_date") or "") <= end
+            and start <= str(item.get("exit_date") or "") <= end
+        ]
+        trade_metrics = calculate_trade_metrics(phase_trades)
+        portfolio = simulate_portfolio(
+            phase_trades,
+            initial_equity=float(position["initial_equity"]),
+            mode="FIXED_RISK",
+            risk_per_trade=float(position["risk_per_trade"]),
+            max_position_pct=float(position["max_position_pct"]),
+            max_concurrent_positions=int(position["max_concurrent_positions"]),
+        )
+        concentration = calculate_concentration(phase_trades)
+        enriched = [
+            {
+                **item,
+                "_year": str(item.get("signal_date") or "")[:4] or "UNKNOWN",
+                "_month": str(item.get("signal_date") or "")[:7] or "UNKNOWN",
+            }
+            for item in phase_trades
+        ]
+        breakdowns = {
+            "year": group_trade_metrics(enriched, "_year"),
+            "month": group_trade_metrics(enriched, "_month"),
+            "market_status": group_trade_metrics(enriched, "market_status"),
+            "pattern_type": group_trade_metrics(enriched, "pattern_type"),
+            "tail_path": group_trade_metrics(enriched, "tail_path"),
+            "candidate_type": group_trade_metrics(enriched, "candidate_type"),
+        }
+        result[phase] = {
+            "trade_metrics": trade_metrics,
+            "fixed_risk_portfolio": portfolio["metrics"],
+            "concentration": concentration,
+            "breakdowns": breakdowns,
+            "selection_metrics": build_selection_metrics(
+                trade_metrics=trade_metrics,
+                fixed_risk_metrics=portfolio["metrics"],
+                concentration=concentration,
+            ),
+        }
+    return result
 
 
 def _load_yaml(path: str) -> dict:

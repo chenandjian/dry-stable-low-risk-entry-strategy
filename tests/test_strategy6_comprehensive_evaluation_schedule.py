@@ -1,6 +1,7 @@
 import pytest
 
 from strategy6.backtest.models import BacktestRunSpec
+from strategy6.backtest.runner import build_phase_selection_results
 from strategy6.backtest.validation import build_evaluation_schedule
 
 
@@ -101,3 +102,47 @@ def test_run_identity_includes_schedule_stage_parent_and_date_range():
     assert baseline.run_id != _run(evaluation_step=1).run_id
     assert baseline.run_id != _run(parent="p-other").run_id
     assert baseline.run_id != _run(mode="FULL_CONFIRMATION").run_id
+
+
+def test_full_result_metrics_keep_train_and_validation_trades_separate():
+    trades = [
+        {
+            "code": "000001", "signal_date": "2024-12-20", "exit_date": "2024-12-30",
+            "r_multiple": 2.0, "net_return": 0.10, "net_profit": 1000,
+            "tail_path": "ORIGINAL", "candidate_type": "READY",
+            "pattern_type": "VCP", "market_status": "MARKET_STRONG",
+        },
+        {
+            "code": "000002", "signal_date": "2025-01-03", "exit_date": "2025-01-10",
+            "r_multiple": -1.0, "net_return": -0.05, "net_profit": -500,
+        },
+        {
+            "code": "000003", "signal_date": "2024-12-31", "exit_date": "2025-01-03",
+            "r_multiple": 9.0, "net_return": 0.50, "net_profit": 5000,
+        },
+        {
+            "code": "000004", "signal_date": "2025-12-31", "exit_date": "",
+            "exit_reason": "UNRESOLVED_NO_EXIT_BAR", "r_multiple": 0.0,
+            "net_return": 0.0, "net_profit": 0,
+        },
+    ]
+    position = {
+        "initial_equity": 1_000_000,
+        "risk_per_trade": 0.01,
+        "max_position_pct": 0.20,
+        "max_concurrent_positions": 5,
+    }
+
+    result = build_phase_selection_results(trades, position)
+
+    assert result["TRAIN"]["trade_metrics"]["trades"] == 1
+    assert result["TRAIN"]["trade_metrics"]["expectancy_r"] == 2.0
+    assert result["VALIDATION"]["trade_metrics"]["trades"] == 1
+    assert result["VALIDATION"]["trade_metrics"]["expectancy_r"] == -1.0
+    assert result["TRAIN"]["selection_metrics"]["max_drawdown"] >= 0
+    assert result["VALIDATION"]["concentration"]["top_stock"] == ""
+    assert result["VALIDATION"]["concentration"]["top_five_profit_share"] == 0
+    assert result["TRAIN"]["breakdowns"]["year"]["2024"]["trades"] == 1
+    assert result["TRAIN"]["breakdowns"]["month"]["2024-12"]["expectancy_r"] == 2.0
+    assert result["TRAIN"]["breakdowns"]["pattern_type"]["VCP"]["trades"] == 1
+    assert result["TRAIN"]["breakdowns"]["market_status"]["MARKET_STRONG"]["trades"] == 1
