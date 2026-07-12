@@ -143,6 +143,7 @@ def init_db(path: str = "data/cuphandle.db"):
         _ensure_strategy6_lifecycle_table(conn)
         _ensure_strategy6_task_lifecycle_table(conn)
         _ensure_strategy6_backtest_tables(conn)
+        _ensure_strategy6_optimization_tables(conn)
         _ensure_strategy2_backtest_tables(conn)
         _ensure_strategy3_backtest_tables(conn)
         _ensure_strategy1_backtest_tables(conn)
@@ -253,6 +254,233 @@ def _ensure_strategy6_backtest_tables(conn: sqlite3.Connection):
         CREATE INDEX IF NOT EXISTS idx_s6_bt_trade_run
             ON strategy6_backtest_trades(run_id, parameter_set_id, entry_date);
     ''')
+
+
+def _ensure_strategy6_optimization_tables(conn: sqlite3.Connection):
+    """Create resumable comprehensive-optimization metadata tables."""
+    conn.executescript('''
+        CREATE TABLE IF NOT EXISTS strategy6_optimization_campaigns (
+            campaign_id TEXT PRIMARY KEY,
+            status TEXT NOT NULL DEFAULT 'PENDING',
+            strategy_git_commit TEXT,
+            data_version TEXT NOT NULL,
+            base_config_hash TEXT NOT NULL,
+            manifest_json TEXT NOT NULL DEFAULT '{}',
+            error_message TEXT,
+            created_at TEXT DEFAULT (datetime('now')),
+            updated_at TEXT DEFAULT (datetime('now')),
+            completed_at TEXT
+        );
+        CREATE TABLE IF NOT EXISTS strategy6_optimization_stages (
+            campaign_id TEXT NOT NULL,
+            stage_id TEXT NOT NULL,
+            stage_order INTEGER NOT NULL,
+            status TEXT NOT NULL DEFAULT 'PENDING',
+            parent_parameter_set_id TEXT NOT NULL,
+            selected_parameter_set_id TEXT,
+            decision TEXT,
+            detail_json TEXT NOT NULL DEFAULT '{}',
+            error_message TEXT,
+            created_at TEXT DEFAULT (datetime('now')),
+            updated_at TEXT DEFAULT (datetime('now')),
+            completed_at TEXT,
+            PRIMARY KEY (campaign_id, stage_id)
+        );
+        CREATE TABLE IF NOT EXISTS strategy6_optimization_trials (
+            campaign_id TEXT NOT NULL,
+            stage_id TEXT NOT NULL,
+            trial_id TEXT NOT NULL,
+            parameter_set_id TEXT NOT NULL,
+            parent_parameter_set_id TEXT NOT NULL,
+            trial_kind TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'PENDING',
+            coarse_run_id TEXT,
+            full_run_id TEXT,
+            parameter_json TEXT NOT NULL DEFAULT '{}',
+            selection_metric_json TEXT NOT NULL DEFAULT '{}',
+            reject_reason TEXT,
+            error_message TEXT,
+            created_at TEXT DEFAULT (datetime('now')),
+            updated_at TEXT DEFAULT (datetime('now')),
+            completed_at TEXT,
+            PRIMARY KEY (campaign_id, stage_id, trial_id),
+            UNIQUE (campaign_id, stage_id, parameter_set_id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_s6_opt_stage_status
+            ON strategy6_optimization_stages(campaign_id, stage_order, status);
+        CREATE INDEX IF NOT EXISTS idx_s6_opt_trial_status
+            ON strategy6_optimization_trials(campaign_id, stage_id, status);
+    ''')
+
+
+def save_strategy6_optimization_campaign(item: dict) -> None:
+    conn = get_conn()
+    conn.execute(
+        '''INSERT INTO strategy6_optimization_campaigns
+           (campaign_id, status, strategy_git_commit, data_version,
+            base_config_hash, manifest_json, error_message, completed_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+           ON CONFLICT(campaign_id) DO UPDATE SET
+             status=excluded.status,
+             manifest_json=excluded.manifest_json,
+             error_message=excluded.error_message,
+             completed_at=excluded.completed_at,
+             updated_at=datetime('now')''',
+        (
+            item["campaign_id"], item.get("status", "PENDING"),
+            item.get("strategy_git_commit", ""), item["data_version"],
+            item["base_config_hash"],
+            json.dumps(item.get("manifest") or {}, ensure_ascii=False, sort_keys=True),
+            item.get("error_message"), item.get("completed_at"),
+        ),
+    )
+    conn.commit()
+
+
+def get_strategy6_optimization_campaign(campaign_id: str) -> dict | None:
+    row = get_conn().execute(
+        '''SELECT campaign_id, status, strategy_git_commit, data_version,
+                  base_config_hash, manifest_json, error_message, created_at,
+                  updated_at, completed_at
+           FROM strategy6_optimization_campaigns WHERE campaign_id=?''',
+        (campaign_id,),
+    ).fetchone()
+    if not row:
+        return None
+    keys = (
+        "campaign_id", "status", "strategy_git_commit", "data_version",
+        "base_config_hash", "manifest", "error_message", "created_at",
+        "updated_at", "completed_at",
+    )
+    result = dict(zip(keys, row))
+    result["manifest"] = json.loads(result["manifest"] or "{}")
+    return result
+
+
+def save_strategy6_optimization_stage(item: dict) -> None:
+    conn = get_conn()
+    conn.execute(
+        '''INSERT INTO strategy6_optimization_stages
+           (campaign_id, stage_id, stage_order, status,
+            parent_parameter_set_id, selected_parameter_set_id, decision,
+            detail_json, error_message, completed_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+           ON CONFLICT(campaign_id, stage_id) DO UPDATE SET
+             status=excluded.status,
+             selected_parameter_set_id=excluded.selected_parameter_set_id,
+             decision=excluded.decision,
+             detail_json=excluded.detail_json,
+             error_message=excluded.error_message,
+             completed_at=excluded.completed_at,
+             updated_at=datetime('now')''',
+        (
+            item["campaign_id"], item["stage_id"], int(item["stage_order"]),
+            item.get("status", "PENDING"), item["parent_parameter_set_id"],
+            item.get("selected_parameter_set_id"), item.get("decision"),
+            json.dumps(item.get("detail") or {}, ensure_ascii=False, sort_keys=True),
+            item.get("error_message"), item.get("completed_at"),
+        ),
+    )
+    conn.commit()
+
+
+def get_strategy6_optimization_stages(campaign_id: str) -> list[dict]:
+    rows = get_conn().execute(
+        '''SELECT campaign_id, stage_id, stage_order, status,
+                  parent_parameter_set_id, selected_parameter_set_id, decision,
+                  detail_json, error_message, created_at, updated_at, completed_at
+           FROM strategy6_optimization_stages WHERE campaign_id=?
+           ORDER BY stage_order, stage_id''',
+        (campaign_id,),
+    ).fetchall()
+    keys = (
+        "campaign_id", "stage_id", "stage_order", "status",
+        "parent_parameter_set_id", "selected_parameter_set_id", "decision",
+        "detail", "error_message", "created_at", "updated_at", "completed_at",
+    )
+    result = []
+    for row in rows:
+        item = dict(zip(keys, row))
+        item["detail"] = json.loads(item["detail"] or "{}")
+        result.append(item)
+    return result
+
+
+def save_strategy6_optimization_trial(item: dict) -> None:
+    conn = get_conn()
+    conn.execute(
+        '''INSERT INTO strategy6_optimization_trials
+           (campaign_id, stage_id, trial_id, parameter_set_id,
+            parent_parameter_set_id, trial_kind, status, coarse_run_id,
+            full_run_id, parameter_json, selection_metric_json,
+            reject_reason, error_message, completed_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+           ON CONFLICT(campaign_id, stage_id, trial_id) DO UPDATE SET
+             status=excluded.status,
+             coarse_run_id=COALESCE(excluded.coarse_run_id, coarse_run_id),
+             full_run_id=COALESCE(excluded.full_run_id, full_run_id),
+             selection_metric_json=excluded.selection_metric_json,
+             reject_reason=excluded.reject_reason,
+             error_message=excluded.error_message,
+             completed_at=excluded.completed_at,
+             updated_at=datetime('now')''',
+        (
+            item["campaign_id"], item["stage_id"], item["trial_id"],
+            item["parameter_set_id"], item["parent_parameter_set_id"],
+            item["trial_kind"], item.get("status", "PENDING"),
+            item.get("coarse_run_id"), item.get("full_run_id"),
+            json.dumps(item.get("parameters") or {}, ensure_ascii=False, sort_keys=True),
+            json.dumps(item.get("selection_metrics") or {}, ensure_ascii=False, sort_keys=True),
+            item.get("reject_reason"), item.get("error_message"), item.get("completed_at"),
+        ),
+    )
+    conn.commit()
+
+
+def get_strategy6_optimization_trials(campaign_id: str, stage_id: str | None = None) -> list[dict]:
+    query = '''SELECT campaign_id, stage_id, trial_id, parameter_set_id,
+                      parent_parameter_set_id, trial_kind, status,
+                      coarse_run_id, full_run_id, parameter_json,
+                      selection_metric_json, reject_reason, error_message,
+                      created_at, updated_at, completed_at
+               FROM strategy6_optimization_trials WHERE campaign_id=?'''
+    params: list = [campaign_id]
+    if stage_id is not None:
+        query += " AND stage_id=?"
+        params.append(stage_id)
+    query += " ORDER BY stage_id, created_at, trial_id"
+    rows = get_conn().execute(query, params).fetchall()
+    keys = (
+        "campaign_id", "stage_id", "trial_id", "parameter_set_id",
+        "parent_parameter_set_id", "trial_kind", "status", "coarse_run_id",
+        "full_run_id", "parameters", "selection_metrics", "reject_reason",
+        "error_message", "created_at", "updated_at", "completed_at",
+    )
+    result = []
+    for row in rows:
+        item = dict(zip(keys, row))
+        item["parameters"] = json.loads(item["parameters"] or "{}")
+        item["selection_metrics"] = json.loads(item["selection_metrics"] or "{}")
+        result.append(item)
+    return result
+
+
+def get_selectable_strategy6_optimization_trials(campaign_id: str, stage_id: str) -> list[dict]:
+    result = []
+    for item in get_strategy6_optimization_trials(campaign_id, stage_id):
+        if item["status"] not in {"COMPLETED", "COMPLETED_WITH_SKIPS"}:
+            continue
+        run_id = item.get("full_run_id") or item.get("coarse_run_id")
+        if not run_id:
+            continue
+        failed = get_conn().execute(
+            '''SELECT 1 FROM strategy6_backtest_stock_progress
+               WHERE run_id=? AND parameter_set_id=? AND status LIKE 'FAILED%' LIMIT 1''',
+            (run_id, item["parameter_set_id"]),
+        ).fetchone()
+        if not failed:
+            result.append(item)
+    return result
 
 
 def save_strategy6_backtest_run(item: dict) -> None:
