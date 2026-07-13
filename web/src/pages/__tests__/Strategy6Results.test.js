@@ -148,6 +148,10 @@ describe('Strategy6Results', () => {
           target_price_2: 10.2,
           risk_reward_ratio_2: 2.2,
           volume_ratio_5_20: 0.66,
+          tail_avg_volume: 0,
+          pre_tail_avg_volume_20: 0,
+          tail_volume_ratio: 0,
+          tail_path: 'NONE',
           risk_tags: ['UPPER_PRESSURE'],
           warn_tags: [],
         },
@@ -253,6 +257,13 @@ describe('Strategy6Results', () => {
     expect(wrapper.text()).toContain('11.80 - 12.50')
     expect(wrapper.text()).toContain('下沿测试2次')
     expect(wrapper.text()).toContain('紧密排列')
+    expect(wrapper.text()).toContain('未形成尾段（V5/V20 0.660）')
+    expect(wrapper.vm.tailVolumeDisplay({
+      tail_avg_volume: 0,
+      pre_tail_avg_volume_20: 0,
+      tail_volume_ratio: 0,
+      volume_ratio_5_20: null,
+    })).toBe('未形成尾段')
     expect(wrapper.text()).toContain('2026-07-10 至 2026-07-14')
     expect(wrapper.text()).toContain('NEXT_TRADING_DAY_ONLY')
     expect(wrapper.text()).toContain('4.0.0')

@@ -123,7 +123,7 @@
               <td class="rr">{{ fmt(c.objective_rr_2 ?? c.risk_reward_ratio_2) }}</td>
               <td>{{ c.pattern_type || 'UNKNOWN' }}</td>
               <td>{{ c.tail_path || 'NONE' }} / {{ c.box_status || 'NO_BOX' }}</td>
-              <td>{{ fmt(c.tail_volume_ratio ?? c.volume_ratio_5_20, 3) }}</td>
+              <td>{{ tailVolumeDisplay(c) }}</td>
               <td>
                 <div>{{ c.market_status || 'UNKNOWN' }}</div>
                 <div class="muted">RS20 {{ pct(c.relative_strength_20) }}</div>
@@ -170,7 +170,7 @@
         <div><span>相对强度</span><strong>RS20 {{ pct(selected.relative_strength_20) }}</strong></div>
         <div><span>候选池</span><strong>首次入池 {{ selected.first_pool_date || '--' }} · 池龄 {{ selected.pool_age_trading_days ?? 0 }}日</strong></div>
         <div><span>退出/冷却</span><strong>{{ selected.exit_reason || '--' }} · 冷却至 {{ selected.cooldown_until_date || '--' }} · 重入 {{ selected.reentry_count ?? 0 }} 次</strong></div>
-        <div><span>量能</span><strong>尾段 {{ fmt(selected.tail_avg_volume, 0) }} · 前置20日 {{ fmt(selected.pre_tail_avg_volume_20, 0) }} · 比值 {{ fmt(selected.tail_volume_ratio, 3) }}</strong></div>
+        <div><span>量能</span><strong>{{ tailVolumeDisplay(selected, true) }}</strong></div>
         <div><span>版本</span><strong>{{ selected.strategy_version || '--' }} · {{ selected.config_hash || '--' }}</strong></div>
         <div><span>价格口径</span><strong>{{ selected.price_basis || 'FORWARD_ADJUSTED' }} · 未复权报价 {{ fmt(selected.current_price_raw) }}</strong></div>
         <div><span>涨跌幅</span><strong>5日 {{ pct(selected.return_5) }} · 10日 {{ pct(selected.return_10) }} · 20日 {{ pct(selected.return_20) }}</strong></div>
@@ -304,6 +304,26 @@ export default {
       if (v == null || v === '') return '--'
       const n = Number(v)
       return Number.isFinite(n) ? n.toFixed(digits) : '--'
+    },
+    tailVolumeDisplay(candidate, detailed = false) {
+      const tailAvg = Number(candidate?.tail_avg_volume)
+      const baselineAvg = Number(candidate?.pre_tail_avg_volume_20)
+      const ratio = Number(candidate?.tail_volume_ratio)
+      const hasTailMeasurement = (
+        Number.isFinite(tailAvg) && tailAvg > 0
+        && Number.isFinite(baselineAvg) && baselineAvg > 0
+        && Number.isFinite(ratio)
+      )
+      if (hasTailMeasurement) {
+        if (!detailed) return this.fmt(ratio, 3)
+        return `尾段 ${this.fmt(tailAvg, 0)} · 前置20日 ${this.fmt(baselineAvg, 0)} · 比值 ${this.fmt(ratio, 3)}`
+      }
+      const rawV5v20 = candidate?.volume_ratio_5_20
+      if (rawV5v20 != null && rawV5v20 !== '') {
+        const v5v20 = Number(rawV5v20)
+        if (Number.isFinite(v5v20)) return `未形成尾段（V5/V20 ${this.fmt(v5v20, 3)}）`
+      }
+      return '未形成尾段'
     },
     pct(v) {
       if (v == null || v === '') return '--'
