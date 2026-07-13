@@ -95,7 +95,7 @@ npm --prefix web run build
 
 检查未知值回退、空值、技术缩写、CSV 原始值以及未触及后端。
 
-- [ ] **步骤 4：只暂存本次文件并提交、推送**
+- [x] **步骤 4：只暂存本次文件并提交、推送**
 
 ```bash
 git add docs/superpowers/specs/2026-07-13-strategy6-frontend-chinese-labels-design.md docs/superpowers/plans/2026-07-13-strategy6-frontend-chinese-labels.md web/src/utils/strategy6Labels.js web/src/utils/__tests__/strategy6Labels.test.js web/src/pages/Strategy6Results.vue web/src/pages/StrategyConfig.vue web/src/pages/__tests__/Strategy6Results.test.js web/src/pages/__tests__/StrategyConfig.scheduler.test.js
