@@ -8,7 +8,7 @@
       <select v-model="selectedTaskId" @change="loadCandidates">
         <option value="">选择策略6任务</option>
         <option v-for="task in tasks" :key="task.id" :value="task.id">
-          {{ task.id }} · {{ task.status }} · {{ task.candidates || 0 }} 候选
+          {{ task.id }} · {{ label('taskStatus', task.status) }} · {{ task.candidates || 0 }} 候选
         </option>
       </select>
       <button
@@ -42,9 +42,9 @@
     <section v-if="marketSnapshot" class="panel market-panel">
       <div class="panel-header">市场过滤数据</div>
       <div class="market-summary">
-        <span>状态 <strong>{{ marketSnapshot.market_status || 'UNKNOWN' }}</strong></span>
+        <span>状态 <strong>{{ label('marketStatus', marketSnapshot.market_status || 'UNKNOWN') }}</strong></span>
         <span>20日市场涨幅 <strong>{{ pct(marketSnapshot.market_return_20) }}</strong></span>
-        <span v-for="reason in marketSnapshot.market_reasons || []" :key="reason" class="tag info">{{ reason }}</span>
+        <span v-for="reason in marketSnapshot.market_reasons || []" :key="reason" class="tag info">{{ label('marketReason', reason) }}</span>
       </div>
       <div class="table-scroll">
         <table class="market-table">
@@ -66,7 +66,7 @@
               <td>{{ idx.above_ma20 ? '是' : '否' }}</td>
               <td>{{ idx.ma20_above_ma50 ? '是' : '否' }}</td>
               <td>{{ idx.volume_down_risk ? '是' : '否' }}</td>
-              <td>{{ idx.source || '--' }}</td>
+              <td>{{ label('source', idx.source) }}</td>
               <td>{{ idx.fetched_at || '--' }}</td>
               <td>{{ idx.rows_count ?? 0 }}</td>
             </tr>
@@ -83,11 +83,11 @@
           <tbody>
             <tr v-for="row in lifecycleAuditRows" :key="row.code">
               <td><span class="code">{{ row.code }}</span> {{ row.name }}</td>
-              <td>{{ row.lifecycle_status }}</td>
+              <td>{{ label('lifecycleStatus', row.lifecycle_status) }}</td>
               <td>{{ row.first_seen_date || '--' }}</td>
               <td>{{ row.days_in_pool ?? 0 }}日</td>
               <td>{{ row.exit_date || '--' }}</td>
-              <td>{{ row.exit_reason || (row.reject_reasons || []).join(' / ') || '--' }}</td>
+              <td>{{ row.exit_reason ? label('tag', row.exit_reason) : joinedLabels('tag', row.reject_reasons, ' / ') }}</td>
               <td>{{ row.cooldown_until_date || '--' }}</td>
               <td>{{ row.reentry_count ?? 0 }}</td>
             </tr>
@@ -103,7 +103,7 @@
           <thead>
             <tr>
               <th>股票</th><th>现价</th><th>总分</th><th>分类</th><th>生命周期</th>
-              <th>启动类型/等级</th><th>支撑状态</th><th>Key/前置支撑</th><th>买入区</th>
+              <th>启动类型/等级</th><th>支撑状态</th><th>关键/前置支撑</th><th>买入区</th>
               <th>止损</th><th>客观目标1/2</th><th>客观RR2</th><th>形态</th><th>尾部路径/箱体</th><th>尾段/前20量比</th><th>市场/RS</th><th>入池</th><th>风险/警告</th><th>数据日</th>
             </tr>
           </thead>
@@ -112,20 +112,20 @@
               <td><span class="code">{{ c.code }}</span> {{ c.name }}</td>
               <td>{{ fmt(c.current_price) }}</td>
               <td class="score">{{ fmt(c.total_score, 0) }}</td>
-              <td><span class="type-badge" :class="classFor(c)">{{ c.candidate_type }}</span></td>
-              <td>{{ c.lifecycle_status || '--' }}</td>
-              <td>{{ c.start_type || '--' }} / {{ c.start_grade || '--' }}</td>
-              <td>{{ c.support_status || '--' }}</td>
+              <td><span class="type-badge" :class="classFor(c)">{{ label('candidateType', c.candidate_type) }}</span></td>
+              <td>{{ label('lifecycleStatus', c.lifecycle_status) }}</td>
+              <td>{{ label('startType', c.start_type) }} / {{ label('startGrade', c.start_grade) }}</td>
+              <td>{{ label('supportStatus', c.support_status) }}</td>
               <td>{{ fmt(c.key_support_price) }} / {{ fmt(c.prior_key_support_price) }}</td>
               <td>{{ priceRange(c.buy_zone_low, c.buy_zone_high) }}</td>
               <td>{{ fmt(c.stop_loss_price) }}</td>
               <td>{{ fmt(c.objective_target_1 ?? c.target_price_1) }} / {{ fmt(c.objective_target_2 ?? c.target_price_2) }}</td>
               <td class="rr">{{ fmt(c.objective_rr_2 ?? c.risk_reward_ratio_2) }}</td>
-              <td>{{ c.pattern_type || 'UNKNOWN' }}</td>
-              <td>{{ c.tail_path || 'NONE' }} / {{ c.box_status || 'NO_BOX' }}</td>
+              <td>{{ label('patternType', c.pattern_type || 'UNKNOWN') }}</td>
+              <td>{{ label('tailPath', c.tail_path || 'NONE') }} / {{ label('boxStatus', c.box_status || 'NO_BOX') }}</td>
               <td>{{ tailVolumeDisplay(c) }}</td>
               <td>
-                <div>{{ c.market_status || 'UNKNOWN' }}</div>
+                <div>{{ label('marketStatus', c.market_status || 'UNKNOWN') }}</div>
                 <div class="muted">RS20 {{ pct(c.relative_strength_20) }}</div>
               </td>
               <td>
@@ -133,8 +133,8 @@
                 <div class="muted">池龄 {{ c.pool_age_trading_days ?? 0 }}日</div>
               </td>
               <td>
-                <span v-for="tag in c.risk_tags || []" :key="'r'+tag" class="tag risk">{{ tag }}</span>
-                <span v-for="tag in c.warn_tags || []" :key="'w'+tag" class="tag warn">{{ tag }}</span>
+                <span v-for="tag in c.risk_tags || []" :key="'r'+tag" class="tag risk">{{ label('tag', tag) }}</span>
+                <span v-for="tag in c.warn_tags || []" :key="'w'+tag" class="tag warn">{{ label('tag', tag) }}</span>
               </td>
               <td>{{ c.kline_latest_date || c.evaluation_date || '--' }}</td>
             </tr>
@@ -146,42 +146,42 @@
     <section v-if="selected" class="panel detail-panel">
       <div class="panel-header">候选详情 · {{ selected.code }} {{ selected.name }}</div>
       <div class="detail-grid">
-        <div><span>分类</span><strong>{{ selected.candidate_type }} / {{ selected.classification || '--' }}</strong></div>
-        <div><span>生命周期</span><strong>{{ selected.lifecycle_status || '--' }}</strong></div>
-        <div><span>强势启动</span><strong>{{ selected.start_type || '--' }} / {{ selected.start_grade || '--' }} / {{ pct(selected.start_day_return) }} · 启动后{{ selected.days_since_start ?? 0 }}日</strong></div>
+        <div><span>分类</span><strong>{{ label('candidateType', selected.candidate_type) }} / {{ label('classification', selected.classification) }}</strong></div>
+        <div><span>生命周期</span><strong>{{ label('lifecycleStatus', selected.lifecycle_status) }}</strong></div>
+        <div><span>强势启动</span><strong>{{ label('startType', selected.start_type) }} / {{ label('startGrade', selected.start_grade) }} / {{ pct(selected.start_day_return) }} · 启动后{{ selected.days_since_start ?? 0 }}日</strong></div>
         <div><span>启动日低点</span><strong>{{ fmt(selected.start_low) }}</strong></div>
-        <div><span>支撑</span><strong>{{ selected.support_status || '--' }} · {{ selected.main_support_ma || '--' }} · 测试{{ selected.support_test_count ?? 0 }}次</strong></div>
+        <div><span>支撑</span><strong>{{ label('supportStatus', selected.support_status) }} · {{ selected.main_support_ma || '--' }} · 测试{{ selected.support_test_count ?? 0 }}次</strong></div>
         <div><span>战术价格</span><strong>支撑 {{ fmt(selected.key_support_price) }} · 前置支撑 {{ fmt(selected.prior_key_support_price) }} · 止损 {{ fmt(selected.stop_loss_price) }}</strong></div>
         <div><span>买入区</span><strong>{{ priceRange(selected.buy_zone_low, selected.buy_zone_high) }}</strong></div>
-        <div><span>阶段</span><strong>{{ selected.phase_status || '--' }} · 整理 {{ selected.consolidation_start_date || '--' }} · 尾段 {{ selected.tail_start_date || '--' }}</strong></div>
-        <div><span>形态</span><strong>{{ selected.pattern_type || 'UNKNOWN' }} · {{ selected.pivot_source || '--' }} · 收缩{{ selected.contraction_count ?? 0 }}次</strong></div>
-        <div><span>支撑簇</span><strong>战术 {{ fmt(selected.tactical_support_price) }} · {{ (selected.support_cluster_sources || []).join(' / ') || '--' }}</strong></div>
+        <div><span>阶段</span><strong>{{ label('phaseStatus', selected.phase_status) }} · 整理 {{ selected.consolidation_start_date || '--' }} · 尾段 {{ selected.tail_start_date || '--' }}</strong></div>
+        <div><span>形态</span><strong>{{ label('patternType', selected.pattern_type || 'UNKNOWN') }} · {{ label('pivotSource', selected.pivot_source) }} · 收缩{{ selected.contraction_count ?? 0 }}次</strong></div>
+        <div><span>支撑簇</span><strong>战术 {{ fmt(selected.tactical_support_price) }} · {{ joinedLabels('supportSource', selected.support_cluster_sources, ' / ') }}</strong></div>
         <div><span>客观目标</span><strong>{{ fmt(selected.objective_target_1 ?? selected.target_price_1) }} / {{ fmt(selected.objective_target_2 ?? selected.target_price_2) }} · RR {{ fmt(selected.objective_rr_1 ?? selected.risk_reward_ratio_1) }} / {{ fmt(selected.objective_rr_2 ?? selected.risk_reward_ratio_2) }}</strong></div>
         <div><span>执行R目标</span><strong>1.5R {{ fmt(selected.execution_target_1_5r) }} · 2R {{ fmt(selected.execution_target_2r) }} · 2.5R {{ fmt(selected.execution_target_2_5r) }} · 3.5R {{ fmt(selected.execution_target_3_5r) }}</strong></div>
         <div><span>执行窗口</span><strong>{{ selected.valid_from_date || '--' }} 至 {{ selected.valid_until_date || '--' }} · 限价 {{ fmt(selected.suggested_limit_price) }}</strong></div>
         <div><span>六维评分</span><strong>启动{{ selected.strong_start_score ?? 0 }} 形态{{ selected.pattern_score_component ?? 0 }} 支撑{{ selected.support_score ?? 0 }} 尾段{{ selected.tail_score ?? 0 }} 客观RR{{ selected.objective_rr_score ?? 0 }} RS/风险{{ selected.relative_strength_risk_score ?? 0 }}</strong></div>
-        <div><span>尾部路径</span><strong>{{ selected.tail_path || 'NONE' }} · 原路径 {{ selected.original_tail_pass ? '通过' : '未通过' }}/{{ selected.original_tail_score ?? 0 }} · 箱体 {{ selected.box_tail_pass ? '通过' : '未通过' }}/{{ selected.box_tail_score ?? 0 }}</strong></div>
-        <div><span>稳定箱体</span><strong>{{ selected.box_status || 'NO_BOX' }} · {{ selected.box_start_date || '--' }} 至 {{ selected.box_end_date || '--' }} · {{ selected.box_days ?? 0 }}日</strong></div>
+        <div><span>尾部路径</span><strong>{{ label('tailPath', selected.tail_path || 'NONE') }} · 原路径 {{ selected.original_tail_pass ? '通过' : '未通过' }}/{{ selected.original_tail_score ?? 0 }} · 箱体 {{ selected.box_tail_pass ? '通过' : '未通过' }}/{{ selected.box_tail_score ?? 0 }}</strong></div>
+        <div><span>稳定箱体</span><strong>{{ label('boxStatus', selected.box_status || 'NO_BOX') }} · {{ selected.box_start_date || '--' }} 至 {{ selected.box_end_date || '--' }} · {{ selected.box_days ?? 0 }}日</strong></div>
         <div><span>箱体区间</span><strong>{{ priceRange(selected.box_low, selected.box_high) }} · 宽度 {{ pct(selected.box_width) }} · 位置 {{ pct(selected.box_position) }}</strong></div>
         <div><span>箱体承接</span><strong>下沿测试{{ selected.box_low_test_count ?? 0 }}次 · 上沿测试{{ selected.box_high_test_count ?? 0 }}次 · 中枢 {{ pct(selected.box_center_shift) }} · 后/前量 {{ fmt(selected.box_volume_contraction_ratio, 3) }}</strong></div>
-        <div><span>紧密排列</span><strong>{{ selected.box_quality_tag || 'NONE' }} · {{ selected.compact_kline_pass ? '通过' : '未通过' }} · {{ selected.compact_kline_score ?? 0 }}/10 · 箱体质量 {{ selected.box_quality_score ?? 0 }}</strong></div>
+        <div><span>紧密排列</span><strong>{{ label('boxQualityTag', selected.box_quality_tag || 'NONE') }} · {{ selected.compact_kline_pass ? '通过' : '未通过' }} · {{ selected.compact_kline_score ?? 0 }}/10 · 箱体质量 {{ selected.box_quality_score ?? 0 }}</strong></div>
         <div><span>紧密指标</span><strong>平均实体 {{ pct(selected.avg_body_ratio_5) }} · 收盘区间 {{ pct(selected.compact_close_range_5) }} · 重叠{{ selected.kline_overlap_pair_count ?? 0 }}组 · ATR比 {{ fmt(selected.atr_contraction_ratio, 3) }}</strong></div>
-        <div><span>市场过滤</span><strong>{{ selected.market_status || 'UNKNOWN' }} · {{ selected.enable_market_filter ? '开启' : '关闭' }} · {{ selected.market_filter_mode || '--' }}</strong></div>
+        <div><span>市场过滤</span><strong>{{ label('marketStatus', selected.market_status || 'UNKNOWN') }} · {{ selected.enable_market_filter ? '开启' : '关闭' }} · {{ label('marketFilterMode', selected.market_filter_mode) }}</strong></div>
         <div><span>相对强度</span><strong>RS20 {{ pct(selected.relative_strength_20) }}</strong></div>
         <div><span>候选池</span><strong>首次入池 {{ selected.first_pool_date || '--' }} · 池龄 {{ selected.pool_age_trading_days ?? 0 }}日</strong></div>
-        <div><span>退出/冷却</span><strong>{{ selected.exit_reason || '--' }} · 冷却至 {{ selected.cooldown_until_date || '--' }} · 重入 {{ selected.reentry_count ?? 0 }} 次</strong></div>
+        <div><span>退出/冷却</span><strong>{{ label('tag', selected.exit_reason) }} · 冷却至 {{ selected.cooldown_until_date || '--' }} · 重入 {{ selected.reentry_count ?? 0 }} 次</strong></div>
         <div><span>量能</span><strong>{{ tailVolumeDisplay(selected, true) }}</strong></div>
         <div><span>版本</span><strong>{{ selected.strategy_version || '--' }} · {{ selected.config_hash || '--' }}</strong></div>
-        <div><span>价格口径</span><strong>{{ selected.price_basis || 'FORWARD_ADJUSTED' }} · 未复权报价 {{ fmt(selected.current_price_raw) }}</strong></div>
+        <div><span>价格口径</span><strong>{{ label('priceBasis', selected.price_basis || 'FORWARD_ADJUSTED') }} · 未复权报价 {{ fmt(selected.current_price_raw) }}</strong></div>
         <div><span>涨跌幅</span><strong>5日 {{ pct(selected.return_5) }} · 10日 {{ pct(selected.return_10) }} · 20日 {{ pct(selected.return_20) }}</strong></div>
         <div><span>建议</span><strong>{{ selected.suggestion || '--' }}</strong></div>
       </div>
       <div class="tags">
-        <span v-for="note in selected.execution_notes || []" :key="'e' + note" class="tag info">{{ note }}</span>
-        <span v-for="tag in selected.risk_tags || []" :key="'r' + tag" class="tag risk">{{ tag }}</span>
-        <span v-for="tag in selected.warn_tags || []" :key="'w' + tag" class="tag warn">{{ tag }}</span>
-        <span v-for="tag in selected.reject_reasons || []" :key="'x' + tag" class="tag risk">{{ tag }}</span>
-        <span v-for="tag in selected.score_reasons || []" :key="'s' + tag" class="tag info">{{ tag }}</span>
+        <span v-for="note in selected.execution_notes || []" :key="'e' + note" class="tag info">{{ label('executionNote', note) }}</span>
+        <span v-for="tag in selected.risk_tags || []" :key="'r' + tag" class="tag risk">{{ label('tag', tag) }}</span>
+        <span v-for="tag in selected.warn_tags || []" :key="'w' + tag" class="tag warn">{{ label('tag', tag) }}</span>
+        <span v-for="tag in selected.reject_reasons || []" :key="'x' + tag" class="tag risk">{{ label('tag', tag) }}</span>
+        <span v-for="tag in selected.score_reasons || []" :key="'s' + tag" class="tag info">{{ label('tag', tag) }}</span>
       </div>
     </section>
 
@@ -192,6 +192,7 @@
 <script>
 import { useApi } from '../composables/useApi.js'
 import { downloadCsv } from '../utils/csvExport.js'
+import { strategy6Label, strategy6Labels } from '../utils/strategy6Labels.js'
 
 export default {
   name: 'Strategy6Results',
@@ -222,9 +223,9 @@ export default {
     },
     candidateGroups() {
       return [
-        { type: 'READY_CANDIDATE', title: '就绪候选 READY_CANDIDATE', items: this.readyCandidates },
-        { type: 'KEY_CANDIDATE', title: '重点候选 KEY_CANDIDATE', items: this.keyCandidates },
-        { type: 'WATCH_CANDIDATE', title: '观察候选 WATCH_CANDIDATE', items: this.watchCandidates },
+        { type: 'READY_CANDIDATE', title: '就绪候选', items: this.readyCandidates },
+        { type: 'KEY_CANDIDATE', title: '重点候选', items: this.keyCandidates },
+        { type: 'WATCH_CANDIDATE', title: '观察候选', items: this.watchCandidates },
       ].filter(group => group.items.length)
     },
     topScore() {
@@ -260,6 +261,13 @@ export default {
     }
   },
   methods: {
+    label(group, value) {
+      return strategy6Label(group, value)
+    },
+    joinedLabels(group, values, separator = ' / ') {
+      const translated = strategy6Labels(group, values)
+      return translated.length ? translated.join(separator) : '--'
+    },
     async loadCandidates() {
       if (!this.selectedTaskId) {
         this.candidates = []
@@ -341,9 +349,7 @@ export default {
       return 'rejected'
     },
     marketDataStatusText(status) {
-      if (status === 'FRESH') return '新鲜'
-      if (status === 'STALE') return '过期'
-      return '缺失'
+      return this.label('marketDataStatus', status || 'MISSING')
     },
     exportCandidates() {
       downloadCsv({
@@ -352,17 +358,23 @@ export default {
           { header: '代码', value: c => c.code },
           { header: '名称', value: c => c.name },
           { header: '板块', value: c => c.sector_name || '' },
-          { header: '候选类型', value: c => c.candidate_type || '' },
-          { header: '生命周期', value: c => c.lifecycle_status || '' },
+          { header: '候选类型', value: c => this.label('candidateType', c.candidate_type) },
+          { header: '候选类型原始值', value: c => c.candidate_type || '' },
+          { header: '生命周期', value: c => this.label('lifecycleStatus', c.lifecycle_status) },
+          { header: '生命周期原始值', value: c => c.lifecycle_status || '' },
           { header: '首次入池', value: c => c.first_pool_date || '' },
           { header: '池龄交易日', value: c => c.pool_age_trading_days ?? '' },
           { header: '策略版本', value: c => c.strategy_version || '' },
-          { header: '阶段状态', value: c => c.phase_status || '' },
-          { header: '形态类型', value: c => c.pattern_type || '' },
+          { header: '阶段状态', value: c => this.label('phaseStatus', c.phase_status) },
+          { header: '阶段状态原始值', value: c => c.phase_status || '' },
+          { header: '形态类型', value: c => this.label('patternType', c.pattern_type) },
+          { header: '形态类型原始值', value: c => c.pattern_type || '' },
           { header: '总分', value: c => c.total_score ?? '' },
           { header: '市场过滤', value: c => c.enable_market_filter ? '开启' : '关闭' },
-          { header: '市场过滤模式', value: c => c.market_filter_mode || '' },
-          { header: '市场状态', value: c => c.market_status || '' },
+          { header: '市场过滤模式', value: c => this.label('marketFilterMode', c.market_filter_mode) },
+          { header: '市场过滤模式原始值', value: c => c.market_filter_mode || '' },
+          { header: '市场状态', value: c => this.label('marketStatus', c.market_status) },
+          { header: '市场状态原始值', value: c => c.market_status || '' },
           { header: 'RS20', value: c => this.pct(c.relative_strength_20) },
           { header: '现价', value: c => this.fmt(c.current_price) },
           { header: '日涨跌', value: c => this.pct(c.daily_return) },
@@ -370,12 +382,14 @@ export default {
           { header: '10日涨幅', value: c => this.pct(c.return_10) },
           { header: '20日涨幅', value: c => this.pct(c.return_20) },
           { header: '启动日', value: c => c.start_date || '' },
-          { header: '启动类型', value: c => c.start_type || '' },
+          { header: '启动类型', value: c => this.label('startType', c.start_type) },
+          { header: '启动类型原始值', value: c => c.start_type || '' },
           { header: '启动等级', value: c => c.start_grade || '' },
           { header: '启动日低点', value: c => this.fmt(c.start_low) },
           { header: '启动后天数', value: c => c.days_since_start ?? '' },
-          { header: '支撑状态', value: c => c.support_status || '' },
-          { header: 'Key支撑', value: c => this.fmt(c.key_support_price) },
+          { header: '支撑状态', value: c => this.label('supportStatus', c.support_status) },
+          { header: '支撑状态原始值', value: c => c.support_status || '' },
+          { header: '关键支撑', value: c => this.fmt(c.key_support_price) },
           { header: '前置支撑', value: c => this.fmt(c.prior_key_support_price) },
           { header: '战术支撑', value: c => this.fmt(c.tactical_support_price) },
           { header: '支撑区低', value: c => this.fmt(c.support_zone_low) },
@@ -404,9 +418,11 @@ export default {
           { header: '箱体路径启用', value: c => c.box_tail_enabled ? '是' : '否' },
           { header: '箱体通过', value: c => c.box_tail_pass ? '是' : '否' },
           { header: '箱体分', value: c => c.box_tail_score ?? '' },
-          { header: '箱体状态', value: c => c.box_status || '' },
+          { header: '箱体状态', value: c => this.label('boxStatus', c.box_status) },
+          { header: '箱体状态原始值', value: c => c.box_status || '' },
           { header: '尾部通过', value: c => c.tail_pass ? '是' : '否' },
-          { header: '尾部路径', value: c => c.tail_path || '' },
+          { header: '尾部路径', value: c => this.label('tailPath', c.tail_path) },
+          { header: '尾部路径原始值', value: c => c.tail_path || '' },
           { header: '箱体开始', value: c => c.box_start_date || '' },
           { header: '箱体结束', value: c => c.box_end_date || '' },
           { header: '箱体天数', value: c => c.box_days ?? '' },
@@ -423,13 +439,16 @@ export default {
           { header: '前半中枢', value: c => this.fmt(c.first_half_median_close) },
           { header: '后半中枢', value: c => this.fmt(c.second_half_median_close) },
           { header: '箱体中枢变化', value: c => this.pct(c.box_center_shift) },
-          { header: '箱体跌破原因', value: c => c.box_break_reason || '' },
-          { header: '箱体选择原因', value: c => c.box_selection_reason || '' },
+          { header: '箱体跌破原因', value: c => c.box_break_reason ? this.label('tag', c.box_break_reason) : '' },
+          { header: '箱体跌破原因原始值', value: c => c.box_break_reason || '' },
+          { header: '箱体选择原因', value: c => c.box_selection_reason ? this.label('tag', c.box_selection_reason) : '' },
+          { header: '箱体选择原因原始值', value: c => c.box_selection_reason || '' },
           { header: '紧密排列启用', value: c => c.compact_kline_enabled ? '是' : '否' },
           { header: '紧密排列通过', value: c => c.compact_kline_pass ? '是' : '否' },
           { header: '紧密排列分', value: c => c.compact_kline_score ?? '' },
           { header: '箱体质量分', value: c => c.box_quality_score ?? '' },
-          { header: '箱体质量标签', value: c => c.box_quality_tag || '' },
+          { header: '箱体质量标签', value: c => this.label('boxQualityTag', c.box_quality_tag) },
+          { header: '箱体质量标签原始值', value: c => c.box_quality_tag || '' },
           { header: '平均实体比', value: c => this.pct(c.avg_body_ratio_5) },
           { header: '最大实体比', value: c => this.pct(c.max_body_ratio_5) },
           { header: '紧密收盘区间', value: c => this.pct(c.compact_close_range_5) },
@@ -440,16 +459,21 @@ export default {
           { header: 'ATR5', value: c => this.fmt(c.atr5) },
           { header: 'ATR20', value: c => this.fmt(c.atr20) },
           { header: 'ATR收缩比', value: c => this.fmt(c.atr_contraction_ratio, 3) },
-          { header: '紧密排列原因', value: c => (c.compact_kline_reasons || []).join('|') },
-          { header: '紧密排列风险', value: c => (c.compact_kline_risk_tags || []).join('|') },
+          { header: '紧密排列原因', value: c => strategy6Labels('tag', c.compact_kline_reasons).join('|') },
+          { header: '紧密排列原因原始值', value: c => (c.compact_kline_reasons || []).join('|') },
+          { header: '紧密排列风险', value: c => strategy6Labels('tag', c.compact_kline_risk_tags).join('|') },
+          { header: '紧密排列风险原始值', value: c => (c.compact_kline_risk_tags || []).join('|') },
           { header: '启动分', value: c => c.strong_start_score ?? '' },
           { header: '支撑分', value: c => c.support_score ?? '' },
           { header: '量干分', value: c => c.dry_stable_score ?? '' },
           { header: '盈亏比分', value: c => c.risk_reward_score ?? '' },
           { header: '风控分', value: c => c.risk_control_score ?? '' },
-          { header: '风险标签', value: c => (c.risk_tags || []).join('|') },
-          { header: '警告标签', value: c => (c.warn_tags || []).join('|') },
-          { header: '否决原因', value: c => (c.reject_reasons || []).join('|') },
+          { header: '风险标签', value: c => strategy6Labels('tag', c.risk_tags).join('|') },
+          { header: '风险标签原始值', value: c => (c.risk_tags || []).join('|') },
+          { header: '警告标签', value: c => strategy6Labels('tag', c.warn_tags).join('|') },
+          { header: '警告标签原始值', value: c => (c.warn_tags || []).join('|') },
+          { header: '否决原因', value: c => strategy6Labels('tag', c.reject_reasons).join('|') },
+          { header: '否决原因原始值', value: c => (c.reject_reasons || []).join('|') },
           { header: '建议', value: c => c.suggestion || '' },
           { header: '数据日', value: c => c.kline_latest_date || c.evaluation_date || '' },
         ],

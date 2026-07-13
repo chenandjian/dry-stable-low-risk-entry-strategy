@@ -220,11 +220,14 @@ describe('Strategy6Results', () => {
 
     expect(api.getStrategy6Candidates).toHaveBeenCalledWith('s6-task')
     expect(wrapper.text()).toContain('策略6')
-    expect(wrapper.text()).toContain('READY_CANDIDATE')
-    expect(wrapper.text()).toContain('KEY_CANDIDATE')
-    expect(wrapper.text()).toContain('WATCH_CANDIDATE')
-    expect(wrapper.text()).toContain('VOLUME_LIMIT_UP / S')
-    expect(wrapper.text()).toContain('MA10_SUPPORT')
+    expect(wrapper.text()).toContain('就绪候选')
+    expect(wrapper.text()).toContain('重点候选')
+    expect(wrapper.text()).toContain('观察候选')
+    expect(wrapper.text()).not.toContain('READY_CANDIDATE')
+    expect(wrapper.text()).not.toContain('KEY_CANDIDATE')
+    expect(wrapper.text()).not.toContain('WATCH_CANDIDATE')
+    expect(wrapper.text()).toContain('放量涨停启动 / S')
+    expect(wrapper.text()).toContain('MA10支撑')
     expect(wrapper.text()).toContain('11.80 / 11.60')
     expect(wrapper.text()).toContain('启动后5日')
     expect(wrapper.text()).toContain('启动日低点')
@@ -232,8 +235,8 @@ describe('Strategy6Results', () => {
     expect(wrapper.text()).toContain('止损')
     expect(wrapper.text()).toContain('RR2')
     expect(wrapper.text()).toContain('3.40')
-    expect(wrapper.text()).toContain('BUY_ZONE')
-    expect(wrapper.text()).toContain('MARKET_WEAK')
+    expect(wrapper.text()).toContain('买入区间')
+    expect(wrapper.text()).toContain('市场偏弱')
     expect(wrapper.text()).toContain('RS20 18.00%')
     expect(wrapper.text()).toContain('市场过滤数据')
     expect(wrapper.text()).toContain('上证指数')
@@ -241,19 +244,19 @@ describe('Strategy6Results', () => {
     expect(wrapper.text()).toContain('MA20')
     expect(wrapper.text()).toContain('数据状态')
     expect(wrapper.text()).toContain('新鲜')
-    expect(wrapper.text()).toContain('sina')
+    expect(wrapper.text()).toContain('新浪')
     expect(wrapper.text()).toContain('2026-07-09 15:20:00')
     expect(wrapper.text()).not.toContain('板块过滤')
     expect(wrapper.text()).toContain('首次入池 2026-07-01')
     expect(wrapper.text()).toContain('池龄 6日')
-    expect(wrapper.text()).toContain('NEAR_120D_PRESSURE')
+    expect(wrapper.text()).toContain('接近120日压力位')
     expect(wrapper.text()).toContain('VCP')
     expect(wrapper.text()).toContain('客观目标')
     expect(wrapper.text()).toContain('执行R目标')
     expect(wrapper.text()).toContain('尾部路径')
-    expect(wrapper.text()).toContain('BOX')
-    expect(wrapper.text()).toContain('BOX_SUPPORT_READY')
-    expect(wrapper.text()).toContain('BOX_COMPACT_READY')
+    expect(wrapper.text()).toContain('稳定箱体路径')
+    expect(wrapper.text()).toContain('箱体下沿支撑就绪')
+    expect(wrapper.text()).toContain('箱体K线紧密就绪')
     expect(wrapper.text()).toContain('11.80 - 12.50')
     expect(wrapper.text()).toContain('下沿测试2次')
     expect(wrapper.text()).toContain('紧密排列')
@@ -265,12 +268,12 @@ describe('Strategy6Results', () => {
       volume_ratio_5_20: null,
     })).toBe('未形成尾段')
     expect(wrapper.text()).toContain('2026-07-10 至 2026-07-14')
-    expect(wrapper.text()).toContain('NEXT_TRADING_DAY_ONLY')
+    expect(wrapper.text()).toContain('仅限下一交易日执行')
     expect(wrapper.text()).toContain('4.0.0')
     expect(api.getStrategy6Lifecycle).toHaveBeenCalledWith('s6-task')
     expect(wrapper.text()).toContain('生命周期退出/冷却审计')
     expect(wrapper.text()).toContain('退出样本')
-    expect(wrapper.text()).toContain('SUPPORT_FAILED')
+    expect(wrapper.text()).toContain('支撑失效')
   })
 
   it('loads all candidates for a URL task even when task list is stale', async () => {
@@ -316,10 +319,30 @@ describe('Strategy6Results', () => {
     })
     await flushUi()
 
-    expect(wrapper.text()).toContain('READY_CANDIDATE')
+    expect(wrapper.text()).toContain('就绪候选')
     expect(wrapper.findAll('.candidate-table tbody tr')).toHaveLength(3)
     expect(wrapper.text()).toContain('市场指数快照加载失败')
     expect(wrapper.text()).not.toContain('策略6候选加载失败')
+  })
+
+  it('translates incomplete market snapshot reasons', async () => {
+    api.getStrategy6MarketSnapshot.mockResolvedValue({
+      snapshot: {
+        market_status: 'UNKNOWN',
+        market_reasons: ['MARKET_DATA_PARTIAL', 'observed_indexes=1'],
+        indexes: [],
+      },
+    })
+
+    const wrapper = mount(Strategy6Results, {
+      global: { mocks: { $route: { query: { task: 's6-task' } } } },
+    })
+    await flushUi()
+
+    expect(wrapper.text()).toContain('市场指数数据不完整')
+    expect(wrapper.text()).toContain('有效指数数量=1')
+    expect(wrapper.text()).not.toContain('MARKET_DATA_PARTIAL')
+    expect(wrapper.text()).not.toContain('observed_indexes=1')
   })
 
   it('exports strategy6 candidates with market, lifecycle and trade plan fields', async () => {
@@ -340,17 +363,18 @@ describe('Strategy6Results', () => {
     expect(mocks.click).toHaveBeenCalled()
     const blob = mocks.createObjectURL.mock.calls[0][0]
     const csv = await blob.text()
-    expect(csv).toContain('代码,名称,板块,候选类型,生命周期,首次入池,池龄交易日')
-    expect(csv).toContain('市场状态,RS20')
+    expect(csv).toContain('代码,名称,板块,候选类型,候选类型原始值,生命周期,生命周期原始值,首次入池,池龄交易日')
+    expect(csv).toContain('市场状态,市场状态原始值,RS20')
     expect(csv).not.toContain('板块状态')
     expect(csv).not.toContain('板块RS10')
     expect(csv).toContain('启动日低点,启动后天数')
-    expect(csv).toContain('Key支撑,前置支撑')
-    expect(csv).toContain('策略版本,阶段状态,形态类型')
+    expect(csv).toContain('关键支撑,前置支撑')
+    expect(csv).toContain('策略版本,阶段状态,阶段状态原始值,形态类型,形态类型原始值')
     expect(csv).toContain('客观目标1,客观目标2,客观RR1,客观RR2')
     expect(csv).toContain('1.5R目标,2R目标,2.5R目标,3.5R目标')
-    expect(csv).toContain('000001,平安银行,,READY_CANDIDATE,BUY_ZONE,2026-07-01,6')
-    expect(csv).toContain('downgrade,MARKET_WEAK,18.00%,12.34')
+    expect(csv).toContain('000001,平安银行,,就绪候选,READY_CANDIDATE,买入区间,BUY_ZONE,2026-07-01,6')
+    expect(csv).toContain('降级处理,downgrade,市场偏弱,MARKET_WEAK,18.00%,12.34')
+    expect(csv).toContain('接近120日压力位,NEAR_120D_PRESSURE')
   })
 
   it('exports strategy6 daily report as excel from backend report endpoint', async () => {

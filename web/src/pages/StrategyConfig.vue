@@ -689,7 +689,7 @@
             @click="toggleStrategy6('pattern_filter_enabled')">{{ config.strategy6?.pattern_filter_enabled === true ? '开' : '关' }}</button>
         </label>
         <label class="toggle-item">
-          <span class="toggle-label" title="开启后按过滤模式处理 MARKET_WEAK / MARKET_RISK">市场过滤</span>
+          <span class="toggle-label" title="开启后按过滤模式处理弱势市场和风险市场">市场过滤</span>
           <button class="toggle" :class="{ active: config.strategy6?.enable_market_filter === true }"
             @click="toggleStrategy6('enable_market_filter')">{{ config.strategy6?.enable_market_filter === true ? '开' : '关' }}</button>
         </label>
@@ -747,13 +747,13 @@
           <span class="default">默认 0.98</span>
         </div>
         <div class="param">
-          <label title="strict: 弱市场不允许重点/就绪；downgrade: 降为观察；score_only: 只扣风险分">市场过滤模式</label>
+          <label title="严格过滤：弱势市场不允许重点/就绪；降级处理：降为观察；仅调整评分：只扣风险分">市场过滤模式</label>
           <select data-test="strategy6-market-filter-mode" v-model="config.strategy6.market_filter_mode" @change="markDirty">
-            <option value="strict">strict · 严格</option>
-            <option value="downgrade">downgrade · 降级</option>
-            <option value="score_only">score_only · 只扣分</option>
+            <option value="strict">严格过滤</option>
+            <option value="downgrade">降级处理</option>
+            <option value="score_only">仅调整评分</option>
           </select>
-          <span class="default">默认 downgrade</span>
+          <span class="default">默认：降级处理</span>
         </div>
         <div class="param">
           <label title="个股20日涨幅相对沪深300的最低超额收益">最低RS20</label>
@@ -766,7 +766,7 @@
           <span class="default">默认 60</span>
         </div>
         <div class="param">
-          <label title="启动后不足该天数只进入 START_CONFIRMED 观察">最小启动年龄</label>
+          <label title="启动后不足该天数只进入‘强势启动已确认’观察状态">最小启动年龄</label>
           <input data-test="strategy6-start-age-min" type="number" v-model.number="config.strategy6.start_age_min_days" @input="markDirty" min="1" max="20" />
           <span class="default">默认 5</span>
         </div>
@@ -791,21 +791,21 @@
           <span class="default">默认 5</span>
         </div>
         <div class="param">
-          <label title="strict直接排除未知形态；downgrade降级；score_only仅影响形态分">形态过滤模式</label>
+          <label title="严格过滤直接排除未知形态；降级处理将候选降级；仅调整评分只影响形态分">形态过滤模式</label>
           <select data-test="strategy6-pattern-mode" v-model="config.strategy6.pattern_filter_mode" @change="markDirty">
-            <option value="strict">strict · 严格</option>
-            <option value="downgrade">downgrade · 降级</option>
-            <option value="score_only">score_only · 只计分</option>
+            <option value="strict">严格过滤</option>
+            <option value="downgrade">降级处理</option>
+            <option value="score_only">仅调整评分</option>
           </select>
-          <span class="default">默认 score_only</span>
+          <span class="default">默认：仅调整评分</span>
         </div>
         <div class="param">
-          <label title="信号价至少达到最后收缩上沿的该比例范围；高于Pivot的突破由生命周期规则判断">形态距Pivot最大下偏</label>
+          <label title="信号价至少达到最后收缩上沿的该比例范围；高于突破枢轴的突破由生命周期规则判断">形态距突破枢轴最大下偏</label>
           <input data-test="strategy6-pattern-pivot-proximity" type="number" v-model.number="config.strategy6.pattern_pivot_proximity_pct" @input="markDirty" min="0.01" max="0.20" step="0.01" />
           <span class="default">默认 0.05</span>
         </div>
         <div class="param">
-          <label title="当前价高于Pivot超过该比例时标记为EXTENDED并排除追高">突破过度延伸比例</label>
+          <label title="当前价高于突破枢轴超过该比例时标记为‘涨幅已过度延伸’并排除追高">突破过度延伸比例</label>
           <input data-test="strategy6-breakout-extended-max" type="number" v-model.number="config.strategy6.breakout_extended_max_pct" @input="markDirty" min="0.01" max="0.30" step="0.01" />
           <span class="default">默认 0.08</span>
         </div>
@@ -905,7 +905,7 @@
           <span class="default">默认 0.75</span>
         </div>
         <div class="param">
-          <label title="强量干门槛，用于 READY 候选">强量干 V5/V20</label>
+          <label title="强量干门槛，用于就绪候选">强量干 V5/V20</label>
           <input type="number" v-model.number="config.strategy6.tail_strong_volume_ratio_5_20" @input="markDirty" min="0" max="2" step="0.01" />
           <span class="default">默认 0.60</span>
         </div>
@@ -930,17 +930,17 @@
           <span class="default">默认 2.5</span>
         </div>
         <div class="param">
-          <label title="READY_CANDIDATE 最低总分">就绪最低分</label>
+          <label title="就绪候选最低总分">就绪最低分</label>
           <input type="number" v-model.number="config.strategy6.ready_min_score" @input="markDirty" min="0" max="100" step="1" />
           <span class="default">默认 85</span>
         </div>
         <div class="param">
-          <label title="KEY_CANDIDATE 最低总分">重点最低分</label>
+          <label title="重点候选最低总分">重点最低分</label>
           <input type="number" v-model.number="config.strategy6.key_min_score" @input="markDirty" min="0" max="100" step="1" />
           <span class="default">默认 75</span>
         </div>
         <div class="param">
-          <label title="WATCH_CANDIDATE 最低总分">观察最低分</label>
+          <label title="观察候选最低总分">观察最低分</label>
           <input type="number" v-model.number="config.strategy6.watch_min_score" @input="markDirty" min="0" max="100" step="1" />
           <span class="default">默认 60</span>
         </div>
@@ -1788,9 +1788,9 @@ function validate() {
   if (s6.normal_start_min_amount_yi < 0 || s6.normal_start_min_amount_yi > 1000) errors.push('策略6: 普通启动成交额需在 0-1000 亿')
   if (s6.normal_start_self_amount_percentile < 0 || s6.normal_start_self_amount_percentile > 1) errors.push('策略6: 启动成交额自身分位需在 0-1')
   if (s6.near_120d_high_ratio < 0 || s6.near_120d_high_ratio > 1) errors.push('策略6: 接近120日高比例需在 0-1')
-  if (!['strict', 'downgrade', 'score_only'].includes(s6.market_filter_mode)) errors.push('策略6: 市场过滤模式必须是 strict/downgrade/score_only')
-  if (!['strict', 'downgrade', 'score_only'].includes(s6.pattern_filter_mode)) errors.push('策略6: 形态过滤模式必须是 strict/downgrade/score_only')
-  if (s6.pattern_pivot_proximity_pct <= 0 || s6.pattern_pivot_proximity_pct > 0.20) errors.push('策略6: 形态距Pivot最大下偏需在 (0,0.20]')
+  if (!['strict', 'downgrade', 'score_only'].includes(s6.market_filter_mode)) errors.push('策略6: 市场过滤模式必须是严格过滤、降级处理或仅调整评分')
+  if (!['strict', 'downgrade', 'score_only'].includes(s6.pattern_filter_mode)) errors.push('策略6: 形态过滤模式必须是严格过滤、降级处理或仅调整评分')
+  if (s6.pattern_pivot_proximity_pct <= 0 || s6.pattern_pivot_proximity_pct > 0.20) errors.push('策略6: 形态距突破枢轴最大下偏需在 (0,0.20]')
   if (s6.breakout_extended_max_pct <= 0 || s6.breakout_extended_max_pct > 0.30) errors.push('策略6: 突破过度延伸比例需在 (0,0.30]')
   if (s6.start_age_min_days < 1 || s6.start_age_min_days > s6.start_age_max_days) errors.push('策略6: 最小启动年龄需在 1 到最大启动年龄之间')
   if (s6.start_age_max_days > s6.start_lookback_days) errors.push('策略6: 最大启动年龄不能超过启动回看天数')

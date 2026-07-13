@@ -208,6 +208,17 @@ describe('StrategyConfig scheduler controls', () => {
     expect(wrapper.find('[data-test="strategy6-breakout-extended-max"]').element.value).toBe('0.08')
     expect(wrapper.find('[data-test="strategy6-stop-atr-multiplier"]').element.value).toBe('0.8')
     expect(wrapper.find('[data-test="strategy6-max-watch-days"]').element.value).toBe('10')
+    const strategy6Text = wrapper.find('.strategy6-section').text()
+    expect(strategy6Text).toContain('严格过滤')
+    expect(strategy6Text).toContain('降级处理')
+    expect(strategy6Text).toContain('仅调整评分')
+    expect(strategy6Text).not.toContain('strict ·')
+    expect(strategy6Text).not.toContain('downgrade ·')
+    expect(strategy6Text).not.toContain('score_only ·')
+    expect(strategy6Text).not.toContain('READY_CANDIDATE')
+    expect(strategy6Text).not.toContain('KEY_CANDIDATE')
+    expect(strategy6Text).not.toContain('WATCH_CANDIDATE')
+    expect(strategy6Text).not.toContain('Pivot')
   })
 
   it('saves strategy6 market filter mode without legacy sector filter fields', async () => {
@@ -230,6 +241,18 @@ describe('StrategyConfig scheduler controls', () => {
     expect(payload.strategy6.breakout_extended_max_pct).toBe(0.08)
     expect(payload.strategy6.stop_atr_multiplier).toBe(0.8)
     expect(payload.strategy6.max_watch_days).toBe(10)
+  })
+
+  it('shows strategy6 validation errors with Chinese business terms', async () => {
+    const wrapper = mount(StrategyConfig)
+    await flushUi()
+
+    await wrapper.find('[data-test="strategy6-pattern-pivot-proximity"]').setValue(0)
+    await wrapper.find('.btn-save').trigger('click')
+    await flushUi()
+
+    expect(wrapper.text()).toContain('形态距突破枢轴最大下偏')
+    expect(wrapper.text()).not.toContain('形态距Pivot最大下偏')
   })
 
   it('renders and saves nested strategy6 box-tail and compact-kline controls', async () => {
