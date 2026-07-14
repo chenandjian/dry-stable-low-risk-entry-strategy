@@ -1,6 +1,13 @@
 import pytest
 
 from strategy6.brooks.models import BrooksTailResult, BrooksTradeTriggerResult
+from strategy6.brooks.models import (
+    BrooksCompactStructureResult,
+    BrooksContextResult,
+    BrooksSellingPressureResult,
+    BrooksStructureResult,
+)
+from strategy6.brooks.tail import score_brooks_tail
 from strategy6.validation import resolve_strategy6_config
 
 
@@ -59,3 +66,57 @@ def test_brooks_result_mutable_defaults_are_not_shared():
 
     assert second.reasons == []
     assert second.metrics == {}
+
+
+def test_brooks_tail_passes_on_complete_high_quality_evidence():
+    config = resolve_strategy6_config({})["brooks_tail"]
+    result = score_brooks_tail(
+        context=BrooksContextResult(context_type="BULL_CONTEXT", passed=True),
+        selling=BrooksSellingPressureResult(
+            exhausted=True,
+            strong_bear_bar_count=0,
+            bear_follow_through_count=0,
+            max_consecutive_bear_bars=0,
+        ),
+        compact=BrooksCompactStructureResult(structure_type="COMPACT_ORDERLY"),
+        structure=BrooksStructureResult(
+            micro_double_bottom=True,
+            second_entry_long_ready=True,
+            setup_types=["MICRO_DOUBLE_BOTTOM", "SECOND_ENTRY_LONG_READY"],
+        ),
+        price_stability_checks={
+            "close_range": True,
+            "atr": True,
+            "body_avg": True,
+            "body_max": True,
+            "lower_lows": True,
+        },
+        volume_dry_pass=True,
+        volume_dry_premium=True,
+        support_not_broken=True,
+        config=config,
+    )
+
+    assert result.passed is True
+    assert result.score >= 17
+    assert result.premium is True
+    assert result.status == "SECOND_ENTRY_LONG_READY"
+
+
+def test_bearish_compact_structure_is_a_hard_reject_even_with_high_score():
+    config = resolve_strategy6_config({})["brooks_tail"]
+    result = score_brooks_tail(
+        context=BrooksContextResult(context_type="BEAR_CONTEXT", passed=False),
+        selling=BrooksSellingPressureResult(exhausted=False),
+        compact=BrooksCompactStructureResult(structure_type="COMPACT_BEARISH"),
+        structure=BrooksStructureResult(setup_types=["ORDERLY_COMPRESSION_AT_SUPPORT"]),
+        price_stability_checks={key: True for key in ("close_range", "atr", "body_avg", "body_max", "lower_lows")},
+        volume_dry_pass=True,
+        volume_dry_premium=True,
+        support_not_broken=True,
+        config=config,
+    )
+
+    assert result.hard_reject is True
+    assert result.passed is False
+    assert result.status == "COMPACT_BEARISH_REJECT"
