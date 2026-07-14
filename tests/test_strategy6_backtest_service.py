@@ -38,6 +38,9 @@ class FakeEvaluation:
             "start_date": "2025-01-01", "pattern_type": "VCP", "pivot_price": 10.5,
             "box_start_date": "2025-01-02", "box_end_date": self.date,
             "box_status": "BOX_SUPPORT_READY", "compact_kline_pass": True,
+            "entry_archetype": "SUPPORT_PULLBACK", "setup_quality_score": 21,
+            "support_reaction_score": 8, "start_event_quality_score": 17,
+            "path_evidence_score": 13, "score_model_version": "S6_QUALITY_V2",
             "buy_zone_low": 9.8, "buy_zone_high": 10.2, "suggested_limit_price": 10.0,
             "stop_loss_price": 9.5, "objective_target_2": 11.5,
         }
@@ -63,6 +66,38 @@ def test_service_keeps_daily_signals_but_only_one_order_per_setup_and_skips_oos(
     assert len(result["orders"]) == 1
     assert len(result["trades"]) == 1
     assert result["trades"][0]["tail_path"] == "BOX"
+    assert result["trades"][0]["entry_archetype"] == "SUPPORT_PULLBACK"
+    assert result["entry_archetype_metrics"]["SUPPORT_PULLBACK"]["trades"] == 1
+    assert result["setup_quality_metrics"]["20-24"]["trades"] == 1
+
+
+def test_service_keeps_wait_breakout_signal_without_creating_order():
+    class WaitingEvaluation(FakeEvaluation):
+        def to_candidate_dict(self):
+            return {
+                **super().to_candidate_dict(),
+                "candidate_type": "WATCH_CANDIDATE",
+                "entry_archetype": "WAIT_BREAKOUT",
+                "suggested_limit_price": None,
+            }
+
+    class WaitingEngine:
+        def evaluate_at(self, rows, **kwargs):
+            return WaitingEvaluation(rows[-1]["date"])
+
+    result = run_parameter_research(
+        parameter_set_id="s6ps-wait",
+        data_by_code={"000001": {"name": "样本", "rows": _rows()}},
+        evaluation_dates=["2025-01-03"],
+        market_data_by_symbol={"hs300": _rows()},
+        backtest_config=resolve_backtest_config({}),
+        engine_factory=lambda: WaitingEngine(), minimum_history=1, oos_start="2026-01-01",
+    )
+
+    assert len(result["signals"]) == 1
+    assert result["signals"][0]["entry_archetype"] == "WAIT_BREAKOUT"
+    assert result["orders"] == []
+    assert result["trades"] == []
 
 
 def test_brooks_only_watch_signal_does_not_consume_setup_before_cross_day_trade_trigger():

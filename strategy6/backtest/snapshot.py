@@ -89,10 +89,19 @@ def path_metadata(snapshot: dict) -> dict:
 
 
 def is_trade_ready_snapshot(snapshot: dict) -> bool:
+    entry_archetype = str(snapshot.get("entry_archetype") or "").upper()
+    if entry_archetype in {"WAIT_BREAKOUT", "NONE"}:
+        return False
     paths = authoritative_tail_paths(snapshot)
     if paths == ["BROOKS"]:
         return bool(snapshot.get("brooks_trade_ready"))
     return bool(paths)
+
+
+def quality_score_band(value) -> str:
+    score = max(0, int(float(value or 0)))
+    lower = (score // 5) * 5
+    return f"{lower:02d}-{lower + 4:02d}"
 
 
 def build_setup_id(snapshot: dict) -> str:

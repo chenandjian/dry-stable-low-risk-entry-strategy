@@ -11,6 +11,7 @@ from strategy6.backtest.snapshot import (
     authoritative_tail_paths,
     is_trade_ready_snapshot,
     path_metadata,
+    quality_score_band,
     rebuild_stock_signals,
 )
 
@@ -67,7 +68,9 @@ def run_parameter_research(
                 continue
             signals.append(signal_record)
             if signal_scope in {"BROOKS_ONLY", "BROOKS_PATH"}:
-                trade_ready = bool(signal.snapshot.get("brooks_trade_ready"))
+                trade_ready = bool(signal.snapshot.get("brooks_trade_ready")) and is_trade_ready_snapshot(
+                    signal.snapshot
+                )
             else:
                 trade_ready = is_trade_ready_snapshot(signal.snapshot)
             if not trade_ready:
@@ -88,6 +91,7 @@ def run_parameter_research(
                 "fill_reason": outcome.order.fill_reason,
                 "expire_date": outcome.order.expire_date,
                 "audit_tags": outcome.audit_tags,
+                "entry_archetype": signal.snapshot.get("entry_archetype", ""),
             }
             orders.append(order_record)
             if outcome.trade is None:
@@ -107,6 +111,16 @@ def run_parameter_research(
                 "compact_kline_pass": bool(signal.snapshot.get("compact_kline_pass")),
                 "net_profit": round(outcome.trade.net_return * outcome.trade.entry_price * 100, 6),
                 "stop_loss_price": signal.snapshot.get("stop_loss_price", 0),
+                "entry_archetype": signal.snapshot.get("entry_archetype", ""),
+                "setup_quality_score": signal.snapshot.get("setup_quality_score", 0),
+                "support_reaction_score": signal.snapshot.get("support_reaction_score", 0),
+                "start_event_quality_score": signal.snapshot.get("start_event_quality_score", 0),
+                "path_evidence_score": signal.snapshot.get("path_evidence_score", 0),
+                "score_model_version": signal.snapshot.get("score_model_version", ""),
+                "setup_quality_band": quality_score_band(signal.snapshot.get("setup_quality_score", 0)),
+                "support_reaction_band": quality_score_band(signal.snapshot.get("support_reaction_score", 0)),
+                "start_quality_band": quality_score_band(signal.snapshot.get("start_event_quality_score", 0)),
+                "path_evidence_band": quality_score_band(signal.snapshot.get("path_evidence_score", 0)),
             })
             trades.append(trade_record)
     closed_trades = [item for item in trades if item.get("exit_date")]
@@ -126,6 +140,11 @@ def run_parameter_research(
         "tail_path_summary_metrics": group_trade_metrics(closed_trades, "tail_path_summary"),
         "brooks_status_metrics": group_trade_metrics(closed_trades, "brooks_status"),
         "brooks_structure_metrics": group_brooks_structure_metrics(closed_trades),
+        "entry_archetype_metrics": group_trade_metrics(closed_trades, "entry_archetype"),
+        "setup_quality_metrics": group_trade_metrics(closed_trades, "setup_quality_band"),
+        "support_reaction_metrics": group_trade_metrics(closed_trades, "support_reaction_band"),
+        "start_quality_metrics": group_trade_metrics(closed_trades, "start_quality_band"),
+        "path_evidence_metrics": group_trade_metrics(closed_trades, "path_evidence_band"),
         "concentration": calculate_concentration(closed_trades),
         "oos_status": "OOS_LOCKED",
     }

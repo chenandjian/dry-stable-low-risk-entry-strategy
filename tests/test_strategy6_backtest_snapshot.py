@@ -1,4 +1,9 @@
-from strategy6.backtest.snapshot import authoritative_tail_paths, build_setup_id, rebuild_stock_signals
+from strategy6.backtest.snapshot import (
+    authoritative_tail_paths,
+    build_setup_id,
+    is_trade_ready_snapshot,
+    rebuild_stock_signals,
+)
 from strategy6.engine import StrongVcpTailEngine
 
 
@@ -60,6 +65,18 @@ def test_asof_rebuild_never_passes_future_stock_or_market_rows():
     )
     assert engine.calls == [("2025-01-05", "2025-01-05"), ("2025-01-06", "2025-01-06")]
     assert [signal.evaluation_date for signal in signals] == ["2025-01-05", "2025-01-06"]
+
+
+def test_wait_breakout_snapshot_is_observable_but_not_trade_ready():
+    waiting = FakeEvaluation(
+        "2025-01-05",
+        entry_archetype="WAIT_BREAKOUT",
+        suggested_limit_price=None,
+    ).to_candidate_dict()
+
+    assert authoritative_tail_paths(waiting) == ["BOX"]
+    assert is_trade_ready_snapshot(waiting) is False
+    assert is_trade_ready_snapshot(FakeEvaluation("2025-01-05").to_candidate_dict()) is True
 
 
 def test_setup_id_is_stable_but_parameter_set_keeps_snapshots_independent():

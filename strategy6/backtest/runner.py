@@ -551,6 +551,11 @@ def run_local_parameter_set(
         "tail_path_summary_metrics": group_trade_metrics(closed_trades, "tail_path_summary"),
         "brooks_status_metrics": group_trade_metrics(closed_trades, "brooks_status"),
         "brooks_structure_metrics": group_brooks_structure_metrics(closed_trades),
+        "entry_archetype_metrics": group_trade_metrics(closed_trades, "entry_archetype"),
+        "setup_quality_metrics": group_trade_metrics(closed_trades, "setup_quality_band"),
+        "support_reaction_metrics": group_trade_metrics(closed_trades, "support_reaction_band"),
+        "start_quality_metrics": group_trade_metrics(closed_trades, "start_quality_band"),
+        "path_evidence_metrics": group_trade_metrics(closed_trades, "path_evidence_band"),
         "concentration": calculate_concentration(closed_trades),
         "portfolios": {
             "EQUAL_WEIGHT": equal_portfolio,
@@ -603,6 +608,11 @@ def build_phase_selection_results(trades: list[dict], position: dict) -> dict:
             "brooks_status": group_trade_metrics(enriched, "brooks_status"),
             "brooks_structure": group_brooks_structure_metrics(enriched),
             "candidate_type": group_trade_metrics(enriched, "candidate_type"),
+            "entry_archetype": group_trade_metrics(enriched, "entry_archetype"),
+            "setup_quality": group_trade_metrics(enriched, "setup_quality_band"),
+            "support_reaction": group_trade_metrics(enriched, "support_reaction_band"),
+            "start_quality": group_trade_metrics(enriched, "start_quality_band"),
+            "path_evidence": group_trade_metrics(enriched, "path_evidence_band"),
         }
         result[phase] = {
             "trade_metrics": trade_metrics,

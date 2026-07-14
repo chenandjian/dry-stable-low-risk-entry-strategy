@@ -17,6 +17,11 @@ def test_report_writes_summary_daily_candidates_and_trades(tmp_path):
         "tail_path_summary_metrics": {"BROOKS": {"trades": 1}},
         "brooks_status_metrics": {"SECOND_ENTRY_LONG_READY": {"trades": 1}},
         "brooks_structure_metrics": {"MICRO_DOUBLE_BOTTOM": {"trades": 1}},
+        "entry_archetype_metrics": {"SUPPORT_PULLBACK": {"trades": 1}},
+        "setup_quality_metrics": {"20-24": {"trades": 1}},
+        "support_reaction_metrics": {"05-09": {"trades": 1}},
+        "start_quality_metrics": {"15-19": {"trades": 1}},
+        "path_evidence_metrics": {"10-14": {"trades": 1}},
         "signals": [{
             "evaluation_date": "2025-01-02", "code": "000001", "name": "样本",
             "tail_path": "NONE", "tail_paths": ["BROOKS"], "tail_primary_path": "BROOKS",
@@ -50,6 +55,9 @@ def test_report_writes_summary_daily_candidates_and_trades(tmp_path):
     assert "旧双路径归因" in markdown
     assert "权威三路径归因" in markdown
     assert "Brooks状态" in markdown
+    assert "入场类型与质量归因" in markdown
+    assert "SUPPORT_PULLBACK" in markdown
+    assert "setup_quality" in markdown
     summary = json.loads(paths["summary_json"].read_text(encoding="utf-8"))
     assert summary["summary"]["trades"] == 1
 
