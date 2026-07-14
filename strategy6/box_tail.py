@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from statistics import mean, median
 
+from strategy6.brooks.metrics import calculate_kline_overlap_ratio as _shared_overlap_ratio
 from strategy6.indicators import _atr
 from strategy6.models import (
     Strategy6BoxTail,
@@ -441,17 +442,7 @@ def count_independent_box_high_tests(rows: list[dict], box_high: float, config: 
 
 
 def calculate_kline_overlap_ratio(previous: dict, current: dict) -> float | None:
-    previous_range = float(previous["high"]) - float(previous["low"])
-    current_range = float(current["high"]) - float(current["low"])
-    minimum_range = min(previous_range, current_range)
-    if minimum_range <= 0:
-        return None
-    overlap = max(
-        0.0,
-        min(float(previous["high"]), float(current["high"]))
-        - max(float(previous["low"]), float(current["low"])),
-    )
-    return round(overlap / minimum_range, 6)
+    return _shared_overlap_ratio(previous, current)
 
 
 def _count_independent_indexes(indexes: list[int]) -> int:
