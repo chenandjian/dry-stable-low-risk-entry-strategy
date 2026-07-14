@@ -1,7 +1,7 @@
 from datetime import date, timedelta
 
 from strategy6.models import Strategy6Indicators, Strategy6Pattern, Strategy6Start
-from strategy6.support import evaluate_support
+from strategy6.support import evaluate_support, evaluate_support_reaction
 from strategy6.validation import resolve_strategy6_config
 
 
@@ -71,3 +71,47 @@ def test_support_zone_width_uses_larger_of_price_pct_and_atr():
 
     assert round(support.support_zone_high - support.key_support_price, 2) == 3.0
     assert round(support.key_support_price - support.support_zone_low, 2) == 3.0
+
+
+def test_support_reaction_rewards_low_volume_test_and_three_day_recovery():
+    rows = _rows()
+    for row in rows:
+        row["low"] = 102.0
+    rows[-5].update({"low": 99.2, "close": 100.2, "volume": 400_000})
+    rows[-4]["close"] = 101.0
+    rows[-3]["close"] = 102.5
+
+    score, reasons, risks = evaluate_support_reaction(rows, 100.0, 1.0, 15)
+
+    assert score >= 7
+    assert "SUPPORT_TEST_LOW_VOLUME" in reasons
+    assert "SUPPORT_TEST_RECOVERED" in reasons
+    assert "SUPPORT_VOLUME_BREAK_UNRECOVERED" not in risks
+
+
+def test_support_reaction_flags_high_volume_break_without_recovery():
+    rows = _rows()
+    for row in rows:
+        row["low"] = 102.0
+    for row in rows[-4:]:
+        row.update({"low": 95.0, "close": 96.0, "volume": 2_000_000})
+
+    score, reasons, risks = evaluate_support_reaction(rows, 100.0, 1.0, 15)
+
+    assert score <= 3
+    assert "SUPPORT_VOLUME_BREAK_UNRECOVERED" in risks
+
+
+def test_support_reaction_does_not_reward_more_tests_when_rebounds_weaken():
+    rows = _rows()
+    for row in rows:
+        row["low"] = 102.0
+    rows[-10].update({"low": 99.3, "close": 100.1, "volume": 500_000})
+    rows[-9]["close"] = 103.0
+    rows[-4].update({"low": 99.4, "close": 100.0, "volume": 500_000})
+    rows[-3]["close"] = 100.4
+    rows[-2]["close"] = 100.2
+
+    _, _, risks = evaluate_support_reaction(rows, 100.0, 1.0, 15)
+
+    assert "SUPPORT_REACTION_WEAKENING" in risks
