@@ -46,3 +46,28 @@ def test_best_stage_must_pass_both_train_and_validation_before_ranking():
 
     assert selected["stage_id"] == "B2"
 
+
+def test_best_stage_uses_combined_train_and_validation_sample_threshold():
+    passing_metrics = {
+        "expectancy_r": 0.10,
+        "profit_factor": 1.30,
+        "avg_win_r": 2.5,
+        "avg_loss_r": 1.0,
+        "max_drawdown": 0.15,
+    }
+    stages = [
+        {
+            "stage_id": "COMBINED_60",
+            "train": {**passing_metrics, "trades": 30},
+            "validation": {**passing_metrics, "trades": 30},
+        },
+        {
+            "stage_id": "COMBINED_59",
+            "train": {**passing_metrics, "trades": 30},
+            "validation": {**passing_metrics, "trades": 29},
+        },
+    ]
+
+    selected = select_best_stage(stages)
+
+    assert selected["stage_id"] == "COMBINED_60"

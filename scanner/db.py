@@ -5371,7 +5371,9 @@ def _deserialize_strategy6_row(row: dict) -> dict:
     row["tail_segmentation_status"] = row.get("tail_segmentation_status") or "FIXED_WINDOW"
     row["relative_strength_trend"] = row.get("relative_strength_trend") or "UNKNOWN"
     row["entry_archetype"] = row.get("entry_archetype") or "NONE"
-    row["score_model_version"] = row.get("score_model_version") or "S6_QUALITY_V2"
+    # A missing version identifies a pre-V2 row.  Keep it empty so clients do
+    # not present migration defaults such as zero scores as measured V2 data.
+    row["score_model_version"] = row.get("score_model_version") or ""
     return row
 
 

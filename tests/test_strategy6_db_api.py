@@ -307,6 +307,7 @@ def test_strategy6_legacy_candidate_gets_safe_brooks_and_path_defaults(tmp_path)
     assert saved["passed_path_count"] == 1
     assert saved["multi_path_confirmed"] is False
     assert saved["brooks_result"] == {}
+    assert saved["score_model_version"] == ""
 
 
 def test_strategy6_legacy_candidate_treats_corrupt_path_scores_as_zero(tmp_path):

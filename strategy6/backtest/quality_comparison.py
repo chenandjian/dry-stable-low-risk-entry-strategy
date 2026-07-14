@@ -24,11 +24,11 @@ def compare_candidate_records(baseline: list[dict], optimized: list[dict]) -> di
     }
 
 
-def quality_gate(metrics: dict) -> dict:
+def quality_gate(metrics: dict, *, min_trades: int = 60) -> dict:
     avg_loss = abs(float(metrics.get("avg_loss_r") or 0.0))
     payoff = float(metrics.get("avg_win_r") or 0.0) / avg_loss if avg_loss > 0 else 0.0
     checks = {
-        "trades_gte_60": int(metrics.get("trades") or 0) >= 60,
+        "minimum_trades": int(metrics.get("trades") or 0) >= min_trades,
         "expectancy_positive": float(metrics.get("expectancy_r") or 0.0) > 0,
         "profit_factor_gte_1_2": float(metrics.get("profit_factor") or 0.0) >= 1.2,
         "payoff_gte_2": payoff >= 2.0,
@@ -40,8 +40,12 @@ def quality_gate(metrics: dict) -> dict:
 def select_best_stage(stages: list[dict]) -> dict | None:
     eligible = [
         stage for stage in stages
-        if quality_gate(stage.get("train") or {})["passed"]
-        and quality_gate(stage.get("validation") or {})["passed"]
+        if (
+            int((stage.get("train") or {}).get("trades") or 0)
+            + int((stage.get("validation") or {}).get("trades") or 0)
+        ) >= 60
+        and quality_gate(stage.get("train") or {}, min_trades=0)["passed"]
+        and quality_gate(stage.get("validation") or {}, min_trades=0)["passed"]
     ]
     if not eligible:
         return None
