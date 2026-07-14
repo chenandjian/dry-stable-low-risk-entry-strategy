@@ -23,6 +23,15 @@ DEFAULT_STRATEGY6_CONFIG = {
     "consolidation_min_days": 5,
     "consolidation_max_days": 40,
     "tail_window_days": 5,
+    "dynamic_tail_enabled": True,
+    "dynamic_tail_min_days": 3,
+    "dynamic_tail_max_days": 10,
+    "dynamic_tail_baseline_days": 20,
+    "dynamic_tail_min_score": 3,
+    "dynamic_tail_range_ratio_max": 0.75,
+    "dynamic_tail_atr_ratio_max": 0.80,
+    "dynamic_tail_volume_ratio_max": 0.80,
+    "dynamic_tail_body_ratio_max": 0.80,
     "pattern_filter_enabled": True,
     "pattern_filter_mode": "score_only",
     "pattern_pivot_proximity_pct": 0.05,
@@ -239,6 +248,11 @@ def resolve_strategy6_config(config: dict | None) -> dict:
     _validate_int_range(raw, "consolidation_min_days", 1, 40)
     _validate_int_range(raw, "consolidation_max_days", raw["consolidation_min_days"], 120)
     _validate_int_range(raw, "tail_window_days", 3, 10)
+    raw["dynamic_tail_enabled"] = bool(raw.get("dynamic_tail_enabled", True))
+    _validate_int_range(raw, "dynamic_tail_min_days", 3, 10)
+    _validate_int_range(raw, "dynamic_tail_max_days", raw["dynamic_tail_min_days"], 15)
+    _validate_int_range(raw, "dynamic_tail_baseline_days", 10, 60)
+    _validate_int_range(raw, "dynamic_tail_min_score", 1, 4)
     _validate_int_range(raw, "support_test_lookback", 5, 40)
     _validate_int_range(raw, "buy_zone_valid_days", 1, 10)
     _validate_int_range(raw, "max_watch_days", 1, 60)
@@ -260,6 +274,8 @@ def resolve_strategy6_config(config: dict | None) -> dict:
         "breakout_extended_max_pct",
         "support_cluster_price_pct", "support_cluster_atr_multiplier",
         "support_zone_price_pct", "support_zone_atr_multiplier",
+        "dynamic_tail_range_ratio_max", "dynamic_tail_atr_ratio_max",
+        "dynamic_tail_volume_ratio_max", "dynamic_tail_body_ratio_max",
     ):
         _validate_number(raw, key)
     for key in (
@@ -285,6 +301,11 @@ def resolve_strategy6_config(config: dict | None) -> dict:
     _validate_between(raw, "breakout_extended_max_pct", 0, 0.30, lower_exclusive=True)
     _validate_between(raw, "tail_volume_ratio_5_20", 0, 2, lower_exclusive=True)
     _validate_between(raw, "tail_strong_volume_ratio_5_20", 0, raw["tail_volume_ratio_5_20"], lower_exclusive=True)
+    for key in (
+        "dynamic_tail_range_ratio_max", "dynamic_tail_atr_ratio_max",
+        "dynamic_tail_volume_ratio_max", "dynamic_tail_body_ratio_max",
+    ):
+        _validate_between(raw, key, 0, 2, lower_exclusive=True)
     if not raw["rr2_min_watch"] <= raw["rr2_min_key"] <= raw["rr2_min_ready"]:
         raise ValueError("rr2 thresholds must satisfy watch <= key <= ready")
     if not raw["watch_min_score"] <= raw["key_min_score"] <= raw["ready_min_score"]:
