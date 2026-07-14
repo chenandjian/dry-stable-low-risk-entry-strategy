@@ -59,6 +59,7 @@ def test_e6_to_e10_use_authoritative_paths_and_brooks_evidence_without_changing_
     assert [s["code"] for s in filter_experiment_signals(SIGNALS, "E1_DUAL_DEFAULT")] == ["A", "B", "C"]
     metrics = group_authoritative_path_metrics([{
         **flag_only_brooks,
+        "exit_date": "2025-01-10",
         "r_multiple": 1.5,
         "net_return": 0.08,
         "net_profit": 800,
@@ -72,7 +73,7 @@ def test_runner_adds_parallel_three_path_and_brooks_breakdowns_without_overwriti
             "code": "D", "signal_date": "2025-01-02", "exit_date": "2025-01-10",
             "tail_path": "NONE", "tail_paths": ["BROOKS"], "tail_primary_path": "BROOKS",
             "tail_path_summary": "BROOKS", "passed_path_count": 1,
-            "brooks_status": "SECOND_ENTRY_LONG_READY", "brooks_setup_types": ["MICRO_DOUBLE_BOTTOM"],
+            "brooks_status": "BROOKS_SUPPORT_READY", "brooks_setup_types": ["MICRO_DOUBLE_BOTTOM"],
             "candidate_type": "KEY_CANDIDATE", "market_status": "MARKET_OK", "pattern_type": "VCP",
             "r_multiple": 2.0, "net_return": 0.1, "net_profit": 1000,
         }
@@ -81,7 +82,7 @@ def test_runner_adds_parallel_three_path_and_brooks_breakdowns_without_overwriti
     experiments = _derive_experiment_metrics(trades)
     assert experiments["E6_BROOKS_ONLY"]["trades"] == 1
     assert experiments["E7_ORIGINAL_OR_BOX_OR_BROOKS"]["trades"] == 1
-    assert experiments["E9_BROOKS_STATUS_SECOND_ENTRY_LONG_READY"]["trades"] == 1
+    assert experiments["E9_BROOKS_STATUS_BROOKS_SUPPORT_READY"]["trades"] == 1
     assert experiments["E10_BROOKS_STRUCTURE_MICRO_DOUBLE_BOTTOM"]["trades"] == 1
 
     phases = build_phase_selection_results(trades, {
@@ -95,7 +96,42 @@ def test_runner_adds_parallel_three_path_and_brooks_breakdowns_without_overwriti
     assert breakdowns["authoritative_tail_path"]["BROOKS"]["trades"] == 1
     assert breakdowns["tail_primary_path"]["BROOKS"]["trades"] == 1
     assert breakdowns["tail_path_summary"]["BROOKS"]["trades"] == 1
-    assert breakdowns["brooks_status"]["SECOND_ENTRY_LONG_READY"]["trades"] == 1
+    assert breakdowns["brooks_status"]["BROOKS_SUPPORT_READY"]["trades"] == 1
+
+
+def test_ready_status_experiments_match_production_engine_status_values():
+    records = [
+        {"code": "A", "brooks_status": "BROOKS_SUPPORT_READY"},
+        {"code": "B", "brooks_status": "BROOKS_FAILED_BREAKOUT_READY"},
+        {"code": "C", "brooks_status": "BROOKS_BREAKOUT_READY"},
+    ]
+
+    assert [item["code"] for item in filter_experiment_signals(
+        records, "E9_BROOKS_STATUS_BROOKS_SUPPORT_READY"
+    )] == ["A"]
+    assert [item["code"] for item in filter_experiment_signals(
+        records, "E9_BROOKS_STATUS_BROOKS_FAILED_BREAKOUT_READY"
+    )] == ["B"]
+    assert [item["code"] for item in filter_experiment_signals(
+        records, "E9_BROOKS_STATUS_BROOKS_BREAKOUT_READY"
+    )] == ["C"]
+
+
+def test_experiment_and_path_metrics_ignore_unresolved_trades():
+    closed = {
+        "code": "A", "tail_path": "NONE", "tail_paths": ["BROOKS"],
+        "brooks_tail_pass": True, "original_tail_pass": False, "box_tail_pass": False,
+        "brooks_status": "BROOKS_SUPPORT_READY", "brooks_setup_types": ["MICRO_DOUBLE_BOTTOM"],
+        "exit_date": "2025-01-10", "r_multiple": 2.0, "net_return": 0.1, "net_profit": 1000,
+    }
+    unresolved = {**closed, "code": "B", "exit_date": ""}
+
+    experiments = _derive_experiment_metrics([closed, unresolved])
+    paths = group_authoritative_path_metrics([closed, unresolved])
+
+    assert experiments["E6_BROOKS_ONLY"]["trades"] == 1
+    assert experiments["E9_BROOKS_STATUS_BROOKS_SUPPORT_READY"]["trades"] == 1
+    assert paths["BROOKS"]["trades"] == 1
 
 
 def test_incremental_value_reports_capital_displacement_not_only_profit():

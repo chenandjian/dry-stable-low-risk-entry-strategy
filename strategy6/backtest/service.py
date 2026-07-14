@@ -92,7 +92,8 @@ def run_parameter_research(
                 "stop_loss_price": signal.snapshot.get("stop_loss_price", 0),
             })
             trades.append(trade_record)
-    metrics = calculate_trade_metrics([item for item in trades if item.get("exit_date")])
+    closed_trades = [item for item in trades if item.get("exit_date")]
+    metrics = calculate_trade_metrics(closed_trades)
     metrics["unfilled_rate"] = (
         sum(item["status"] != "FILLED" for item in orders) / len(orders) if orders else 0.0
     )
@@ -102,12 +103,12 @@ def run_parameter_research(
         "orders": sorted(orders, key=lambda item: (item["signal_date"], item["code"])),
         "trades": sorted(trades, key=lambda item: (item.get("entry_date", ""), item["code"])),
         "summary": metrics,
-        "path_metrics": group_trade_metrics(trades, "tail_path"),
-        "authoritative_path_metrics": group_authoritative_path_metrics(trades),
-        "tail_primary_path_metrics": group_trade_metrics(trades, "tail_primary_path"),
-        "tail_path_summary_metrics": group_trade_metrics(trades, "tail_path_summary"),
-        "brooks_status_metrics": group_trade_metrics(trades, "brooks_status"),
-        "brooks_structure_metrics": group_brooks_structure_metrics(trades),
-        "concentration": calculate_concentration(trades),
+        "path_metrics": group_trade_metrics(closed_trades, "tail_path"),
+        "authoritative_path_metrics": group_authoritative_path_metrics(closed_trades),
+        "tail_primary_path_metrics": group_trade_metrics(closed_trades, "tail_primary_path"),
+        "tail_path_summary_metrics": group_trade_metrics(closed_trades, "tail_path_summary"),
+        "brooks_status_metrics": group_trade_metrics(closed_trades, "brooks_status"),
+        "brooks_structure_metrics": group_brooks_structure_metrics(closed_trades),
+        "concentration": calculate_concentration(closed_trades),
         "oos_status": "OOS_LOCKED",
     }

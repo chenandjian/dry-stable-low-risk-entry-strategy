@@ -11,6 +11,9 @@ BROOKS_STATUS_EXPERIMENTS = {
     "E9_BROOKS_STATUS_MICRO_DOUBLE_BOTTOM": "MICRO_DOUBLE_BOTTOM",
     "E9_BROOKS_STATUS_ORDERLY_COMPRESSION_AT_SUPPORT": "ORDERLY_COMPRESSION_AT_SUPPORT",
     "E9_BROOKS_STATUS_BARB_WIRE_WAIT": "BARB_WIRE_WAIT",
+    "E9_BROOKS_STATUS_BROOKS_SUPPORT_READY": "BROOKS_SUPPORT_READY",
+    "E9_BROOKS_STATUS_BROOKS_FAILED_BREAKOUT_READY": "BROOKS_FAILED_BREAKOUT_READY",
+    "E9_BROOKS_STATUS_BROOKS_BREAKOUT_READY": "BROOKS_BREAKOUT_READY",
 }
 
 BROOKS_STRUCTURE_EXPERIMENTS = {
@@ -78,6 +81,8 @@ def filter_experiment_signals(signals: list[dict], experiment_id: str) -> list[d
 def group_authoritative_path_metrics(records: list[dict]) -> dict[str, dict]:
     grouped = {path: [] for path in ("ORIGINAL", "BOX", "BROOKS")}
     for item in records:
+        if not item.get("exit_date"):
+            continue
         for path in authoritative_tail_paths(item):
             grouped[path].append(item)
     return {
@@ -90,6 +95,8 @@ def group_authoritative_path_metrics(records: list[dict]) -> dict[str, dict]:
 def group_brooks_structure_metrics(records: list[dict]) -> dict[str, dict]:
     grouped: dict[str, list[dict]] = {}
     for item in records:
+        if not item.get("exit_date"):
+            continue
         for setup_type in brooks_setup_types(item):
             grouped.setdefault(setup_type, []).append(item)
     return {

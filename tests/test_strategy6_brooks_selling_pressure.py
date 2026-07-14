@@ -43,6 +43,7 @@ def test_bear_bar_without_follow_through_and_midpoint_reclaim_is_exhausted():
     assert result.strong_bear_bar_count == 1
     assert result.bear_follow_through_count == 0
     assert result.bear_follow_through_failed is True
+    assert result.bear_follow_through_failed_date == rows[-2]["date"]
     assert result.exhausted is True
 
 

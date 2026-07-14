@@ -577,7 +577,7 @@ def _git_commit() -> str:
 
 
 def _derive_experiment_metrics(trades: list[dict]) -> dict:
-    signal_like = trades
+    signal_like = [item for item in trades if item.get("exit_date")]
     return {
         experiment_id: calculate_trade_metrics(filter_experiment_signals(signal_like, experiment_id))
         for experiment_id in DERIVED_EXPERIMENT_IDS

@@ -107,16 +107,33 @@ def build_setup_id(snapshot: dict) -> str:
         brooks_result = snapshot.get("brooks_result")
         structure = brooks_result.get("structure") if isinstance(brooks_result, dict) else {}
         structure = structure if isinstance(structure, dict) else {}
-        identity["brooks_structure"] = {
-            "setup_types": sorted(brooks_setup_types(snapshot)),
-            "first_recent_low_date": structure.get("first_recent_low_date", ""),
-            "second_recent_low_date": structure.get("second_recent_low_date", ""),
-            "second_entry_signal_date": structure.get("second_entry_signal_date", ""),
-        }
+        event_anchor = _brooks_event_anchor(structure)
+        if event_anchor:
+            identity["brooks_event_anchor"] = event_anchor
     digest = hashlib.sha256(
         json.dumps(identity, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
     ).hexdigest()
     return f"s6setup-{digest[:20]}"
+
+
+def _brooks_event_anchor(structure: dict) -> dict[str, str]:
+    event_fields = (
+        "first_recent_low_date",
+        "failed_bear_breakout_date",
+        "bear_follow_through_failed_date",
+        "second_recent_low_date",
+        "second_entry_signal_date",
+        "reclaim_date",
+    )
+    events = [
+        (str(structure.get(field) or ""), field)
+        for field in event_fields
+        if structure.get(field)
+    ]
+    if not events:
+        return {}
+    event_date, event_type = min(events)
+    return {"event_type": event_type, "event_date": event_date}
 
 
 def rebuild_stock_signals(

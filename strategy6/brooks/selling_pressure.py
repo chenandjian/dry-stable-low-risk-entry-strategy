@@ -53,8 +53,16 @@ def analyze_selling_pressure(
         ))
         if followed:
             result.bear_follow_through_dates.append(str(following.get("date") or ""))
-        elif _reclaimed_body_midpoint(window, index):
+        else:
+            reclaim_date = _reclaimed_body_midpoint(window, index)
+            if not reclaim_date:
+                continue
             result.bear_follow_through_failed = True
+            if (
+                not result.bear_follow_through_failed_date
+                or reclaim_date < result.bear_follow_through_failed_date
+            ):
+                result.bear_follow_through_failed_date = reclaim_date
     result.bear_follow_through_count = len(result.bear_follow_through_dates)
     result.max_consecutive_bear_bars = _max_consecutive_bear_bars(window)
     result.bear_body_contraction_ratio = _bear_body_contraction_ratio(window)
@@ -91,15 +99,15 @@ def analyze_selling_pressure(
     return result
 
 
-def _reclaimed_body_midpoint(rows: list[dict], bear_index: int) -> bool:
+def _reclaimed_body_midpoint(rows: list[dict], bear_index: int) -> str:
     bear = rows[bear_index]
     midpoint = (
         float(bear.get("open") or 0) + float(bear.get("close") or 0)
     ) / 2
-    return any(
-        float(row.get("close") or 0) >= midpoint
-        for row in rows[bear_index + 1:bear_index + 3]
-    )
+    for row in rows[bear_index + 1:bear_index + 3]:
+        if float(row.get("close") or 0) >= midpoint:
+            return str(row.get("date") or "")
+    return ""
 
 
 def _max_consecutive_bear_bars(rows: list[dict]) -> int:

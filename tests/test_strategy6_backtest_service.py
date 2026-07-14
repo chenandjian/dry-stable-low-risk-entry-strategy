@@ -1,6 +1,8 @@
 import copy
 
 from strategy6.backtest.config import resolve_backtest_config
+from strategy6.backtest.execution import ExecutionOutcome
+from strategy6.backtest.models import BacktestOrder, BacktestSignal, BacktestTrade
 from strategy6.backtest.service import run_parameter_research
 from strategy6.backtest.runner import (
     _evaluate_stock_payload,
@@ -77,7 +79,8 @@ def test_brooks_only_watch_signal_does_not_consume_setup_before_cross_day_trade_
                 "tail_path_summary": "BROOKS", "tail_primary_path": "BROOKS",
                 "passed_path_count": 1, "tail_pass": True,
                 "original_tail_pass": False, "box_tail_pass": False,
-                "brooks_tail_pass": True, "brooks_status": "SECOND_ENTRY_LONG_READY",
+                "brooks_tail_pass": True,
+                "brooks_status": "BROOKS_SUPPORT_READY" if ready else "SECOND_ENTRY_LONG_READY",
                 "brooks_trade_ready": ready,
                 "brooks_result": {"structure": {
                     "setup_types": ["SECOND_ENTRY_LONG_READY"],
@@ -108,6 +111,59 @@ def test_brooks_only_watch_signal_does_not_consume_setup_before_cross_day_trade_
     assert result["orders"][0]["signal_date"] == "2025-01-04"
     assert result["orders"][0]["tail_path"] == "NONE"
     assert result["orders"][0]["tail_paths"] == ["BROOKS"]
+
+
+def test_service_group_metrics_use_only_closed_trades(monkeypatch):
+    snapshot = {
+        "tail_path": "BOTH", "tail_paths": ["ORIGINAL", "BOX", "BROOKS"],
+        "tail_primary_path": "BROOKS", "tail_path_summary": "MULTI",
+        "original_tail_pass": True, "box_tail_pass": True, "brooks_tail_pass": True,
+        "brooks_trade_ready": True, "brooks_status": "BROOKS_SUPPORT_READY",
+        "brooks_setup_types": ["MICRO_DOUBLE_BOTTOM"],
+    }
+    signals = [
+        BacktestSignal(
+            parameter_set_id="p", code="000001", name="样本", evaluation_date="2025-01-03",
+            setup_id="closed", tail_path="BOTH", candidate_type="KEY_CANDIDATE", snapshot=snapshot,
+        ),
+        BacktestSignal(
+            parameter_set_id="p", code="000001", name="样本", evaluation_date="2025-01-04",
+            setup_id="unresolved", tail_path="BOTH", candidate_type="KEY_CANDIDATE", snapshot=snapshot,
+        ),
+    ]
+    monkeypatch.setattr("strategy6.backtest.service.rebuild_stock_signals", lambda **kwargs: signals)
+
+    def simulate(signal, stock_rows, market_dates, config):
+        order = BacktestOrder(
+            order_id=f"order-{signal.setup_id}", signal=signal,
+            created_date=signal.evaluation_date, expire_date="2025-01-10", status="FILLED",
+        )
+        trade = BacktestTrade(
+            trade_id=f"trade-{signal.setup_id}", code=signal.code,
+            signal_date=signal.evaluation_date, entry_date="2025-01-06", entry_price=10.0,
+            exit_date="2025-01-10" if signal.setup_id == "closed" else "",
+            exit_price=11.0 if signal.setup_id == "closed" else 0.0,
+            net_return=0.1 if signal.setup_id == "closed" else 0.0,
+            r_multiple=2.0 if signal.setup_id == "closed" else 0.0,
+        )
+        return ExecutionOutcome(order=order, trade=trade)
+
+    monkeypatch.setattr("strategy6.backtest.service.simulate_frozen_trade", simulate)
+    result = run_parameter_research(
+        parameter_set_id="p", data_by_code={"000001": {"name": "样本", "rows": _rows()}},
+        evaluation_dates=["2025-01-03", "2025-01-04"],
+        market_data_by_symbol={"hs300": _rows()}, backtest_config=resolve_backtest_config({}),
+        engine_factory=lambda: FakeEngine(), minimum_history=1, oos_start="2026-01-01",
+    )
+
+    assert len(result["trades"]) == 2
+    assert result["summary"]["trades"] == 1
+    assert result["path_metrics"]["BOTH"]["trades"] == 1
+    assert result["authoritative_path_metrics"]["BROOKS"]["trades"] == 1
+    assert result["tail_primary_path_metrics"]["BROOKS"]["trades"] == 1
+    assert result["tail_path_summary_metrics"]["MULTI"]["trades"] == 1
+    assert result["brooks_status_metrics"]["BROOKS_SUPPORT_READY"]["trades"] == 1
+    assert result["brooks_structure_metrics"]["MICRO_DOUBLE_BOTTOM"]["trades"] == 1
 
 
 def test_service_does_not_mutate_strategy_or_backtest_config():

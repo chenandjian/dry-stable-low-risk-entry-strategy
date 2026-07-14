@@ -26,6 +26,7 @@ def analyze_brooks_structures(
     _detect_failed_breakout(rows, support, selling, atr14, config, result)
     if selling.bear_follow_through_failed:
         result.bear_follow_through_failed = True
+        result.bear_follow_through_failed_date = selling.bear_follow_through_failed_date
         result.setup_types.append("BEAR_FOLLOW_THROUGH_FAILED")
     if (
         compact_structure_type == "COMPACT_ORDERLY"
@@ -106,6 +107,7 @@ def _detect_failed_breakout(
     key = float(support.key_support_price)
     recovery_days = int(cfg["recovery_days"])
     max_distance = float(atr14) * float(cfg["max_break_distance_atr"])
+    selected_event: tuple[tuple[int, int], str, str] | None = None
     for index, row in enumerate(rows[:-1]):
         low = float(row.get("low") or 0)
         close = float(row.get("close") or 0)
@@ -113,9 +115,19 @@ def _detect_failed_breakout(
         if not broke or key - min(low, close) > max_distance:
             continue
         recovery = rows[index + 1:index + recovery_days + 1]
-        reclaimed = any(float(item.get("close") or 0) >= key for item in recovery)
-        if reclaimed and selling.exhausted and selling.bear_follow_through_count == 0:
-            result.failed_bear_breakout = True
+        reclaim = next(
+            (item for item in recovery if float(item.get("close") or 0) >= key),
+            None,
+        )
+        if reclaim is not None and selling.exhausted and selling.bear_follow_through_count == 0:
+            priority = (int(close < key), index)
+            event = (priority, str(row.get("date") or ""), str(reclaim.get("date") or ""))
+            if selected_event is None or event[0] > selected_event[0]:
+                selected_event = event
+    if selected_event is not None:
+        result.failed_bear_breakout = True
+        result.failed_bear_breakout_date = selected_event[1]
+        result.reclaim_date = selected_event[2]
     if result.failed_bear_breakout:
         result.setup_types.append("FAILED_BEAR_BREAKOUT")
 

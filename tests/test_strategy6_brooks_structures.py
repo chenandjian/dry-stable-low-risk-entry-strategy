@@ -149,4 +149,26 @@ def test_failed_bear_breakout_reclaims_support_within_two_days():
     )
 
     assert result.failed_bear_breakout is True
+    assert result.failed_bear_breakout_date == rows[-3]["date"]
+    assert result.reclaim_date == rows[-2]["date"]
     assert "FAILED_BEAR_BREAKOUT" in result.setup_types
+
+
+def test_bear_follow_through_failed_date_is_propagated_to_structure():
+    rows = [_bar(index) for index in range(5)]
+    result = analyze_brooks_structures(
+        rows,
+        Strategy6Support(key_support_price=10.0),
+        BrooksSellingPressureResult(
+            exhausted=True,
+            bear_follow_through_failed=True,
+            bear_follow_through_failed_date=rows[-2]["date"],
+        ),
+        compact_structure_type="NO_COMPACT",
+        atr14=0.5,
+        tail_volume_ratio=0.55,
+        config=_config(),
+    )
+
+    assert result.bear_follow_through_failed is True
+    assert result.bear_follow_through_failed_date == rows[-2]["date"]

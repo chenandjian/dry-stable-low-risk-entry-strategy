@@ -80,7 +80,7 @@ def test_setup_id_is_stable_but_parameter_set_keeps_snapshots_independent():
     assert first.parameter_set_id != second.parameter_set_id
 
 
-def test_brooks_setup_id_uses_visible_structure_anchors_without_changing_legacy_identity():
+def test_brooks_setup_id_uses_stable_event_anchor_without_changing_legacy_identity():
     legacy = FakeEvaluation("2025-01-05").to_candidate_dict()
     brooks = {
         **legacy,
@@ -95,19 +95,61 @@ def test_brooks_setup_id_uses_visible_structure_anchors_without_changing_legacy_
             }
         },
     }
-    later_structure = {
+    added_setup_types = {
         **brooks,
         "brooks_result": {
             "structure": {
                 **brooks["brooks_result"]["structure"],
-                "second_recent_low_date": "2025-01-05",
+                "setup_types": [
+                    "MICRO_DOUBLE_BOTTOM",
+                    "SECOND_ENTRY_LONG_READY",
+                    "ORDERLY_COMPRESSION_AT_SUPPORT",
+                ],
             }
         },
+    }
+    failed_breakout_a = {
+        **legacy,
+        "tail_path": "NONE",
+        "tail_paths": ["BROOKS"],
+        "brooks_result": {"structure": {
+            "setup_types": ["FAILED_BEAR_BREAKOUT"],
+            "failed_bear_breakout_date": "2025-01-04",
+            "reclaim_date": "2025-01-05",
+        }},
+    }
+    failed_breakout_b = {
+        **failed_breakout_a,
+        "brooks_result": {"structure": {
+            **failed_breakout_a["brooks_result"]["structure"],
+            "failed_bear_breakout_date": "2025-01-06",
+            "reclaim_date": "2025-01-07",
+        }},
     }
 
     assert build_setup_id(legacy) == "s6setup-098716efbee10b7d82fb"
     assert build_setup_id(brooks) != build_setup_id(legacy)
-    assert build_setup_id(brooks) != build_setup_id(later_structure)
+    assert build_setup_id(brooks) == build_setup_id(added_setup_types)
+    assert build_setup_id(failed_breakout_a) != build_setup_id(failed_breakout_b)
+
+
+def test_orderly_compression_without_event_date_keeps_outer_setup_identity():
+    first = FakeEvaluation("2025-01-05", tail_path="NONE").to_candidate_dict()
+    first.update({
+        "tail_paths": ["BROOKS"],
+        "brooks_result": {"structure": {
+            "setup_types": ["ORDERLY_COMPRESSION_AT_SUPPORT"],
+        }},
+    })
+    later = {
+        **first,
+        "evaluation_date": "2025-01-06",
+        "brooks_result": {"structure": {
+            "setup_types": ["ORDERLY_COMPRESSION_AT_SUPPORT", "BEAR_FOLLOW_THROUGH_FAILED"],
+        }},
+    }
+
+    assert build_setup_id(first) == build_setup_id(later)
 
 
 def test_failed_box_never_raises_original_path_score_in_snapshot():
@@ -252,7 +294,7 @@ def test_asof_brooks_trigger_waits_for_next_visible_session_and_ignores_future_b
                 tail_primary_path="BROOKS",
                 passed_path_count=1,
                 brooks_tail_pass=True,
-                brooks_status="SECOND_ENTRY_LONG_READY",
+                brooks_status="BROOKS_SUPPORT_READY" if triggered else "SECOND_ENTRY_LONG_READY",
                 brooks_trade_ready=triggered,
                 brooks_result={
                     "structure": {
@@ -278,4 +320,7 @@ def test_asof_brooks_trigger_waits_for_next_visible_session_and_ignores_future_b
 
     assert [signal.evaluation_date for signal in signals] == ["2025-01-05", "2025-01-06"]
     assert [signal.snapshot["brooks_trade_ready"] for signal in signals] == [False, True]
+    assert [signal.snapshot["brooks_status"] for signal in signals] == [
+        "SECOND_ENTRY_LONG_READY", "BROOKS_SUPPORT_READY",
+    ]
     assert [signal.candidate_type for signal in signals] == ["WATCH_CANDIDATE", "KEY_CANDIDATE"]

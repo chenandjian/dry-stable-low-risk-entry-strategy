@@ -28,6 +28,7 @@ class BrooksSellingPressureResult:
     max_consecutive_bear_bars: int = 0
     bear_body_contraction_ratio: float | None = None
     bear_follow_through_failed: bool = False
+    bear_follow_through_failed_date: str = ""
     reasons: list[str] = field(default_factory=list)
     risk_tags: list[str] = field(default_factory=list)
 
@@ -46,7 +47,10 @@ class BrooksCompactStructureResult:
 class BrooksStructureResult:
     micro_double_bottom: bool = False
     failed_bear_breakout: bool = False
+    failed_bear_breakout_date: str = ""
+    reclaim_date: str = ""
     bear_follow_through_failed: bool = False
+    bear_follow_through_failed_date: str = ""
     orderly_compression_at_support: bool = False
     second_entry_long_ready: bool = False
     first_recent_low_date: str = ""

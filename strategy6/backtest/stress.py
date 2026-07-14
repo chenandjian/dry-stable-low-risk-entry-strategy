@@ -6,6 +6,7 @@ from dataclasses import asdict
 
 from strategy6.backtest.execution import simulate_frozen_trade
 from strategy6.backtest.metrics import calculate_trade_metrics
+from strategy6.backtest.snapshot import is_trade_ready_snapshot
 
 
 def build_execution_tuning_configs(base_config: dict) -> list[dict]:
@@ -76,6 +77,8 @@ def replay_stress_scenarios(signals, *, load_rows, market_dates: list[str], base
         trades = []
         seen: set[str] = set()
         for signal in sorted(signals, key=lambda item: (item.evaluation_date, item.code)):
+            if not is_trade_ready_snapshot({"tail_path": signal.tail_path, **signal.snapshot}):
+                continue
             if signal.setup_id in seen:
                 continue
             seen.add(signal.setup_id)
@@ -101,6 +104,8 @@ def replay_frozen_signals(signals, *, load_rows, market_dates: list[str], config
     setup_ids = []
     seen: set[str] = set()
     for signal in sorted(signals, key=lambda item: (item.evaluation_date, item.code)):
+        if not is_trade_ready_snapshot({"tail_path": signal.tail_path, **signal.snapshot}):
+            continue
         if signal.setup_id in seen:
             continue
         seen.add(signal.setup_id)
