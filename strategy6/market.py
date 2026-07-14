@@ -127,6 +127,22 @@ def has_relative_strength_20_market(
     return bool(_hs300_rows(market_data_by_symbol or {}, expected_trade_date))
 
 
+def compute_relative_strength_periods(
+    stock_rows: list[dict],
+    market_data_by_symbol: dict[str, list[dict]] | None,
+    *,
+    expected_trade_date: str = "",
+) -> dict[int, float] | None:
+    """Return stock minus same-day HS300 returns for 5/10/20 days."""
+    market_rows = _hs300_rows(market_data_by_symbol or {}, expected_trade_date)
+    if not market_rows or len(stock_rows) <= 20:
+        return None
+    return {
+        days: round(_return(stock_rows, days) - _return(market_rows, days), 6)
+        for days in (5, 10, 20)
+    }
+
+
 def _market_return_20(data: dict[str, list[dict]], *, expected_trade_date: str = "") -> float:
     rows = _hs300_rows(data, expected_trade_date)
     return _return(rows, 20) if rows else 0.0
