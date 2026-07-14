@@ -115,6 +115,92 @@ DEFAULT_STRATEGY6_CONFIG = {
             "premium_atr_contraction_ratio_max": 0.65,
         },
     },
+    "brooks_tail": {
+        "enabled": True,
+        "mode": "independent_path",
+        "context": {
+            "allowed_start_grades": ["S", "A"],
+            "allow_grade_b_watch_only": True,
+            "close_below_ma20_atr_tolerance": 0.50,
+            "require_ma20_above_ma50": False,
+            "require_ma20_slope_positive": True,
+            "ma20_slope_window_days": 10,
+            "lower_high_low_window_days": 10,
+            "max_lower_high_low_sequence": 2,
+        },
+        "selling_pressure": {
+            "window_days": 7,
+            "strong_bear_body_ratio_min": 0.03,
+            "strong_bear_close_position_max": 0.25,
+            "max_strong_bear_bar_count": 1,
+            "bear_follow_through_close_position_max": 0.35,
+            "max_bear_follow_through_count": 1,
+            "max_consecutive_bear_bars": 2,
+            "require_bear_body_contracting": False,
+        },
+        "price_stability": {
+            "compact_window_days": 5,
+            "close_range_max": 0.08,
+            "premium_close_range_max": 0.05,
+            "atr_contraction_max": 0.80,
+            "premium_atr_contraction_max": 0.65,
+            "avg_body_ratio_max": 0.025,
+            "max_body_ratio_max": 0.04,
+            "max_lower_low_count": 1,
+            "low_similarity_tolerance": 0.02,
+        },
+        "volume_dry": {
+            "tail_window_days": 5,
+            "baseline_window_days": 20,
+            "tail_volume_ratio_max": 0.75,
+            "premium_tail_volume_ratio_max": 0.60,
+            "require_volume_slope_negative": False,
+            "reject_high_volume_decline": True,
+        },
+        "support": {
+            "support_distance_atr": 0.80,
+            "support_distance_pct": 0.03,
+            "effective_break_pct": 0.03,
+            "consecutive_close_break_days": 2,
+        },
+        "second_entry": {
+            "enabled": True,
+            "min_separation_days": 2,
+            "max_separation_days": 15,
+            "low_similarity_tolerance": 0.02,
+            "signal_bar_close_position_min": 0.55,
+            "signal_bar_max_body_ratio": 0.03,
+        },
+        "failed_breakout": {
+            "enabled": True,
+            "recovery_days": 2,
+            "max_break_distance_atr": 0.80,
+            "require_reclaim_support": True,
+        },
+        "compact_structure": {
+            "enabled": True,
+            "middle_zone_low": 0.35,
+            "middle_zone_high": 0.70,
+            "max_direction_changes": 3,
+            "max_long_shadow_bar_count": 2,
+            "long_shadow_ratio_min": 0.45,
+        },
+        "trade_trigger": {
+            "enabled": True,
+            "trigger_valid_days": 3,
+            "max_trigger_distance_atr": 1.50,
+            "breakout_follow_through_days": 2,
+        },
+        "scoring": {
+            "context_points": 4,
+            "selling_pressure_points": 6,
+            "price_stability_points": 4,
+            "volume_dry_points": 2,
+            "setup_points": 4,
+            "pass_score_min": 14,
+            "premium_score_min": 17,
+        },
+    },
 }
 
 
@@ -139,6 +225,8 @@ def resolve_strategy6_config(config: dict | None) -> dict:
                         for nested_key, nested_value in compact_override.items()
                         if nested_key in raw["box_tail"]["compact_kline"]
                     })
+            elif key == "brooks_tail" and isinstance(value, dict):
+                _merge_known_dict(raw["brooks_tail"], value)
             else:
                 raw[key] = value
 
@@ -202,6 +290,7 @@ def resolve_strategy6_config(config: dict | None) -> dict:
     if not raw["watch_min_score"] <= raw["key_min_score"] <= raw["ready_min_score"]:
         raise ValueError("score thresholds must satisfy watch <= key <= ready")
     _validate_box_tail_config(raw["box_tail"])
+    _validate_brooks_tail_config(raw["brooks_tail"])
     return raw
 
 
@@ -305,3 +394,112 @@ def _validate_box_tail_config(config: dict) -> None:
         raise ValueError("premium_overlap_ratio must be >= min_overlap_ratio")
     if compact["premium_atr_contraction_ratio_max"] > compact["atr_contraction_ratio_max"]:
         raise ValueError("premium_atr_contraction_ratio_max must be <= atr_contraction_ratio_max")
+
+
+def _merge_known_dict(target: dict, overrides: dict) -> None:
+    for key, value in overrides.items():
+        if key not in target:
+            continue
+        if isinstance(target[key], dict) and isinstance(value, dict):
+            _merge_known_dict(target[key], value)
+        else:
+            target[key] = value
+
+
+def _validate_brooks_tail_config(config: dict) -> None:
+    config["enabled"] = bool(config.get("enabled", True))
+    if config.get("mode") != "independent_path":
+        raise ValueError("brooks_tail.mode must be independent_path")
+
+    context = config["context"]
+    grades = context.get("allowed_start_grades")
+    if not isinstance(grades, list) or not grades or any(grade not in {"S", "A"} for grade in grades):
+        raise ValueError("allowed_start_grades must contain only S/A")
+    context["allow_grade_b_watch_only"] = bool(context.get("allow_grade_b_watch_only", True))
+    context["require_ma20_above_ma50"] = bool(context.get("require_ma20_above_ma50", False))
+    context["require_ma20_slope_positive"] = bool(context.get("require_ma20_slope_positive", True))
+    _validate_between(context, "close_below_ma20_atr_tolerance", 0, 3)
+    _validate_int_range(context, "ma20_slope_window_days", 2, 60)
+    _validate_int_range(context, "lower_high_low_window_days", 5, 60)
+    _validate_int_range(context, "max_lower_high_low_sequence", 0, 10)
+
+    selling = config["selling_pressure"]
+    selling["require_bear_body_contracting"] = bool(selling.get("require_bear_body_contracting", False))
+    _validate_int_range(selling, "window_days", 3, 30)
+    _validate_int_range(selling, "max_strong_bear_bar_count", 0, selling["window_days"])
+    _validate_int_range(selling, "max_bear_follow_through_count", 0, selling["window_days"])
+    _validate_int_range(selling, "max_consecutive_bear_bars", 0, selling["window_days"])
+    _validate_between(selling, "strong_bear_body_ratio_min", 0, 1, lower_exclusive=True)
+    _validate_between(selling, "strong_bear_close_position_max", 0, 1)
+    _validate_between(selling, "bear_follow_through_close_position_max", 0, 1)
+
+    stability = config["price_stability"]
+    _validate_int_range(stability, "compact_window_days", 3, 10)
+    _validate_int_range(stability, "max_lower_low_count", 0, 5)
+    for key in (
+        "close_range_max", "premium_close_range_max", "atr_contraction_max",
+        "premium_atr_contraction_max", "avg_body_ratio_max", "max_body_ratio_max",
+        "low_similarity_tolerance",
+    ):
+        _validate_between(stability, key, 0, 2)
+    if stability["premium_close_range_max"] > stability["close_range_max"]:
+        raise ValueError("premium_close_range_max must be <= close_range_max")
+    if stability["premium_atr_contraction_max"] > stability["atr_contraction_max"]:
+        raise ValueError("premium_atr_contraction_max must be <= atr_contraction_max")
+
+    volume = config["volume_dry"]
+    volume["require_volume_slope_negative"] = bool(volume.get("require_volume_slope_negative", False))
+    volume["reject_high_volume_decline"] = bool(volume.get("reject_high_volume_decline", True))
+    _validate_int_range(volume, "tail_window_days", 3, 10)
+    _validate_int_range(volume, "baseline_window_days", 10, 60)
+    _validate_between(volume, "tail_volume_ratio_max", 0, 2, lower_exclusive=True)
+    _validate_between(volume, "premium_tail_volume_ratio_max", 0, volume["tail_volume_ratio_max"], lower_exclusive=True)
+
+    support = config["support"]
+    _validate_between(support, "support_distance_atr", 0, 3)
+    _validate_between(support, "support_distance_pct", 0, 0.20)
+    _validate_between(support, "effective_break_pct", 0, 0.20)
+    _validate_int_range(support, "consecutive_close_break_days", 1, 5)
+
+    second = config["second_entry"]
+    second["enabled"] = bool(second.get("enabled", True))
+    _validate_int_range(second, "min_separation_days", 1, 15)
+    _validate_int_range(second, "max_separation_days", second["min_separation_days"], 30)
+    _validate_between(second, "low_similarity_tolerance", 0, 0.20)
+    _validate_between(second, "signal_bar_close_position_min", 0, 1)
+    _validate_between(second, "signal_bar_max_body_ratio", 0, 1)
+
+    failed = config["failed_breakout"]
+    failed["enabled"] = bool(failed.get("enabled", True))
+    failed["require_reclaim_support"] = bool(failed.get("require_reclaim_support", True))
+    _validate_int_range(failed, "recovery_days", 1, 5)
+    _validate_between(failed, "max_break_distance_atr", 0, 3)
+
+    compact = config["compact_structure"]
+    compact["enabled"] = bool(compact.get("enabled", True))
+    _validate_between(compact, "middle_zone_low", 0, 1)
+    _validate_between(compact, "middle_zone_high", compact["middle_zone_low"], 1)
+    _validate_int_range(compact, "max_direction_changes", 0, 10)
+    _validate_int_range(compact, "max_long_shadow_bar_count", 0, 10)
+    _validate_between(compact, "long_shadow_ratio_min", 0, 1)
+
+    trigger = config["trade_trigger"]
+    trigger["enabled"] = bool(trigger.get("enabled", True))
+    _validate_int_range(trigger, "trigger_valid_days", 1, 10)
+    _validate_between(trigger, "max_trigger_distance_atr", 0, 5)
+    _validate_int_range(trigger, "breakout_follow_through_days", 1, 5)
+
+    scoring = config["scoring"]
+    for key in (
+        "context_points", "selling_pressure_points", "price_stability_points",
+        "volume_dry_points", "setup_points", "pass_score_min", "premium_score_min",
+    ):
+        _validate_int_range(scoring, key, 0, 20)
+    if scoring["pass_score_min"] > scoring["premium_score_min"]:
+        raise ValueError("pass_score_min must be <= premium_score_min")
+    total = sum(scoring[key] for key in (
+        "context_points", "selling_pressure_points", "price_stability_points",
+        "volume_dry_points", "setup_points",
+    ))
+    if total != 20:
+        raise ValueError("brooks_tail scoring components must total 20")
