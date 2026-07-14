@@ -129,6 +129,13 @@ def classify_candidate(
             "SETUP_FORMING",
             "观察等待触发：Brooks结构成立，但交易触发尚未确认",
         )
+    if trade_plan.entry_archetype == "WAIT_BREAKOUT":
+        return (
+            "WATCH_CANDIDATE",
+            "observe",
+            "SETUP_FORMING",
+            "观察：结构有效，等待突破平台上沿后确认",
+        )
     if _single_auxiliary_path(dry_tail, box_tail, brooks_tail):
         return (
             "WATCH_CANDIDATE",

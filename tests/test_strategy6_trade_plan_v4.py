@@ -88,3 +88,64 @@ def test_unknown_pattern_uses_atr_and_historical_pressure_objective_fallback():
     assert plan.objective_target_1 == 108.0
     assert plan.objective_target_2 > plan.objective_target_1
     assert plan.objective_rr_2 >= 1.5
+
+
+def test_wait_breakout_has_audit_trigger_but_no_executable_order_price():
+    ind = Strategy6Indicators(
+        evaluation_date="2026-07-14", current_price=103.0, atr14=2.0,
+        highest_close_20=110.0, highest_close_120=115.0, highest_close_250=120.0,
+    )
+    support = Strategy6Support(
+        support_status="PATTERN_SUPPORT", key_support_price=96.0,
+        tactical_support_price=98.0, support_zone_low=98.0, support_zone_high=101.0,
+        pivot_price=105.0, box_height=8.0,
+    )
+
+    plan = calculate_trade_plan(
+        ind, support, resolve_strategy6_config({}), entry_archetype="WAIT_BREAKOUT",
+    )
+
+    assert plan.entry_archetype == "WAIT_BREAKOUT"
+    assert plan.suggested_buy_price is None
+    assert plan.suggested_limit_price is None
+    assert plan.buy_zone_low == 105.0
+    assert plan.objective_rr_2 > 0
+
+
+def test_breakout_stop_uses_pivot_failure_instead_of_remote_key_support():
+    ind = Strategy6Indicators(
+        evaluation_date="2026-07-14", current_price=106.0, atr14=2.0,
+        highest_close_20=112.0, highest_close_120=120.0, highest_close_250=125.0,
+    )
+    support = Strategy6Support(
+        support_status="PATTERN_SUPPORT", key_support_price=90.0,
+        support_zone_low=89.0, support_zone_high=91.0,
+        pivot_price=105.0, box_height=10.0,
+    )
+
+    plan = calculate_trade_plan(
+        ind, support, resolve_strategy6_config({}), entry_archetype="PIVOT_BREAKOUT",
+    )
+
+    assert plan.entry_archetype == "PIVOT_BREAKOUT"
+    assert 102.0 < plan.stop_loss_price < 105.0
+    assert plan.stop_loss_price > support.key_support_price
+
+
+def test_support_pullback_stop_uses_nearby_tactical_support_at_entry_price():
+    ind = Strategy6Indicators(
+        evaluation_date="2026-07-14", current_price=100.0, atr14=2.0,
+        highest_close_20=110.0, highest_close_120=120.0, highest_close_250=125.0,
+    )
+    support = Strategy6Support(
+        support_status="KEY_SUPPORT_VALID", key_support_price=90.0,
+        tactical_support_price=100.0, support_zone_low=89.0, support_zone_high=91.0,
+    )
+
+    plan = calculate_trade_plan(
+        ind, support, resolve_strategy6_config({}), entry_archetype="SUPPORT_PULLBACK",
+    )
+
+    assert plan.suggested_buy_price == 100.0
+    assert 96.0 < plan.stop_loss_price < 100.0
+    assert plan.objective_rr_2 > 0

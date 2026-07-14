@@ -253,7 +253,7 @@ def test_engine_brooks_only_waiting_candidate_dict_has_no_ready_or_buy_semantics
     monkeypatch.setattr(
         engine_mod,
         "calculate_trade_plan",
-        lambda indicators, support, config: Strategy6TradePlan(
+        lambda indicators, support, config, **kwargs: Strategy6TradePlan(
             objective_rr_2=3.0,
             suggested_buy_price=indicators.current_price,
         ),

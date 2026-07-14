@@ -11,45 +11,79 @@ def calculate_trade_plan(
     ind: Strategy6Indicators,
     support: Strategy6Support,
     config: dict,
+    *,
+    entry_archetype: str = "",
+    entry_trigger_price: float | None = None,
 ) -> Strategy6TradePlan:
     if support.key_support_price <= 0 or support.support_zone_high <= 0:
         return Strategy6TradePlan()
 
     current = ind.current_price
-    if support.support_zone_low <= current <= support.support_zone_high:
+    archetype = entry_archetype or _infer_legacy_archetype(ind, support, config)
+    if archetype == "NONE":
+        return Strategy6TradePlan(entry_archetype="NONE")
+    if archetype == "WAIT_BREAKOUT":
+        planning_entry = support.pivot_price
+        suggested = None
+        buy_low = planning_entry
+        buy_high = planning_entry
+    elif archetype == "PIVOT_BREAKOUT":
+        planning_entry = current
+        suggested = current
+        buy_low = support.pivot_price
+        buy_high = min(current * 1.01, support.pivot_price * (1 + float(config["breakout_extended_max_pct"])))
+    elif archetype == "FAILED_BREAKOUT_RECLAIM":
+        planning_entry = max(float(entry_trigger_price or 0.0), current)
+        suggested = planning_entry
+        buy_low = float(entry_trigger_price or support.support_zone_low)
+        buy_high = planning_entry * 1.01
+    elif archetype == "SUPPORT_PULLBACK":
+        planning_entry = current
         suggested = current
     elif current > support.support_zone_high:
+        planning_entry = support.support_zone_high
         suggested = support.support_zone_high
     else:
+        planning_entry = current
         suggested = None
+    if archetype == "SUPPORT_PULLBACK":
+        if support.support_zone_low <= current <= support.support_zone_high * 1.02:
+            buy_low = support.support_zone_low
+            buy_high = support.support_zone_high
+        else:
+            tactical_width = max(
+                current * float(config["support_zone_price_pct"]),
+                ind.atr14 * float(config["support_zone_atr_multiplier"]),
+            )
+            buy_low = support.tactical_support_price - tactical_width
+            buy_high = support.tactical_support_price + tactical_width
 
-    stop = _stop_loss(ind, support, config)
-    buy_low = support.support_zone_low
-    buy_high = support.support_zone_high
-    if suggested is None or suggested <= stop:
+    stop = _stop_loss(ind, support, config, archetype, planning_entry)
+    if planning_entry <= stop:
         return Strategy6TradePlan(
             suggested_buy_price=suggested,
             buy_zone_low=_round_price(buy_low),
             buy_zone_high=_round_price(buy_high),
             stop_loss_price=_round_price(stop),
+            entry_archetype=archetype,
         )
 
-    risk = suggested - stop
+    risk = planning_entry - stop
     signal_date, valid_from_date, valid_until_date = _valid_dates(
         ind.evaluation_date,
         int(config["buy_zone_valid_days"]),
     )
-    objective_1, objective_2 = _objective_targets(ind, support, suggested, config)
-    reward_1 = max(0.0, objective_1 - suggested)
-    reward_2 = max(0.0, objective_2 - suggested)
-    execution_1_5r = suggested + risk * 1.5
-    execution_2r = suggested + risk * 2.0
-    execution_2_5r = suggested + risk * 2.5
-    execution_3_5r = suggested + risk * 3.5
+    objective_1, objective_2 = _objective_targets(ind, support, planning_entry, config)
+    reward_1 = max(0.0, objective_1 - planning_entry)
+    reward_2 = max(0.0, objective_2 - planning_entry)
+    execution_1_5r = planning_entry + risk * 1.5
+    execution_2r = planning_entry + risk * 2.0
+    execution_2_5r = planning_entry + risk * 2.5
+    execution_3_5r = planning_entry + risk * 3.5
     objective_rr_1 = reward_1 / risk if risk > 0 else 0.0
     objective_rr_2 = reward_2 / risk if risk > 0 else 0.0
     return Strategy6TradePlan(
-        suggested_buy_price=_round_price(suggested),
+        suggested_buy_price=_round_price(suggested) if suggested is not None else None,
         buy_zone_low=_round_price(buy_low),
         buy_zone_high=_round_price(buy_high),
         stop_loss_price=_round_price(stop),
@@ -66,7 +100,7 @@ def calculate_trade_plan(
         risk_amount=_round_price(risk),
         reward_amount_1=_round_price(reward_1),
         reward_amount_2=_round_price(reward_2),
-        reward_amount_3=_round_price(execution_3_5r - suggested),
+        reward_amount_3=_round_price(execution_3_5r - planning_entry),
         risk_reward_ratio_1=round(objective_rr_1, 4),
         risk_reward_ratio_2=round(objective_rr_2, 4),
         risk_reward_ratio_3=3.5,
@@ -76,7 +110,8 @@ def calculate_trade_plan(
         valid_from_date=valid_from_date,
         valid_until_date=valid_until_date,
         buy_zone_valid_days=int(config["buy_zone_valid_days"]),
-        suggested_limit_price=_round_price(suggested),
+        suggested_limit_price=_round_price(suggested) if suggested is not None else None,
+        entry_archetype=archetype,
         execution_notes=[
             "SIGNAL_AFTER_CLOSE",
             "NEXT_TRADING_DAY_ONLY",
@@ -86,14 +121,54 @@ def calculate_trade_plan(
             "LIMIT_DOWN_STOP_MAY_NOT_FILL",
             "PRICE_BASIS_FORWARD_ADJUSTED",
             "SLIPPAGE_COMMISSION_TAX_NOT_INCLUDED_IN_SIGNAL_RR",
+            *(["WAIT_FOR_BREAKOUT_NO_ORDER"] if archetype == "WAIT_BREAKOUT" else []),
         ],
     )
 
 
-def _stop_loss(ind: Strategy6Indicators, support: Strategy6Support, config: dict) -> float:
-    support_buffer = support.key_support_price * float(config["stop_key_support_pct"])
+def _stop_loss(
+    ind: Strategy6Indicators,
+    support: Strategy6Support,
+    config: dict,
+    archetype: str,
+    planning_entry: float,
+) -> float:
+    if archetype in {"PIVOT_BREAKOUT", "WAIT_BREAKOUT"} and support.pivot_price > 0:
+        return support.pivot_price - max(support.pivot_price * 0.01, ind.atr14 * 0.5)
+    if archetype == "FAILED_BREAKOUT_RECLAIM":
+        valid = [
+            value for value in (support.tactical_support_price, support.key_support_price)
+            if 0 < value < planning_entry
+        ]
+        reference = max(valid, default=support.key_support_price)
+        return reference - max(reference * 0.01, ind.atr14 * 0.5)
+    valid_supports = [
+        value for value in (support.tactical_support_price, support.key_support_price)
+        if 0 < value <= planning_entry
+    ]
+    reference = max(valid_supports, default=support.key_support_price)
+    support_buffer = reference * float(config["stop_key_support_pct"])
     atr_buffer = ind.atr14 * float(config["stop_atr_multiplier"])
-    return support.key_support_price - max(support_buffer, atr_buffer)
+    return reference - max(support_buffer, atr_buffer)
+
+
+def _infer_legacy_archetype(
+    ind: Strategy6Indicators,
+    support: Strategy6Support,
+    config: dict,
+) -> str:
+    if (
+        support.pivot_price > 0
+        and support.pivot_price < ind.current_price <= support.pivot_price * (1 + float(config["breakout_extended_max_pct"]))
+        and ind.current_volume_ratio_20 >= 1.3
+        and ind.current_close_position >= 0.65
+    ):
+        return "PIVOT_BREAKOUT"
+    if support.support_zone_low <= ind.current_price <= support.support_zone_high * 1.02:
+        return "SUPPORT_PULLBACK"
+    if support.pivot_price > ind.current_price > 0:
+        return "WAIT_BREAKOUT"
+    return "NONE"
 
 
 def _objective_targets(

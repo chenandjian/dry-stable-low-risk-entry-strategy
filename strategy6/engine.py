@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from strategy6.dry_tail import evaluate_dry_tail
+from strategy6.entry import identify_entry_archetype
 from strategy6.box_tail import combine_tail_paths, evaluate_box_tail, evaluate_compact_kline
 from strategy6.brooks.tail import analyze_brooks_tail
 from strategy6.brooks.trigger import evaluate_brooks_trade_trigger
@@ -117,7 +118,20 @@ class StrongVcpTailEngine:
             brooks_tail.status = brooks_tail.trade_trigger.trigger_type
         tail_paths = combine_tail_paths(dry_tail, box_tail, brooks_tail)
         apply_pressure_tags(rows, indicators)
-        trade_plan = calculate_trade_plan(indicators, support, self.config)
+        entry_archetype = identify_entry_archetype(
+            rows,
+            indicators,
+            support,
+            brooks_tail,
+            self.config,
+        )
+        trade_plan = calculate_trade_plan(
+            indicators,
+            support,
+            self.config,
+            entry_archetype=entry_archetype,
+            entry_trigger_price=brooks_tail.trade_trigger.trigger_price,
+        )
         score = score_strategy6(
             indicators, start, phase, pattern, support, dry_tail, trade_plan, self.config,
             box_tail=box_tail,
