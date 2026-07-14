@@ -1812,7 +1812,12 @@ def _candidate_to_pattern_result(c: dict) -> CupHandleResult:
 async def get_config():
     """Return current configuration (excluding sensitive fields)."""
     config = load_config()
-    return {"config": config}
+    return {
+        "config": {
+            **config,
+            "strategy6": resolve_strategy6_config(config),
+        }
+    }
 
 
 def _validate_scheduler_config(config: dict):

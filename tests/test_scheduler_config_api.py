@@ -166,6 +166,23 @@ def test_update_config_validates_strategy6_and_strips_legacy_sector_fields(monke
     assert repository_config.read_bytes() == repository_config_before
 
 
+def test_get_config_completes_legacy_strategy6_brooks_defaults(monkeypatch):
+    cfg = _valid_config()
+    cfg["custom_section"] = {"keep": "original"}
+    cfg["strategy6"] = {"enabled": True, "rr2_min_watch": 1.7}
+    monkeypatch.setattr(server, "load_config", lambda path="config.yaml": cfg)
+
+    response = TestClient(server.app).get("/api/config")
+
+    assert response.status_code == 200
+    returned = response.json()["config"]
+    assert returned["custom_section"] == {"keep": "original"}
+    assert returned["strategy6"]["rr2_min_watch"] == 1.7
+    assert returned["strategy6"]["brooks_tail"]["enabled"] is True
+    assert returned["strategy6"]["brooks_tail"]["trade_trigger"]["breakout_follow_through_days"] == 2
+    assert returned["strategy6"]["brooks_tail"]["scoring"]["pass_score_min"] == 14
+
+
 def test_update_config_rejects_invalid_strategy6_threshold_order(monkeypatch, tmp_path):
     cfg = _valid_config()
     cfg["strategy6"] = {"enabled": True}

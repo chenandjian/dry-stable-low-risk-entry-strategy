@@ -121,18 +121,39 @@ def _evaluate_breakout(
 ) -> None:
     if len(rows) < 2:
         return
+    breakout_index = next(
+        (
+            index
+            for index in range(len(rows) - 1, 0, -1)
+            if float(rows[index - 1].get("close") or 0) <= pivot
+            and float(rows[index].get("close") or 0) > pivot
+        ),
+        -1,
+    )
+    if breakout_index < 0:
+        return
+
+    follow_through_days = int(config["breakout_follow_through_days"])
+    breakout = rows[breakout_index]
+    result.trigger_price = pivot
+    result.trigger_valid_until = _add_weekdays(
+        str(breakout.get("date") or ""),
+        follow_through_days,
+    )
+    elapsed_bars = len(rows) - 1 - breakout_index
+    if elapsed_bars <= 0:
+        result.risk_tags.append("BROOKS_BREAKOUT_REQUIRES_FOLLOW_THROUGH")
+        return
+    if elapsed_bars > follow_through_days:
+        result.risk_tags.append("BROOKS_BREAKOUT_FOLLOW_THROUGH_EXPIRED")
+        return
+
     current = rows[-1]
-    previous = rows[-2]
     distance = float(current.get("close") or 0) - pivot
-    if float(previous.get("close") or 0) > pivot and float(current.get("close") or 0) >= pivot and 0 <= distance <= atr14 * float(config["max_trigger_distance_atr"]):
+    if float(current.get("close") or 0) >= pivot and 0 <= distance <= atr14 * float(config["max_trigger_distance_atr"]):
         result.ready = True
         result.breakout_follow_through_pass = True
         result.trigger_type = "BROOKS_BREAKOUT_READY"
-        result.trigger_price = pivot
-        result.trigger_valid_until = _add_weekdays(
-            str(previous.get("date") or ""),
-            int(config["trigger_valid_days"]),
-        )
         result.reasons.append("BROOKS_BREAKOUT_FOLLOW_THROUGH")
 
 

@@ -559,6 +559,55 @@ describe('Strategy6Results', () => {
     expect(csv).toContain('接近120日压力位,NEAR_120D_PRESSURE')
   })
 
+  it('exports Brooks-only waiting candidates without READY or immediate-buy semantics', async () => {
+    api.getStrategy6Candidates.mockResolvedValue({ candidates: [
+      {
+        code: '000021', name: 'Brooks等待', candidate_type: 'READY_CANDIDATE',
+        lifecycle_status: 'READY', start_grade: 'B', tail_paths: ['BROOKS'],
+        brooks_tail_pass: true, brooks_trade_ready: true,
+        suggested_buy_price: 10.10, buy_zone_low: 10.01, buy_zone_high: 10.18,
+      },
+      {
+        code: '000023', name: 'Brooks密集区', candidate_type: 'READY_CANDIDATE',
+        lifecycle_status: 'READY', start_grade: 'A', tail_paths: ['BROOKS'],
+        brooks_tail_pass: true, brooks_trade_ready: true,
+        brooks_result: { compact_structure: { structure_type: 'BARB_WIRE' } },
+        suggested_buy_price: 11.10, buy_zone_low: 11.01, buy_zone_high: 11.18,
+      },
+      {
+        code: '000024', name: 'Brooks未触发', candidate_type: 'READY_CANDIDATE',
+        lifecycle_status: 'READY', start_grade: 'A', tail_paths: ['BROOKS'],
+        brooks_tail_pass: true, brooks_trade_ready: false,
+        suggested_buy_price: 12.10, buy_zone_low: 12.01, buy_zone_high: 12.18,
+      },
+      {
+        code: '000022', name: '原路径就绪', candidate_type: 'READY_CANDIDATE',
+        lifecycle_status: 'READY', tail_paths: ['ORIGINAL'], original_tail_pass: true,
+        suggested_buy_price: 8.10, buy_zone_low: 8.01, buy_zone_high: 8.18,
+      },
+    ] })
+    const wrapper = mount(Strategy6Results, {
+      global: { mocks: { $route: { query: { task: 's6-task' } } } },
+    })
+    await flushUi()
+    const mocks = installDownloadMocks()
+
+    await wrapper.find('[data-test="export-candidates"]').trigger('click')
+
+    const csv = await mocks.createObjectURL.mock.calls[0][0].text()
+    const rows = csv.split('\n')
+    const waitingRows = ['000021', '000023', '000024'].map(code => rows.find(row => row.startsWith(`${code},`)))
+    const legacyRow = csv.split('\n').find(row => row.startsWith('000022,'))
+    for (const waitingRow of waitingRows) {
+      expect(waitingRow).toContain('观察候选,WATCH_CANDIDATE,观察/等待触发')
+      expect(waitingRow).not.toContain('READY')
+      expect(waitingRow).not.toMatch(/10\.01|10\.18|11\.01|11\.18|12\.01|12\.18/)
+      expect(waitingRow).toContain('等待触发')
+    }
+    expect(legacyRow).toContain('就绪候选,READY_CANDIDATE')
+    expect(legacyRow).toContain('8.10,8.01,8.18')
+  })
+
   it('exports strategy6 daily report as excel from backend report endpoint', async () => {
     const wrapper = mount(Strategy6Results, {
       global: {
