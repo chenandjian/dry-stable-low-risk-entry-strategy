@@ -5,8 +5,9 @@ from dataclasses import asdict
 
 from strategy6.backtest.data import market_calendar_from_indexes
 from strategy6.backtest.execution import simulate_frozen_trade
+from strategy6.backtest.experiments import group_authoritative_path_metrics, group_brooks_structure_metrics
 from strategy6.backtest.metrics import calculate_concentration, calculate_trade_metrics, group_trade_metrics
-from strategy6.backtest.snapshot import rebuild_stock_signals
+from strategy6.backtest.snapshot import is_trade_ready_snapshot, path_metadata, rebuild_stock_signals
 
 
 def run_parameter_research(
@@ -41,8 +42,10 @@ def run_parameter_research(
             minimum_history=minimum_history,
         )
         for signal in stock_signals:
+            metadata = path_metadata(signal.snapshot)
             signal_record = {
                 **signal.snapshot,
+                **metadata,
                 "parameter_set_id": signal.parameter_set_id,
                 "setup_id": signal.setup_id,
                 "code": signal.code,
@@ -50,6 +53,8 @@ def run_parameter_research(
                 "evaluation_date": signal.evaluation_date,
             }
             signals.append(signal_record)
+            if not is_trade_ready_snapshot(signal.snapshot):
+                continue
             if signal.setup_id in seen_setups:
                 continue
             seen_setups.add(signal.setup_id)
@@ -61,6 +66,7 @@ def run_parameter_research(
                 "code": code,
                 "signal_date": signal.evaluation_date,
                 "tail_path": signal.tail_path,
+                **metadata,
                 "status": outcome.order.status,
                 "fill_reason": outcome.order.fill_reason,
                 "expire_date": outcome.order.expire_date,
@@ -74,6 +80,7 @@ def run_parameter_research(
                 "parameter_set_id": parameter_set_id,
                 "setup_id": signal.setup_id,
                 "tail_path": signal.tail_path,
+                **metadata,
                 "candidate_type": signal.candidate_type,
                 "pattern_type": signal.snapshot.get("pattern_type", "UNKNOWN"),
                 "market_status": signal.snapshot.get("market_status", "UNKNOWN"),
@@ -96,6 +103,11 @@ def run_parameter_research(
         "trades": sorted(trades, key=lambda item: (item.get("entry_date", ""), item["code"])),
         "summary": metrics,
         "path_metrics": group_trade_metrics(trades, "tail_path"),
+        "authoritative_path_metrics": group_authoritative_path_metrics(trades),
+        "tail_primary_path_metrics": group_trade_metrics(trades, "tail_primary_path"),
+        "tail_path_summary_metrics": group_trade_metrics(trades, "tail_path_summary"),
+        "brooks_status_metrics": group_trade_metrics(trades, "brooks_status"),
+        "brooks_structure_metrics": group_brooks_structure_metrics(trades),
         "concentration": calculate_concentration(trades),
         "oos_status": "OOS_LOCKED",
     }

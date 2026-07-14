@@ -63,6 +63,53 @@ def test_service_keeps_daily_signals_but_only_one_order_per_setup_and_skips_oos(
     assert result["trades"][0]["tail_path"] == "BOX"
 
 
+def test_brooks_only_watch_signal_does_not_consume_setup_before_cross_day_trade_trigger():
+    class CrossDayEvaluation:
+        def __init__(self, date):
+            self.date = date
+
+        def to_candidate_dict(self):
+            ready = self.date >= "2025-01-04"
+            return {
+                "code": "000001", "name": "样本", "evaluation_date": self.date,
+                "candidate_type": "KEY_CANDIDATE" if ready else "WATCH_CANDIDATE",
+                "total_score": 88, "tail_path": "NONE", "tail_paths": ["BROOKS"],
+                "tail_path_summary": "BROOKS", "tail_primary_path": "BROOKS",
+                "passed_path_count": 1, "tail_pass": True,
+                "original_tail_pass": False, "box_tail_pass": False,
+                "brooks_tail_pass": True, "brooks_status": "SECOND_ENTRY_LONG_READY",
+                "brooks_trade_ready": ready,
+                "brooks_result": {"structure": {
+                    "setup_types": ["SECOND_ENTRY_LONG_READY"],
+                    "first_recent_low_date": "2025-01-01",
+                    "second_recent_low_date": "2025-01-02",
+                    "second_entry_signal_date": "2025-01-03",
+                }},
+                "start_date": "2025-01-01", "pattern_type": "VCP", "pivot_price": 10.5,
+                "buy_zone_low": 9.8, "buy_zone_high": 10.2, "suggested_limit_price": 10.0,
+                "stop_loss_price": 9.5, "objective_target_2": 11.5,
+            }
+
+    class CrossDayEngine:
+        def evaluate_at(self, rows, **kwargs):
+            return CrossDayEvaluation(rows[-1]["date"])
+
+    result = run_parameter_research(
+        parameter_set_id="s6ps-brooks-cross-day",
+        data_by_code={"000001": {"name": "样本", "rows": _rows()}},
+        evaluation_dates=["2025-01-03", "2025-01-04"],
+        market_data_by_symbol={"hs300": _rows(), "sh000001": _rows()},
+        backtest_config=resolve_backtest_config({"execution": {"buy_zone_valid_days": 3}}),
+        engine_factory=lambda: CrossDayEngine(), minimum_history=1, oos_start="2026-01-01",
+    )
+
+    assert [item["brooks_trade_ready"] for item in result["signals"]] == [False, True]
+    assert len(result["orders"]) == 1
+    assert result["orders"][0]["signal_date"] == "2025-01-04"
+    assert result["orders"][0]["tail_path"] == "NONE"
+    assert result["orders"][0]["tail_paths"] == ["BROOKS"]
+
+
 def test_service_does_not_mutate_strategy_or_backtest_config():
     strategy_config = {"box_tail": {"enabled": False}}
     backtest_config = resolve_backtest_config({})

@@ -41,7 +41,7 @@ def write_backtest_report(result: dict, output_dir) -> dict[str, Path]:
     optimization = result.get("optimization") or {}
     recommendation = result.get("recommendation") or {}
     lines = [
-        "# 策略6双路径历史回测与参数调优报告",
+        "# 策略6历史回测与参数调优报告",
         "",
         "## 可信度",
         "",
@@ -55,6 +55,28 @@ def write_backtest_report(result: dict, output_dir) -> dict[str, Path]:
         "## 汇总指标",
         "",
         _markdown_table(summary),
+        "",
+        "## 旧双路径归因",
+        "",
+        _experiment_table(result.get("path_metrics") or {}),
+        "",
+        "## 权威三路径归因",
+        "",
+        _experiment_table(result.get("authoritative_path_metrics") or {}),
+        "",
+        "## 权威主路径与汇总",
+        "",
+        _experiment_table({
+            "primary": result.get("tail_primary_path_metrics") or {},
+            "summary": result.get("tail_path_summary_metrics") or {},
+        }),
+        "",
+        "## Brooks状态与结构",
+        "",
+        _experiment_table({
+            "status": result.get("brooks_status_metrics") or {},
+            "structure": result.get("brooks_structure_metrics") or {},
+        }),
         "",
         "## 实验对比",
         "",

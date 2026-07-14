@@ -1,3 +1,4 @@
+import csv
 import json
 
 from strategy6.backtest.report import write_backtest_report
@@ -10,9 +11,26 @@ def test_report_writes_summary_daily_candidates_and_trades(tmp_path):
         "oos_lock": {"status": "OOS_LOCKED", "start_date": "2026-01-01"},
         "summary": {"trades": 1, "expectancy_r": 0.2, "profit_factor": 1.5},
         "experiments": {"E0": {"trades": 1}, "E1": {"trades": 2}},
-        "signals": [{"evaluation_date": "2025-01-02", "code": "000001", "name": "样本", "tail_path": "BOX", "candidate_type": "KEY_CANDIDATE"}],
+        "path_metrics": {"NONE": {"trades": 1}},
+        "authoritative_path_metrics": {"BROOKS": {"trades": 1}},
+        "tail_primary_path_metrics": {"BROOKS": {"trades": 1}},
+        "tail_path_summary_metrics": {"BROOKS": {"trades": 1}},
+        "brooks_status_metrics": {"SECOND_ENTRY_LONG_READY": {"trades": 1}},
+        "brooks_structure_metrics": {"MICRO_DOUBLE_BOTTOM": {"trades": 1}},
+        "signals": [{
+            "evaluation_date": "2025-01-02", "code": "000001", "name": "样本",
+            "tail_path": "NONE", "tail_paths": ["BROOKS"], "tail_primary_path": "BROOKS",
+            "tail_path_summary": "BROOKS", "brooks_status": "SECOND_ENTRY_LONG_READY",
+            "brooks_result": {"structure": {"setup_types": ["MICRO_DOUBLE_BOTTOM"]}},
+            "candidate_type": "KEY_CANDIDATE",
+        }],
         "orders": [{"order_id": "o1", "code": "000001", "status": "FILLED"}],
-        "trades": [{"trade_id": "t1", "code": "000001", "net_return": 0.1}],
+        "trades": [{
+            "trade_id": "t1", "code": "000001", "net_return": 0.1,
+            "tail_path": "NONE", "tail_paths": ["BROOKS"],
+            "tail_primary_path": "BROOKS", "tail_path_summary": "BROOKS",
+            "brooks_status": "SECOND_ENTRY_LONG_READY",
+        }],
         "parameter_trials": [{"parameter_set_id": "p1", "robust_score": 80}],
         "phase_metrics": {"TRAIN": {"trades": 1}, "VALIDATION": {"trades": 1}},
         "stress_tests": {"HIGH_COST": {"status": "COMPLETED"}},
@@ -29,5 +47,13 @@ def test_report_writes_summary_daily_candidates_and_trades(tmp_path):
     assert "压力测试" in markdown
     assert "INSUFFICIENT_DATA" in markdown
     assert "KEEP_DEFAULT" in markdown
+    assert "旧双路径归因" in markdown
+    assert "权威三路径归因" in markdown
+    assert "Brooks状态" in markdown
     summary = json.loads(paths["summary_json"].read_text(encoding="utf-8"))
     assert summary["summary"]["trades"] == 1
+
+    with paths["signals_csv"].open(encoding="utf-8-sig", newline="") as handle:
+        signal = next(csv.DictReader(handle))
+    assert json.loads(signal["tail_paths"]) == ["BROOKS"]
+    assert json.loads(signal["brooks_result"])["structure"]["setup_types"] == ["MICRO_DOUBLE_BOTTOM"]

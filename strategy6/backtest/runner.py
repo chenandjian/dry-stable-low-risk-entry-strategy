@@ -14,7 +14,12 @@ from scanner import db
 from strategy6.backtest.cli import audit_database
 from strategy6.backtest.config import resolve_backtest_config
 from strategy6.backtest.data import build_data_fingerprint, market_calendar_from_indexes
-from strategy6.backtest.experiments import filter_experiment_signals
+from strategy6.backtest.experiments import (
+    DERIVED_EXPERIMENT_IDS,
+    filter_experiment_signals,
+    group_authoritative_path_metrics,
+    group_brooks_structure_metrics,
+)
 from strategy6.backtest.metrics import calculate_concentration, calculate_trade_metrics, group_trade_metrics
 from strategy6.backtest.models import BacktestRunSpec, ParameterSet
 from strategy6.backtest.optimization import (
@@ -27,7 +32,7 @@ from strategy6.backtest.portfolio import simulate_portfolio
 from strategy6.backtest.report import write_backtest_report
 from strategy6.backtest.selector import build_selection_metrics
 from strategy6.backtest.service import run_parameter_research
-from strategy6.backtest.snapshot import signal_to_record
+from strategy6.backtest.snapshot import path_metadata, signal_to_record
 from strategy6.backtest.validation import TimeSplit, build_evaluation_schedule
 from strategy6.backtest.walk_forward import lock_oos
 from strategy6.engine import StrongVcpTailEngine
@@ -310,7 +315,12 @@ def run_local_parameter_set(
                         pending[executor.submit(_evaluate_stock_payload, payload)] = payload
     signals = db.get_strategy6_backtest_signals(run.run_id, parameter.parameter_set_id)
     orders = _load_json_details(conn, "strategy6_backtest_orders", run.run_id, parameter.parameter_set_id)
-    trades = _load_json_details(conn, "strategy6_backtest_trades", run.run_id, parameter.parameter_set_id)
+    trades = [
+        {**item, **path_metadata(item)}
+        for item in _load_json_details(
+            conn, "strategy6_backtest_trades", run.run_id, parameter.parameter_set_id,
+        )
+    ]
     progress_counts = dict(conn.execute(
         '''SELECT status, COUNT(*) FROM strategy6_backtest_stock_progress
            WHERE run_id=? AND parameter_set_id=? GROUP BY status''',
@@ -376,12 +386,20 @@ def run_local_parameter_set(
         "parameter_set_id": parameter.parameter_set_id,
         "data_audit": audit,
         "oos_lock": oos,
-        "signals": [item["snapshot"] | {"setup_id": item["setup_id"]} for item in signals],
+        "signals": [
+            item["snapshot"] | path_metadata(item["snapshot"]) | {"setup_id": item["setup_id"]}
+            for item in signals
+        ],
         "orders": orders,
         "trades": trades,
         "summary": summary,
         "phase_results": phase_results,
         "path_metrics": group_trade_metrics(closed_trades, "tail_path"),
+        "authoritative_path_metrics": group_authoritative_path_metrics(closed_trades),
+        "tail_primary_path_metrics": group_trade_metrics(closed_trades, "tail_primary_path"),
+        "tail_path_summary_metrics": group_trade_metrics(closed_trades, "tail_path_summary"),
+        "brooks_status_metrics": group_trade_metrics(closed_trades, "brooks_status"),
+        "brooks_structure_metrics": group_brooks_structure_metrics(closed_trades),
         "concentration": calculate_concentration(closed_trades),
         "portfolios": {
             "EQUAL_WEIGHT": equal_portfolio,
@@ -428,6 +446,11 @@ def build_phase_selection_results(trades: list[dict], position: dict) -> dict:
             "market_status": group_trade_metrics(enriched, "market_status"),
             "pattern_type": group_trade_metrics(enriched, "pattern_type"),
             "tail_path": group_trade_metrics(enriched, "tail_path"),
+            "authoritative_tail_path": group_authoritative_path_metrics(enriched),
+            "tail_primary_path": group_trade_metrics(enriched, "tail_primary_path"),
+            "tail_path_summary": group_trade_metrics(enriched, "tail_path_summary"),
+            "brooks_status": group_trade_metrics(enriched, "brooks_status"),
+            "brooks_structure": group_brooks_structure_metrics(enriched),
             "candidate_type": group_trade_metrics(enriched, "candidate_type"),
         }
         result[phase] = {
@@ -555,14 +578,9 @@ def _git_commit() -> str:
 
 def _derive_experiment_metrics(trades: list[dict]) -> dict:
     signal_like = trades
-    experiment_ids = [
-        "E1_DUAL_DEFAULT", "E2_BOX_ONLY_INCREMENT", "E3_BOTH_ONLY",
-        "E4_BOX_COMPACT_READY", "E5_BOX_SUPPORT_READY", "E5_BOX_STABLE",
-        "E5_BOX_BREAKOUT_READY",
-    ]
     return {
         experiment_id: calculate_trade_metrics(filter_experiment_signals(signal_like, experiment_id))
-        for experiment_id in experiment_ids
+        for experiment_id in DERIVED_EXPERIMENT_IDS
     }
 
 
