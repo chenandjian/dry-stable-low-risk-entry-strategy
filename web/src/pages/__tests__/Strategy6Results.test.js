@@ -49,6 +49,18 @@ describe('Strategy6Results', () => {
           classification: 'ready',
           lifecycle_status: 'BUY_ZONE',
           total_score: 91,
+          score_model_version: 'S6_QUALITY_V2',
+          entry_archetype: 'SUPPORT_PULLBACK',
+          start_event_quality_score: 17,
+          setup_quality_score: 21,
+          setup_quality_reasons: ['gain_retention=0.820'],
+          setup_quality_risk_tags: [],
+          support_reaction_score: 8,
+          support_reaction_reasons: ['SUPPORT_TEST_RECOVERED'],
+          support_reaction_risk_tags: [],
+          path_evidence_score: 13,
+          tail_segmentation_status: 'DYNAMIC_CONTRACTION',
+          tail_segmentation_score: 4,
           current_price: 12.34,
           start_type: 'VOLUME_LIMIT_UP',
           start_grade: 'S',
@@ -333,6 +345,12 @@ describe('Strategy6Results', () => {
     expect(wrapper.text()).toContain('11.80 - 12.50')
     expect(wrapper.text()).toContain('下沿测试2次')
     expect(wrapper.text()).toContain('紧密排列')
+    expect(wrapper.text()).toContain('支撑低吸')
+    expect(wrapper.text()).toContain('整理质量 21')
+    expect(wrapper.text()).toContain('支撑反应 8')
+    expect(wrapper.text()).toContain('启动质量 17')
+    expect(wrapper.text()).toContain('路径证据 13')
+    expect(wrapper.text()).toContain('动态收缩尾段')
     expect(wrapper.text()).toContain('未形成尾段（V5/V20 0.660）')
     expect(wrapper.vm.tailVolumeDisplay({
       tail_avg_volume: 0,
@@ -347,6 +365,19 @@ describe('Strategy6Results', () => {
     expect(wrapper.text()).toContain('生命周期退出/冷却审计')
     expect(wrapper.text()).toContain('退出样本')
     expect(wrapper.text()).toContain('支撑失效')
+  })
+
+  it('shows unknown instead of fake zero quality scores for legacy tasks', async () => {
+    const wrapper = mount(Strategy6Results, {
+      global: { mocks: { $route: { query: { task: 's6-task' } } } },
+    })
+    await flushUi()
+
+    await wrapper.find('[data-test="candidate-row-000002"]').trigger('click')
+
+    expect(wrapper.find('[data-test="detail-quality-v2"]').text()).toContain('--')
+    expect(wrapper.find('[data-test="detail-entry-archetype"]').text()).toContain('--')
+    expect(wrapper.find('[data-test="detail-quality-v2"]').text()).not.toContain('整理质量 0')
   })
 
   it('masks immediate-buy semantics for Brooks-only B-grade, barb-wire and untriggered candidates', async () => {
@@ -543,7 +574,10 @@ describe('Strategy6Results', () => {
     expect(csv).not.toContain('板块RS10')
     expect(csv).toContain('启动日低点,启动后天数')
     expect(csv).toContain('关键支撑,前置支撑')
-    expect(csv).toContain('策略版本,阶段状态,阶段状态原始值,形态类型,形态类型原始值')
+    expect(csv).toContain('阶段状态,阶段状态原始值,形态类型,形态类型原始值')
+    expect(csv).toContain('评分模型版本,入场类型,入场类型原始值,启动事件质量分,整理质量分,支撑反应分,路径证据分')
+    expect(csv).toContain('尾段划分,尾段划分原始值,尾段划分分数')
+    expect(csv).toContain('S6_QUALITY_V2,支撑低吸,SUPPORT_PULLBACK,17,21,8,13')
     expect(csv).toContain('客观目标1,客观目标2,客观RR1,客观RR2')
     expect(csv).toContain('权威路径汇总,权威路径汇总原始值,主路径,主路径原始值,通过路径')
     expect(csv).toContain('Brooks状态,Brooks状态原始值,Brooks交易状态,Brooks触发类型,Brooks触发类型原始值')

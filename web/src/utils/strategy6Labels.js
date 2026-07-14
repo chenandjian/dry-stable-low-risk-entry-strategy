@@ -14,6 +14,14 @@ const LABELS = {
     BUY_ZONE: '买入区间', BREAKOUT_CONFIRMED: '突破已确认', EXTENDED: '涨幅已过度延伸',
     FAILED: '结构失效', EXPIRED: '已过期', COOLDOWN: '冷却期',
   },
+  entryArchetype: {
+    SUPPORT_PULLBACK: '支撑低吸', PIVOT_BREAKOUT: '枢轴突破',
+    FAILED_BREAKOUT_RECLAIM: '假跌破收复', WAIT_BREAKOUT: '等待突破', NONE: '无有效入场',
+  },
+  tailSegmentationStatus: {
+    DYNAMIC_CONTRACTION: '动态收缩尾段', FALLBACK_FIXED: '固定窗口回退',
+    INSUFFICIENT_BASELINE: '基准数据不足', DISABLED: '动态划分关闭',
+  },
   startType: {
     NONE: '未识别强势启动', ONE_WORD_LIMIT_UP: '一字涨停启动', VOLUME_LIMIT_UP: '放量涨停启动',
     LOW_VOLUME_LIMIT_UP: '缩量涨停启动', NORMAL_STRONG_BREAKOUT: '普通强势突破',
@@ -97,6 +105,7 @@ const LABELS = {
     LIMIT_DOWN_STOP_MAY_NOT_FILL: '跌停时止损可能无法成交',
     PRICE_BASIS_FORWARD_ADJUSTED: '价格口径为前复权',
     SLIPPAGE_COMMISSION_TAX_NOT_INCLUDED_IN_SIGNAL_RR: '信号盈亏比未计入滑点、佣金和印花税',
+    WAIT_FOR_BREAKOUT_NO_ORDER: '等待突破，当前不生成订单',
   },
   tag: {
     BIG_DOWN_VOLUME: '放量大跌', PRESSURE_NEAR_HIGH: '接近前高压力', UPPER_PRESSURE: '上方压力', UPPER_SHADOW_PRESSURE: '上影线抛压',
@@ -159,6 +168,14 @@ const LABELS = {
     BROOKS_TRIGGER_REQUIRES_LATER_SESSION: '需等待后续交易日确认', BROOKS_TRIGGER_GAP_TOO_FAR: '跳空后距离触发位过远',
     BROOKS_TRIGGER_EXPIRED: 'Brooks触发已过期', BROOKS_SECOND_ENTRY_TRIGGERED: '二次入场已触发',
     BROOKS_FAILED_BREAKOUT_CONFIRMED: '假跌破反转已确认', BROOKS_BREAKOUT_FOLLOW_THROUGH: '突破获得后续跟进',
+    SUPPORT_TEST_LOW_VOLUME: '支撑测试时缩量', SUPPORT_TEST_RECOVERED: '支撑测试后收复',
+    SUPPORT_TEST_REPEATED: '支撑经过重复测试', SUPPORT_VOLUME_BREAK_UNRECOVERED: '放量跌破支撑且未收复',
+    SUPPORT_REACTION_WEAKENING: '支撑反应正在减弱', SETUP_QUALITY_DATA_UNAVAILABLE: '整理质量数据不足',
+    START_GAIN_POORLY_RETAINED: '启动涨幅保持不足', DISTRIBUTION_PRESSURE_HIGH: '派发压力较高',
+    DOWN_VOLUME_DOMINATES: '下跌日成交量占优', VOLATILITY_NOT_CONTRACTING: '波动率未收缩',
+    RELATIVE_STRENGTH_FADING: '相对强度走弱', REPEATED_FAILED_BREAKOUTS: '反复假突破',
+    RS_TREND_UNAVAILABLE: '相对强度趋势数据不可用', START_LOW_BROKEN: '启动低点被跌破',
+    START_GAIN_FULLY_RETRACED: '启动涨幅已完全回吐', START_FOLLOW_THROUGH_DISTRIBUTION: '启动后出现放量派发',
   },
 }
 
@@ -179,6 +196,12 @@ const DYNAMIC_LABELS = [
   [/^ma20_above_ma50=(.+)$/, value => `MA20不低于MA50的指数数=${value}`],
   [/^risk_count=(.+)$/, value => `放量下跌风险指数数=${value}`],
   [/^observed_indexes=(.+)$/, value => `有效指数数量=${value}`],
+  [/^gain_retention=(.+)$/, value => `启动涨幅保持率=${value}`],
+  [/^distribution_days=(.+)$/, value => `派发日数量=${value}`],
+  [/^up_down_volume=(.+)$/, value => `上涨/下跌成交量比=${value}`],
+  [/^volatility_contraction=(.+)$/, value => `波动收缩比=${value}`],
+  [/^failed_breakouts=(.+)$/, value => `假突破次数=${value}`],
+  [/^rs_trend=(.+)$/, value => `相对强度趋势=${value}`],
 ]
 
 export function strategy6Label(group, value) {
