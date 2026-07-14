@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from strategy6.box_tail import combine_tail_paths
+from strategy6.brooks.models import BrooksTailResult
 from strategy6.models import (
     Strategy6BoxTail,
     Strategy6DryTail,
@@ -26,6 +27,7 @@ def score_strategy6(
     config: dict,
     *,
     box_tail: Strategy6BoxTail | None = None,
+    brooks_tail: BrooksTailResult | None = None,
 ) -> Strategy6Score:
     strong = _strong_start_score(start)
     pattern_score = 20 if not config["pattern_filter_enabled"] else min(
@@ -35,6 +37,7 @@ def score_strategy6(
     tail_score = min(20, combine_tail_paths(
         dry_tail,
         box_tail or Strategy6BoxTail(),
+        brooks_tail,
     ).score)
     objective_rr_score = _rr_score(trade_plan.objective_rr_2)
     relative_strength_risk_score = _relative_strength_risk_score(ind)

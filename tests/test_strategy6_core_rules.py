@@ -128,14 +128,48 @@ def test_engine_outputs_full_candidate_trade_plan():
     assert candidate["original_tail_pass"] == result.dry_tail.dry_tail_pass
     assert candidate["original_tail_score"] == result.dry_tail.dry_stable_score
     assert candidate["box_tail_enabled"] is True
-    assert candidate["tail_pass"] == (candidate["original_tail_pass"] or candidate["box_tail_pass"])
+    assert candidate["tail_pass"] == bool(candidate["tail_paths"])
     assert candidate["tail_path"] in {"ORIGINAL", "BOX", "BOTH", "NONE"}
-    if candidate["tail_path"] == "BOTH":
-        assert candidate["tail_score"] == max(candidate["original_tail_score"], candidate["box_tail_score"])
-    elif candidate["tail_path"] == "BOX":
-        assert candidate["tail_score"] == candidate["box_tail_score"]
-    else:
-        assert candidate["tail_score"] == candidate["original_tail_score"]
+
+
+def test_engine_outputs_brooks_and_authoritative_three_path_fields():
+    result = StrongVcpTailEngine({}).evaluate_at(
+        build_strategy6_candidate_data(),
+        code="000001",
+        name="平安银行",
+    )
+    candidate = result.to_candidate_dict()
+
+    assert isinstance(candidate["tail_paths"], list)
+    assert candidate["tail_path_summary"] in {"NONE", "ORIGINAL", "BOX", "BROOKS", "MULTI"}
+    assert candidate["tail_primary_path"] in {"NONE", "ORIGINAL", "BOX", "BROOKS"}
+    assert candidate["tail_pass"] == bool(candidate["tail_paths"])
+    assert candidate["tail_score"] == max(
+        candidate["original_tail_score"] if candidate["original_tail_pass"] else 0,
+        candidate["box_tail_score"] if candidate["box_tail_pass"] else 0,
+        candidate["brooks_tail_score"] if candidate["brooks_tail_pass"] else 0,
+    )
+    assert candidate["brooks_status"]
+    assert isinstance(candidate["brooks_result"], dict)
+
+
+def test_engine_brooks_disabled_preserves_legacy_two_path_summary():
+    result = StrongVcpTailEngine({
+        "strategy6": {"brooks_tail": {"enabled": False}},
+    }).evaluate_at(build_strategy6_candidate_data(), code="000001")
+    candidate = result.to_candidate_dict()
+
+    assert candidate["brooks_tail_enabled"] is False
+    assert candidate["brooks_tail_pass"] is False
+    assert candidate["brooks_tail_score"] == 0
+    assert candidate["tail_path"] in {"NONE", "ORIGINAL", "BOX", "BOTH"}
+    assert candidate["tail_paths"] == [
+        path for path, passed in (
+            ("ORIGINAL", candidate["original_tail_pass"]),
+            ("BOX", candidate["box_tail_pass"]),
+        ) if passed
+    ]
+    assert candidate["tail_pass"] == (candidate["original_tail_pass"] or candidate["box_tail_pass"])
 
 
 def test_rr2_below_minimum_rejects_candidate():

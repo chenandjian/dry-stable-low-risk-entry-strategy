@@ -3,6 +3,7 @@ from dataclasses import replace
 import pytest
 
 from strategy6.box_tail import combine_tail_paths
+from strategy6.brooks.models import BrooksTailResult
 from strategy6.filters import classify_candidate, hard_filter_reasons
 from strategy6.models import (
     Strategy6BoxTail,
@@ -48,6 +49,37 @@ def test_tail_score_uses_max_and_never_adds_compact_quality_score():
     assert combined.score == 18
     assert combined.score != 34
     assert combined.score != 27
+
+
+def test_three_path_summary_preserves_legacy_tail_path_and_uses_max_score():
+    original = Strategy6DryTail(dry_tail_pass=True, dry_stable_score=16)
+    box = Strategy6BoxTail(enabled=True, passed=True, score=18)
+    brooks = BrooksTailResult(enabled=True, passed=True, score=18)
+
+    combined = combine_tail_paths(original, box, brooks)
+
+    assert combined.path == "BOTH"
+    assert combined.paths == ["ORIGINAL", "BOX", "BROOKS"]
+    assert combined.summary == "MULTI"
+    assert combined.primary == "BROOKS"
+    assert combined.multi_path_confirmed is True
+    assert combined.passed_path_count == 3
+    assert combined.score == 18
+
+
+def test_brooks_only_uses_new_authoritative_fields_without_changing_legacy_path():
+    combined = combine_tail_paths(
+        Strategy6DryTail(dry_tail_pass=False, dry_stable_score=7),
+        Strategy6BoxTail(enabled=True, passed=False, score=12),
+        BrooksTailResult(enabled=True, passed=True, score=17),
+    )
+
+    assert combined.path == "NONE"
+    assert combined.paths == ["BROOKS"]
+    assert combined.summary == "BROOKS"
+    assert combined.primary == "BROOKS"
+    assert combined.passed is True
+    assert combined.score == 17
 
 
 def test_strategy6_config_deep_merges_box_and_compact_defaults():

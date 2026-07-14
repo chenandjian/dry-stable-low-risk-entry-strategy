@@ -4,6 +4,7 @@ from __future__ import annotations
 from statistics import mean, median
 
 from strategy6.brooks.metrics import calculate_kline_overlap_ratio as _shared_overlap_ratio
+from strategy6.brooks.models import BrooksTailResult
 from strategy6.indicators import _atr
 from strategy6.models import (
     Strategy6BoxTail,
@@ -18,7 +19,9 @@ from strategy6.models import (
 def combine_tail_paths(
     original: Strategy6DryTail,
     box: Strategy6BoxTail,
+    brooks: BrooksTailResult | None = None,
 ) -> Strategy6TailPaths:
+    brooks = brooks or BrooksTailResult.disabled()
     original_pass = bool(original.dry_tail_pass)
     box_pass = bool(box.passed)
     if original_pass and box_pass:
@@ -29,20 +32,42 @@ def combine_tail_paths(
         path = "BOX"
     else:
         path = "NONE"
-    if path == "BOTH":
-        score = max(int(original.dry_stable_score), int(box.score))
-    elif path == "BOX":
-        score = int(box.score)
+    brooks_pass = bool(brooks.passed)
+    paths = [
+        name for name, passed in (
+            ("ORIGINAL", original_pass),
+            ("BOX", box_pass),
+            ("BROOKS", brooks_pass),
+        ) if passed
+    ]
+    scores = {
+        "ORIGINAL": int(original.dry_stable_score),
+        "BOX": int(box.score),
+        "BROOKS": int(brooks.score),
+    }
+    if paths:
+        score = max(scores[name] for name in paths)
+        priority = {"ORIGINAL": 0, "BOX": 1, "BROOKS": 2}
+        primary = max(paths, key=lambda name: (scores[name], priority[name]))
     else:
-        # ORIGINAL and NONE retain the exact pre-feature diagnostic score.
+        # Preserve the pre-feature diagnostic score when no path passes.
         score = int(original.dry_stable_score)
+        primary = "NONE"
+    summary = paths[0] if len(paths) == 1 else "MULTI" if paths else "NONE"
     return Strategy6TailPaths(
         original_pass=original_pass,
         original_score=int(original.dry_stable_score),
         box_pass=box_pass,
         box_score=int(box.score),
-        passed=original_pass or box_pass,
+        brooks_pass=brooks_pass,
+        brooks_score=int(brooks.score),
+        passed=bool(paths),
         path=path,
+        paths=paths,
+        summary=summary,
+        primary=primary,
+        passed_path_count=len(paths),
+        multi_path_confirmed=len(paths) >= 2,
         score=score,
     )
 

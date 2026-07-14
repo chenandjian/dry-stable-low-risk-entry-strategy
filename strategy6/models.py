@@ -188,8 +188,15 @@ class Strategy6TailPaths:
     original_score: int = 0
     box_pass: bool = False
     box_score: int = 0
+    brooks_pass: bool = False
+    brooks_score: int = 0
     passed: bool = False
     path: str = "NONE"
+    paths: list[str] = field(default_factory=list)
+    summary: str = "NONE"
+    primary: str = "NONE"
+    passed_path_count: int = 0
+    multi_path_confirmed: bool = False
     score: int = 0
 
 
@@ -252,6 +259,7 @@ class Strategy6Evaluation:
     support: Strategy6Support
     dry_tail: Strategy6DryTail
     box_tail: Strategy6BoxTail
+    brooks_tail: object
     tail_paths: Strategy6TailPaths
     trade_plan: Strategy6TradePlan
     score: Strategy6Score
@@ -277,6 +285,7 @@ class Strategy6Evaluation:
         plan = self.trade_plan
         score = self.score
         box = self.box_tail
+        brooks = self.brooks_tail
         compact = box.compact_kline
         tail = self.tail_paths
         return {
@@ -327,6 +336,11 @@ class Strategy6Evaluation:
             "box_status": box.status,
             "tail_pass": tail.passed,
             "tail_path": tail.path,
+            "tail_paths": tail.paths,
+            "tail_path_summary": tail.summary,
+            "tail_primary_path": tail.primary,
+            "passed_path_count": tail.passed_path_count,
+            "multi_path_confirmed": tail.multi_path_confirmed,
             "box_start_date": box.start_date,
             "box_end_date": box.end_date,
             "box_days": box.days,
@@ -362,6 +376,7 @@ class Strategy6Evaluation:
             "atr_contraction_ratio": compact.atr_contraction_ratio,
             "compact_kline_reasons": compact.reasons,
             "compact_kline_risk_tags": compact.risk_tags,
+            **brooks.to_dict(),
             "highest_close_20": ind.highest_close_20,
             "highest_close_120": ind.highest_close_120,
             "pullback_from_20d_high": ind.pullback_from_20d_high,

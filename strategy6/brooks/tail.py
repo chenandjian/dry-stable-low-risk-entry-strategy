@@ -8,6 +8,127 @@ from strategy6.brooks.models import (
     BrooksStructureResult,
     BrooksTailResult,
 )
+from strategy6.brooks.compact import classify_compact_structure
+from strategy6.brooks.context import analyze_brooks_context, support_effectively_broken
+from strategy6.brooks.metrics import bar_metrics, find_swing_lows
+from strategy6.brooks.selling_pressure import analyze_selling_pressure
+from strategy6.brooks.structures import analyze_brooks_structures
+from strategy6.models import (
+    Strategy6CompactKline,
+    Strategy6DryTail,
+    Strategy6Indicators,
+    Strategy6Phase,
+    Strategy6Start,
+    Strategy6Support,
+)
+
+
+def analyze_brooks_tail(
+    rows: list[dict],
+    indicators: Strategy6Indicators,
+    start: Strategy6Start,
+    phase: Strategy6Phase,
+    support: Strategy6Support,
+    dry_tail: Strategy6DryTail,
+    compact_metrics: Strategy6CompactKline,
+    *,
+    config: dict,
+) -> BrooksTailResult:
+    if not config["enabled"]:
+        return BrooksTailResult.disabled()
+    if not phase.valid:
+        return BrooksTailResult(
+            enabled=True,
+            status="BROOKS_FAILED",
+            reject_reasons=[phase.status or "BROOKS_PHASE_INVALID"],
+        )
+
+    context = analyze_brooks_context(rows, indicators, start, support, config)
+    selling = analyze_selling_pressure(rows, support, config)
+    compact = classify_compact_structure(
+        rows,
+        compact_metrics,
+        context,
+        support,
+        selling,
+        atr14=indicators.atr14,
+        config=config,
+    )
+    structures = analyze_brooks_structures(
+        rows,
+        support,
+        selling,
+        compact_structure_type=compact.structure_type,
+        atr14=indicators.atr14,
+        tail_volume_ratio=dry_tail.tail_volume_ratio,
+        config=config,
+    )
+    stability = _price_stability_checks(rows, compact_metrics, config)
+    volume_dry_pass = (
+        dry_tail.tail_volume_ratio > 0
+        and dry_tail.tail_volume_ratio <= float(config["volume_dry"]["tail_volume_ratio_max"])
+        and not indicators.has_big_down_volume
+    )
+    volume_dry_premium = (
+        volume_dry_pass
+        and dry_tail.tail_volume_ratio <= float(config["volume_dry"]["premium_tail_volume_ratio_max"])
+        and (not config["volume_dry"]["require_volume_slope_negative"] or dry_tail.volume_slope_10 < 0)
+    )
+    support_not_broken = not support_effectively_broken(
+        rows,
+        support,
+        float(config["support"]["effective_break_pct"]),
+        int(config["support"]["consecutive_close_break_days"]),
+    )
+    result = score_brooks_tail(
+        context=context,
+        selling=selling,
+        compact=compact,
+        structure=structures,
+        price_stability_checks=stability,
+        volume_dry_pass=volume_dry_pass,
+        volume_dry_premium=volume_dry_premium,
+        support_not_broken=support_not_broken,
+        config=config,
+    )
+    result.metrics.update({
+        "close_range_5": compact_metrics.close_range,
+        "avg_body_ratio_5": compact_metrics.avg_body_ratio,
+        "max_body_ratio_5": compact_metrics.max_body_ratio,
+        "atr_contraction_ratio": compact_metrics.atr_contraction_ratio,
+        "tail_volume_ratio": dry_tail.tail_volume_ratio,
+        "volume_slope_10": dry_tail.volume_slope_10,
+    })
+    return result
+
+
+def _price_stability_checks(
+    rows: list[dict],
+    compact: Strategy6CompactKline,
+    config: dict,
+) -> dict[str, bool]:
+    cfg = config["price_stability"]
+    window = rows[-int(cfg["compact_window_days"]):]
+    metrics = [bar_metrics(row) for row in window]
+    valid = len(window) == int(cfg["compact_window_days"]) and all(metric.valid for metric in metrics)
+    closes = [float(row.get("close") or 0) for row in window]
+    close_range = max(closes) / min(closes) - 1 if valid and min(closes) > 0 else float("inf")
+    average_body = sum(metric.body_ratio or 0 for metric in metrics) / len(metrics) if valid else float("inf")
+    maximum_body = max((metric.body_ratio or 0 for metric in metrics), default=float("inf"))
+    atr_ratio = compact.atr_contraction_ratio
+    swing_lows = find_swing_lows(rows[-max(10, int(cfg["compact_window_days"]) + 2):])
+    lower_lows = True
+    if len(swing_lows) >= 2:
+        lower_lows = swing_lows[-1].price >= swing_lows[-2].price * (
+            1 - float(cfg["low_similarity_tolerance"])
+        )
+    return {
+        "close_range": close_range <= float(cfg["close_range_max"]),
+        "atr": atr_ratio is not None and atr_ratio <= float(cfg["atr_contraction_max"]),
+        "body_avg": average_body <= float(cfg["avg_body_ratio_max"]),
+        "body_max": maximum_body <= float(cfg["max_body_ratio_max"]),
+        "lower_lows": lower_lows,
+    }
 
 
 def score_brooks_tail(
