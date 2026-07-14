@@ -201,6 +201,40 @@ def test_brooks_setup_id_uses_fixed_priority_for_same_date_events_regardless_of_
     assert build_setup_id(same_date_events) == build_setup_id(second_entry_only)
 
 
+def test_brooks_setup_id_only_uses_box_start_when_box_path_passes():
+    legacy = FakeEvaluation("2025-01-05").to_candidate_dict()
+    brooks_only = {
+        **legacy,
+        "tail_path": "NONE",
+        "tail_paths": ["BROOKS"],
+        "original_tail_pass": False,
+        "box_tail_pass": False,
+        "brooks_tail_pass": True,
+        "brooks_result": {"structure": {
+            "setup_types": ["FAILED_BEAR_BREAKOUT"],
+            "failed_bear_breakout_date": "2025-01-05",
+        }},
+    }
+    brooks_only_rolling_box = {**brooks_only, "box_start_date": "2025-01-04"}
+    original_brooks = {
+        **brooks_only,
+        "tail_paths": ["ORIGINAL", "BROOKS"],
+        "original_tail_pass": True,
+    }
+    original_brooks_rolling_box = {**original_brooks, "box_start_date": "2025-01-04"}
+    box_brooks = {
+        **brooks_only,
+        "tail_paths": ["BOX", "BROOKS"],
+        "box_tail_pass": True,
+    }
+    box_brooks_new_box = {**box_brooks, "box_start_date": "2025-01-04"}
+
+    assert build_setup_id(brooks_only) == build_setup_id(brooks_only_rolling_box)
+    assert build_setup_id(original_brooks) == build_setup_id(original_brooks_rolling_box)
+    assert build_setup_id(box_brooks) != build_setup_id(box_brooks_new_box)
+    assert build_setup_id(legacy) == "s6setup-098716efbee10b7d82fb"
+
+
 def test_orderly_compression_without_event_date_keeps_outer_setup_identity():
     first = FakeEvaluation("2025-01-05", tail_path="NONE").to_candidate_dict()
     first.update({

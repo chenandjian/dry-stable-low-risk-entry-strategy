@@ -96,14 +96,16 @@ def is_trade_ready_snapshot(snapshot: dict) -> bool:
 
 
 def build_setup_id(snapshot: dict) -> str:
+    paths = authoritative_tail_paths(snapshot)
     identity = {
         "code": snapshot.get("code", ""),
         "start_date": snapshot.get("start_date", ""),
         "pattern_type": snapshot.get("pattern_type", ""),
         "pivot_price": round(float(snapshot.get("pivot_price") or 0), 4),
-        "box_start_date": snapshot.get("box_start_date", ""),
     }
-    if "BROOKS" in authoritative_tail_paths(snapshot):
+    if "BROOKS" not in paths or "BOX" in paths:
+        identity["box_start_date"] = snapshot.get("box_start_date", "")
+    if "BROOKS" in paths:
         brooks_result = snapshot.get("brooks_result")
         structure = brooks_result.get("structure") if isinstance(brooks_result, dict) else {}
         structure = structure if isinstance(structure, dict) else {}
