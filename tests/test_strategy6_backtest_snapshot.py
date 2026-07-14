@@ -133,6 +133,74 @@ def test_brooks_setup_id_uses_stable_event_anchor_without_changing_legacy_identi
     assert build_setup_id(failed_breakout_a) != build_setup_id(failed_breakout_b)
 
 
+def test_brooks_setup_id_anchors_to_latest_concrete_event_not_first_low():
+    legacy = FakeEvaluation("2025-01-05").to_candidate_dict()
+    base_structure = {
+        "setup_types": ["FAILED_BEAR_BREAKOUT"],
+        "first_recent_low_date": "2025-01-02",
+    }
+    failed_breakout_a = {
+        **legacy,
+        "tail_path": "NONE",
+        "tail_paths": ["BROOKS"],
+        "brooks_result": {"structure": {
+            **base_structure,
+            "failed_bear_breakout_date": "2025-01-04",
+        }},
+    }
+    failed_breakout_b = {
+        **failed_breakout_a,
+        "brooks_result": {"structure": {
+            **base_structure,
+            "failed_bear_breakout_date": "2025-01-06",
+        }},
+    }
+    setup_types_only = {
+        **failed_breakout_a,
+        "brooks_result": {"structure": {
+            **failed_breakout_a["brooks_result"]["structure"],
+            "setup_types": ["FAILED_BEAR_BREAKOUT", "ORDERLY_COMPRESSION_AT_SUPPORT"],
+        }},
+    }
+
+    assert build_setup_id(failed_breakout_a) != build_setup_id(failed_breakout_b)
+    assert build_setup_id(failed_breakout_a) == build_setup_id(setup_types_only)
+
+
+def test_brooks_setup_id_uses_fixed_priority_for_same_date_events_regardless_of_field_order():
+    legacy = FakeEvaluation("2025-01-05").to_candidate_dict()
+    ordered_structure = {
+        "setup_types": ["SECOND_ENTRY_LONG_READY", "FAILED_BEAR_BREAKOUT"],
+        "first_recent_low_date": "2025-01-06",
+        "bear_follow_through_failed_date": "2025-01-06",
+        "second_recent_low_date": "2025-01-06",
+        "failed_bear_breakout_date": "2025-01-06",
+        "reclaim_date": "2025-01-06",
+        "second_entry_signal_date": "2025-01-06",
+    }
+    reversed_structure = dict(reversed(list(ordered_structure.items())))
+    same_date_events = {
+        **legacy,
+        "tail_path": "NONE",
+        "tail_paths": ["BROOKS"],
+        "brooks_result": {"structure": ordered_structure},
+    }
+    reordered = {
+        **same_date_events,
+        "brooks_result": {"structure": reversed_structure},
+    }
+    second_entry_only = {
+        **same_date_events,
+        "brooks_result": {"structure": {
+            "setup_types": ordered_structure["setup_types"],
+            "second_entry_signal_date": "2025-01-06",
+        }},
+    }
+
+    assert build_setup_id(same_date_events) == build_setup_id(reordered)
+    assert build_setup_id(same_date_events) == build_setup_id(second_entry_only)
+
+
 def test_orderly_compression_without_event_date_keeps_outer_setup_identity():
     first = FakeEvaluation("2025-01-05", tail_path="NONE").to_candidate_dict()
     first.update({

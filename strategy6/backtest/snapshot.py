@@ -117,22 +117,22 @@ def build_setup_id(snapshot: dict) -> str:
 
 
 def _brooks_event_anchor(structure: dict) -> dict[str, str]:
-    event_fields = (
-        "first_recent_low_date",
-        "failed_bear_breakout_date",
-        "bear_follow_through_failed_date",
-        "second_recent_low_date",
-        "second_entry_signal_date",
-        "reclaim_date",
-    )
+    event_priority = {
+        "first_recent_low_date": 1,
+        "bear_follow_through_failed_date": 2,
+        "second_recent_low_date": 3,
+        "failed_bear_breakout_date": 4,
+        "reclaim_date": 5,
+        "second_entry_signal_date": 6,
+    }
     events = [
-        (str(structure.get(field) or ""), field)
-        for field in event_fields
+        (str(structure.get(field) or ""), priority, field)
+        for field, priority in event_priority.items()
         if structure.get(field)
     ]
     if not events:
         return {}
-    event_date, event_type = min(events)
+    event_date, _, event_type = max(events, key=lambda event: (event[0], event[1]))
     return {"event_type": event_type, "event_date": event_date}
 
 
