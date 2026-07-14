@@ -5195,6 +5195,23 @@ def _deserialize_strategy5_row(row: dict) -> dict:
     return row
 
 
+def _strategy6_safe_bool(value) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return value != 0
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "y", "on"}
+    return False
+
+
+def _strategy6_safe_int(value) -> int:
+    try:
+        return int(value or 0)
+    except (TypeError, ValueError, OverflowError):
+        return 0
+
+
 def _deserialize_strategy6_row(row: dict) -> dict:
     for field in (
         "enable_sector_filter",
@@ -5217,6 +5234,18 @@ def _deserialize_strategy6_row(row: dict) -> dict:
                 row[field] = []
         elif not value:
             row[field] = []
+    for field in (
+        "is_limit_up", "is_one_word_limit_up", "enable_market_filter",
+        "relative_strength_20_observed", "original_tail_pass", "box_tail_enabled",
+        "box_tail_pass", "tail_pass", "compact_kline_enabled", "compact_kline_pass",
+        "brooks_tail_enabled", "brooks_tail_pass", "brooks_tail_premium",
+        "brooks_trade_ready", "multi_path_confirmed",
+    ):
+        if field in row:
+            row[field] = _strategy6_safe_bool(row.get(field))
+    for field in ("original_tail_score", "box_tail_score", "brooks_tail_score"):
+        if field in row:
+            row[field] = _strategy6_safe_int(row.get(field))
     raw_tail_paths = row.get("tail_paths")
     if isinstance(raw_tail_paths, str) and raw_tail_paths:
         try:
@@ -5262,9 +5291,9 @@ def _deserialize_strategy6_row(row: dict) -> dict:
         )
     if not row.get("tail_primary_path"):
         score_by_path = {
-            "ORIGINAL": int(row.get("original_tail_score") or 0),
-            "BOX": int(row.get("box_tail_score") or 0),
-            "BROOKS": int(row.get("brooks_tail_score") or 0),
+            "ORIGINAL": row.get("original_tail_score", 0),
+            "BOX": row.get("box_tail_score", 0),
+            "BROOKS": row.get("brooks_tail_score", 0),
         }
         priority = {"ORIGINAL": 0, "BOX": 1, "BROOKS": 2}
         row["tail_primary_path"] = max(
@@ -5275,15 +5304,6 @@ def _deserialize_strategy6_row(row: dict) -> dict:
     if legacy_paths:
         row["passed_path_count"] = len(tail_paths)
         row["multi_path_confirmed"] = len(tail_paths) > 1
-    for field in (
-        "is_limit_up", "is_one_word_limit_up", "enable_market_filter",
-        "relative_strength_20_observed", "original_tail_pass", "box_tail_enabled",
-        "box_tail_pass", "tail_pass", "compact_kline_enabled", "compact_kline_pass",
-        "brooks_tail_enabled", "brooks_tail_pass", "brooks_tail_premium",
-        "brooks_trade_ready", "multi_path_confirmed",
-    ):
-        if field in row:
-            row[field] = bool(row.get(field))
     return row
 
 

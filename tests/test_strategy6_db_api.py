@@ -277,6 +277,77 @@ def test_strategy6_legacy_candidate_gets_safe_brooks_and_path_defaults(tmp_path)
     assert saved["brooks_result"] == {}
 
 
+def test_strategy6_legacy_candidate_treats_corrupt_path_scores_as_zero(tmp_path):
+    db.init_db(str(tmp_path / "s6-brooks-corrupt-score.db"))
+    db.create_scan_task("s6-corrupt", "2026-07-09 10:00:00", strategy_type=STRATEGY6_TYPE)
+    conn = db.get_conn()
+    conn.execute(
+        """INSERT INTO strategy6_candidates (
+               task_id, code, name, evaluation_date, candidate_type, classification,
+               original_tail_pass, box_tail_pass, brooks_tail_pass,
+               original_tail_score, box_tail_score, brooks_tail_score,
+               tail_paths, tail_primary_path
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        (
+            "s6-corrupt", "000003", "损坏分数", "2026-07-09", "KEY_CANDIDATE", "highlight",
+            "true", "false", "false", "broken", "invalid", "bad", None, None,
+        ),
+    )
+    conn.commit()
+
+    saved = db.get_strategy6_candidate("000003", task_id="s6-corrupt")
+
+    assert saved["original_tail_score"] == 0
+    assert saved["box_tail_score"] == 0
+    assert saved["brooks_tail_score"] == 0
+    assert saved["tail_paths"] == ["ORIGINAL"]
+    assert saved["tail_primary_path"] == "ORIGINAL"
+
+
+def test_strategy6_legacy_candidate_parses_text_booleans_before_deriving_paths(tmp_path):
+    db.init_db(str(tmp_path / "s6-brooks-text-bools.db"))
+    db.create_scan_task("s6-bools", "2026-07-09 10:00:00", strategy_type=STRATEGY6_TYPE)
+    conn = db.get_conn()
+    insert_sql = """INSERT INTO strategy6_candidates (
+        task_id, code, name, evaluation_date, candidate_type, classification,
+        original_tail_pass, box_tail_pass, brooks_tail_pass,
+        brooks_tail_enabled, brooks_tail_premium, brooks_trade_ready,
+        multi_path_confirmed, tail_paths, tail_path_summary, tail_primary_path
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"""
+    conn.execute(
+        insert_sql,
+        (
+            "s6-bools", "000004", "文本假值", "2026-07-09", "KEY_CANDIDATE", "highlight",
+            "false", "0", "no", "false", "0", "no", "false", None, None, None,
+        ),
+    )
+    conn.execute(
+        insert_sql,
+        (
+            "s6-bools", "000005", "文本真值", "2026-07-09", "KEY_CANDIDATE", "highlight",
+            "true", "1", "true", "true", "1", "true", "1", None, None, None,
+        ),
+    )
+    conn.commit()
+
+    false_row = db.get_strategy6_candidate("000004", task_id="s6-bools")
+    true_row = db.get_strategy6_candidate("000005", task_id="s6-bools")
+
+    for field in (
+        "original_tail_pass", "box_tail_pass", "brooks_tail_pass",
+        "brooks_tail_enabled", "brooks_tail_premium", "brooks_trade_ready",
+        "multi_path_confirmed",
+    ):
+        assert false_row[field] is False
+        assert true_row[field] is True
+    assert false_row["tail_paths"] == []
+    assert false_row["tail_path_summary"] == "NONE"
+    assert false_row["tail_primary_path"] == "NONE"
+    assert true_row["tail_paths"] == ["ORIGINAL", "BOX", "BROOKS"]
+    assert true_row["tail_path_summary"] == "MULTI"
+    assert true_row["tail_primary_path"] == "BROOKS"
+
+
 def test_strategy6_legacy_sector_columns_are_not_returned_by_new_api_rows(tmp_path):
     db.init_db(str(tmp_path / "s6-legacy.db"))
     conn = db.get_conn()
