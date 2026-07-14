@@ -136,6 +136,25 @@ def _candidate():
             "structure": {"setup_types": ["SECOND_ENTRY_LONG"]},
             "trade_trigger": {"ready": True, "trigger_type": "SECOND_ENTRY_BREAK", "trigger_price": 12.48},
         },
+        "start_event_quality_score": 16,
+        "start_follow_through_return_5": 0.08,
+        "start_gain_retention_ratio": 0.76,
+        "start_max_close_drawdown_5": -0.03,
+        "start_failure_reasons": [],
+        "tail_segmentation_status": "DYNAMIC_CONTRACTION",
+        "tail_segmentation_score": 8,
+        "tail_range_contraction_ratio": 0.62,
+        "tail_atr_contraction_ratio": 0.68,
+        "tail_body_contraction_ratio": 0.59,
+        "setup_quality_score": 19,
+        "setup_quality_reasons": ["GAIN_RETAINED"],
+        "setup_quality_risk_tags": [],
+        "support_reaction_score": 8,
+        "support_reaction_reasons": ["LOW_VOLUME_RECOVERY"],
+        "support_reaction_risk_tags": [],
+        "path_evidence_score": 13,
+        "entry_archetype": "SUPPORT_PULLBACK",
+        "score_model_version": "S6_QUALITY_V2",
     }
 
 
@@ -186,6 +205,16 @@ def test_strategy6_candidate_table_is_independent(tmp_path):
     assert detail["passed_path_count"] == 2
     assert detail["multi_path_confirmed"] is True
     assert detail["brooks_result"]["context"]["context_type"] == "BULL_TREND"
+    assert detail["start_event_quality_score"] == 16
+    assert detail["start_failure_reasons"] == []
+    assert detail["tail_segmentation_status"] == "DYNAMIC_CONTRACTION"
+    assert detail["setup_quality_score"] == 19
+    assert detail["setup_quality_reasons"] == ["GAIN_RETAINED"]
+    assert detail["support_reaction_score"] == 8
+    assert detail["support_reaction_reasons"] == ["LOW_VOLUME_RECOVERY"]
+    assert detail["path_evidence_score"] == 13
+    assert detail["entry_archetype"] == "SUPPORT_PULLBACK"
+    assert detail["score_model_version"] == "S6_QUALITY_V2"
     assert db.get_candidates(task_id="s6-task") == []
     assert db.get_strategy2_candidates(task_id="s6-task") == []
     assert db.get_strategy3_candidates(task_id="s6-task") == []

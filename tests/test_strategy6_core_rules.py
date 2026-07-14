@@ -137,6 +137,21 @@ def test_engine_outputs_full_candidate_trade_plan():
     assert candidate["box_tail_enabled"] is True
     assert candidate["tail_pass"] == bool(candidate["tail_paths"])
     assert candidate["tail_path"] in {"ORIGINAL", "BOX", "BOTH", "NONE"}
+    assert candidate["start_event_quality_score"] >= 0
+    assert candidate["start_follow_through_return_5"] >= -1
+    assert candidate["start_gain_retention_ratio"] >= 0
+    assert candidate["start_max_close_drawdown_5"] <= 0
+    assert isinstance(candidate["start_failure_reasons"], list)
+    assert candidate["tail_segmentation_status"]
+    assert candidate["tail_segmentation_score"] >= 0
+    assert candidate["setup_quality_score"] >= 0
+    assert candidate["support_reaction_score"] >= 0
+    assert candidate["path_evidence_score"] >= 0
+    assert candidate["entry_archetype"] in {
+        "SUPPORT_PULLBACK", "PIVOT_BREAKOUT", "FAILED_BREAKOUT_RECLAIM",
+        "WAIT_BREAKOUT", "NONE",
+    }
+    assert candidate["score_model_version"] == "S6_QUALITY_V2"
 
 
 def test_engine_outputs_brooks_and_authoritative_three_path_fields():

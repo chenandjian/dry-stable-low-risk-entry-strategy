@@ -63,6 +63,11 @@ class Strategy6Start:
     limit_up_pct: float = 0.0
     high_trigger: str = ""
     days_since_start: int = 0
+    event_quality_score: int = 0
+    follow_through_return_5: float = 0.0
+    gain_retention_ratio: float = 0.0
+    max_close_drawdown_5: float = 0.0
+    failure_reasons: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -81,6 +86,11 @@ class Strategy6Phase:
     start_age_days: int = 0
     consolidation_days: int = 0
     tail_days: int = 0
+    tail_segmentation_status: str = "FIXED_WINDOW"
+    tail_segmentation_score: int = 0
+    tail_range_contraction_ratio: float = 0.0
+    tail_atr_contraction_ratio: float = 0.0
+    tail_body_contraction_ratio: float = 0.0
 
 
 @dataclass
@@ -114,6 +124,22 @@ class Strategy6Support:
     support_score: int = 0
     support_cluster_sources: list[str] = field(default_factory=list)
     support_cluster_score: int = 0
+    support_reaction_score: int = 0
+    support_reaction_reasons: list[str] = field(default_factory=list)
+    support_reaction_risk_tags: list[str] = field(default_factory=list)
+
+
+@dataclass
+class Strategy6SetupQuality:
+    score: int = 0
+    gain_retention_ratio: float = 0.0
+    distribution_day_count: int = 0
+    up_down_volume_ratio: float = 0.0
+    volatility_contraction_ratio: float = 0.0
+    failed_breakout_count: int = 0
+    relative_strength_trend: str = "UNKNOWN"
+    reasons: list[str] = field(default_factory=list)
+    risk_tags: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -230,6 +256,7 @@ class Strategy6TradePlan:
     buy_zone_valid_days: int = 0
     suggested_limit_price: float | None = None
     execution_notes: list[str] = field(default_factory=list)
+    entry_archetype: str = "NONE"
 
 
 @dataclass
@@ -245,6 +272,10 @@ class Strategy6Score:
     tail_score: int = 0
     objective_rr_score: int = 0
     relative_strength_risk_score: int = 0
+    setup_quality_score: int = 0
+    support_reaction_score: int = 0
+    path_evidence_score: int = 0
+    score_model_version: str = "S6_QUALITY_V2"
 
 
 @dataclass
@@ -263,6 +294,7 @@ class Strategy6Evaluation:
     tail_paths: Strategy6TailPaths
     trade_plan: Strategy6TradePlan
     score: Strategy6Score
+    setup_quality: Strategy6SetupQuality = field(default_factory=Strategy6SetupQuality)
     strategy_version: str = ""
     config_hash: str = ""
     candidate_type: str = "REJECTED"
@@ -288,6 +320,7 @@ class Strategy6Evaluation:
         brooks = self.brooks_tail
         compact = box.compact_kline
         tail = self.tail_paths
+        quality = self.setup_quality
         return {
             "strategy_version": self.strategy_version,
             "config_hash": self.config_hash,
@@ -397,6 +430,11 @@ class Strategy6Evaluation:
             "limit_up_pct": start.limit_up_pct,
             "days_since_start": start.days_since_start,
             "high_trigger": start.high_trigger,
+            "start_event_quality_score": start.event_quality_score,
+            "start_follow_through_return_5": start.follow_through_return_5,
+            "start_gain_retention_ratio": start.gain_retention_ratio,
+            "start_max_close_drawdown_5": start.max_close_drawdown_5,
+            "start_failure_reasons": start.failure_reasons,
             "phase_status": self.phase.status,
             "consolidation_start_date": self.phase.consolidation_start_date,
             "tail_start_date": self.phase.tail_start_date,
@@ -404,6 +442,11 @@ class Strategy6Evaluation:
             "start_age_days": self.phase.start_age_days,
             "consolidation_days": self.phase.consolidation_days,
             "tail_days": self.phase.tail_days,
+            "tail_segmentation_status": self.phase.tail_segmentation_status,
+            "tail_segmentation_score": self.phase.tail_segmentation_score,
+            "tail_range_contraction_ratio": self.phase.tail_range_contraction_ratio,
+            "tail_atr_contraction_ratio": self.phase.tail_atr_contraction_ratio,
+            "tail_body_contraction_ratio": self.phase.tail_body_contraction_ratio,
             "pattern_type": self.pattern.pattern_type,
             "pattern_score": self.pattern.pattern_score,
             "pattern_start_date": self.pattern.pattern_start_date,
@@ -428,6 +471,18 @@ class Strategy6Evaluation:
             "support_score": score.support_score,
             "support_cluster_sources": support.support_cluster_sources,
             "support_cluster_score": support.support_cluster_score,
+            "support_reaction_score": support.support_reaction_score,
+            "support_reaction_reasons": support.support_reaction_reasons,
+            "support_reaction_risk_tags": support.support_reaction_risk_tags,
+            "setup_quality_score": quality.score,
+            "setup_gain_retention_ratio": quality.gain_retention_ratio,
+            "distribution_day_count": quality.distribution_day_count,
+            "up_down_volume_ratio": quality.up_down_volume_ratio,
+            "volatility_contraction_ratio": quality.volatility_contraction_ratio,
+            "failed_breakout_count": quality.failed_breakout_count,
+            "relative_strength_trend": quality.relative_strength_trend,
+            "setup_quality_reasons": quality.reasons,
+            "setup_quality_risk_tags": quality.risk_tags,
             "suggested_buy_price": plan.suggested_buy_price,
             "buy_zone_low": plan.buy_zone_low,
             "buy_zone_high": plan.buy_zone_high,
@@ -456,6 +511,7 @@ class Strategy6Evaluation:
             "buy_zone_valid_days": plan.buy_zone_valid_days,
             "suggested_limit_price": plan.suggested_limit_price,
             "execution_notes": plan.execution_notes,
+            "entry_archetype": plan.entry_archetype,
             "strong_start_score": score.strong_start_score,
             "dry_stable_score": score.dry_stable_score,
             "risk_reward_score": score.risk_reward_score,
@@ -465,6 +521,8 @@ class Strategy6Evaluation:
             "tail_score": score.tail_score,
             "objective_rr_score": score.objective_rr_score,
             "relative_strength_risk_score": score.relative_strength_risk_score,
+            "path_evidence_score": score.path_evidence_score,
+            "score_model_version": score.score_model_version,
             "candidate_type": self.candidate_type,
             "classification": self.classification,
             "lifecycle_status": self.lifecycle_status,

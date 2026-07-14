@@ -2839,6 +2839,31 @@ def _ensure_strategy6_candidates_table(conn: sqlite3.Connection):
         "passed_path_count": "INTEGER DEFAULT 0",
         "multi_path_confirmed": "INTEGER DEFAULT 0",
         "brooks_result_json": "TEXT",
+        "start_event_quality_score": "INTEGER DEFAULT 0",
+        "start_follow_through_return_5": "REAL DEFAULT 0",
+        "start_gain_retention_ratio": "REAL DEFAULT 0",
+        "start_max_close_drawdown_5": "REAL DEFAULT 0",
+        "start_failure_reasons": "TEXT",
+        "tail_segmentation_status": "TEXT",
+        "tail_segmentation_score": "INTEGER DEFAULT 0",
+        "tail_range_contraction_ratio": "REAL DEFAULT 0",
+        "tail_atr_contraction_ratio": "REAL DEFAULT 0",
+        "tail_body_contraction_ratio": "REAL DEFAULT 0",
+        "setup_quality_score": "INTEGER DEFAULT 0",
+        "setup_gain_retention_ratio": "REAL DEFAULT 0",
+        "distribution_day_count": "INTEGER DEFAULT 0",
+        "up_down_volume_ratio": "REAL DEFAULT 0",
+        "volatility_contraction_ratio": "REAL DEFAULT 0",
+        "failed_breakout_count": "INTEGER DEFAULT 0",
+        "relative_strength_trend": "TEXT",
+        "setup_quality_reasons": "TEXT",
+        "setup_quality_risk_tags": "TEXT",
+        "support_reaction_score": "INTEGER DEFAULT 0",
+        "support_reaction_reasons": "TEXT",
+        "support_reaction_risk_tags": "TEXT",
+        "path_evidence_score": "INTEGER DEFAULT 0",
+        "entry_archetype": "TEXT",
+        "score_model_version": "TEXT",
     }.items():
         _ensure_column(conn, "strategy6_candidates", column, col_type)
     conn.execute(
@@ -3847,6 +3872,15 @@ def upsert_strategy6_candidate(
         "brooks_trade_trigger_type", "brooks_trigger_price", "brooks_trigger_valid_until", "tail_paths",
         "tail_path_summary", "tail_primary_path", "passed_path_count",
         "multi_path_confirmed", "brooks_result_json",
+        "start_event_quality_score", "start_follow_through_return_5",
+        "start_gain_retention_ratio", "start_max_close_drawdown_5", "start_failure_reasons",
+        "tail_segmentation_status", "tail_segmentation_score",
+        "tail_range_contraction_ratio", "tail_atr_contraction_ratio", "tail_body_contraction_ratio",
+        "setup_quality_score", "setup_gain_retention_ratio", "distribution_day_count",
+        "up_down_volume_ratio", "volatility_contraction_ratio", "failed_breakout_count",
+        "relative_strength_trend", "setup_quality_reasons", "setup_quality_risk_tags",
+        "support_reaction_score", "support_reaction_reasons", "support_reaction_risk_tags",
+        "path_evidence_score", "entry_archetype", "score_model_version",
     ]
     extra_values = [
         d.get("first_seen_date", first_pool_date),
@@ -3966,6 +4000,31 @@ def upsert_strategy6_candidate(
             sort_keys=True,
             default=_json_default,
         ),
+        d.get("start_event_quality_score", 0),
+        d.get("start_follow_through_return_5", 0.0),
+        d.get("start_gain_retention_ratio", 0.0),
+        d.get("start_max_close_drawdown_5", 0.0),
+        _json_any(d.get("start_failure_reasons", [])),
+        d.get("tail_segmentation_status", "FIXED_WINDOW"),
+        d.get("tail_segmentation_score", 0),
+        d.get("tail_range_contraction_ratio", 0.0),
+        d.get("tail_atr_contraction_ratio", 0.0),
+        d.get("tail_body_contraction_ratio", 0.0),
+        d.get("setup_quality_score", 0),
+        d.get("setup_gain_retention_ratio", 0.0),
+        d.get("distribution_day_count", 0),
+        d.get("up_down_volume_ratio", 0.0),
+        d.get("volatility_contraction_ratio", 0.0),
+        d.get("failed_breakout_count", 0),
+        d.get("relative_strength_trend", "UNKNOWN"),
+        _json_any(d.get("setup_quality_reasons", [])),
+        _json_any(d.get("setup_quality_risk_tags", [])),
+        d.get("support_reaction_score", 0),
+        _json_any(d.get("support_reaction_reasons", [])),
+        _json_any(d.get("support_reaction_risk_tags", [])),
+        d.get("path_evidence_score", 0),
+        d.get("entry_archetype", "NONE"),
+        d.get("score_model_version", "S6_QUALITY_V2"),
     ]
     columns.extend(extra_columns)
     values.extend(extra_values)
@@ -5227,6 +5286,8 @@ def _deserialize_strategy6_row(row: dict) -> dict:
         "risk_tags", "warn_tags", "reject_reasons", "score_reasons",
         "support_cluster_sources", "execution_notes",
         "compact_kline_reasons", "compact_kline_risk_tags",
+        "start_failure_reasons", "setup_quality_reasons", "setup_quality_risk_tags",
+        "support_reaction_reasons", "support_reaction_risk_tags",
     ):
         value = row.get(field)
         if isinstance(value, str) and value:
@@ -5307,6 +5368,10 @@ def _deserialize_strategy6_row(row: dict) -> dict:
     if legacy_paths:
         row["passed_path_count"] = len(tail_paths)
         row["multi_path_confirmed"] = len(tail_paths) > 1
+    row["tail_segmentation_status"] = row.get("tail_segmentation_status") or "FIXED_WINDOW"
+    row["relative_strength_trend"] = row.get("relative_strength_trend") or "UNKNOWN"
+    row["entry_archetype"] = row.get("entry_archetype") or "NONE"
+    row["score_model_version"] = row.get("score_model_version") or "S6_QUALITY_V2"
     return row
 
 
