@@ -349,27 +349,48 @@ describe('Strategy6Results', () => {
     expect(wrapper.text()).toContain('支撑失效')
   })
 
-  it('keeps Brooks watch states free of buy semantics and renders legacy rows safely', async () => {
+  it('masks immediate-buy semantics for Brooks-only B-grade, barb-wire and untriggered candidates', async () => {
     api.getStrategy6Candidates.mockResolvedValue({
       candidates: [
         {
-          code: '000010', name: '等待触发', candidate_type: 'WATCH_CANDIDATE',
+          code: '000010', name: 'B级等待', candidate_type: 'READY_CANDIDATE', lifecycle_status: 'BUY_ZONE',
+          start_grade: 'B', buy_zone_low: 8.01, buy_zone_high: 8.18, suggestion: '立即买入',
+          execution_notes: ['NEXT_TRADING_DAY_ONLY'],
           brooks_tail_enabled: true, brooks_tail_pass: true, brooks_tail_score: 15,
-          brooks_tail_premium: false, brooks_status: 'SECOND_ENTRY_LONG_READY',
-          brooks_trade_ready: false, brooks_trade_trigger_type: '', tail_paths: ['BROOKS'],
+          brooks_tail_premium: false, brooks_status: 'SECOND_ENTRY_LONG_READY', brooks_trade_ready: true,
+          brooks_trade_trigger_type: 'BROOKS_SUPPORT_READY', tail_paths: ['BROOKS'],
           tail_path_summary: 'BROOKS', tail_primary_path: 'BROOKS', passed_path_count: 1,
           multi_path_confirmed: false, tail_path: 'NONE',
           brooks_result: {
             context: { context_type: 'WEAK_BULL_CONTEXT', watch_only: true },
-            compact_structure: { structure_type: 'BARB_WIRE', barb_wire_risk: true },
+            compact_structure: { structure_type: 'COMPACT_ORDERLY', barb_wire_risk: false },
             structure: { setup_types: ['SECOND_ENTRY_LONG_READY'] },
-            trade_trigger: { ready: false, trigger_type: '', trigger_valid_until: '2026-07-15' },
+            trade_trigger: { ready: true, trigger_type: 'BROOKS_SUPPORT_READY', trigger_valid_until: '2026-07-15' },
             reasons: [], reject_reasons: [], risk_tags: ['BROOKS_GRADE_B_WATCH_ONLY'],
           },
         },
         {
-          code: '000011', name: '旧任务', candidate_type: 'WATCH_CANDIDATE',
-          tail_path: 'ORIGINAL', original_tail_pass: true,
+          code: '000012', name: '铁丝网等待', candidate_type: 'READY_CANDIDATE', lifecycle_status: 'BUY_ZONE',
+          start_grade: 'A', buy_zone_low: 9.01, buy_zone_high: 9.18, suggestion: '立即买入',
+          brooks_tail_enabled: true, brooks_tail_pass: true, brooks_trade_ready: true,
+          brooks_trade_trigger_type: 'BROOKS_SUPPORT_READY', tail_paths: ['BROOKS'],
+          tail_path_summary: 'BROOKS', tail_primary_path: 'BROOKS', tail_path: 'NONE',
+          brooks_result: {
+            context: { context_type: 'BULL_CONTEXT', watch_only: false },
+            compact_structure: { structure_type: 'BARB_WIRE', barb_wire_risk: true },
+            trade_trigger: { ready: true, trigger_type: 'BROOKS_SUPPORT_READY' },
+          },
+        },
+        {
+          code: '000013', name: '信号未触发', candidate_type: 'READY_CANDIDATE', lifecycle_status: 'BUY_ZONE',
+          start_grade: 'A', buy_zone_low: 10.01, buy_zone_high: 10.18, suggestion: '立即买入',
+          brooks_tail_enabled: true, brooks_tail_pass: true, brooks_trade_ready: false,
+          tail_paths: ['BROOKS'], tail_path_summary: 'BROOKS', tail_primary_path: 'BROOKS', tail_path: 'NONE',
+          brooks_result: { context: { context_type: 'BULL_CONTEXT' }, compact_structure: { structure_type: 'COMPACT_ORDERLY' }, trade_trigger: { ready: false } },
+        },
+        {
+          code: '000011', name: '旧路径就绪', candidate_type: 'READY_CANDIDATE', lifecycle_status: 'BUY_ZONE',
+          tail_path: 'ORIGINAL', original_tail_pass: true, buy_zone_low: 7.01, buy_zone_high: 7.18,
         },
       ],
     })
@@ -379,16 +400,53 @@ describe('Strategy6Results', () => {
     })
     await flushUi()
 
-    expect(wrapper.text()).toContain('Brooks价格行为')
-    expect(wrapper.text()).toContain('观察/等待触发')
-    expect(wrapper.text()).toContain('弱上涨背景')
-    expect(wrapper.text()).toContain('铁丝网震荡')
-    expect(wrapper.text()).not.toContain('交易触发已确认')
-    expect(wrapper.text()).not.toContain('undefined')
+    for (const code of ['000010', '000012', '000013']) {
+      expect(wrapper.find(`[data-test="candidate-buy-zone-${code}"]`).text()).toBe('等待触发')
+      expect(wrapper.find(`[data-test="candidate-type-${code}"]`).text()).toBe('观察候选')
+      expect(wrapper.find(`[data-test="candidate-lifecycle-${code}"]`).text()).toBe('观察/等待触发')
+    }
+    expect(wrapper.text()).toContain('执行区间/状态')
+    expect(wrapper.text()).not.toContain('仅限下一交易日执行')
+    expect(wrapper.text()).not.toContain('8.01 - 8.18')
+    expect(wrapper.text()).not.toContain('9.01 - 9.18')
+    expect(wrapper.text()).not.toContain('10.01 - 10.18')
+    expect(wrapper.find('[data-test="detail-execution-zone"]').text()).toContain('等待触发')
+    expect(wrapper.find('[data-test="detail-suggestion"]').text()).toContain('观察/等待触发')
 
-    await wrapper.findAll('.candidate-table tbody tr')[1].trigger('click')
+    await wrapper.find('[data-test="candidate-row-000011"]').trigger('click')
+    expect(wrapper.find('[data-test="candidate-buy-zone-000011"]').text()).toContain('7.01 - 7.18')
+    expect(wrapper.find('[data-test="detail-execution-zone"]').text()).toContain('7.01 - 7.18')
     expect(wrapper.text()).toContain('未启用或旧任务无数据')
     expect(wrapper.text()).not.toContain('undefined')
+  })
+
+  it('uses generic and path-specific Brooks trigger prices instead of the second-entry price', async () => {
+    const wrapper = mount(Strategy6Results, {
+      global: { mocks: { $route: { query: {} } } },
+    })
+
+    expect(wrapper.vm.brooksTriggerPrice({
+      brooks_result: {
+        trade_trigger: { trigger_type: 'BROOKS_FAILED_BREAKOUT_READY', trigger_price: 10.21, failed_breakout_trigger_price: 10.11 },
+        structure: { second_entry_trigger_price: 9.99 },
+      },
+    })).toBe(10.21)
+    expect(wrapper.vm.brooksTriggerPrice({
+      brooks_result: {
+        trade_trigger: { trigger_type: 'BROOKS_FAILED_BREAKOUT_READY', failed_breakout_trigger_price: 11.22 },
+        structure: { second_entry_trigger_price: 9.99 },
+      },
+    })).toBe(11.22)
+    expect(wrapper.vm.brooksTriggerPrice({
+      brooks_result: {
+        trade_trigger: { trigger_type: 'BROOKS_BREAKOUT_READY', follow_through_trigger_price: 12.23 },
+        structure: { second_entry_trigger_price: 9.99 },
+      },
+    })).toBe(12.23)
+    expect(wrapper.vm.brooksTriggerValidUntil({
+      brooks_trigger_valid_until: '2026-07-20',
+      brooks_result: { trade_trigger: { trigger_valid_until: '2026-07-19' } },
+    })).toBe('2026-07-20')
   })
 
   it('loads all candidates for a URL task even when task list is stale', async () => {

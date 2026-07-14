@@ -103,21 +103,21 @@
           <thead>
             <tr>
               <th>股票</th><th>现价</th><th>总分</th><th>分类</th><th>生命周期</th>
-              <th>启动类型/等级</th><th>支撑状态</th><th>关键/前置支撑</th><th>买入区</th>
+              <th>启动类型/等级</th><th>支撑状态</th><th>关键/前置支撑</th><th>执行区间/状态</th>
               <th>止损</th><th>客观目标1/2</th><th>客观RR2</th><th>形态</th><th>权威路径/Brooks</th><th>尾段/前20量比</th><th>市场/RS</th><th>入池</th><th>风险/警告</th><th>数据日</th>
             </tr>
           </thead>
           <tbody>
-            <tr v-for="c in group.items" :key="c.code" class="clickable" @click="selected = c">
+            <tr v-for="c in group.items" :key="c.code" :data-test="`candidate-row-${c.code}`" class="clickable" @click="selected = c">
               <td><span class="code">{{ c.code }}</span> {{ c.name }}</td>
               <td>{{ fmt(c.current_price) }}</td>
               <td class="score">{{ fmt(c.total_score, 0) }}</td>
-              <td><span class="type-badge" :class="classFor(c)">{{ label('candidateType', c.candidate_type) }}</span></td>
-              <td>{{ label('lifecycleStatus', c.lifecycle_status) }}</td>
+              <td><span :data-test="`candidate-type-${c.code}`" class="type-badge" :class="classFor(c)">{{ candidateTypeText(c) }}</span></td>
+              <td :data-test="`candidate-lifecycle-${c.code}`">{{ lifecycleText(c) }}</td>
               <td>{{ label('startType', c.start_type) }} / {{ label('startGrade', c.start_grade) }}</td>
               <td>{{ label('supportStatus', c.support_status) }}</td>
               <td>{{ fmt(c.key_support_price) }} / {{ fmt(c.prior_key_support_price) }}</td>
-              <td>{{ priceRange(c.buy_zone_low, c.buy_zone_high) }}</td>
+              <td :data-test="`candidate-buy-zone-${c.code}`">{{ executionZoneText(c) }}</td>
               <td>{{ fmt(c.stop_loss_price) }}</td>
               <td>{{ fmt(c.objective_target_1 ?? c.target_price_1) }} / {{ fmt(c.objective_target_2 ?? c.target_price_2) }}</td>
               <td class="rr">{{ fmt(c.objective_rr_2 ?? c.risk_reward_ratio_2) }}</td>
@@ -151,19 +151,19 @@
     <section v-if="selected" class="panel detail-panel">
       <div class="panel-header">候选详情 · {{ selected.code }} {{ selected.name }}</div>
       <div class="detail-grid">
-        <div><span>分类</span><strong>{{ label('candidateType', selected.candidate_type) }} / {{ label('classification', selected.classification) }}</strong></div>
-        <div><span>生命周期</span><strong>{{ label('lifecycleStatus', selected.lifecycle_status) }}</strong></div>
+        <div><span>分类</span><strong>{{ candidateTypeText(selected) }} / {{ isBrooksOnlyWaiting(selected) ? '观察' : label('classification', selected.classification) }}</strong></div>
+        <div><span>生命周期</span><strong>{{ lifecycleText(selected) }}</strong></div>
         <div><span>强势启动</span><strong>{{ label('startType', selected.start_type) }} / {{ label('startGrade', selected.start_grade) }} / {{ pct(selected.start_day_return) }} · 启动后{{ selected.days_since_start ?? 0 }}日</strong></div>
         <div><span>启动日低点</span><strong>{{ fmt(selected.start_low) }}</strong></div>
         <div><span>支撑</span><strong>{{ label('supportStatus', selected.support_status) }} · {{ selected.main_support_ma || '--' }} · 测试{{ selected.support_test_count ?? 0 }}次</strong></div>
         <div><span>战术价格</span><strong>支撑 {{ fmt(selected.key_support_price) }} · 前置支撑 {{ fmt(selected.prior_key_support_price) }} · 止损 {{ fmt(selected.stop_loss_price) }}</strong></div>
-        <div><span>买入区</span><strong>{{ priceRange(selected.buy_zone_low, selected.buy_zone_high) }}</strong></div>
+        <div data-test="detail-execution-zone"><span>{{ isBrooksOnlyWaiting(selected) ? 'Brooks状态' : '买入区' }}</span><strong>{{ executionZoneText(selected) }}</strong></div>
         <div><span>阶段</span><strong>{{ label('phaseStatus', selected.phase_status) }} · 整理 {{ selected.consolidation_start_date || '--' }} · 尾段 {{ selected.tail_start_date || '--' }}</strong></div>
         <div><span>形态</span><strong>{{ label('patternType', selected.pattern_type || 'UNKNOWN') }} · {{ label('pivotSource', selected.pivot_source) }} · 收缩{{ selected.contraction_count ?? 0 }}次</strong></div>
         <div><span>支撑簇</span><strong>战术 {{ fmt(selected.tactical_support_price) }} · {{ joinedLabels('supportSource', selected.support_cluster_sources, ' / ') }}</strong></div>
         <div><span>客观目标</span><strong>{{ fmt(selected.objective_target_1 ?? selected.target_price_1) }} / {{ fmt(selected.objective_target_2 ?? selected.target_price_2) }} · RR {{ fmt(selected.objective_rr_1 ?? selected.risk_reward_ratio_1) }} / {{ fmt(selected.objective_rr_2 ?? selected.risk_reward_ratio_2) }}</strong></div>
         <div><span>执行R目标</span><strong>1.5R {{ fmt(selected.execution_target_1_5r) }} · 2R {{ fmt(selected.execution_target_2r) }} · 2.5R {{ fmt(selected.execution_target_2_5r) }} · 3.5R {{ fmt(selected.execution_target_3_5r) }}</strong></div>
-        <div><span>执行窗口</span><strong>{{ selected.valid_from_date || '--' }} 至 {{ selected.valid_until_date || '--' }} · 限价 {{ fmt(selected.suggested_limit_price) }}</strong></div>
+        <div><span>执行窗口</span><strong>{{ isBrooksOnlyWaiting(selected) ? '等待Brooks交易触发确认' : `${selected.valid_from_date || '--'} 至 ${selected.valid_until_date || '--'} · 限价 ${fmt(selected.suggested_limit_price)}` }}</strong></div>
         <div><span>六维评分</span><strong>启动{{ selected.strong_start_score ?? 0 }} 形态{{ selected.pattern_score_component ?? 0 }} 支撑{{ selected.support_score ?? 0 }} 尾段{{ selected.tail_score ?? 0 }} 客观RR{{ selected.objective_rr_score ?? 0 }} RS/风险{{ selected.relative_strength_risk_score ?? 0 }}</strong></div>
         <div><span>权威三路径</span><strong>{{ label('tailPathSummary', authoritativeSummary(selected)) }} · 主路径 {{ label('tailPrimaryPath', authoritativePrimary(selected)) }} · 通过 {{ joinedLabels('tailPrimaryPath', authoritativePaths(selected), ' / ') }} · {{ selected.multi_path_confirmed ? '多路径确认' : '单路径或未通过' }}</strong></div>
         <div><span>旧尾部路径（原始/箱体）</span><strong>{{ label('tailPath', selected.tail_path || 'NONE') }} · 原路径 {{ selected.original_tail_pass ? '通过' : '未通过' }}/{{ selected.original_tail_score ?? 0 }} · 箱体 {{ selected.box_tail_pass ? '通过' : '未通过' }}/{{ selected.box_tail_score ?? 0 }}</strong></div>
@@ -180,7 +180,7 @@
         <div><span>版本</span><strong>{{ selected.strategy_version || '--' }} · {{ selected.config_hash || '--' }}</strong></div>
         <div><span>价格口径</span><strong>{{ label('priceBasis', selected.price_basis || 'FORWARD_ADJUSTED') }} · 未复权报价 {{ fmt(selected.current_price_raw) }}</strong></div>
         <div><span>涨跌幅</span><strong>5日 {{ pct(selected.return_5) }} · 10日 {{ pct(selected.return_10) }} · 20日 {{ pct(selected.return_20) }}</strong></div>
-        <div><span>建议</span><strong>{{ selected.suggestion || '--' }}</strong></div>
+        <div data-test="detail-suggestion"><span>建议</span><strong>{{ isBrooksOnlyWaiting(selected) ? '观察/等待触发' : (selected.suggestion || '--') }}</strong></div>
       </div>
       <div class="brooks-evidence">
         <div class="subsection-title">Brooks价格行为证据</div>
@@ -191,7 +191,7 @@
             <span>评分 {{ selected.brooks_tail_score ?? 0 }}/20</span>
             <span>{{ selected.brooks_tail_pass ? '观察结构通过' : '观察结构未通过' }}</span>
             <span>{{ selected.brooks_tail_premium ? '优质结构' : '普通结构' }}</span>
-            <span :class="selected.brooks_trade_ready ? 'brooks-ready' : 'brooks-wait'">{{ brooksTradeState(selected) }}</span>
+            <span :class="brooksTradeConfirmed(selected) ? 'brooks-ready' : 'brooks-wait'">{{ brooksTradeState(selected) }}</span>
           </div>
           <div class="brooks-grid">
             <div><span>上涨背景</span><strong>{{ label('brooksContext', brooksDetail(selected).context?.context_type || 'INVALID_CONTEXT') }} · {{ passText(brooksDetail(selected).bull_context_pass ?? brooksDetail(selected).context?.passed) }}</strong></div>
@@ -201,7 +201,7 @@
             <div><span>支撑未破</span><strong>{{ passText(brooksDetail(selected).support_not_broken) }}</strong></div>
             <div><span>结构识别</span><strong>{{ joinedLabels('brooksSetup', brooksDetail(selected).structure?.setup_types, ' / ') }}</strong></div>
             <div><span>紧密分类</span><strong>{{ label('brooksCompact', brooksDetail(selected).compact_structure?.structure_type || 'NO_COMPACT') }} · 方向变化 {{ brooksDetail(selected).compact_structure?.direction_change_count ?? 0 }} · 长影线 {{ brooksDetail(selected).compact_structure?.long_shadow_bar_count ?? 0 }}</strong></div>
-            <div><span>交易触发</span><strong>{{ brooksTradeState(selected) }} · {{ label('brooksTriggerType', selected.brooks_trade_trigger_type || brooksDetail(selected).trade_trigger?.trigger_type) }} · 触发价 {{ fmt(brooksDetail(selected).structure?.second_entry_trigger_price) }} · 有效至 {{ selected.brooks_trigger_valid_until || brooksDetail(selected).trade_trigger?.trigger_valid_until || '--' }}</strong></div>
+            <div><span>交易触发</span><strong>{{ brooksTradeState(selected) }} · {{ label('brooksTriggerType', selected.brooks_trade_trigger_type || brooksDetail(selected).trade_trigger?.trigger_type) }} · 触发价 {{ fmt(brooksTriggerPrice(selected)) }} · 有效至 {{ brooksTriggerValidUntil(selected) }}</strong></div>
           </div>
           <div class="tags brooks-tags">
             <span v-for="reason in brooksReasonItems(selected, 'reasons')" :key="'br'+reason" class="tag info">{{ label('tag', reason) }}</span>
@@ -211,7 +211,7 @@
         </template>
       </div>
       <div class="tags">
-        <span v-for="note in selected.execution_notes || []" :key="'e' + note" class="tag info">{{ label('executionNote', note) }}</span>
+        <span v-for="note in isBrooksOnlyWaiting(selected) ? [] : (selected.execution_notes || [])" :key="'e' + note" class="tag info">{{ label('executionNote', note) }}</span>
         <span v-for="tag in selected.risk_tags || []" :key="'r' + tag" class="tag risk">{{ label('tag', tag) }}</span>
         <span v-for="tag in selected.warn_tags || []" :key="'w' + tag" class="tag warn">{{ label('tag', tag) }}</span>
         <span v-for="tag in selected.reject_reasons || []" :key="'x' + tag" class="tag risk">{{ label('tag', tag) }}</span>
@@ -247,13 +247,13 @@ export default {
       return [...this.candidates].sort((a, b) => (b.total_score || 0) - (a.total_score || 0))
     },
     readyCandidates() {
-      return this.sortedCandidates.filter(c => c.candidate_type === 'READY_CANDIDATE')
+      return this.sortedCandidates.filter(c => this.effectiveCandidateType(c) === 'READY_CANDIDATE')
     },
     keyCandidates() {
-      return this.sortedCandidates.filter(c => c.candidate_type === 'KEY_CANDIDATE')
+      return this.sortedCandidates.filter(c => this.effectiveCandidateType(c) === 'KEY_CANDIDATE')
     },
     watchCandidates() {
-      return this.sortedCandidates.filter(c => c.candidate_type === 'WATCH_CANDIDATE')
+      return this.sortedCandidates.filter(c => this.effectiveCandidateType(c) === 'WATCH_CANDIDATE')
     },
     candidateGroups() {
       return [
@@ -330,7 +330,61 @@ export default {
     },
     brooksTradeState(candidate) {
       if (!candidate?.brooks_tail_enabled) return '未启用或旧任务无数据'
-      return candidate.brooks_trade_ready === true ? '交易触发已确认' : '观察/等待触发'
+      return this.brooksTradeConfirmed(candidate) ? '交易触发已确认' : '观察/等待触发'
+    },
+    brooksTradeConfirmed(candidate) {
+      if (candidate?.brooks_trade_ready !== true) return false
+      const detail = this.brooksDetail(candidate)
+      if (candidate?.start_grade === 'B' || detail.context?.watch_only === true) return false
+      if (detail.compact_structure?.structure_type === 'BARB_WIRE' || detail.compact_structure?.barb_wire_risk === true) return false
+      return true
+    },
+    isBrooksOnlyWaiting(candidate) {
+      const paths = this.authoritativePaths(candidate)
+      return paths.length === 1 && paths[0] === 'BROOKS' && !this.brooksTradeConfirmed(candidate)
+    },
+    effectiveCandidateType(candidate) {
+      return this.isBrooksOnlyWaiting(candidate) ? 'WATCH_CANDIDATE' : (candidate?.candidate_type || 'WATCH_CANDIDATE')
+    },
+    candidateTypeText(candidate) {
+      return this.label('candidateType', this.effectiveCandidateType(candidate))
+    },
+    lifecycleText(candidate) {
+      return this.isBrooksOnlyWaiting(candidate) ? '观察/等待触发' : this.label('lifecycleStatus', candidate?.lifecycle_status)
+    },
+    executionZoneText(candidate) {
+      return this.isBrooksOnlyWaiting(candidate) ? '等待触发' : this.priceRange(candidate?.buy_zone_low, candidate?.buy_zone_high)
+    },
+    brooksTriggerPrice(candidate) {
+      const detail = this.brooksDetail(candidate)
+      const trigger = detail.trade_trigger || {}
+      const structure = detail.structure || {}
+      const triggerType = candidate?.brooks_trade_trigger_type || trigger.trigger_type || ''
+      const firstValid = values => values.find(value => value != null && value !== '' && Number.isFinite(Number(value)))
+      const generic = firstValid([trigger.trigger_price, candidate?.brooks_trigger_price])
+      if (generic != null) return Number(generic)
+      let specific = null
+      if (triggerType === 'BROOKS_FAILED_BREAKOUT_READY') {
+        specific = firstValid([trigger.failed_breakout_trigger_price, structure.failed_breakout_trigger_price])
+      } else if (triggerType === 'BROOKS_BREAKOUT_READY') {
+        specific = firstValid([trigger.follow_through_trigger_price, trigger.breakout_trigger_price, structure.follow_through_trigger_price])
+      } else if (triggerType === 'BROOKS_SUPPORT_READY') {
+        specific = firstValid([trigger.second_entry_trigger_price, structure.second_entry_trigger_price])
+      }
+      if (specific != null) return Number(specific)
+      const compatible = firstValid([
+        trigger.failed_breakout_trigger_price,
+        trigger.follow_through_trigger_price,
+        trigger.breakout_trigger_price,
+        trigger.second_entry_trigger_price,
+        structure.failed_breakout_trigger_price,
+        structure.follow_through_trigger_price,
+        structure.second_entry_trigger_price,
+      ])
+      return compatible == null ? null : Number(compatible)
+    },
+    brooksTriggerValidUntil(candidate) {
+      return candidate?.brooks_trigger_valid_until || this.brooksDetail(candidate).trade_trigger?.trigger_valid_until || '--'
     },
     brooksReasonItems(candidate, key) {
       const detail = this.brooksDetail(candidate)
@@ -412,9 +466,10 @@ export default {
       return `${this.fmt(low)} - ${this.fmt(high)}`
     },
     classFor(c) {
-      if (c.candidate_type === 'READY_CANDIDATE') return 'ready'
-      if (c.candidate_type === 'KEY_CANDIDATE') return 'key'
-      if (c.candidate_type === 'WATCH_CANDIDATE') return 'watch'
+      const type = this.effectiveCandidateType(c)
+      if (type === 'READY_CANDIDATE') return 'ready'
+      if (type === 'KEY_CANDIDATE') return 'key'
+      if (type === 'WATCH_CANDIDATE') return 'watch'
       return 'rejected'
     },
     marketDataStatusText(status) {
@@ -509,7 +564,7 @@ export default {
           { header: 'Brooks交易状态', value: c => this.brooksTradeState(c) },
           { header: 'Brooks触发类型', value: c => this.label('brooksTriggerType', c.brooks_trade_trigger_type) },
           { header: 'Brooks触发类型原始值', value: c => c.brooks_trade_trigger_type || '' },
-          { header: 'Brooks触发有效期', value: c => c.brooks_trigger_valid_until || '' },
+          { header: 'Brooks触发有效期', value: c => this.brooksTriggerValidUntil(c) === '--' ? '' : this.brooksTriggerValidUntil(c) },
           { header: '上涨背景', value: c => this.passText(this.brooksDetail(c).bull_context_pass ?? this.brooksDetail(c).context?.passed) },
           { header: '卖压衰竭', value: c => this.passText(this.brooksDetail(c).selling_pressure_exhausted ?? this.brooksDetail(c).selling_pressure?.exhausted) },
           { header: '价格稳定', value: c => this.passText(this.brooksDetail(c).price_stable_pass) },
@@ -521,7 +576,7 @@ export default {
           { header: 'Brooks结构原始值', value: c => (this.brooksDetail(c).structure?.setup_types || []).join('|') },
           { header: 'Brooks紧密分类', value: c => this.label('brooksCompact', this.brooksDetail(c).compact_structure?.structure_type) },
           { header: 'Brooks紧密分类原始值', value: c => this.brooksDetail(c).compact_structure?.structure_type || '' },
-          { header: 'Brooks触发价', value: c => this.fmt(this.brooksDetail(c).structure?.second_entry_trigger_price) },
+          { header: 'Brooks触发价', value: c => this.fmt(this.brooksTriggerPrice(c)) },
           { header: 'Brooks原因', value: c => strategy6Labels('tag', this.brooksReasonItems(c, 'reasons')).join('|') },
           { header: 'Brooks原因原始值', value: c => this.brooksReasonItems(c, 'reasons').join('|') },
           { header: 'Brooks风险', value: c => strategy6Labels('tag', this.brooksReasonItems(c, 'risk_tags')).join('|') },

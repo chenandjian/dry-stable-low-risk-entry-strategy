@@ -74,6 +74,12 @@ function brooksTailConfig() {
   }
 }
 
+function strategy6InputByLabel(wrapper, label) {
+  const param = wrapper.findAll('.strategy6-section .param').filter(node => node.find('label').text() === label).at(-1)
+  if (!param) throw new Error(`missing Strategy6 input label: ${label}`)
+  return param.find('input')
+}
+
 function configResponse() {
   return {
     config: {
@@ -387,5 +393,72 @@ describe('StrategyConfig scheduler controls', () => {
     expect(wrapper.text()).toContain('Brooks通过分不能高于优质分')
     expect(wrapper.text()).toContain('Brooks优质量干比不能高于普通量干比')
     expect(wrapper.text()).not.toContain('pass_score_min')
+  })
+
+  it('rejects out-of-range values for every editable Brooks numeric control', async () => {
+    const wrapper = mount(StrategyConfig)
+    await flushUi()
+    const cases = [
+      ['MA20斜率窗口', 10, 1, 'MA20斜率窗口需在 2-60'],
+      ['高低点序列窗口', 10, 4, '高低点序列窗口需在 5-60'],
+      ['最大下移序列数', 2, 11, '最大下移序列数需在 0-10'],
+      ['跌破MA20 ATR容差', 0.5, 3.1, '跌破MA20 ATR容差需在 0-3'],
+      ['卖压观察窗口', 7, 2, '观察窗口需在 3-30'],
+      ['最多强空方K线', 1, 8, '最大强空方K线数不能超过观察窗口'],
+      ['最多空方跟进', 1, 8, '最大空方跟进数不能超过观察窗口'],
+      ['最多连续阴线', 2, 8, '最大连续阴线数不能超过观察窗口'],
+      ['稳定判断窗口', 5, 2, '价格稳定: 窗口需在 3-10'],
+      ['收盘区间上限', 0.08, 2.1, '收盘区间上限需在 0-2'],
+      ['优质收盘区间', 0.05, 2.1, '优质收盘区间需在 0-2'],
+      ['尾部量比上限', 0.75, 0, '普通量干比需在 (0,2]'],
+      ['优质量干比', 0.6, 0, '优质量干比需在 (0,2]'],
+      ['量能基准窗口', 20, 9, '基准窗口需在 10-60'],
+      ['二次低点最短间隔', 2, 16, '最短低点间隔需在 1-15'],
+      ['二次低点最长间隔', 15, 31, '最长低点间隔需在 2-30'],
+      ['假跌破收回天数', 2, 6, '收回天数需在 1-5'],
+      ['紧密区下界', 0.35, -0.1, '紧密区下界需在 0-1'],
+      ['紧密区上界', 0.7, 1.1, '紧密区上界需在 0-1'],
+      ['最多方向变化', 3, 11, '方向变化次数需在 0-10'],
+      ['最多长影线K线', 2, 11, '长影线K线数需在 0-10'],
+      ['触发有效交易日', 3, 0, '有效交易日需在 1-10'],
+      ['最大触发距离 ATR', 1.5, 5.1, '最大距离需在 0-5 ATR'],
+      ['突破跟进天数', 2, 6, '突破跟进天数需在 1-5'],
+      ['背景分', 4, 21, '各分项需在 0-20'],
+      ['卖压衰竭分', 6, 21, '各分项需在 0-20'],
+      ['价格稳定分', 4, 21, '各分项需在 0-20'],
+      ['量干分', 2, 21, '各分项需在 0-20'],
+      ['结构分', 4, 21, '各分项需在 0-20'],
+      ['Brooks通过分', 14, 21, '通过分和优质分需在 0-20'],
+      ['Brooks优质分', 17, 21, '通过分和优质分需在 0-20'],
+    ]
+
+    for (const [label, validValue, invalidValue, message] of cases) {
+      const input = strategy6InputByLabel(wrapper, label)
+      await input.setValue(invalidValue)
+      api.updateConfig.mockClear()
+      await wrapper.find('.btn-save').trigger('click')
+      await flushUi()
+      expect(api.updateConfig, label).not.toHaveBeenCalled()
+      expect(wrapper.find('.error-msg').text(), label).toContain(message)
+      await input.setValue(validValue)
+    }
+  })
+
+  it('rejects Brooks cross-field relationships before saving', async () => {
+    const wrapper = mount(StrategyConfig)
+    await flushUi()
+
+    await strategy6InputByLabel(wrapper, '优质收盘区间').setValue('0.09')
+    await strategy6InputByLabel(wrapper, '二次低点最短间隔').setValue('10')
+    await strategy6InputByLabel(wrapper, '二次低点最长间隔').setValue('8')
+    await strategy6InputByLabel(wrapper, '紧密区下界').setValue('0.8')
+    await strategy6InputByLabel(wrapper, '紧密区上界').setValue('0.7')
+    await wrapper.find('.btn-save').trigger('click')
+    await flushUi()
+
+    expect(api.updateConfig).not.toHaveBeenCalled()
+    expect(wrapper.text()).toContain('优质收盘区间不能高于普通区间')
+    expect(wrapper.text()).toContain('最短低点间隔不能高于最长间隔')
+    expect(wrapper.text()).toContain('紧密区下界不能高于上界')
   })
 })
