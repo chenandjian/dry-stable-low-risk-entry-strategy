@@ -123,6 +123,7 @@ def _candidate():
         "brooks_status": "SECOND_ENTRY_LONG_READY",
         "brooks_trade_ready": True,
         "brooks_trade_trigger_type": "SECOND_ENTRY_BREAK",
+        "brooks_trigger_price": 12.48,
         "brooks_trigger_valid_until": "2026-07-14",
         "tail_paths": ["BOX", "BROOKS"],
         "tail_path_summary": "MULTI",
@@ -133,7 +134,7 @@ def _candidate():
             "status": "SECOND_ENTRY_LONG_READY",
             "context": {"context_type": "BULL_TREND", "passed": True},
             "structure": {"setup_types": ["SECOND_ENTRY_LONG"]},
-            "trade_trigger": {"ready": True, "trigger_type": "SECOND_ENTRY_BREAK"},
+            "trade_trigger": {"ready": True, "trigger_type": "SECOND_ENTRY_BREAK", "trigger_price": 12.48},
         },
     }
 
@@ -178,6 +179,7 @@ def test_strategy6_candidate_table_is_independent(tmp_path):
     assert detail["brooks_tail_pass"] is True
     assert detail["brooks_tail_premium"] is True
     assert detail["brooks_trade_ready"] is True
+    assert detail["brooks_trigger_price"] == 12.48
     assert detail["tail_paths"] == ["BOX", "BROOKS"]
     assert detail["tail_path_summary"] == "MULTI"
     assert detail["tail_primary_path"] == "BROOKS"
@@ -212,7 +214,7 @@ def test_strategy6_candidate_schema_contains_all_box_tail_output_fields(tmp_path
         "compact_kline_reasons", "compact_kline_risk_tags",
         "brooks_tail_enabled", "brooks_tail_pass", "brooks_tail_score",
         "brooks_tail_premium", "brooks_status", "brooks_trade_ready",
-        "brooks_trade_trigger_type", "brooks_trigger_valid_until", "tail_paths",
+        "brooks_trade_trigger_type", "brooks_trigger_price", "brooks_trigger_valid_until", "tail_paths",
         "tail_path_summary", "tail_primary_path", "passed_path_count",
         "multi_path_confirmed", "brooks_result_json",
     }
@@ -268,6 +270,7 @@ def test_strategy6_legacy_candidate_gets_safe_brooks_and_path_defaults(tmp_path)
     assert saved["brooks_status"] == "BROOKS_DISABLED"
     assert saved["brooks_trade_ready"] is False
     assert saved["brooks_trade_trigger_type"] == ""
+    assert saved["brooks_trigger_price"] is None
     assert saved["brooks_trigger_valid_until"] == ""
     assert saved["tail_paths"] == ["ORIGINAL"]
     assert saved["tail_path_summary"] == "ORIGINAL"
@@ -391,9 +394,12 @@ def test_strategy6_api_returns_candidates_and_rejects_cross_strategy(tmp_path, m
     assert listed["tail_path"] == "BOX"
     assert listed["tail_paths"] == ["BOX", "BROOKS"]
     assert listed["brooks_result"]["trade_trigger"]["ready"] is True
+    assert listed["brooks_trigger_price"] == 12.48
+    assert listed["brooks_result"]["trade_trigger"]["trigger_price"] == 12.48
     assert detailed["candidate_type"] == "KEY_CANDIDATE"
     assert detailed["tail_path"] == "BOX"
     assert detailed["brooks_status"] == "SECOND_ENTRY_LONG_READY"
+    assert detailed["brooks_trigger_price"] == 12.48
     assert detailed["brooks_result"]["structure"]["setup_types"] == ["SECOND_ENTRY_LONG"]
 
     mismatch = client.get("/api/strategy6/tasks/s1-task/candidates")

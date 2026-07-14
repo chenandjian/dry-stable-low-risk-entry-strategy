@@ -2831,6 +2831,7 @@ def _ensure_strategy6_candidates_table(conn: sqlite3.Connection):
         "brooks_status": "TEXT",
         "brooks_trade_ready": "INTEGER DEFAULT 0",
         "brooks_trade_trigger_type": "TEXT",
+        "brooks_trigger_price": "REAL",
         "brooks_trigger_valid_until": "TEXT",
         "tail_paths": "TEXT",
         "tail_path_summary": "TEXT",
@@ -3843,7 +3844,7 @@ def upsert_strategy6_candidate(
         "compact_kline_reasons", "compact_kline_risk_tags",
         "brooks_tail_enabled", "brooks_tail_pass", "brooks_tail_score",
         "brooks_tail_premium", "brooks_status", "brooks_trade_ready",
-        "brooks_trade_trigger_type", "brooks_trigger_valid_until", "tail_paths",
+        "brooks_trade_trigger_type", "brooks_trigger_price", "brooks_trigger_valid_until", "tail_paths",
         "tail_path_summary", "tail_primary_path", "passed_path_count",
         "multi_path_confirmed", "brooks_result_json",
     ]
@@ -3952,6 +3953,7 @@ def upsert_strategy6_candidate(
         d.get("brooks_status", "BROOKS_DISABLED"),
         1 if d.get("brooks_trade_ready") else 0,
         d.get("brooks_trade_trigger_type", ""),
+        d.get("brooks_trigger_price"),
         d.get("brooks_trigger_valid_until", ""),
         _json_any(d.get("tail_paths", [])),
         d.get("tail_path_summary", "NONE"),
@@ -5284,6 +5286,7 @@ def _deserialize_strategy6_row(row: dict) -> dict:
     if not row.get("brooks_status"):
         row["brooks_status"] = "BROOKS_DISABLED"
     row["brooks_trade_trigger_type"] = row.get("brooks_trade_trigger_type") or ""
+    row["brooks_trigger_price"] = row.get("brooks_trigger_price")
     row["brooks_trigger_valid_until"] = row.get("brooks_trigger_valid_until") or ""
     if not row.get("tail_path_summary"):
         row["tail_path_summary"] = (

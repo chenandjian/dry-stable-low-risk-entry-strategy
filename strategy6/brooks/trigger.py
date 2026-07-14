@@ -59,6 +59,7 @@ def _evaluate_second_entry(
         result.risk_tags.append("BROOKS_TRIGGER_SIGNAL_NOT_VISIBLE")
         return
     valid_days = int(config["trigger_valid_days"])
+    result.trigger_price = float(trigger_price)
     result.trigger_valid_until = _add_weekdays(signal_date, valid_days)
     if signal_index == len(rows) - 1:
         result.risk_tags.append("BROOKS_TRIGGER_REQUIRES_LATER_SESSION")
@@ -102,6 +103,11 @@ def _evaluate_failed_breakout(
                 result.ready = True
                 result.failed_bear_breakout_confirmed = True
                 result.trigger_type = "BROOKS_FAILED_BREAKOUT_READY"
+                result.trigger_price = reclaim_high
+                result.trigger_valid_until = _add_weekdays(
+                    str(row.get("date") or ""),
+                    int(config["trigger_valid_days"]),
+                )
                 result.reasons.append("BROOKS_FAILED_BREAKOUT_CONFIRMED")
                 return
 
@@ -122,6 +128,11 @@ def _evaluate_breakout(
         result.ready = True
         result.breakout_follow_through_pass = True
         result.trigger_type = "BROOKS_BREAKOUT_READY"
+        result.trigger_price = pivot
+        result.trigger_valid_until = _add_weekdays(
+            str(previous.get("date") or ""),
+            int(config["trigger_valid_days"]),
+        )
         result.reasons.append("BROOKS_BREAKOUT_FOLLOW_THROUGH")
 
 

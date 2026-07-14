@@ -188,6 +188,7 @@ STRATEGY6_REPORT_COLUMNS = [
     ("brooks_status", "brooks_status"),
     ("brooks_trade_ready", "brooks_trade_ready"),
     ("brooks_trade_trigger_type", "brooks_trade_trigger_type"),
+    ("brooks_trigger_price", "brooks_trigger_price"),
     ("brooks_trigger_valid_until", "brooks_trigger_valid_until"),
     ("tail_paths", "tail_paths"),
     ("tail_path_summary", "tail_path_summary"),

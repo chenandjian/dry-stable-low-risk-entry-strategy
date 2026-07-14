@@ -361,27 +361,11 @@ export default {
       const structure = detail.structure || {}
       const triggerType = candidate?.brooks_trade_trigger_type || trigger.trigger_type || ''
       const firstValid = values => values.find(value => value != null && value !== '' && Number.isFinite(Number(value)))
-      const generic = firstValid([trigger.trigger_price, candidate?.brooks_trigger_price])
+      const generic = firstValid([candidate?.brooks_trigger_price, trigger.trigger_price])
       if (generic != null) return Number(generic)
-      let specific = null
-      if (triggerType === 'BROOKS_FAILED_BREAKOUT_READY') {
-        specific = firstValid([trigger.failed_breakout_trigger_price, structure.failed_breakout_trigger_price])
-      } else if (triggerType === 'BROOKS_BREAKOUT_READY') {
-        specific = firstValid([trigger.follow_through_trigger_price, trigger.breakout_trigger_price, structure.follow_through_trigger_price])
-      } else if (triggerType === 'BROOKS_SUPPORT_READY') {
-        specific = firstValid([trigger.second_entry_trigger_price, structure.second_entry_trigger_price])
-      }
-      if (specific != null) return Number(specific)
-      const compatible = firstValid([
-        trigger.failed_breakout_trigger_price,
-        trigger.follow_through_trigger_price,
-        trigger.breakout_trigger_price,
-        trigger.second_entry_trigger_price,
-        structure.failed_breakout_trigger_price,
-        structure.follow_through_trigger_price,
-        structure.second_entry_trigger_price,
-      ])
-      return compatible == null ? null : Number(compatible)
+      if (triggerType !== 'BROOKS_SUPPORT_READY') return null
+      const legacySecondEntry = firstValid([structure.second_entry_trigger_price])
+      return legacySecondEntry == null ? null : Number(legacySecondEntry)
     },
     brooksTriggerValidUntil(candidate) {
       return candidate?.brooks_trigger_valid_until || this.brooksDetail(candidate).trade_trigger?.trigger_valid_until || '--'

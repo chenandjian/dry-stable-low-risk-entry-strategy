@@ -51,6 +51,8 @@ def test_second_entry_signal_day_is_ready_to_trigger_but_not_triggered():
     result = _evaluate(rows, _tail(rows[-1]["date"]))
     assert result.ready is False
     assert result.second_entry_triggered is False
+    assert result.trigger_price == 10.10
+    assert result.trigger_valid_until == "2026-01-07"
     assert "BROOKS_TRIGGER_REQUIRES_LATER_SESSION" in result.risk_tags
 
 
@@ -60,6 +62,42 @@ def test_next_session_break_of_signal_high_confirms_support_trigger():
     assert result.ready is True
     assert result.second_entry_triggered is True
     assert result.trigger_type == "BROOKS_SUPPORT_READY"
+    assert result.trigger_price == 10.10
+
+
+def test_failed_breakout_uses_reclaim_high_and_signal_date_for_authoritative_trigger():
+    rows = [
+        _bar(0),
+        _bar(1, high=10.18, low=9.70, close=9.90),
+        _bar(2, high=10.30, low=9.95, close=10.20),
+    ]
+    tail = _tail(rows[0]["date"])
+    tail.structure.second_entry_long_ready = False
+    tail.structure.failed_bear_breakout = True
+
+    result = _evaluate(rows, tail)
+
+    assert result.ready is True
+    assert result.trigger_type == "BROOKS_FAILED_BREAKOUT_READY"
+    assert result.trigger_price == 10.18
+    assert result.trigger_valid_until == "2026-01-07"
+
+
+def test_breakout_follow_through_uses_pivot_and_breakout_date_for_authoritative_trigger():
+    rows = [
+        _bar(0),
+        _bar(1, high=10.65, low=10.30, close=10.60),
+        _bar(2, high=10.70, low=10.45, close=10.55),
+    ]
+    tail = _tail(rows[0]["date"])
+    tail.structure.second_entry_long_ready = False
+
+    result = _evaluate(rows, tail)
+
+    assert result.ready is True
+    assert result.trigger_type == "BROOKS_BREAKOUT_READY"
+    assert result.trigger_price == 10.5
+    assert result.trigger_valid_until == "2026-01-07"
 
 
 def test_trigger_expires_after_three_later_sessions():

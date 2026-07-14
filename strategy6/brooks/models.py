@@ -70,6 +70,7 @@ class BrooksStructureResult:
 class BrooksTradeTriggerResult:
     ready: bool = False
     trigger_type: str = ""
+    trigger_price: float | None = None
     trigger_valid_until: str = ""
     second_entry_triggered: bool = False
     failed_bear_breakout_confirmed: bool = False
@@ -118,6 +119,7 @@ class BrooksTailResult:
             "brooks_status": self.status,
             "brooks_trade_ready": self.trade_trigger.ready,
             "brooks_trade_trigger_type": self.trade_trigger.trigger_type,
+            "brooks_trigger_price": self.trade_trigger.trigger_price,
             "brooks_trigger_valid_until": self.trade_trigger.trigger_valid_until,
             "brooks_result": detail,
         }

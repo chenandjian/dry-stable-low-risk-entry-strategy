@@ -32,7 +32,7 @@ def test_strategy6_report_xlsx_handles_empty_candidates():
         "compact_kline_reasons", "compact_kline_risk_tags",
         "brooks_tail_enabled", "brooks_tail_pass", "brooks_tail_score",
         "brooks_tail_premium", "brooks_status", "brooks_trade_ready",
-        "brooks_trade_trigger_type", "brooks_trigger_valid_until", "tail_paths",
+        "brooks_trade_trigger_type", "brooks_trigger_price", "brooks_trigger_valid_until", "tail_paths",
         "tail_path_summary", "tail_primary_path", "passed_path_count",
         "multi_path_confirmed", "brooks_result",
     ):
@@ -76,6 +76,7 @@ def test_strategy6_report_serializes_brooks_details_as_stable_json():
         "brooks_status": "MICRO_DOUBLE_BOTTOM",
         "brooks_trade_ready": False,
         "brooks_trade_trigger_type": "",
+        "brooks_trigger_price": 10.18,
         "brooks_trigger_valid_until": "2026-07-14",
         "brooks_result": {
             "status": "MICRO_DOUBLE_BOTTOM",
@@ -85,7 +86,9 @@ def test_strategy6_report_serializes_brooks_details_as_stable_json():
 
     workbook = zipfile.ZipFile(BytesIO(content))
     shared = workbook.read("xl/sharedStrings.xml").decode("utf-8")
+    sheet = workbook.read("xl/worksheets/sheet1.xml").decode("utf-8")
 
     assert "BROOKS" in shared
     assert "MICRO_DOUBLE_BOTTOM" in shared
+    assert "<v>10.18</v>" in sheet
     assert '{"context":{"context_type":"TRADING_RANGE","passed":true},"status":"MICRO_DOUBLE_BOTTOM"}' in shared

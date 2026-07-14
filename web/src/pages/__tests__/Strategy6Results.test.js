@@ -420,29 +420,30 @@ describe('Strategy6Results', () => {
     expect(wrapper.text()).not.toContain('undefined')
   })
 
-  it('uses generic and path-specific Brooks trigger prices instead of the second-entry price', async () => {
+  it('prefers authoritative production Brooks trigger prices and only falls back for legacy tasks', async () => {
     const wrapper = mount(Strategy6Results, {
       global: { mocks: { $route: { query: {} } } },
     })
 
     expect(wrapper.vm.brooksTriggerPrice({
+      brooks_trigger_price: 10.31,
       brooks_result: {
-        trade_trigger: { trigger_type: 'BROOKS_FAILED_BREAKOUT_READY', trigger_price: 10.21, failed_breakout_trigger_price: 10.11 },
+        trade_trigger: { trigger_type: 'BROOKS_FAILED_BREAKOUT_READY', trigger_price: 10.21 },
         structure: { second_entry_trigger_price: 9.99 },
       },
-    })).toBe(10.21)
+    })).toBe(10.31)
     expect(wrapper.vm.brooksTriggerPrice({
       brooks_result: {
-        trade_trigger: { trigger_type: 'BROOKS_FAILED_BREAKOUT_READY', failed_breakout_trigger_price: 11.22 },
+        trade_trigger: { trigger_type: 'BROOKS_FAILED_BREAKOUT_READY', trigger_price: 11.22 },
         structure: { second_entry_trigger_price: 9.99 },
       },
     })).toBe(11.22)
     expect(wrapper.vm.brooksTriggerPrice({
       brooks_result: {
-        trade_trigger: { trigger_type: 'BROOKS_BREAKOUT_READY', follow_through_trigger_price: 12.23 },
+        trade_trigger: { trigger_type: 'BROOKS_SUPPORT_READY' },
         structure: { second_entry_trigger_price: 9.99 },
       },
-    })).toBe(12.23)
+    })).toBe(9.99)
     expect(wrapper.vm.brooksTriggerValidUntil({
       brooks_trigger_valid_until: '2026-07-20',
       brooks_result: { trade_trigger: { trigger_valid_until: '2026-07-19' } },

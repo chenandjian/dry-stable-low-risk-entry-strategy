@@ -153,6 +153,27 @@ def test_engine_outputs_brooks_and_authoritative_three_path_fields():
     assert isinstance(candidate["brooks_result"], dict)
 
 
+def test_engine_candidate_dict_exposes_authoritative_brooks_trigger_price():
+    from strategy6.brooks.models import BrooksTradeTriggerResult
+
+    result = StrongVcpTailEngine({}).evaluate_at(
+        build_strategy6_candidate_data(),
+        code="000001",
+        name="平安银行",
+    )
+    result.brooks_tail.trade_trigger = BrooksTradeTriggerResult(
+        ready=True,
+        trigger_type="BROOKS_FAILED_BREAKOUT_READY",
+        trigger_price=12.34,
+        trigger_valid_until="2026-07-20",
+    )
+
+    candidate = result.to_candidate_dict()
+
+    assert candidate["brooks_trigger_price"] == 12.34
+    assert candidate["brooks_result"]["trade_trigger"]["trigger_price"] == 12.34
+
+
 def test_engine_brooks_disabled_preserves_legacy_two_path_summary():
     result = StrongVcpTailEngine({
         "strategy6": {"brooks_tail": {"enabled": False}},
