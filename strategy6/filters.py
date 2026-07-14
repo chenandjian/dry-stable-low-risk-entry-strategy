@@ -110,6 +110,13 @@ def classify_candidate(
     tactical_blocks_ready = _tactical_blocks_ready(ind, start, support)
     if phase.status == "START_TOO_RECENT":
         return "WATCH_CANDIDATE", "observe", "START_CONFIRMED", "观察：强势启动已确认，等待独立整理阶段"
+    if _brooks_only_waiting_for_trigger(dry_tail, box_tail, brooks_tail):
+        return (
+            "WATCH_CANDIDATE",
+            "observe",
+            "SETUP_FORMING",
+            "观察等待触发：Brooks结构成立，但交易触发尚未确认",
+        )
     if (
         config["pattern_filter_enabled"]
         and config["pattern_filter_mode"] == "downgrade"
@@ -142,6 +149,20 @@ def classify_candidate(
     if score.total_score >= config["watch_min_score"] or trade_plan.objective_rr_2 >= config["rr2_min_watch"]:
         return "WATCH_CANDIDATE", "observe", lifecycle, "观察：形态部分满足，等待进一步确认"
     return "REJECTED", "rejected", lifecycle, "排除：评分不足"
+
+
+def _brooks_only_waiting_for_trigger(
+    dry_tail: Strategy6DryTail,
+    box_tail: Strategy6BoxTail | None,
+    brooks_tail: BrooksTailResult | None,
+) -> bool:
+    return bool(
+        brooks_tail is not None
+        and brooks_tail.passed
+        and not brooks_tail.trade_trigger.ready
+        and not dry_tail.dry_tail_pass
+        and (box_tail is None or not box_tail.passed)
+    )
 
 
 def _lifecycle_status(

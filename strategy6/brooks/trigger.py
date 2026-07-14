@@ -61,10 +61,14 @@ def _evaluate_second_entry(
     valid_days = int(config["trigger_valid_days"])
     result.trigger_price = float(trigger_price)
     result.trigger_valid_until = _add_weekdays(signal_date, valid_days)
-    if signal_index == len(rows) - 1:
+    current_index = len(rows) - 1
+    if current_index > signal_index + valid_days:
+        result.risk_tags.append("BROOKS_TRIGGER_EXPIRED")
+        return
+    if signal_index == current_index:
         result.risk_tags.append("BROOKS_TRIGGER_REQUIRES_LATER_SESSION")
         return
-    last_valid_index = min(len(rows) - 1, signal_index + valid_days)
+    last_valid_index = min(current_index, signal_index + valid_days)
     max_distance = float(atr14) * float(config["max_trigger_distance_atr"])
     for row in rows[signal_index + 1:last_valid_index + 1]:
         high = float(row.get("high") or 0)
@@ -78,8 +82,6 @@ def _evaluate_second_entry(
             result.trigger_type = "BROOKS_SUPPORT_READY"
             result.reasons.append("BROOKS_SECOND_ENTRY_TRIGGERED")
             return
-    if len(rows) - 1 > signal_index + valid_days:
-        result.risk_tags.append("BROOKS_TRIGGER_EXPIRED")
 
 
 def _evaluate_failed_breakout(

@@ -3,7 +3,7 @@ from dataclasses import replace
 import pytest
 
 from strategy6.box_tail import combine_tail_paths
-from strategy6.brooks.models import BrooksTailResult
+from strategy6.brooks.models import BrooksTailResult, BrooksTradeTriggerResult
 from strategy6.filters import classify_candidate, hard_filter_reasons
 from strategy6.models import (
     Strategy6BoxTail,
@@ -207,5 +207,94 @@ def test_box_only_path_can_reach_existing_candidate_classification_without_thres
         cfg,
         box_tail=box,
     )
+    assert candidate_type == "READY_CANDIDATE"
+    assert lifecycle in {"READY", "BUY_ZONE"}
+
+
+def test_brooks_only_waiting_trigger_cannot_emit_ready_or_buy_zone_semantics():
+    ind, start, phase, pattern, support, original, box, trade = _passing_context()
+    cfg = resolve_strategy6_config({})
+    brooks = BrooksTailResult(
+        enabled=True,
+        passed=True,
+        score=18,
+        status="SECOND_ENTRY_LONG_READY",
+        trade_trigger=BrooksTradeTriggerResult(ready=False),
+    )
+
+    candidate_type, classification, lifecycle, suggestion = classify_candidate(
+        ind,
+        start,
+        phase,
+        pattern,
+        support,
+        original,
+        trade,
+        Strategy6Score(total_score=95, tail_score=18),
+        [],
+        cfg,
+        box_tail=replace(box, passed=False),
+        brooks_tail=brooks,
+    )
+
+    assert candidate_type == "WATCH_CANDIDATE"
+    assert classification == "observe"
+    assert lifecycle == "SETUP_FORMING"
+    assert "等待触发" in suggestion
+
+
+def test_brooks_only_ready_trigger_can_use_existing_ready_classification():
+    ind, start, phase, pattern, support, original, box, trade = _passing_context()
+    brooks = BrooksTailResult(
+        enabled=True,
+        passed=True,
+        score=18,
+        trade_trigger=BrooksTradeTriggerResult(ready=True),
+    )
+
+    candidate_type, classification, lifecycle, _ = classify_candidate(
+        ind,
+        start,
+        phase,
+        pattern,
+        support,
+        original,
+        trade,
+        Strategy6Score(total_score=95, tail_score=18),
+        [],
+        resolve_strategy6_config({}),
+        box_tail=replace(box, passed=False),
+        brooks_tail=brooks,
+    )
+
+    assert candidate_type == "READY_CANDIDATE"
+    assert classification == "ready"
+    assert lifecycle in {"READY", "BUY_ZONE"}
+
+
+def test_original_or_box_path_is_not_downgraded_by_unready_brooks_path():
+    ind, start, phase, pattern, support, original, box, trade = _passing_context()
+    brooks = BrooksTailResult(
+        enabled=True,
+        passed=True,
+        score=18,
+        trade_trigger=BrooksTradeTriggerResult(ready=False),
+    )
+
+    candidate_type, _, lifecycle, _ = classify_candidate(
+        ind,
+        start,
+        phase,
+        pattern,
+        support,
+        original,
+        trade,
+        Strategy6Score(total_score=95, tail_score=18),
+        [],
+        resolve_strategy6_config({}),
+        box_tail=box,
+        brooks_tail=brooks,
+    )
+
     assert candidate_type == "READY_CANDIDATE"
     assert lifecycle in {"READY", "BUY_ZONE"}

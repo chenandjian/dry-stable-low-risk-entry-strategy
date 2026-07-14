@@ -54,8 +54,14 @@ def analyze_brooks_tail(
         atr14=indicators.atr14,
         config=config,
     )
+    structure_start = phase.consolidation_start_index
+    structure_rows = (
+        rows[structure_start:]
+        if 0 <= structure_start < len(rows)
+        else []
+    )
     structures = analyze_brooks_structures(
-        rows,
+        structure_rows,
         support,
         selling,
         compact_structure_type=compact.structure_type,

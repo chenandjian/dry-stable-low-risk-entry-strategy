@@ -24,7 +24,12 @@ def analyze_brooks_structures(
 
     _detect_recent_lows(rows, support, selling, atr14, config, result)
     _detect_failed_breakout(rows, support, selling, atr14, config, result)
-    if selling.bear_follow_through_failed:
+    first_visible_date = str(rows[0].get("date") or "")
+    if (
+        selling.bear_follow_through_failed
+        and selling.bear_follow_through_failed_date
+        and selling.bear_follow_through_failed_date >= first_visible_date
+    ):
         result.bear_follow_through_failed = True
         result.bear_follow_through_failed_date = selling.bear_follow_through_failed_date
         result.setup_types.append("BEAR_FOLLOW_THROUGH_FAILED")
@@ -74,7 +79,8 @@ def _detect_recent_lows(
     )
     similar = second.price >= first.price * (1 - tolerance)
     second_row = rows[second.index]
-    signal_metrics = bar_metrics(second_row)
+    confirmation_row = rows[second.index + 1]
+    signal_metrics = bar_metrics(confirmation_row)
     no_follow_through = selling.exhausted and selling.bear_follow_through_count == 0
     reclaimed = float(second_row.get("close") or 0) >= float(support.support_zone_low or support.key_support_price)
     result.micro_double_bottom = both_near_support and similar and reclaimed and no_follow_through
@@ -87,8 +93,8 @@ def _detect_recent_lows(
         and (signal_metrics.body_ratio or 1) <= float(cfg["signal_bar_max_body_ratio"])
     )
     if result.second_entry_long_ready:
-        result.second_entry_signal_date = second.date
-        result.second_entry_signal_high = float(second_row.get("high") or 0)
+        result.second_entry_signal_date = str(confirmation_row.get("date") or "")
+        result.second_entry_signal_high = float(confirmation_row.get("high") or 0)
         result.second_entry_trigger_price = result.second_entry_signal_high
         result.setup_types.append("SECOND_ENTRY_LONG_READY")
 

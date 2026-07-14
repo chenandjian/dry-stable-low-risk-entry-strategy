@@ -145,6 +145,30 @@ def test_trigger_expires_after_three_later_sessions():
     assert "BROOKS_TRIGGER_EXPIRED" in result.risk_tags
 
 
+def test_historical_second_entry_trigger_is_not_ready_after_current_bar_expires():
+    rows = [_bar(index) for index in range(8)]
+    rows[3].update({"high": 10.25, "close": 10.18})
+
+    result = _evaluate(rows, _tail(rows[2]["date"]))
+
+    assert result.ready is False
+    assert result.second_entry_triggered is False
+    assert result.trigger_type == ""
+    assert "BROOKS_TRIGGER_EXPIRED" in result.risk_tags
+
+
+def test_future_trigger_bar_cannot_change_signal_day_result():
+    signal_rows = [_bar(0), _bar(1), _bar(2, high=10.10, close=10.05)]
+    signal_day = _evaluate(signal_rows, _tail(signal_rows[-1]["date"]))
+
+    later_rows = [*signal_rows, _bar(3, high=10.25, close=10.18)]
+    next_day = _evaluate(later_rows, _tail(signal_rows[-1]["date"]))
+
+    assert signal_day.ready is False
+    assert "BROOKS_TRIGGER_REQUIRES_LATER_SESSION" in signal_day.risk_tags
+    assert next_day.ready is True
+
+
 def test_b_grade_and_barb_wire_cannot_be_trade_ready():
     rows = [_bar(0), _bar(1), _bar(2, high=10.10), _bar(3, high=10.25)]
     grade_b = _evaluate(rows, _tail(rows[2]["date"]), grade="B")

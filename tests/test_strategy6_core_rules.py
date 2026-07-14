@@ -5,7 +5,14 @@ from strategy6.engine import StrongVcpTailEngine
 from strategy6.filters import classify_candidate
 from strategy6.indicators import calculate_indicators
 from strategy6.market import build_market_snapshot
-from strategy6.models import Strategy6Indicators
+from strategy6.models import (
+    Strategy6BoxTail,
+    Strategy6CompactKline,
+    Strategy6DryTail,
+    Strategy6Indicators,
+    Strategy6Score,
+    Strategy6TradePlan,
+)
 from strategy6.strong_start import evaluate_strong_start
 from strategy6.scorer import _relative_strength_risk_score
 from strategy6.validation import resolve_strategy6_config
@@ -191,6 +198,73 @@ def test_engine_brooks_disabled_preserves_legacy_two_path_summary():
         ) if passed
     ]
     assert candidate["tail_pass"] == (candidate["original_tail_pass"] or candidate["box_tail_pass"])
+
+
+def test_engine_brooks_only_waiting_candidate_dict_has_no_ready_or_buy_semantics(monkeypatch):
+    from strategy6.brooks.models import BrooksTailResult, BrooksTradeTriggerResult
+    import strategy6.engine as engine_mod
+
+    monkeypatch.setattr(
+        engine_mod,
+        "evaluate_dry_tail",
+        lambda *args, **kwargs: Strategy6DryTail(
+            dry_tail_pass=False,
+            dry_stable_score=8,
+            tail_volume_ratio=0.55,
+        ),
+    )
+    monkeypatch.setattr(
+        engine_mod,
+        "evaluate_box_tail",
+        lambda *args, **kwargs: Strategy6BoxTail(
+            enabled=True,
+            passed=False,
+            score=10,
+            compact_kline=Strategy6CompactKline(enabled=True, passed=True),
+        ),
+    )
+    monkeypatch.setattr(
+        engine_mod,
+        "analyze_brooks_tail",
+        lambda *args, **kwargs: BrooksTailResult(
+            enabled=True,
+            passed=True,
+            score=18,
+            status="SECOND_ENTRY_LONG_READY",
+        ),
+    )
+    monkeypatch.setattr(
+        engine_mod,
+        "evaluate_brooks_trade_trigger",
+        lambda *args, **kwargs: BrooksTradeTriggerResult(ready=False),
+    )
+    monkeypatch.setattr(
+        engine_mod,
+        "calculate_trade_plan",
+        lambda indicators, support, config: Strategy6TradePlan(
+            objective_rr_2=3.0,
+            suggested_buy_price=indicators.current_price,
+        ),
+    )
+    monkeypatch.setattr(
+        engine_mod,
+        "score_strategy6",
+        lambda *args, **kwargs: Strategy6Score(total_score=95, tail_score=18),
+    )
+
+    result = StrongVcpTailEngine({"strategy6": {"enable_market_filter": False}}).evaluate_at(
+        build_strategy6_candidate_data(),
+        code="000001",
+        name="平安银行",
+    )
+    candidate = result.to_candidate_dict()
+
+    assert candidate["tail_paths"] == ["BROOKS"]
+    assert candidate["brooks_trade_ready"] is False
+    assert candidate["candidate_type"] == "WATCH_CANDIDATE"
+    assert candidate["classification"] == "observe"
+    assert candidate["lifecycle_status"] == "SETUP_FORMING"
+    assert "等待触发" in candidate["suggestion"]
 
 
 def test_rr2_below_minimum_rejects_candidate():

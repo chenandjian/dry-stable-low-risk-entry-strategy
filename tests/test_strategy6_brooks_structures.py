@@ -108,8 +108,11 @@ def test_micro_double_bottom_and_second_entry_are_identified_near_support():
 
     assert result.micro_double_bottom is True
     assert result.second_entry_long_ready is True
-    assert result.second_entry_signal_date == rows[6]["date"]
-    assert result.second_entry_trigger_price == rows[6]["high"]
+    # A swing low is only observable after the following bar closes.  The
+    # confirmation bar, not the still-forming low bar, owns the signal/trigger.
+    assert result.second_entry_signal_date == rows[7]["date"]
+    assert result.second_entry_signal_high == rows[7]["high"]
+    assert result.second_entry_trigger_price == rows[7]["high"]
     assert "MICRO_DOUBLE_BOTTOM" in result.setup_types
 
 

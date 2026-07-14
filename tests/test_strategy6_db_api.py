@@ -407,6 +407,48 @@ def test_strategy6_api_returns_candidates_and_rejects_cross_strategy(tmp_path, m
     assert mismatch.json()["error"] == "TASK_STRATEGY_MISMATCH"
 
 
+def test_strategy6_api_preserves_brooks_only_waiting_candidate_semantics(tmp_path, monkeypatch):
+    db_path = str(tmp_path / "s6-brooks-waiting-api.db")
+    db.init_db(db_path)
+    monkeypatch.setattr(
+        server_mod,
+        "load_config",
+        lambda path="config.yaml": {"data": {"database_path": db_path}, "strategy6": {}},
+    )
+    server_mod._running.update({"running": False, "task_id": None, "strategy_type": None, "stats": {}})
+    db.create_scan_task("s6-waiting", "2026-07-09 10:05:00", strategy_type=STRATEGY6_TYPE)
+    candidate = _candidate()
+    candidate.update({
+        "candidate_type": "WATCH_CANDIDATE",
+        "classification": "observe",
+        "lifecycle_status": "SETUP_FORMING",
+        "suggestion": "观察等待触发：Brooks结构成立，但交易触发尚未确认",
+        "original_tail_pass": False,
+        "box_tail_pass": False,
+        "brooks_tail_pass": True,
+        "brooks_trade_ready": False,
+        "tail_path": "NONE",
+        "tail_paths": ["BROOKS"],
+        "tail_path_summary": "BROOKS",
+        "tail_primary_path": "BROOKS",
+        "passed_path_count": 1,
+        "multi_path_confirmed": False,
+    })
+    candidate["brooks_result"]["trade_trigger"] = {"ready": False, "trigger_type": ""}
+    db.upsert_strategy6_candidate("s6-waiting", candidate)
+
+    client = TestClient(server_mod.app)
+    listed = client.get("/api/strategy6/tasks/s6-waiting/candidates").json()["candidates"][0]
+    detailed = client.get("/api/strategy6/tasks/s6-waiting/candidates/000001").json()["candidate"]
+
+    for item in (listed, detailed):
+        assert item["candidate_type"] == "WATCH_CANDIDATE"
+        assert item["classification"] == "observe"
+        assert item["lifecycle_status"] == "SETUP_FORMING"
+        assert item["tail_paths"] == ["BROOKS"]
+        assert item["brooks_trade_ready"] is False
+
+
 def test_strategy6_api_returns_market_snapshot_for_task(tmp_path, monkeypatch):
     db_path = str(tmp_path / "s6marketapi.db")
     db.init_db(db_path)
