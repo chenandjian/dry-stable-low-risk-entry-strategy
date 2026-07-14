@@ -2824,6 +2824,20 @@ def _ensure_strategy6_candidates_table(conn: sqlite3.Connection):
         "atr_contraction_ratio": "REAL",
         "compact_kline_reasons": "TEXT",
         "compact_kline_risk_tags": "TEXT",
+        "brooks_tail_enabled": "INTEGER DEFAULT 0",
+        "brooks_tail_pass": "INTEGER DEFAULT 0",
+        "brooks_tail_score": "INTEGER DEFAULT 0",
+        "brooks_tail_premium": "INTEGER DEFAULT 0",
+        "brooks_status": "TEXT",
+        "brooks_trade_ready": "INTEGER DEFAULT 0",
+        "brooks_trade_trigger_type": "TEXT",
+        "brooks_trigger_valid_until": "TEXT",
+        "tail_paths": "TEXT",
+        "tail_path_summary": "TEXT",
+        "tail_primary_path": "TEXT",
+        "passed_path_count": "INTEGER DEFAULT 0",
+        "multi_path_confirmed": "INTEGER DEFAULT 0",
+        "brooks_result_json": "TEXT",
     }.items():
         _ensure_column(conn, "strategy6_candidates", column, col_type)
     conn.execute(
@@ -3827,6 +3841,11 @@ def upsert_strategy6_candidate(
         "kline_overlap_pair_count", "avg_kline_overlap_ratio", "gap_count_5",
         "max_gap_ratio_5", "atr5", "atr20", "atr_contraction_ratio",
         "compact_kline_reasons", "compact_kline_risk_tags",
+        "brooks_tail_enabled", "brooks_tail_pass", "brooks_tail_score",
+        "brooks_tail_premium", "brooks_status", "brooks_trade_ready",
+        "brooks_trade_trigger_type", "brooks_trigger_valid_until", "tail_paths",
+        "tail_path_summary", "tail_primary_path", "passed_path_count",
+        "multi_path_confirmed", "brooks_result_json",
     ]
     extra_values = [
         d.get("first_seen_date", first_pool_date),
@@ -3926,6 +3945,25 @@ def upsert_strategy6_candidate(
         d.get("atr_contraction_ratio"),
         _json_any(d.get("compact_kline_reasons", [])),
         _json_any(d.get("compact_kline_risk_tags", [])),
+        1 if d.get("brooks_tail_enabled") else 0,
+        1 if d.get("brooks_tail_pass") else 0,
+        d.get("brooks_tail_score", 0),
+        1 if d.get("brooks_tail_premium") else 0,
+        d.get("brooks_status", "BROOKS_DISABLED"),
+        1 if d.get("brooks_trade_ready") else 0,
+        d.get("brooks_trade_trigger_type", ""),
+        d.get("brooks_trigger_valid_until", ""),
+        _json_any(d.get("tail_paths", [])),
+        d.get("tail_path_summary", "NONE"),
+        d.get("tail_primary_path", "NONE"),
+        d.get("passed_path_count", 0),
+        1 if d.get("multi_path_confirmed") else 0,
+        json.dumps(
+            d.get("brooks_result") or {},
+            ensure_ascii=False,
+            sort_keys=True,
+            default=_json_default,
+        ),
     ]
     columns.extend(extra_columns)
     values.extend(extra_values)
@@ -5179,10 +5217,70 @@ def _deserialize_strategy6_row(row: dict) -> dict:
                 row[field] = []
         elif not value:
             row[field] = []
+    raw_tail_paths = row.get("tail_paths")
+    if isinstance(raw_tail_paths, str) and raw_tail_paths:
+        try:
+            tail_paths = json.loads(raw_tail_paths)
+        except (json.JSONDecodeError, TypeError):
+            tail_paths = []
+    elif isinstance(raw_tail_paths, list):
+        tail_paths = raw_tail_paths
+    else:
+        tail_paths = []
+    if not isinstance(tail_paths, list):
+        tail_paths = []
+    tail_paths = [str(path) for path in tail_paths if path]
+    legacy_paths = not tail_paths
+    if legacy_paths:
+        if row.get("original_tail_pass"):
+            tail_paths.append("ORIGINAL")
+        if row.get("box_tail_pass"):
+            tail_paths.append("BOX")
+        if row.get("brooks_tail_pass"):
+            tail_paths.append("BROOKS")
+    row["tail_paths"] = tail_paths
+
+    brooks_json = row.pop("brooks_result_json", None)
+    if isinstance(brooks_json, str) and brooks_json:
+        try:
+            brooks_result = json.loads(brooks_json)
+        except (json.JSONDecodeError, TypeError):
+            brooks_result = {}
+    elif isinstance(brooks_json, dict):
+        brooks_result = brooks_json
+    else:
+        brooks_result = {}
+    row["brooks_result"] = brooks_result if isinstance(brooks_result, dict) else {}
+
+    if not row.get("brooks_status"):
+        row["brooks_status"] = "BROOKS_DISABLED"
+    row["brooks_trade_trigger_type"] = row.get("brooks_trade_trigger_type") or ""
+    row["brooks_trigger_valid_until"] = row.get("brooks_trigger_valid_until") or ""
+    if not row.get("tail_path_summary"):
+        row["tail_path_summary"] = (
+            "MULTI" if len(tail_paths) > 1 else tail_paths[0] if tail_paths else "NONE"
+        )
+    if not row.get("tail_primary_path"):
+        score_by_path = {
+            "ORIGINAL": int(row.get("original_tail_score") or 0),
+            "BOX": int(row.get("box_tail_score") or 0),
+            "BROOKS": int(row.get("brooks_tail_score") or 0),
+        }
+        priority = {"ORIGINAL": 0, "BOX": 1, "BROOKS": 2}
+        row["tail_primary_path"] = max(
+            tail_paths,
+            key=lambda path: (score_by_path.get(path, 0), priority.get(path, -1)),
+            default="NONE",
+        )
+    if legacy_paths:
+        row["passed_path_count"] = len(tail_paths)
+        row["multi_path_confirmed"] = len(tail_paths) > 1
     for field in (
         "is_limit_up", "is_one_word_limit_up", "enable_market_filter",
         "relative_strength_20_observed", "original_tail_pass", "box_tail_enabled",
         "box_tail_pass", "tail_pass", "compact_kline_enabled", "compact_kline_pass",
+        "brooks_tail_enabled", "brooks_tail_pass", "brooks_tail_premium",
+        "brooks_trade_ready", "multi_path_confirmed",
     ):
         if field in row:
             row[field] = bool(row.get(field))

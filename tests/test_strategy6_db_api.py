@@ -116,6 +116,25 @@ def _candidate():
         "atr_contraction_ratio": 0.60,
         "compact_kline_reasons": ["compact:range_overlap"],
         "compact_kline_risk_tags": [],
+        "brooks_tail_enabled": True,
+        "brooks_tail_pass": True,
+        "brooks_tail_score": 19,
+        "brooks_tail_premium": True,
+        "brooks_status": "SECOND_ENTRY_LONG_READY",
+        "brooks_trade_ready": True,
+        "brooks_trade_trigger_type": "SECOND_ENTRY_BREAK",
+        "brooks_trigger_valid_until": "2026-07-14",
+        "tail_paths": ["BOX", "BROOKS"],
+        "tail_path_summary": "MULTI",
+        "tail_primary_path": "BROOKS",
+        "passed_path_count": 2,
+        "multi_path_confirmed": True,
+        "brooks_result": {
+            "status": "SECOND_ENTRY_LONG_READY",
+            "context": {"context_type": "BULL_TREND", "passed": True},
+            "structure": {"setup_types": ["SECOND_ENTRY_LONG"]},
+            "trade_trigger": {"ready": True, "trigger_type": "SECOND_ENTRY_BREAK"},
+        },
     }
 
 
@@ -155,6 +174,16 @@ def test_strategy6_candidate_table_is_independent(tmp_path):
     assert detail["box_low_test_count"] == 2
     assert detail["compact_kline_reasons"] == ["compact:range_overlap"]
     assert detail["compact_kline_risk_tags"] == []
+    assert detail["brooks_tail_enabled"] is True
+    assert detail["brooks_tail_pass"] is True
+    assert detail["brooks_tail_premium"] is True
+    assert detail["brooks_trade_ready"] is True
+    assert detail["tail_paths"] == ["BOX", "BROOKS"]
+    assert detail["tail_path_summary"] == "MULTI"
+    assert detail["tail_primary_path"] == "BROOKS"
+    assert detail["passed_path_count"] == 2
+    assert detail["multi_path_confirmed"] is True
+    assert detail["brooks_result"]["context"]["context_type"] == "BULL_TREND"
     assert db.get_candidates(task_id="s6-task") == []
     assert db.get_strategy2_candidates(task_id="s6-task") == []
     assert db.get_strategy3_candidates(task_id="s6-task") == []
@@ -181,9 +210,71 @@ def test_strategy6_candidate_schema_contains_all_box_tail_output_fields(tmp_path
         "kline_overlap_pair_count", "avg_kline_overlap_ratio", "gap_count_5",
         "max_gap_ratio_5", "atr5", "atr20", "atr_contraction_ratio",
         "compact_kline_reasons", "compact_kline_risk_tags",
+        "brooks_tail_enabled", "brooks_tail_pass", "brooks_tail_score",
+        "brooks_tail_premium", "brooks_status", "brooks_trade_ready",
+        "brooks_trade_trigger_type", "brooks_trigger_valid_until", "tail_paths",
+        "tail_path_summary", "tail_primary_path", "passed_path_count",
+        "multi_path_confirmed", "brooks_result_json",
     }
 
     assert required <= columns
+
+
+def test_strategy6_candidate_persists_brooks_only_path_and_structured_result(tmp_path):
+    db.init_db(str(tmp_path / "s6-brooks-only.db"))
+    db.create_scan_task("s6-brooks", "2026-07-09 10:00:00", strategy_type=STRATEGY6_TYPE)
+    candidate = _candidate()
+    candidate.update({
+        "original_tail_pass": False,
+        "box_tail_pass": False,
+        "tail_path": "NONE",
+        "tail_paths": ["BROOKS"],
+        "tail_path_summary": "BROOKS",
+        "tail_primary_path": "BROOKS",
+        "passed_path_count": 1,
+        "multi_path_confirmed": False,
+    })
+
+    db.upsert_strategy6_candidate("s6-brooks", candidate)
+
+    saved = db.get_strategy6_candidate("000001", task_id="s6-brooks")
+    assert saved["tail_path"] == "NONE"
+    assert saved["tail_paths"] == ["BROOKS"]
+    assert saved["tail_path_summary"] == "BROOKS"
+    assert saved["tail_primary_path"] == "BROOKS"
+    assert saved["passed_path_count"] == 1
+    assert saved["multi_path_confirmed"] is False
+    assert saved["brooks_result"]["structure"]["setup_types"] == ["SECOND_ENTRY_LONG"]
+
+
+def test_strategy6_legacy_candidate_gets_safe_brooks_and_path_defaults(tmp_path):
+    db.init_db(str(tmp_path / "s6-brooks-legacy.db"))
+    db.create_scan_task("s6-legacy", "2026-07-09 10:00:00", strategy_type=STRATEGY6_TYPE)
+    conn = db.get_conn()
+    conn.execute(
+        """INSERT INTO strategy6_candidates (
+               task_id, code, name, evaluation_date, candidate_type, classification,
+               original_tail_pass, box_tail_pass, tail_pass, tail_path
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        ("s6-legacy", "000002", "旧候选", "2026-07-09", "KEY_CANDIDATE", "highlight", 1, 0, 1, "ORIGINAL"),
+    )
+    conn.commit()
+
+    saved = db.get_strategy6_candidate("000002", task_id="s6-legacy")
+    assert saved["brooks_tail_enabled"] is False
+    assert saved["brooks_tail_pass"] is False
+    assert saved["brooks_tail_score"] == 0
+    assert saved["brooks_tail_premium"] is False
+    assert saved["brooks_status"] == "BROOKS_DISABLED"
+    assert saved["brooks_trade_ready"] is False
+    assert saved["brooks_trade_trigger_type"] == ""
+    assert saved["brooks_trigger_valid_until"] == ""
+    assert saved["tail_paths"] == ["ORIGINAL"]
+    assert saved["tail_path_summary"] == "ORIGINAL"
+    assert saved["tail_primary_path"] == "ORIGINAL"
+    assert saved["passed_path_count"] == 1
+    assert saved["multi_path_confirmed"] is False
+    assert saved["brooks_result"] == {}
 
 
 def test_strategy6_legacy_sector_columns_are_not_returned_by_new_api_rows(tmp_path):
@@ -223,8 +314,16 @@ def test_strategy6_api_returns_candidates_and_rejects_cross_strategy(tmp_path, m
 
     client = TestClient(server_mod.app)
     assert client.get("/api/strategy6/tasks").json()["tasks"][0]["id"] == "s6-task"
-    assert client.get("/api/strategy6/tasks/s6-task/candidates").json()["candidates"][0]["code"] == "000001"
-    assert client.get("/api/strategy6/tasks/s6-task/candidates/000001").json()["candidate"]["candidate_type"] == "KEY_CANDIDATE"
+    listed = client.get("/api/strategy6/tasks/s6-task/candidates").json()["candidates"][0]
+    detailed = client.get("/api/strategy6/tasks/s6-task/candidates/000001").json()["candidate"]
+    assert listed["code"] == "000001"
+    assert listed["tail_path"] == "BOX"
+    assert listed["tail_paths"] == ["BOX", "BROOKS"]
+    assert listed["brooks_result"]["trade_trigger"]["ready"] is True
+    assert detailed["candidate_type"] == "KEY_CANDIDATE"
+    assert detailed["tail_path"] == "BOX"
+    assert detailed["brooks_status"] == "SECOND_ENTRY_LONG_READY"
+    assert detailed["brooks_result"]["structure"]["setup_types"] == ["SECOND_ENTRY_LONG"]
 
     mismatch = client.get("/api/strategy6/tasks/s1-task/candidates")
     assert mismatch.status_code == 400

@@ -1,6 +1,7 @@
 """Strategy6 daily report export."""
 from __future__ import annotations
 
+import json
 from io import BytesIO
 from zipfile import ZIP_DEFLATED, ZipFile
 from xml.sax.saxutils import escape
@@ -180,6 +181,20 @@ STRATEGY6_REPORT_COLUMNS = [
     ("atr_contraction_ratio", "atr_contraction_ratio"),
     ("compact_kline_reasons", "compact_kline_reasons"),
     ("compact_kline_risk_tags", "compact_kline_risk_tags"),
+    ("brooks_tail_enabled", "brooks_tail_enabled"),
+    ("brooks_tail_pass", "brooks_tail_pass"),
+    ("brooks_tail_score", "brooks_tail_score"),
+    ("brooks_tail_premium", "brooks_tail_premium"),
+    ("brooks_status", "brooks_status"),
+    ("brooks_trade_ready", "brooks_trade_ready"),
+    ("brooks_trade_trigger_type", "brooks_trade_trigger_type"),
+    ("brooks_trigger_valid_until", "brooks_trigger_valid_until"),
+    ("tail_paths", "tail_paths"),
+    ("tail_path_summary", "tail_path_summary"),
+    ("tail_primary_path", "tail_primary_path"),
+    ("passed_path_count", "passed_path_count"),
+    ("multi_path_confirmed", "multi_path_confirmed"),
+    ("brooks_result", "brooks_result"),
     ("risk_tags", "risk_tags"),
     ("warn_tags", "warn_tags"),
     ("reject_reason", "reject_reasons"),
@@ -258,6 +273,8 @@ def _encode_sheet_rows(
 
 
 def _cell_value(value):
+    if isinstance(value, dict):
+        return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     if isinstance(value, list):
         return "|".join(str(v) for v in value)
     if isinstance(value, bool):
