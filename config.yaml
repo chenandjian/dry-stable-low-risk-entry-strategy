@@ -394,3 +394,80 @@ strategy6:
       max_gap_ratio: 0.03
       atr_contraction_ratio_max: 0.80
       premium_atr_contraction_ratio_max: 0.65
+  brooks_tail:
+    enabled: true
+    mode: independent_path
+    context:
+      allowed_start_grades:
+        - S
+        - A
+      allow_grade_b_watch_only: true
+      close_below_ma20_atr_tolerance: 0.50
+      require_ma20_above_ma50: false
+      require_ma20_slope_positive: true
+      ma20_slope_window_days: 10
+      lower_high_low_window_days: 10
+      max_lower_high_low_sequence: 2
+    selling_pressure:
+      window_days: 7
+      strong_bear_body_ratio_min: 0.03
+      strong_bear_close_position_max: 0.25
+      max_strong_bear_bar_count: 1
+      bear_follow_through_close_position_max: 0.35
+      max_bear_follow_through_count: 1
+      max_consecutive_bear_bars: 2
+      require_bear_body_contracting: false
+    price_stability:
+      compact_window_days: 5
+      close_range_max: 0.08
+      premium_close_range_max: 0.05
+      atr_contraction_max: 0.80
+      premium_atr_contraction_max: 0.65
+      avg_body_ratio_max: 0.025
+      max_body_ratio_max: 0.04
+      max_lower_low_count: 1
+      low_similarity_tolerance: 0.02
+    volume_dry:
+      tail_window_days: 5
+      baseline_window_days: 20
+      tail_volume_ratio_max: 0.75
+      premium_tail_volume_ratio_max: 0.60
+      require_volume_slope_negative: false
+      reject_high_volume_decline: true
+    support:
+      support_distance_atr: 0.80
+      support_distance_pct: 0.03
+      effective_break_pct: 0.03
+      consecutive_close_break_days: 2
+    second_entry:
+      enabled: true
+      min_separation_days: 2
+      max_separation_days: 15
+      low_similarity_tolerance: 0.02
+      signal_bar_close_position_min: 0.55
+      signal_bar_max_body_ratio: 0.03
+    failed_breakout:
+      enabled: true
+      recovery_days: 2
+      max_break_distance_atr: 0.80
+      require_reclaim_support: true
+    compact_structure:
+      enabled: true
+      middle_zone_low: 0.35
+      middle_zone_high: 0.70
+      max_direction_changes: 3
+      max_long_shadow_bar_count: 2
+      long_shadow_ratio_min: 0.45
+    trade_trigger:
+      enabled: true
+      trigger_valid_days: 3
+      max_trigger_distance_atr: 1.50
+      breakout_follow_through_days: 2
+    scoring:
+      context_points: 4
+      selling_pressure_points: 6
+      price_stability_points: 4
+      volume_dry_points: 2
+      setup_points: 4
+      pass_score_min: 14
+      premium_score_min: 17

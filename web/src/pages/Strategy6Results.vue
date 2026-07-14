@@ -104,7 +104,7 @@
             <tr>
               <th>股票</th><th>现价</th><th>总分</th><th>分类</th><th>生命周期</th>
               <th>启动类型/等级</th><th>支撑状态</th><th>关键/前置支撑</th><th>买入区</th>
-              <th>止损</th><th>客观目标1/2</th><th>客观RR2</th><th>形态</th><th>尾部路径/箱体</th><th>尾段/前20量比</th><th>市场/RS</th><th>入池</th><th>风险/警告</th><th>数据日</th>
+              <th>止损</th><th>客观目标1/2</th><th>客观RR2</th><th>形态</th><th>权威路径/Brooks</th><th>尾段/前20量比</th><th>市场/RS</th><th>入池</th><th>风险/警告</th><th>数据日</th>
             </tr>
           </thead>
           <tbody>
@@ -122,7 +122,12 @@
               <td>{{ fmt(c.objective_target_1 ?? c.target_price_1) }} / {{ fmt(c.objective_target_2 ?? c.target_price_2) }}</td>
               <td class="rr">{{ fmt(c.objective_rr_2 ?? c.risk_reward_ratio_2) }}</td>
               <td>{{ label('patternType', c.pattern_type || 'UNKNOWN') }}</td>
-              <td>{{ label('tailPath', c.tail_path || 'NONE') }} / {{ label('boxStatus', c.box_status || 'NO_BOX') }}</td>
+              <td>
+                <div>{{ label('tailPathSummary', authoritativeSummary(c)) }}</div>
+                <div class="muted">主路径 {{ label('tailPrimaryPath', authoritativePrimary(c)) }}</div>
+                <div v-if="c.brooks_tail_enabled" class="muted">{{ label('brooksStatus', c.brooks_status || 'BROOKS_WATCH') }} · {{ brooksTradeState(c) }}</div>
+                <div v-else class="muted">旧路径 {{ label('tailPath', c.tail_path || 'NONE') }}</div>
+              </td>
               <td>{{ tailVolumeDisplay(c) }}</td>
               <td>
                 <div>{{ label('marketStatus', c.market_status || 'UNKNOWN') }}</div>
@@ -160,7 +165,8 @@
         <div><span>执行R目标</span><strong>1.5R {{ fmt(selected.execution_target_1_5r) }} · 2R {{ fmt(selected.execution_target_2r) }} · 2.5R {{ fmt(selected.execution_target_2_5r) }} · 3.5R {{ fmt(selected.execution_target_3_5r) }}</strong></div>
         <div><span>执行窗口</span><strong>{{ selected.valid_from_date || '--' }} 至 {{ selected.valid_until_date || '--' }} · 限价 {{ fmt(selected.suggested_limit_price) }}</strong></div>
         <div><span>六维评分</span><strong>启动{{ selected.strong_start_score ?? 0 }} 形态{{ selected.pattern_score_component ?? 0 }} 支撑{{ selected.support_score ?? 0 }} 尾段{{ selected.tail_score ?? 0 }} 客观RR{{ selected.objective_rr_score ?? 0 }} RS/风险{{ selected.relative_strength_risk_score ?? 0 }}</strong></div>
-        <div><span>尾部路径</span><strong>{{ label('tailPath', selected.tail_path || 'NONE') }} · 原路径 {{ selected.original_tail_pass ? '通过' : '未通过' }}/{{ selected.original_tail_score ?? 0 }} · 箱体 {{ selected.box_tail_pass ? '通过' : '未通过' }}/{{ selected.box_tail_score ?? 0 }}</strong></div>
+        <div><span>权威三路径</span><strong>{{ label('tailPathSummary', authoritativeSummary(selected)) }} · 主路径 {{ label('tailPrimaryPath', authoritativePrimary(selected)) }} · 通过 {{ joinedLabels('tailPrimaryPath', authoritativePaths(selected), ' / ') }} · {{ selected.multi_path_confirmed ? '多路径确认' : '单路径或未通过' }}</strong></div>
+        <div><span>旧尾部路径（原始/箱体）</span><strong>{{ label('tailPath', selected.tail_path || 'NONE') }} · 原路径 {{ selected.original_tail_pass ? '通过' : '未通过' }}/{{ selected.original_tail_score ?? 0 }} · 箱体 {{ selected.box_tail_pass ? '通过' : '未通过' }}/{{ selected.box_tail_score ?? 0 }}</strong></div>
         <div><span>稳定箱体</span><strong>{{ label('boxStatus', selected.box_status || 'NO_BOX') }} · {{ selected.box_start_date || '--' }} 至 {{ selected.box_end_date || '--' }} · {{ selected.box_days ?? 0 }}日</strong></div>
         <div><span>箱体区间</span><strong>{{ priceRange(selected.box_low, selected.box_high) }} · 宽度 {{ pct(selected.box_width) }} · 位置 {{ pct(selected.box_position) }}</strong></div>
         <div><span>箱体承接</span><strong>下沿测试{{ selected.box_low_test_count ?? 0 }}次 · 上沿测试{{ selected.box_high_test_count ?? 0 }}次 · 中枢 {{ pct(selected.box_center_shift) }} · 后/前量 {{ fmt(selected.box_volume_contraction_ratio, 3) }}</strong></div>
@@ -175,6 +181,34 @@
         <div><span>价格口径</span><strong>{{ label('priceBasis', selected.price_basis || 'FORWARD_ADJUSTED') }} · 未复权报价 {{ fmt(selected.current_price_raw) }}</strong></div>
         <div><span>涨跌幅</span><strong>5日 {{ pct(selected.return_5) }} · 10日 {{ pct(selected.return_10) }} · 20日 {{ pct(selected.return_20) }}</strong></div>
         <div><span>建议</span><strong>{{ selected.suggestion || '--' }}</strong></div>
+      </div>
+      <div class="brooks-evidence">
+        <div class="subsection-title">Brooks价格行为证据</div>
+        <div v-if="!selected.brooks_tail_enabled" class="brooks-empty">{{ label('brooksStatus', 'BROOKS_DISABLED') }}</div>
+        <template v-else>
+          <div class="brooks-summary">
+            <strong>{{ label('brooksStatus', selected.brooks_status || 'BROOKS_WATCH') }}</strong>
+            <span>评分 {{ selected.brooks_tail_score ?? 0 }}/20</span>
+            <span>{{ selected.brooks_tail_pass ? '观察结构通过' : '观察结构未通过' }}</span>
+            <span>{{ selected.brooks_tail_premium ? '优质结构' : '普通结构' }}</span>
+            <span :class="selected.brooks_trade_ready ? 'brooks-ready' : 'brooks-wait'">{{ brooksTradeState(selected) }}</span>
+          </div>
+          <div class="brooks-grid">
+            <div><span>上涨背景</span><strong>{{ label('brooksContext', brooksDetail(selected).context?.context_type || 'INVALID_CONTEXT') }} · {{ passText(brooksDetail(selected).bull_context_pass ?? brooksDetail(selected).context?.passed) }}</strong></div>
+            <div><span>卖压衰竭</span><strong>{{ passText(brooksDetail(selected).selling_pressure_exhausted ?? brooksDetail(selected).selling_pressure?.exhausted) }} · 强空方K线 {{ brooksDetail(selected).selling_pressure?.strong_bear_bar_count ?? 0 }} · 跟进 {{ brooksDetail(selected).selling_pressure?.bear_follow_through_count ?? 0 }}</strong></div>
+            <div><span>价格稳定</span><strong>{{ passText(brooksDetail(selected).price_stable_pass) }}</strong></div>
+            <div><span>量能萎缩</span><strong>{{ passText(brooksDetail(selected).volume_dry_pass) }}</strong></div>
+            <div><span>支撑未破</span><strong>{{ passText(brooksDetail(selected).support_not_broken) }}</strong></div>
+            <div><span>结构识别</span><strong>{{ joinedLabels('brooksSetup', brooksDetail(selected).structure?.setup_types, ' / ') }}</strong></div>
+            <div><span>紧密分类</span><strong>{{ label('brooksCompact', brooksDetail(selected).compact_structure?.structure_type || 'NO_COMPACT') }} · 方向变化 {{ brooksDetail(selected).compact_structure?.direction_change_count ?? 0 }} · 长影线 {{ brooksDetail(selected).compact_structure?.long_shadow_bar_count ?? 0 }}</strong></div>
+            <div><span>交易触发</span><strong>{{ brooksTradeState(selected) }} · {{ label('brooksTriggerType', selected.brooks_trade_trigger_type || brooksDetail(selected).trade_trigger?.trigger_type) }} · 触发价 {{ fmt(brooksDetail(selected).structure?.second_entry_trigger_price) }} · 有效至 {{ selected.brooks_trigger_valid_until || brooksDetail(selected).trade_trigger?.trigger_valid_until || '--' }}</strong></div>
+          </div>
+          <div class="tags brooks-tags">
+            <span v-for="reason in brooksReasonItems(selected, 'reasons')" :key="'br'+reason" class="tag info">{{ label('tag', reason) }}</span>
+            <span v-for="risk in brooksReasonItems(selected, 'risk_tags')" :key="'bk'+risk" class="tag warn">{{ label('tag', risk) }}</span>
+            <span v-for="reject in brooksReasonItems(selected, 'reject_reasons')" :key="'bx'+reject" class="tag risk">{{ label('tag', reject) }}</span>
+          </div>
+        </template>
       </div>
       <div class="tags">
         <span v-for="note in selected.execution_notes || []" :key="'e' + note" class="tag info">{{ label('executionNote', note) }}</span>
@@ -267,6 +301,41 @@ export default {
     joinedLabels(group, values, separator = ' / ') {
       const translated = strategy6Labels(group, values)
       return translated.length ? translated.join(separator) : '--'
+    },
+    brooksDetail(candidate) {
+      return candidate?.brooks_result && typeof candidate.brooks_result === 'object'
+        ? candidate.brooks_result
+        : {}
+    },
+    authoritativePaths(candidate) {
+      if (Array.isArray(candidate?.tail_paths)) return candidate.tail_paths
+      const paths = []
+      if (candidate?.original_tail_pass) paths.push('ORIGINAL')
+      if (candidate?.box_tail_pass) paths.push('BOX')
+      return paths
+    },
+    authoritativeSummary(candidate) {
+      if (candidate?.tail_path_summary) return candidate.tail_path_summary
+      const paths = this.authoritativePaths(candidate)
+      if (paths.length > 1) return 'MULTI'
+      return paths[0] || 'NONE'
+    },
+    authoritativePrimary(candidate) {
+      if (candidate?.tail_primary_path) return candidate.tail_primary_path
+      const paths = this.authoritativePaths(candidate)
+      return paths.includes('BOX') ? 'BOX' : (paths[0] || 'NONE')
+    },
+    passText(value) {
+      return value === true ? '通过' : (value === false ? '未通过' : '无数据')
+    },
+    brooksTradeState(candidate) {
+      if (!candidate?.brooks_tail_enabled) return '未启用或旧任务无数据'
+      return candidate.brooks_trade_ready === true ? '交易触发已确认' : '观察/等待触发'
+    },
+    brooksReasonItems(candidate, key) {
+      const detail = this.brooksDetail(candidate)
+      const groups = [detail, detail.context, detail.selling_pressure, detail.structure, detail.compact_structure, detail.trade_trigger]
+      return [...new Set(groups.flatMap(group => Array.isArray(group?.[key]) ? group[key] : []))]
     },
     async loadCandidates() {
       if (!this.selectedTaskId) {
@@ -423,6 +492,42 @@ export default {
           { header: '尾部通过', value: c => c.tail_pass ? '是' : '否' },
           { header: '尾部路径', value: c => this.label('tailPath', c.tail_path) },
           { header: '尾部路径原始值', value: c => c.tail_path || '' },
+          { header: '权威路径汇总', value: c => this.label('tailPathSummary', this.authoritativeSummary(c)) },
+          { header: '权威路径汇总原始值', value: c => this.authoritativeSummary(c) },
+          { header: '主路径', value: c => this.label('tailPrimaryPath', this.authoritativePrimary(c)) },
+          { header: '主路径原始值', value: c => this.authoritativePrimary(c) },
+          { header: '通过路径', value: c => strategy6Labels('tailPrimaryPath', this.authoritativePaths(c)).join('|') },
+          { header: '通过路径原始值', value: c => this.authoritativePaths(c).join('|') },
+          { header: '通过路径数', value: c => c.passed_path_count ?? this.authoritativePaths(c).length },
+          { header: '多路径确认', value: c => c.multi_path_confirmed ? '是' : '否' },
+          { header: 'Brooks路径启用', value: c => c.brooks_tail_enabled ? '是' : '否' },
+          { header: 'Brooks通过', value: c => c.brooks_tail_pass ? '是' : '否' },
+          { header: 'Brooks分', value: c => c.brooks_tail_score ?? '' },
+          { header: 'Brooks优质', value: c => c.brooks_tail_premium ? '是' : '否' },
+          { header: 'Brooks状态', value: c => this.label('brooksStatus', c.brooks_status || 'BROOKS_DISABLED') },
+          { header: 'Brooks状态原始值', value: c => c.brooks_status || 'BROOKS_DISABLED' },
+          { header: 'Brooks交易状态', value: c => this.brooksTradeState(c) },
+          { header: 'Brooks触发类型', value: c => this.label('brooksTriggerType', c.brooks_trade_trigger_type) },
+          { header: 'Brooks触发类型原始值', value: c => c.brooks_trade_trigger_type || '' },
+          { header: 'Brooks触发有效期', value: c => c.brooks_trigger_valid_until || '' },
+          { header: '上涨背景', value: c => this.passText(this.brooksDetail(c).bull_context_pass ?? this.brooksDetail(c).context?.passed) },
+          { header: '卖压衰竭', value: c => this.passText(this.brooksDetail(c).selling_pressure_exhausted ?? this.brooksDetail(c).selling_pressure?.exhausted) },
+          { header: '价格稳定', value: c => this.passText(this.brooksDetail(c).price_stable_pass) },
+          { header: '量能萎缩', value: c => this.passText(this.brooksDetail(c).volume_dry_pass) },
+          { header: '支撑未破', value: c => this.passText(this.brooksDetail(c).support_not_broken) },
+          { header: 'Brooks背景', value: c => this.label('brooksContext', this.brooksDetail(c).context?.context_type) },
+          { header: 'Brooks背景原始值', value: c => this.brooksDetail(c).context?.context_type || '' },
+          { header: 'Brooks结构', value: c => strategy6Labels('brooksSetup', this.brooksDetail(c).structure?.setup_types).join('|') },
+          { header: 'Brooks结构原始值', value: c => (this.brooksDetail(c).structure?.setup_types || []).join('|') },
+          { header: 'Brooks紧密分类', value: c => this.label('brooksCompact', this.brooksDetail(c).compact_structure?.structure_type) },
+          { header: 'Brooks紧密分类原始值', value: c => this.brooksDetail(c).compact_structure?.structure_type || '' },
+          { header: 'Brooks触发价', value: c => this.fmt(this.brooksDetail(c).structure?.second_entry_trigger_price) },
+          { header: 'Brooks原因', value: c => strategy6Labels('tag', this.brooksReasonItems(c, 'reasons')).join('|') },
+          { header: 'Brooks原因原始值', value: c => this.brooksReasonItems(c, 'reasons').join('|') },
+          { header: 'Brooks风险', value: c => strategy6Labels('tag', this.brooksReasonItems(c, 'risk_tags')).join('|') },
+          { header: 'Brooks风险原始值', value: c => this.brooksReasonItems(c, 'risk_tags').join('|') },
+          { header: 'Brooks否决原因', value: c => strategy6Labels('tag', this.brooksReasonItems(c, 'reject_reasons')).join('|') },
+          { header: 'Brooks否决原因原始值', value: c => this.brooksReasonItems(c, 'reject_reasons').join('|') },
           { header: '箱体开始', value: c => c.box_start_date || '' },
           { header: '箱体结束', value: c => c.box_end_date || '' },
           { header: '箱体天数', value: c => c.box_days ?? '' },
@@ -536,6 +641,18 @@ td { vertical-align: top; }
 .detail-grid div { display: flex; flex-direction: column; gap: 3px; }
 .detail-grid span { color: var(--text-secondary); font-size: 12px; }
 .detail-grid strong { color: var(--text-primary); }
+.brooks-evidence { margin: 0 14px 14px; padding: 14px; border: 1px solid rgba(77, 163, 255, 0.25); border-radius: 8px; background: rgba(77, 163, 255, 0.04); }
+.subsection-title { color: var(--text-primary); font-weight: 700; margin-bottom: 10px; }
+.brooks-empty { color: var(--text-secondary); }
+.brooks-summary { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; margin-bottom: 12px; color: var(--text-secondary); }
+.brooks-summary strong { color: var(--text-primary); }
+.brooks-ready { color: #36b37e; font-weight: 700; }
+.brooks-wait { color: #e6a23c; font-weight: 700; }
+.brooks-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 10px; }
+.brooks-grid div { display: flex; flex-direction: column; gap: 3px; }
+.brooks-grid span { color: var(--text-secondary); font-size: 12px; }
+.brooks-grid strong { color: var(--text-primary); }
+.brooks-tags { margin-top: 10px; }
 .tags { padding: 0 14px; }
 .empty, .loading, .error-banner { padding: 16px; color: var(--text-secondary); }
 .error-banner { border: 1px solid rgba(239,68,68,0.4); color: #fca5a5; background: rgba(239,68,68,0.08); border-radius: 6px; }

@@ -129,6 +129,69 @@ describe('Strategy6Results', () => {
           compact_close_range_5: 0.028,
           kline_overlap_pair_count: 3,
           atr_contraction_ratio: 0.60,
+          brooks_tail_enabled: true,
+          brooks_tail_pass: true,
+          brooks_tail_score: 19,
+          brooks_tail_premium: true,
+          brooks_status: 'BROOKS_SUPPORT_READY',
+          brooks_trade_ready: true,
+          brooks_trade_trigger_type: 'BROOKS_SUPPORT_READY',
+          brooks_trigger_valid_until: '2026-07-14',
+          tail_paths: ['BOX', 'BROOKS'],
+          tail_path_summary: 'MULTI',
+          tail_primary_path: 'BROOKS',
+          passed_path_count: 2,
+          multi_path_confirmed: true,
+          brooks_result: {
+            bull_context_pass: true,
+            selling_pressure_exhausted: true,
+            price_stable_pass: true,
+            volume_dry_pass: true,
+            support_not_broken: true,
+            setup_pass: true,
+            context: {
+              context_type: 'BULL_CONTEXT',
+              passed: true,
+              watch_only: false,
+              reasons: ['brooks:bull_context'],
+              risk_tags: [],
+            },
+            selling_pressure: {
+              exhausted: true,
+              strong_bear_bar_count: 0,
+              bear_follow_through_count: 0,
+              reasons: ['brooks:selling_pressure_exhausted'],
+              risk_tags: [],
+            },
+            structure: {
+              micro_double_bottom: true,
+              failed_bear_breakout: false,
+              second_entry_long_ready: true,
+              second_entry_signal_date: '2026-07-09',
+              second_entry_trigger_price: 12.40,
+              setup_types: ['MICRO_DOUBLE_BOTTOM', 'SECOND_ENTRY_LONG_READY'],
+              reasons: ['brooks:micro_double_bottom'],
+              risk_tags: [],
+            },
+            compact_structure: {
+              structure_type: 'COMPACT_ORDERLY',
+              direction_change_count: 2,
+              long_shadow_bar_count: 0,
+              barb_wire_risk: false,
+              reasons: ['brooks:compact_orderly'],
+              risk_tags: [],
+            },
+            trade_trigger: {
+              ready: true,
+              trigger_type: 'BROOKS_SUPPORT_READY',
+              trigger_valid_until: '2026-07-14',
+              reasons: ['brooks:second_entry_triggered'],
+              risk_tags: [],
+            },
+            reasons: ['brooks:score_pass'],
+            reject_reasons: [],
+            risk_tags: [],
+          },
         },
         {
           code: '000002',
@@ -255,6 +318,16 @@ describe('Strategy6Results', () => {
     expect(wrapper.text()).toContain('执行R目标')
     expect(wrapper.text()).toContain('尾部路径')
     expect(wrapper.text()).toContain('稳定箱体路径')
+    expect(wrapper.text()).toContain('多路径确认')
+    expect(wrapper.text()).toContain('主路径 Brooks价格行为')
+    expect(wrapper.text()).toContain('Brooks价格行为证据')
+    expect(wrapper.text()).toContain('上涨背景')
+    expect(wrapper.text()).toContain('卖压衰竭')
+    expect(wrapper.text()).toContain('微型双底')
+    expect(wrapper.text()).toContain('有序紧密结构')
+    expect(wrapper.text()).toContain('交易触发已确认')
+    expect(wrapper.text()).toContain('二次入场突破触发')
+    expect(wrapper.text()).toContain('12.40')
     expect(wrapper.text()).toContain('箱体下沿支撑就绪')
     expect(wrapper.text()).toContain('箱体K线紧密就绪')
     expect(wrapper.text()).toContain('11.80 - 12.50')
@@ -274,6 +347,48 @@ describe('Strategy6Results', () => {
     expect(wrapper.text()).toContain('生命周期退出/冷却审计')
     expect(wrapper.text()).toContain('退出样本')
     expect(wrapper.text()).toContain('支撑失效')
+  })
+
+  it('keeps Brooks watch states free of buy semantics and renders legacy rows safely', async () => {
+    api.getStrategy6Candidates.mockResolvedValue({
+      candidates: [
+        {
+          code: '000010', name: '等待触发', candidate_type: 'WATCH_CANDIDATE',
+          brooks_tail_enabled: true, brooks_tail_pass: true, brooks_tail_score: 15,
+          brooks_tail_premium: false, brooks_status: 'SECOND_ENTRY_LONG_READY',
+          brooks_trade_ready: false, brooks_trade_trigger_type: '', tail_paths: ['BROOKS'],
+          tail_path_summary: 'BROOKS', tail_primary_path: 'BROOKS', passed_path_count: 1,
+          multi_path_confirmed: false, tail_path: 'NONE',
+          brooks_result: {
+            context: { context_type: 'WEAK_BULL_CONTEXT', watch_only: true },
+            compact_structure: { structure_type: 'BARB_WIRE', barb_wire_risk: true },
+            structure: { setup_types: ['SECOND_ENTRY_LONG_READY'] },
+            trade_trigger: { ready: false, trigger_type: '', trigger_valid_until: '2026-07-15' },
+            reasons: [], reject_reasons: [], risk_tags: ['BROOKS_GRADE_B_WATCH_ONLY'],
+          },
+        },
+        {
+          code: '000011', name: '旧任务', candidate_type: 'WATCH_CANDIDATE',
+          tail_path: 'ORIGINAL', original_tail_pass: true,
+        },
+      ],
+    })
+
+    const wrapper = mount(Strategy6Results, {
+      global: { mocks: { $route: { query: { task: 's6-task' } } } },
+    })
+    await flushUi()
+
+    expect(wrapper.text()).toContain('Brooks价格行为')
+    expect(wrapper.text()).toContain('观察/等待触发')
+    expect(wrapper.text()).toContain('弱上涨背景')
+    expect(wrapper.text()).toContain('铁丝网震荡')
+    expect(wrapper.text()).not.toContain('交易触发已确认')
+    expect(wrapper.text()).not.toContain('undefined')
+
+    await wrapper.findAll('.candidate-table tbody tr')[1].trigger('click')
+    expect(wrapper.text()).toContain('未启用或旧任务无数据')
+    expect(wrapper.text()).not.toContain('undefined')
   })
 
   it('loads all candidates for a URL task even when task list is stale', async () => {
@@ -371,6 +486,14 @@ describe('Strategy6Results', () => {
     expect(csv).toContain('关键支撑,前置支撑')
     expect(csv).toContain('策略版本,阶段状态,阶段状态原始值,形态类型,形态类型原始值')
     expect(csv).toContain('客观目标1,客观目标2,客观RR1,客观RR2')
+    expect(csv).toContain('权威路径汇总,权威路径汇总原始值,主路径,主路径原始值,通过路径')
+    expect(csv).toContain('Brooks状态,Brooks状态原始值,Brooks交易状态,Brooks触发类型,Brooks触发类型原始值')
+    expect(csv).toContain('多路径,MULTI,Brooks价格行为,BROOKS')
+    expect(csv).toContain('2,是,是,是,19,是,支撑位触发确认,BROOKS_SUPPORT_READY,交易触发已确认,二次入场突破触发,BROOKS_SUPPORT_READY')
+    expect(csv).toContain('稳定箱体路径|Brooks价格行为')
+    expect(csv).toContain('BOX|BROOKS')
+    expect(csv).toContain('上涨背景,卖压衰竭,价格稳定,量能萎缩,支撑未破')
+    expect(csv).toContain('2026-07-14,通过,通过,通过,通过,通过,上涨背景,BULL_CONTEXT')
     expect(csv).toContain('1.5R目标,2R目标,2.5R目标,3.5R目标')
     expect(csv).toContain('000001,平安银行,,就绪候选,READY_CANDIDATE,买入区间,BUY_ZONE,2026-07-01,6')
     expect(csv).toContain('降级处理,downgrade,市场偏弱,MARKET_WEAK,18.00%,12.34')

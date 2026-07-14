@@ -39,6 +39,44 @@ const LABELS = {
     RECENT_20_CLOSE_LOW: '近20日最低收盘', START_LOW: '启动日低点', ATR: 'ATR',
   },
   tailPath: { ORIGINAL: '原尾段路径', BOX: '稳定箱体路径', BOTH: '双路径同时通过', NONE: '未形成尾段路径' },
+  tailPathSummary: {
+    ORIGINAL: '原尾段路径', BOX: '稳定箱体路径', BROOKS: 'Brooks价格行为',
+    MULTI: '多路径', NONE: '未形成尾段路径',
+  },
+  tailPrimaryPath: {
+    ORIGINAL: '原尾段路径', BOX: '稳定箱体路径', BROOKS: 'Brooks价格行为', NONE: '无主路径',
+  },
+  brooksStatus: {
+    BROOKS_DISABLED: '未启用或旧任务无数据', BROOKS_FAILED: 'Brooks条件未成立',
+    BROOKS_WATCH: 'Brooks观察', BARB_WIRE_WAIT: '铁丝网震荡，等待方向确认',
+    COMPACT_BEARISH_REJECT: '紧密结构偏空，已排除', MICRO_DOUBLE_BOTTOM: '微型双底',
+    FAILED_BEAR_BREAKOUT: '空头假突破', SECOND_ENTRY_LONG_READY: '二次入场准备',
+    ORDERLY_COMPRESSION_AT_SUPPORT: '支撑位有序收缩', BROOKS_SUPPORT_READY: '支撑位触发确认',
+    BROOKS_FAILED_BREAKOUT_READY: '假跌破反转触发确认', BROOKS_BREAKOUT_WAIT: '突破后等待确认',
+    BROOKS_BREAKOUT_READY: '突破跟进确认',
+  },
+  brooksTriggerType: {
+    SECOND_ENTRY_BREAK: '二次入场突破触发', FAILED_BEAR_BREAKOUT: '假跌破反转触发',
+    BREAKOUT_FOLLOW_THROUGH: '突破跟进触发', SUPPORT_REVERSAL: '支撑反转触发',
+    BROOKS_SUPPORT_READY: '二次入场突破触发',
+    BROOKS_FAILED_BREAKOUT_READY: '假跌破反转触发',
+    BROOKS_BREAKOUT_READY: '突破跟进触发',
+  },
+  brooksContext: {
+    BULL_CONTEXT: '上涨背景', WEAK_BULL_CONTEXT: '弱上涨背景',
+    TRADING_RANGE_CONTEXT: '交易区间背景', BEAR_CONTEXT: '下跌背景',
+    INVALID_CONTEXT: '背景数据不足',
+  },
+  brooksCompact: {
+    NO_COMPACT: '未形成紧密结构', COMPACT_ORDERLY: '有序紧密结构',
+    COMPACT_NEUTRAL: '中性紧密结构', BARB_WIRE: '铁丝网震荡',
+    COMPACT_BEARISH: '偏空紧密结构',
+  },
+  brooksSetup: {
+    MICRO_DOUBLE_BOTTOM: '微型双底', FAILED_BEAR_BREAKOUT: '空头假突破',
+    BEAR_FOLLOW_THROUGH_FAILED: '空方跟进失败', SECOND_ENTRY_LONG_READY: '二次入场准备',
+    ORDERLY_COMPRESSION_AT_SUPPORT: '支撑位有序收缩',
+  },
   boxStatus: {
     BOX_FORMING: '箱体形成中', BOX_SUPPORT_READY: '箱体下沿支撑就绪', BOX_STABLE: '箱体稳定',
     BOX_BREAKOUT_READY: '箱体突破就绪', BOX_BROKEN: '箱体已破位', NO_BOX: '未形成箱体',
@@ -105,6 +143,22 @@ const LABELS = {
     'compact:close_concentrated': '收盘价集中', 'compact:range_overlap': 'K线区间重叠合格',
     'compact:no_large_gap': '无过大跳空', 'compact:atr_contracted': 'ATR已收缩', 'compact:no_volume_selloff': '紧密区无放量抛售',
     highest_box_quality_score_then_days_width_volume_contraction: '按箱体质量分、天数、宽度和量缩程度择优',
+    BROOKS_GRADE_B_WATCH_ONLY: 'B级启动仅观察', BARB_WIRE_RISK: '铁丝网震荡，方向不明确',
+    BROOKS_CONTEXT_DATA_INSUFFICIENT: 'Brooks背景数据不足', BROOKS_CONTEXT_NOT_BULLISH: 'Brooks背景不支持上涨',
+    BROOKS_BEAR_CONTEXT: '处于下跌背景', BROOKS_BULL_CONTEXT_VALID: '上涨背景有效',
+    BROOKS_SUPPORT_EFFECTIVELY_BROKEN: 'Brooks关键支撑有效跌破',
+    BROOKS_SELLING_PRESSURE_DATA_INSUFFICIENT: '卖压判断数据不足',
+    BROOKS_SELLING_PRESSURE_EXHAUSTED: '卖压已衰竭', BROOKS_CONSECUTIVE_BEAR_BARS: '连续阴线卖压仍在',
+    BROOKS_STRONG_BEAR_BARS_EXCESSIVE: '强空方K线过多', BROOKS_BEAR_FOLLOW_THROUGH: '空方存在跟进',
+    BROOKS_STRUCTURE_DATA_INSUFFICIENT: '结构判断数据不足', BROOKS_COMPACT_ORDERLY: '紧密结构有序',
+    BROOKS_COMPACT_NEUTRAL: '紧密结构中性', BROOKS_COMPACT_BEARISH: '紧密结构偏空',
+    BROOKS_TAIL_PATH_PASSED: 'Brooks尾部路径通过', BROOKS_CONTEXT_REJECT: '上涨背景不合格',
+    BROOKS_SELLING_PRESSURE_NOT_EXHAUSTED: '卖压尚未衰竭', BROOKS_PRICE_NOT_STABLE: '价格尚未稳定',
+    BROOKS_VOLUME_NOT_DRY: '量能尚未充分萎缩', BROOKS_SUPPORT_BROKEN: '支撑已经失效',
+    BROOKS_SETUP_NOT_FOUND: '未识别Brooks结构', BROOKS_TRIGGER_SIGNAL_NOT_VISIBLE: '触发信号尚不可见',
+    BROOKS_TRIGGER_REQUIRES_LATER_SESSION: '需等待后续交易日确认', BROOKS_TRIGGER_GAP_TOO_FAR: '跳空后距离触发位过远',
+    BROOKS_TRIGGER_EXPIRED: 'Brooks触发已过期', BROOKS_SECOND_ENTRY_TRIGGERED: '二次入场已触发',
+    BROOKS_FAILED_BREAKOUT_CONFIRMED: '假跌破反转已确认', BROOKS_BREAKOUT_FOLLOW_THROUGH: '突破获得后续跟进',
   },
 }
 
@@ -133,7 +187,7 @@ export function strategy6Label(group, value) {
   const direct = LABELS[group]?.[raw]
   if (direct) return direct
   if (group === 'tag') {
-    for (const fallbackGroup of ['phaseStatus', 'supportStatus', 'lifecycleStatus', 'boxStatus']) {
+    for (const fallbackGroup of ['phaseStatus', 'supportStatus', 'lifecycleStatus', 'boxStatus', 'brooksStatus', 'brooksSetup', 'brooksCompact']) {
       const fallback = LABELS[fallbackGroup]?.[raw]
       if (fallback) return fallback
     }

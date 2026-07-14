@@ -996,6 +996,86 @@
         <div class="param"><label>优质ATR收缩比</label><input type="number" v-model.number="config.strategy6.box_tail.compact_kline.premium_atr_contraction_ratio_max" @input="markDirty" min="0" max="2" step="0.01" /><span class="default">默认 0.65</span></div>
       </div>
 
+      <template v-if="config.strategy6.brooks_tail">
+        <h4 class="subsection-title">Brooks价格行为第三路径</h4>
+        <div class="toggle-row">
+          <div class="toggle-item">
+            <span>启用Brooks独立路径</span>
+            <button data-test="strategy6-brooks-enabled" class="toggle" :class="{ active: config.strategy6.brooks_tail.enabled }"
+              @click="toggleStrategy6Brooks(null, 'enabled')">{{ config.strategy6.brooks_tail.enabled ? '开' : '关' }}</button>
+          </div>
+          <div class="toggle-item">
+            <span>B级启动仅观察</span>
+            <button class="toggle" :class="{ active: config.strategy6.brooks_tail.context.allow_grade_b_watch_only }"
+              @click="toggleStrategy6Brooks('context', 'allow_grade_b_watch_only')">{{ config.strategy6.brooks_tail.context.allow_grade_b_watch_only ? '开' : '关' }}</button>
+          </div>
+        </div>
+
+        <h4 class="subsection-title">上涨背景</h4>
+        <div class="param-grid">
+          <div class="param"><label>MA20斜率窗口</label><input data-test="strategy6-brooks-context-window" type="number" v-model.number="config.strategy6.brooks_tail.context.ma20_slope_window_days" @input="markDirty" min="2" max="60" /><span class="default">默认 10</span></div>
+          <div class="param"><label>高低点序列窗口</label><input type="number" v-model.number="config.strategy6.brooks_tail.context.lower_high_low_window_days" @input="markDirty" min="5" max="60" /><span class="default">默认 10</span></div>
+          <div class="param"><label>最大下移序列数</label><input type="number" v-model.number="config.strategy6.brooks_tail.context.max_lower_high_low_sequence" @input="markDirty" min="0" max="10" /><span class="default">默认 2</span></div>
+          <div class="param"><label>跌破MA20 ATR容差</label><input type="number" v-model.number="config.strategy6.brooks_tail.context.close_below_ma20_atr_tolerance" @input="markDirty" min="0" max="3" step="0.1" /><span class="default">默认 0.5</span></div>
+        </div>
+
+        <h4 class="subsection-title">卖压衰竭</h4>
+        <div class="param-grid">
+          <div class="param"><label>卖压观察窗口</label><input data-test="strategy6-brooks-selling-window" type="number" v-model.number="config.strategy6.brooks_tail.selling_pressure.window_days" @input="markDirty" min="3" max="30" /><span class="default">默认 7</span></div>
+          <div class="param"><label>最多强空方K线</label><input type="number" v-model.number="config.strategy6.brooks_tail.selling_pressure.max_strong_bear_bar_count" @input="markDirty" min="0" max="30" /><span class="default">默认 1</span></div>
+          <div class="param"><label>最多空方跟进</label><input type="number" v-model.number="config.strategy6.brooks_tail.selling_pressure.max_bear_follow_through_count" @input="markDirty" min="0" max="30" /><span class="default">默认 1</span></div>
+          <div class="param"><label>最多连续阴线</label><input type="number" v-model.number="config.strategy6.brooks_tail.selling_pressure.max_consecutive_bear_bars" @input="markDirty" min="0" max="30" /><span class="default">默认 2</span></div>
+        </div>
+
+        <h4 class="subsection-title">价格稳定与量干</h4>
+        <div class="param-grid">
+          <div class="param"><label>稳定判断窗口</label><input data-test="strategy6-brooks-stability-window" type="number" v-model.number="config.strategy6.brooks_tail.price_stability.compact_window_days" @input="markDirty" min="3" max="10" /><span class="default">默认 5</span></div>
+          <div class="param"><label>收盘区间上限</label><input type="number" v-model.number="config.strategy6.brooks_tail.price_stability.close_range_max" @input="markDirty" min="0" max="2" step="0.01" /><span class="default">默认 0.08</span></div>
+          <div class="param"><label>优质收盘区间</label><input type="number" v-model.number="config.strategy6.brooks_tail.price_stability.premium_close_range_max" @input="markDirty" min="0" max="2" step="0.01" /><span class="default">默认 0.05</span></div>
+          <div class="param"><label>尾部量比上限</label><input type="number" v-model.number="config.strategy6.brooks_tail.volume_dry.tail_volume_ratio_max" @input="markDirty" min="0.01" max="2" step="0.01" /><span class="default">默认 0.75</span></div>
+          <div class="param"><label>优质量干比</label><input data-test="strategy6-brooks-volume-premium" type="number" v-model.number="config.strategy6.brooks_tail.volume_dry.premium_tail_volume_ratio_max" @input="markDirty" min="0.01" max="2" step="0.01" /><span class="default">默认 0.60</span></div>
+          <div class="param"><label>量能基准窗口</label><input type="number" v-model.number="config.strategy6.brooks_tail.volume_dry.baseline_window_days" @input="markDirty" min="10" max="60" /><span class="default">默认 20</span></div>
+        </div>
+
+        <h4 class="subsection-title">结构识别</h4>
+        <div class="toggle-row">
+          <div class="toggle-item"><span>二次入场识别</span><button class="toggle" :class="{ active: config.strategy6.brooks_tail.second_entry.enabled }" @click="toggleStrategy6Brooks('second_entry', 'enabled')">{{ config.strategy6.brooks_tail.second_entry.enabled ? '开' : '关' }}</button></div>
+          <div class="toggle-item"><span>假跌破识别</span><button class="toggle" :class="{ active: config.strategy6.brooks_tail.failed_breakout.enabled }" @click="toggleStrategy6Brooks('failed_breakout', 'enabled')">{{ config.strategy6.brooks_tail.failed_breakout.enabled ? '开' : '关' }}</button></div>
+          <div class="toggle-item"><span>紧密结构分类</span><button class="toggle" :class="{ active: config.strategy6.brooks_tail.compact_structure.enabled }" @click="toggleStrategy6Brooks('compact_structure', 'enabled')">{{ config.strategy6.brooks_tail.compact_structure.enabled ? '开' : '关' }}</button></div>
+        </div>
+        <div class="param-grid">
+          <div class="param"><label>二次低点最短间隔</label><input type="number" v-model.number="config.strategy6.brooks_tail.second_entry.min_separation_days" @input="markDirty" min="1" max="15" /><span class="default">默认 2</span></div>
+          <div class="param"><label>二次低点最长间隔</label><input type="number" v-model.number="config.strategy6.brooks_tail.second_entry.max_separation_days" @input="markDirty" min="1" max="30" /><span class="default">默认 15</span></div>
+          <div class="param"><label>假跌破收回天数</label><input type="number" v-model.number="config.strategy6.brooks_tail.failed_breakout.recovery_days" @input="markDirty" min="1" max="5" /><span class="default">默认 2</span></div>
+          <div class="param"><label>紧密区下界</label><input type="number" v-model.number="config.strategy6.brooks_tail.compact_structure.middle_zone_low" @input="markDirty" min="0" max="1" step="0.05" /><span class="default">默认 0.35</span></div>
+          <div class="param"><label>紧密区上界</label><input type="number" v-model.number="config.strategy6.brooks_tail.compact_structure.middle_zone_high" @input="markDirty" min="0" max="1" step="0.05" /><span class="default">默认 0.70</span></div>
+          <div class="param"><label>最多方向变化</label><input type="number" v-model.number="config.strategy6.brooks_tail.compact_structure.max_direction_changes" @input="markDirty" min="0" max="10" /><span class="default">默认 3</span></div>
+          <div class="param"><label>最多长影线K线</label><input type="number" v-model.number="config.strategy6.brooks_tail.compact_structure.max_long_shadow_bar_count" @input="markDirty" min="0" max="10" /><span class="default">默认 2</span></div>
+        </div>
+
+        <h4 class="subsection-title">交易触发</h4>
+        <div class="toggle-row">
+          <div class="toggle-item"><span>启用跨日触发确认</span><button class="toggle" :class="{ active: config.strategy6.brooks_tail.trade_trigger.enabled }" @click="toggleStrategy6Brooks('trade_trigger', 'enabled')">{{ config.strategy6.brooks_tail.trade_trigger.enabled ? '开' : '关' }}</button></div>
+        </div>
+        <div class="param-grid">
+          <div class="param"><label>触发有效交易日</label><input data-test="strategy6-brooks-trigger-days" type="number" v-model.number="config.strategy6.brooks_tail.trade_trigger.trigger_valid_days" @input="markDirty" min="1" max="10" /><span class="default">默认 3</span></div>
+          <div class="param"><label>最大触发距离 ATR</label><input type="number" v-model.number="config.strategy6.brooks_tail.trade_trigger.max_trigger_distance_atr" @input="markDirty" min="0" max="5" step="0.1" /><span class="default">默认 1.5</span></div>
+          <div class="param"><label>突破跟进天数</label><input type="number" v-model.number="config.strategy6.brooks_tail.trade_trigger.breakout_follow_through_days" @input="markDirty" min="1" max="5" /><span class="default">默认 2</span></div>
+        </div>
+
+        <h4 class="subsection-title">Brooks评分</h4>
+        <div class="param-grid">
+          <div class="param"><label>背景分</label><input type="number" v-model.number="config.strategy6.brooks_tail.scoring.context_points" @input="markDirty" min="0" max="20" /><span class="default">默认 4</span></div>
+          <div class="param"><label>卖压衰竭分</label><input type="number" v-model.number="config.strategy6.brooks_tail.scoring.selling_pressure_points" @input="markDirty" min="0" max="20" /><span class="default">默认 6</span></div>
+          <div class="param"><label>价格稳定分</label><input type="number" v-model.number="config.strategy6.brooks_tail.scoring.price_stability_points" @input="markDirty" min="0" max="20" /><span class="default">默认 4</span></div>
+          <div class="param"><label>量干分</label><input type="number" v-model.number="config.strategy6.brooks_tail.scoring.volume_dry_points" @input="markDirty" min="0" max="20" /><span class="default">默认 2</span></div>
+          <div class="param"><label>结构分</label><input type="number" v-model.number="config.strategy6.brooks_tail.scoring.setup_points" @input="markDirty" min="0" max="20" /><span class="default">默认 4</span></div>
+          <div class="param"><label>Brooks通过分</label><input data-test="strategy6-brooks-pass-score" type="number" v-model.number="config.strategy6.brooks_tail.scoring.pass_score_min" @input="markDirty" min="0" max="20" /><span class="default">默认 14</span></div>
+          <div class="param"><label>Brooks优质分</label><input data-test="strategy6-brooks-premium-score" type="number" v-model.number="config.strategy6.brooks_tail.scoring.premium_score_min" @input="markDirty" min="0" max="20" /><span class="default">默认 17</span></div>
+        </div>
+      </template>
+      <div v-else class="info-msg">Brooks配置由后端默认配置补全后显示。</div>
+
       <div class="info-msg strategy6-info">
         ⓘ 策略6保留真实市场过滤，并在结果页展示扫描时使用的指数快照；板块过滤已移除，不再参与降级或扣分。
       </div>
@@ -1293,6 +1373,7 @@ const defaultStrategy6Config = {
   key_min_score: 75,
   watch_min_score: 60,
   box_tail: defaultStrategy6BoxTailConfig,
+  brooks_tail: null,
 }
 
 const config = reactive({
@@ -1486,6 +1567,9 @@ function sanitizeStrategy6Config(value) {
     Object.entries(value || {}).filter(([key]) => Object.prototype.hasOwnProperty.call(defaultStrategy6Config, key))
   )
   const boxTail = known.box_tail || {}
+  const brooksTail = known.brooks_tail && typeof known.brooks_tail === 'object'
+    ? JSON.parse(JSON.stringify(known.brooks_tail))
+    : null
   return {
     ...defaultStrategy6Config,
     ...known,
@@ -1497,6 +1581,7 @@ function sanitizeStrategy6Config(value) {
         ...(boxTail.compact_kline || {}),
       },
     },
+    brooks_tail: brooksTail,
   }
 }
 
@@ -1614,6 +1699,15 @@ function toggleStrategy6BoxTail(key) {
 function toggleStrategy6CompactKline(key) {
   ensureStrategy6Config()
   config.strategy6.box_tail.compact_kline[key] = !config.strategy6.box_tail.compact_kline[key]
+  markDirty()
+}
+
+function toggleStrategy6Brooks(section, key) {
+  ensureStrategy6Config()
+  const brooks = config.strategy6.brooks_tail
+  if (!brooks) return
+  const target = section ? brooks[section] : brooks
+  target[key] = !target[key]
   markDirty()
 }
 
@@ -1827,6 +1921,50 @@ function validate() {
   if (compact.premium_close_range_max > compact.close_range_max) errors.push('策略6紧密K线: 优质收盘区间不能高于普通区间')
   if (compact.premium_overlap_ratio < compact.min_overlap_ratio) errors.push('策略6紧密K线: 优质重叠比例不能低于普通比例')
   if (compact.premium_atr_contraction_ratio_max > compact.atr_contraction_ratio_max) errors.push('策略6紧密K线: 优质ATR收缩比不能高于普通比例')
+
+  const brooks = s6.brooks_tail
+  if (!brooks || typeof brooks !== 'object') {
+    errors.push('策略6 Brooks: 后端未返回完整配置，请刷新页面后重试')
+  } else {
+    const context = brooks.context || {}
+    const selling = brooks.selling_pressure || {}
+    const stability = brooks.price_stability || {}
+    const volume = brooks.volume_dry || {}
+    const second = brooks.second_entry || {}
+    const failed = brooks.failed_breakout || {}
+    const compactBrooks = brooks.compact_structure || {}
+    const trigger = brooks.trade_trigger || {}
+    const scoring = brooks.scoring || {}
+    if (brooks.mode !== 'independent_path') errors.push('策略6 Brooks: 运行模式必须为独立路径')
+    if (!Array.isArray(context.allowed_start_grades) || !context.allowed_start_grades.length || context.allowed_start_grades.some(v => !['S', 'A'].includes(v))) errors.push('策略6 Brooks: 允许启动等级只能包含 S 或 A')
+    if (context.ma20_slope_window_days < 2 || context.ma20_slope_window_days > 60) errors.push('策略6 Brooks上涨背景: MA20斜率窗口需在 2-60')
+    if (context.lower_high_low_window_days < 5 || context.lower_high_low_window_days > 60) errors.push('策略6 Brooks上涨背景: 高低点序列窗口需在 5-60')
+    if (context.max_lower_high_low_sequence < 0 || context.max_lower_high_low_sequence > 10) errors.push('策略6 Brooks上涨背景: 最大下移序列数需在 0-10')
+    if (selling.window_days < 3 || selling.window_days > 30) errors.push('策略6 Brooks卖压: 观察窗口需在 3-30')
+    for (const [value, name] of [[selling.max_strong_bear_bar_count, '强空方K线数'], [selling.max_bear_follow_through_count, '空方跟进数'], [selling.max_consecutive_bear_bars, '连续阴线数']]) {
+      if (value < 0 || value > selling.window_days) errors.push(`策略6 Brooks卖压: 最大${name}不能超过观察窗口`)
+    }
+    if (stability.compact_window_days < 3 || stability.compact_window_days > 10) errors.push('策略6 Brooks价格稳定: 窗口需在 3-10')
+    if (stability.premium_close_range_max > stability.close_range_max) errors.push('策略6 Brooks价格稳定: 优质收盘区间不能高于普通区间')
+    if (stability.premium_atr_contraction_max > stability.atr_contraction_max) errors.push('策略6 Brooks价格稳定: 优质ATR收缩比不能高于普通比例')
+    if (volume.tail_window_days < 3 || volume.tail_window_days > 10) errors.push('策略6 Brooks量干: 尾部窗口需在 3-10')
+    if (volume.baseline_window_days < 10 || volume.baseline_window_days > 60) errors.push('策略6 Brooks量干: 基准窗口需在 10-60')
+    if (volume.tail_volume_ratio_max <= 0 || volume.tail_volume_ratio_max > 2) errors.push('策略6 Brooks量干: 普通量干比需在 (0,2]')
+    if (volume.premium_tail_volume_ratio_max <= 0 || volume.premium_tail_volume_ratio_max > volume.tail_volume_ratio_max) errors.push('策略6 Brooks优质量干比不能高于普通量干比')
+    if (second.min_separation_days < 1 || second.min_separation_days > second.max_separation_days) errors.push('策略6 Brooks二次入场: 最短低点间隔不能高于最长间隔')
+    if (second.max_separation_days > 30) errors.push('策略6 Brooks二次入场: 最长低点间隔不能超过30日')
+    if (failed.recovery_days < 1 || failed.recovery_days > 5) errors.push('策略6 Brooks假跌破: 收回天数需在 1-5')
+    if (compactBrooks.middle_zone_low < 0 || compactBrooks.middle_zone_high > 1 || compactBrooks.middle_zone_low > compactBrooks.middle_zone_high) errors.push('策略6 Brooks紧密结构: 中部区间需满足 0 <= 下界 <= 上界 <= 1')
+    if (compactBrooks.max_direction_changes < 0 || compactBrooks.max_direction_changes > 10) errors.push('策略6 Brooks紧密结构: 方向变化次数需在 0-10')
+    if (trigger.trigger_valid_days < 1 || trigger.trigger_valid_days > 10) errors.push('策略6 Brooks交易触发: 有效交易日需在 1-10')
+    if (trigger.max_trigger_distance_atr < 0 || trigger.max_trigger_distance_atr > 5) errors.push('策略6 Brooks交易触发: 最大距离需在 0-5 ATR')
+    if (trigger.breakout_follow_through_days < 1 || trigger.breakout_follow_through_days > 5) errors.push('策略6 Brooks交易触发: 突破跟进天数需在 1-5')
+    const scoreParts = ['context_points', 'selling_pressure_points', 'price_stability_points', 'volume_dry_points', 'setup_points']
+    if (scoreParts.some(key => scoring[key] < 0 || scoring[key] > 20)) errors.push('策略6 Brooks评分: 各分项需在 0-20')
+    if (scoreParts.reduce((sum, key) => sum + Number(scoring[key] || 0), 0) !== 20) errors.push('策略6 Brooks评分: 五项分数合计必须为20')
+    if (scoring.pass_score_min < 0 || scoring.pass_score_min > 20 || scoring.premium_score_min < 0 || scoring.premium_score_min > 20) errors.push('策略6 Brooks评分: 通过分和优质分需在 0-20')
+    if (scoring.pass_score_min > scoring.premium_score_min) errors.push('策略6 Brooks通过分不能高于优质分')
+  }
 
   return errors
 }
