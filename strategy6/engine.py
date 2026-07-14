@@ -13,6 +13,7 @@ from strategy6.phase import segment_phases
 from strategy6.pattern import detect_pattern
 from strategy6.pressure import apply_pressure_tags
 from strategy6.scorer import score_strategy6
+from strategy6.setup_quality import evaluate_setup_quality
 from strategy6.strong_start import evaluate_strong_start
 from strategy6.support import evaluate_support
 from strategy6.trade_plan import calculate_trade_plan
@@ -66,6 +67,12 @@ class StrongVcpTailEngine:
         phase = segment_phases(rows, start, self.config)
         pattern = detect_pattern(rows, phase, self.config)
         support = evaluate_support(rows, indicators, start, pattern, self.config)
+        setup_quality = evaluate_setup_quality(
+            rows,
+            start,
+            phase,
+            market_data_by_symbol,
+        )
         dry_tail = evaluate_dry_tail(rows, indicators, phase, self.config)
         box_tail = evaluate_box_tail(
             rows,
@@ -115,11 +122,13 @@ class StrongVcpTailEngine:
             indicators, start, phase, pattern, support, dry_tail, trade_plan, self.config,
             box_tail=box_tail,
             brooks_tail=brooks_tail,
+            setup_quality=setup_quality,
         )
         reject_reasons = hard_filter_reasons(
             rows, indicators, start, phase, pattern, support, dry_tail, trade_plan, self.config,
             box_tail=box_tail,
             brooks_tail=brooks_tail,
+            setup_quality=setup_quality,
         )
         normalized_quote_status = str(quote_status or "").lower()
         if normalized_quote_status == "suspended":
@@ -155,6 +164,7 @@ class StrongVcpTailEngine:
             tail_paths=tail_paths,
             trade_plan=trade_plan,
             score=score,
+            setup_quality=setup_quality,
             strategy_version=STRATEGY6_VERSION,
             config_hash=strategy6_config_hash(self.config),
             candidate_type=candidate_type,

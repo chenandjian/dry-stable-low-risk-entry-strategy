@@ -166,11 +166,8 @@ def test_engine_outputs_brooks_and_authoritative_three_path_fields():
     assert candidate["tail_path_summary"] in {"NONE", "ORIGINAL", "BOX", "BROOKS", "MULTI"}
     assert candidate["tail_primary_path"] in {"NONE", "ORIGINAL", "BOX", "BROOKS"}
     assert candidate["tail_pass"] == bool(candidate["tail_paths"])
-    assert candidate["tail_score"] == max(
-        candidate["original_tail_score"] if candidate["original_tail_pass"] else 0,
-        candidate["box_tail_score"] if candidate["box_tail_pass"] else 0,
-        candidate["brooks_tail_score"] if candidate["brooks_tail_pass"] else 0,
-    )
+    assert candidate["tail_score"] == candidate["path_evidence_score"]
+    assert 0 <= candidate["tail_score"] <= 15
     assert candidate["brooks_status"]
     assert isinstance(candidate["brooks_result"], dict)
 
@@ -537,7 +534,7 @@ def test_upper_shadow_pressure_deducts_risk_control_score():
     pressured = StrongVcpTailEngine({}).evaluate_at(data, code="000001", name="平安银行")
 
     assert "UPPER_SHADOW_PRESSURE" in pressured.indicators.warn_tags
-    assert pressured.score.risk_control_score == clean.score.risk_control_score - 2
+    assert pressured.score.risk_control_score == max(0, clean.score.risk_control_score - 2)
 
 
 def test_close_below_ma5_is_not_marked_ma5_support():
@@ -655,7 +652,7 @@ def test_market_filter_score_only_deducts_score_without_downgrading_candidate_ty
 
     assert score_only.passed is True
     assert score_only.candidate_type == filter_off.candidate_type
-    assert score_only.score.risk_control_score == filter_off.score.risk_control_score - 2
+    assert score_only.score.risk_control_score == max(0, filter_off.score.risk_control_score - 2)
     assert "MARKET_WEAK_DOWNGRADED" not in score_only.indicators.warn_tags
 
 

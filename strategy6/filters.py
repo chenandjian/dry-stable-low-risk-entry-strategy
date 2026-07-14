@@ -8,6 +8,7 @@ from strategy6.models import (
     Strategy6Phase,
     Strategy6Pattern,
     Strategy6Score,
+    Strategy6SetupQuality,
     Strategy6Start,
     Strategy6Support,
     Strategy6TradePlan,
@@ -29,6 +30,7 @@ def hard_filter_reasons(
     *,
     box_tail: Strategy6BoxTail | None = None,
     brooks_tail: BrooksTailResult | None = None,
+    setup_quality: Strategy6SetupQuality | None = None,
 ) -> list[str]:
     reasons: list[str] = []
     if not phase.valid and phase.status != "START_TOO_RECENT":
@@ -75,8 +77,18 @@ def hard_filter_reasons(
     reasons.extend(_shape_failure_reasons(rows, ind, support, config))
     if ind.ma50 > 0 and ind.current_price < ind.ma50 * config["ma50_min_ratio"]:
         reasons.append("CLOSE_LT_MA50_0_92")
+    quality = setup_quality or Strategy6SetupQuality()
+    structural_tail_rejects = {
+        "BIG_DOWN_VOLUME", "TAIL_NEW_LOW", "TAIL_LOW_DECLINING",
+        "TAIL_RETURN_5_TOO_WEAK", "TAIL_SINGLE_DROP_TOO_WEAK",
+    }
+    reasons.extend(reason for reason in dry_tail.rejects if reason in structural_tail_rejects)
     if (box_tail is None or not box_tail.passed) and (brooks_tail is None or not brooks_tail.passed):
         reasons.extend(dry_tail.rejects)
+    if quality.distribution_day_count >= 3 and "DISTRIBUTION_PRESSURE_HIGH" in quality.risk_tags:
+        reasons.append("DISTRIBUTION_PRESSURE_HIGH")
+    if "SUPPORT_VOLUME_BREAK_UNRECOVERED" in support.support_reaction_risk_tags:
+        reasons.append("SUPPORT_VOLUME_BREAK_UNRECOVERED")
     if trade_plan.objective_rr_2 < config["rr2_min_watch"]:
         threshold = str(config["rr2_min_watch"]).replace(".", "_")
         reasons.append(f"RR2_LT_{threshold}")
@@ -117,6 +129,13 @@ def classify_candidate(
             "SETUP_FORMING",
             "观察等待触发：Brooks结构成立，但交易触发尚未确认",
         )
+    if _single_auxiliary_path(dry_tail, box_tail, brooks_tail):
+        return (
+            "WATCH_CANDIDATE",
+            "observe",
+            "SETUP_FORMING",
+            "观察：单一辅助路径仅作证据，等待原始量价或第二路径确认",
+        )
     if (
         config["pattern_filter_enabled"]
         and config["pattern_filter_mode"] == "downgrade"
@@ -130,6 +149,8 @@ def classify_candidate(
         and dry_tail.tail_volume_ratio <= config["tail_strong_volume_ratio_5_20"]
         and support.support_status in {"PATTERN_SUPPORT", "MA20_SUPPORT", "KEY_SUPPORT_VALID"}
         and start.start_grade != "B"
+        and _quality_threshold_met(score.setup_quality_score, config["setup_quality_min_ready"])
+        and _quality_threshold_met(score.support_reaction_score, config["support_reaction_min_ready"])
         and not major_risk
         and not environment_blocks_ready
         and not tactical_blocks_ready
@@ -141,6 +162,8 @@ def classify_candidate(
         and support.support_status in {"PATTERN_SUPPORT", "MA20_SUPPORT", "KEY_SUPPORT_VALID"}
         and score.tail_score >= 15
         and start.start_grade != "B"
+        and _quality_threshold_met(score.setup_quality_score, config["setup_quality_min_key"])
+        and _quality_threshold_met(score.support_reaction_score, config["support_reaction_min_key"])
         and not major_risk
         and not environment_blocks_ready
         and not tactical_blocks_ready
@@ -163,6 +186,25 @@ def _brooks_only_waiting_for_trigger(
         and not dry_tail.dry_tail_pass
         and (box_tail is None or not box_tail.passed)
     )
+
+
+def _single_auxiliary_path(
+    dry_tail: Strategy6DryTail,
+    box_tail: Strategy6BoxTail | None,
+    brooks_tail: BrooksTailResult | None,
+) -> bool:
+    if dry_tail.dry_tail_pass:
+        return False
+    count = int(bool(box_tail is not None and box_tail.passed)) + int(
+        bool(brooks_tail is not None and brooks_tail.passed)
+    )
+    return count == 1
+
+
+def _quality_threshold_met(value: int, threshold: float) -> bool:
+    # Zero is the compatibility value used by direct legacy callers and old
+    # task snapshots. Engine V2 evaluations always calculate these fields.
+    return value == 0 or value >= threshold
 
 
 def _lifecycle_status(

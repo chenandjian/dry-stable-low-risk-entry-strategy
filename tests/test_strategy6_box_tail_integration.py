@@ -12,6 +12,7 @@ from strategy6.models import (
     Strategy6Pattern,
     Strategy6Phase,
     Strategy6Score,
+    Strategy6SetupQuality,
     Strategy6Start,
     Strategy6Support,
     Strategy6TradePlan,
@@ -23,10 +24,10 @@ from strategy6.validation import resolve_strategy6_config
 @pytest.mark.parametrize(
     ("original_pass", "box_pass", "expected_path", "expected_pass", "expected_score"),
     [
-        (True, False, "ORIGINAL", True, 16),
-        (False, True, "BOX", True, 18),
-        (True, True, "BOTH", True, 18),
-        (False, False, "NONE", False, 16),
+        (True, False, "ORIGINAL", True, 10),
+        (False, True, "BOX", True, 3),
+        (True, True, "BOTH", True, 15),
+        (False, False, "NONE", False, 0),
     ],
 )
 def test_tail_paths_use_or_logic(original_pass, box_pass, expected_path, expected_pass, expected_score):
@@ -40,18 +41,18 @@ def test_tail_paths_use_or_logic(original_pass, box_pass, expected_path, expecte
     assert combined.score == expected_score
 
 
-def test_tail_score_uses_max_and_never_adds_compact_quality_score():
+def test_tail_score_uses_calibrated_path_evidence_and_not_raw_path_max():
     original = Strategy6DryTail(dry_tail_pass=True, dry_stable_score=16)
     box = Strategy6BoxTail(passed=True, score=18, quality_score=27)
 
     combined = combine_tail_paths(original, box)
 
-    assert combined.score == 18
-    assert combined.score != 34
+    assert combined.score == 15
+    assert combined.score != 18
     assert combined.score != 27
 
 
-def test_three_path_summary_preserves_legacy_tail_path_and_uses_max_score():
+def test_three_path_summary_preserves_legacy_tail_path_and_caps_path_evidence():
     original = Strategy6DryTail(dry_tail_pass=True, dry_stable_score=16)
     box = Strategy6BoxTail(enabled=True, passed=True, score=18)
     brooks = BrooksTailResult(enabled=True, passed=True, score=18)
@@ -64,7 +65,7 @@ def test_three_path_summary_preserves_legacy_tail_path_and_uses_max_score():
     assert combined.primary == "BROOKS"
     assert combined.multi_path_confirmed is True
     assert combined.passed_path_count == 3
-    assert combined.score == 18
+    assert combined.score == 15
 
 
 def test_brooks_only_uses_new_authoritative_fields_without_changing_legacy_path():
@@ -79,7 +80,7 @@ def test_brooks_only_uses_new_authoritative_fields_without_changing_legacy_path(
     assert combined.summary == "BROOKS"
     assert combined.primary == "BROOKS"
     assert combined.passed is True
-    assert combined.score == 17
+    assert combined.score == 0
 
 
 def test_strategy6_config_deep_merges_box_and_compact_defaults():
@@ -152,7 +153,7 @@ def _passing_context():
     return ind, start, phase, pattern, support, original, box, trade
 
 
-def test_box_path_removes_only_original_tail_rejects_from_hard_filter():
+def test_box_path_cannot_bypass_original_structural_tail_rejects():
     ind, start, phase, pattern, support, original, box, trade = _passing_context()
     cfg = resolve_strategy6_config({})
     reasons = hard_filter_reasons(
@@ -168,7 +169,7 @@ def test_box_path_removes_only_original_tail_rejects_from_hard_filter():
         box_tail=box,
     )
 
-    assert "TAIL_NEW_LOW" not in reasons
+    assert "TAIL_NEW_LOW" in reasons
     failed_reasons = hard_filter_reasons(
         [{"close": 10.0}, {"close": 10.0}],
         ind,
@@ -184,7 +185,24 @@ def test_box_path_removes_only_original_tail_rejects_from_hard_filter():
     assert "TAIL_NEW_LOW" in failed_reasons
 
 
-def test_box_only_path_can_reach_existing_candidate_classification_without_threshold_changes():
+def test_auxiliary_paths_cannot_bypass_severe_distribution_quality_risk():
+    ind, start, phase, pattern, support, original, box, trade = _passing_context()
+    reasons = hard_filter_reasons(
+        [{"close": 10.0}, {"close": 10.0}],
+        ind, start, phase, pattern, support, original, trade,
+        resolve_strategy6_config({}),
+        box_tail=box,
+        setup_quality=Strategy6SetupQuality(
+            score=5,
+            distribution_day_count=4,
+            risk_tags=["DISTRIBUTION_PRESSURE_HIGH"],
+        ),
+    )
+
+    assert "DISTRIBUTION_PRESSURE_HIGH" in reasons
+
+
+def test_box_only_path_is_watch_only_even_with_high_score():
     ind, start, phase, pattern, support, original, box, trade = _passing_context()
     cfg = resolve_strategy6_config({})
     score = score_strategy6(
@@ -192,7 +210,7 @@ def test_box_only_path_can_reach_existing_candidate_classification_without_thres
         box_tail=box,
     )
 
-    assert score.tail_score == 18
+    assert score.tail_score <= 15
     assert score.dry_stable_score == original.dry_stable_score
     candidate_type, _, lifecycle, _ = classify_candidate(
         ind,
@@ -207,8 +225,8 @@ def test_box_only_path_can_reach_existing_candidate_classification_without_thres
         cfg,
         box_tail=box,
     )
-    assert candidate_type == "READY_CANDIDATE"
-    assert lifecycle in {"READY", "BUY_ZONE"}
+    assert candidate_type == "WATCH_CANDIDATE"
+    assert lifecycle == "SETUP_FORMING"
 
 
 def test_brooks_only_waiting_trigger_cannot_emit_ready_or_buy_zone_semantics():
@@ -243,7 +261,7 @@ def test_brooks_only_waiting_trigger_cannot_emit_ready_or_buy_zone_semantics():
     assert "等待触发" in suggestion
 
 
-def test_brooks_only_ready_trigger_can_use_existing_ready_classification():
+def test_brooks_only_ready_trigger_remains_watch_without_core_confirmation():
     ind, start, phase, pattern, support, original, box, trade = _passing_context()
     brooks = BrooksTailResult(
         enabled=True,
@@ -267,9 +285,9 @@ def test_brooks_only_ready_trigger_can_use_existing_ready_classification():
         brooks_tail=brooks,
     )
 
-    assert candidate_type == "READY_CANDIDATE"
-    assert classification == "ready"
-    assert lifecycle in {"READY", "BUY_ZONE"}
+    assert candidate_type == "WATCH_CANDIDATE"
+    assert classification == "observe"
+    assert lifecycle == "SETUP_FORMING"
 
 
 def test_original_or_box_path_is_not_downgraded_by_unready_brooks_path():

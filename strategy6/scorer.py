@@ -10,6 +10,7 @@ from strategy6.models import (
     Strategy6Pattern,
     Strategy6Phase,
     Strategy6Score,
+    Strategy6SetupQuality,
     Strategy6Start,
     Strategy6Support,
     Strategy6TradePlan,
@@ -28,25 +29,37 @@ def score_strategy6(
     *,
     box_tail: Strategy6BoxTail | None = None,
     brooks_tail: BrooksTailResult | None = None,
+    setup_quality: Strategy6SetupQuality | None = None,
 ) -> Strategy6Score:
-    strong = _strong_start_score(start)
-    pattern_score = 20 if not config["pattern_filter_enabled"] else min(
-        20, pattern.pattern_score + (1 if phase.valid and pattern.pattern_score < 20 else 0)
+    quality = setup_quality or Strategy6SetupQuality()
+    legacy_strong = _strong_start_score(start)
+    strong = min(15, round(
+        (start.event_quality_score / 20 * 15)
+        if start.event_quality_score > 0 else (legacy_strong / 20 * 15)
+    ))
+    pattern_base = min(12, round(max(0, pattern.pattern_score) / 20 * 12))
+    phase_bonus = min(3, phase.tail_segmentation_score) if phase.valid else 0
+    pattern_score = pattern_base + phase_bonus
+    support_score = min(
+        15,
+        round(max(0, support.support_cluster_score) / 20 * 10)
+        + min(5, round(max(0, support.support_reaction_score) / 2)),
     )
-    support_score = min(20, support.support_cluster_score + (2 if support.support_test_count >= 2 else 1 if support.support_test_count else 0))
-    tail_score = min(20, combine_tail_paths(
+    tail_score = min(15, combine_tail_paths(
         dry_tail,
         box_tail or Strategy6BoxTail(),
         brooks_tail,
     ).score)
+    setup_quality_score = min(25, max(0, int(quality.score)))
     objective_rr_score = _rr_score(trade_plan.objective_rr_2)
-    relative_strength_risk_score = _relative_strength_risk_score(ind)
-    total = min(100, strong + pattern_score + support_score + tail_score + objective_rr_score + relative_strength_risk_score)
+    relative_strength_risk_score = _market_relative_strength_score(ind)
+    total = min(100, strong + pattern_score + support_score + tail_score + setup_quality_score + objective_rr_score + relative_strength_risk_score)
     reasons = [
         f"strong={strong}",
         f"pattern={pattern_score}",
         f"support={support_score}",
         f"tail={tail_score}",
+        f"setup_quality={setup_quality_score}",
         f"objective_rr={objective_rr_score}",
         f"rs_risk={relative_strength_risk_score}",
     ]
@@ -60,6 +73,10 @@ def score_strategy6(
         risk_reward_score=objective_rr_score,
         relative_strength_risk_score=relative_strength_risk_score,
         risk_control_score=relative_strength_risk_score,
+        setup_quality_score=setup_quality_score,
+        support_reaction_score=support.support_reaction_score,
+        path_evidence_score=tail_score,
+        score_model_version="S6_QUALITY_V2",
         total_score=total,
         score_reasons=reasons,
     )
@@ -105,3 +122,27 @@ def _relative_strength_risk_score(ind: Strategy6Indicators) -> int:
     if ind.market_filter_enabled and ind.market_filter_mode == "score_only" and ind.market_status in {"MARKET_WEAK", "MARKET_RISK"}:
         risk -= 2
     return max(0, rs + risk)
+
+
+def _market_relative_strength_score(ind: Strategy6Indicators) -> int:
+    score = 0
+    if ind.relative_strength_20_observed:
+        if ind.relative_strength_20 >= 0.15:
+            score += 3
+        elif ind.relative_strength_20 >= 0.08:
+            score += 2
+        elif ind.relative_strength_20 >= 0:
+            score += 1
+    if not ind.has_big_down_volume and ind.market_status not in {"MARKET_RISK"}:
+        score += 2
+    if "UPPER_SHADOW_PRESSURE" in ind.warn_tags:
+        score -= 2
+    elif "PRESSURE_NEAR_HIGH" in ind.warn_tags:
+        score -= 1
+    if (
+        ind.market_filter_enabled
+        and ind.market_filter_mode == "score_only"
+        and ind.market_status in {"MARKET_WEAK", "MARKET_RISK"}
+    ):
+        score -= 2
+    return max(0, min(5, score))

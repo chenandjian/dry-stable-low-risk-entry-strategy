@@ -51,6 +51,16 @@ def test_start_confirmed_candidate_keeps_phase_signal_date_when_plan_is_not_read
         "volume": 5_000_000,
         "amount": 2_000_000_000,
     })
+    start_close = rows[start_index]["close"]
+    for offset in (1, 2):
+        rows[start_index + offset].update({
+            "open": start_close * 0.997,
+            "high": start_close * 1.01,
+            "low": start_close * 0.99,
+            "close": start_close * 1.002,
+            "volume": 700_000,
+            "amount": 1_000_000_000,
+        })
 
     candidate = StrongVcpTailEngine({"strategy6": {"enable_market_filter": False}}).evaluate_at(
         rows, code="000001"

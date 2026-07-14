@@ -66,7 +66,7 @@ def segment_phases(rows: list[dict], start: Strategy6Start, config: dict) -> Str
 
 def _select_tail_start(rows: list[dict], start_index: int, config: dict) -> tuple[int, dict]:
     fallback_days = int(config["tail_window_days"])
-    fallback_start = max(start_index + 2, len(rows) - fallback_days)
+    fallback_start = min(len(rows) - 1, max(start_index + 2, len(rows) - fallback_days))
     fallback = {
         "status": "FALLBACK_FIXED" if config.get("dynamic_tail_enabled", True) else "FIXED_WINDOW",
         "score": 0,

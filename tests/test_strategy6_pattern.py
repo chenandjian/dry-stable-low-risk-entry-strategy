@@ -87,7 +87,7 @@ def test_detects_platform_when_range_is_tight_and_lows_do_not_fall():
     assert pattern.pattern_start_date < pattern.pattern_end_date
 
 
-def test_disabled_pattern_filter_is_score_neutral():
+def test_disabled_pattern_filter_does_not_fabricate_pattern_quality():
     cfg = resolve_strategy6_config({"strategy6": {"pattern_filter_enabled": False}})
     unknown = detect_pattern([], Strategy6Phase(), cfg)
 
@@ -102,7 +102,7 @@ def test_disabled_pattern_filter_is_score_neutral():
         cfg,
     )
 
-    assert score.pattern_score_component == 20
+    assert score.pattern_score_component == 0
 
 
 def test_pattern_pivot_excludes_signal_day_breakout_close():

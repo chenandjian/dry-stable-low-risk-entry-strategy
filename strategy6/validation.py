@@ -88,6 +88,10 @@ DEFAULT_STRATEGY6_CONFIG = {
     "ready_min_score": 85,
     "key_min_score": 75,
     "watch_min_score": 60,
+    "setup_quality_min_key": 14,
+    "setup_quality_min_ready": 18,
+    "support_reaction_min_key": 3,
+    "support_reaction_min_ready": 5,
     "box_tail": {
         "enabled": True,
         "min_box_days": 5,
@@ -283,7 +287,11 @@ def resolve_strategy6_config(config: dict | None) -> dict:
         "absolute_max_pullback_20d", "tail_min_return_5", "tail_min_return_3", "big_down_return",
     ):
         _validate_number(raw, key)
-    for key in ("ready_min_score", "key_min_score", "watch_min_score"):
+    for key in (
+        "ready_min_score", "key_min_score", "watch_min_score",
+        "setup_quality_min_key", "setup_quality_min_ready",
+        "support_reaction_min_key", "support_reaction_min_ready",
+    ):
         _validate_number_range(raw, key, 0, 100)
     raw["enable_market_filter"] = bool(raw.get("enable_market_filter", False))
     if raw.get("market_filter_mode") not in {"strict", "downgrade", "score_only"}:
@@ -310,6 +318,10 @@ def resolve_strategy6_config(config: dict | None) -> dict:
         raise ValueError("rr2 thresholds must satisfy watch <= key <= ready")
     if not raw["watch_min_score"] <= raw["key_min_score"] <= raw["ready_min_score"]:
         raise ValueError("score thresholds must satisfy watch <= key <= ready")
+    if raw["setup_quality_min_key"] > raw["setup_quality_min_ready"]:
+        raise ValueError("setup quality thresholds must satisfy key <= ready")
+    if raw["support_reaction_min_key"] > raw["support_reaction_min_ready"]:
+        raise ValueError("support reaction thresholds must satisfy key <= ready")
     _validate_box_tail_config(raw["box_tail"])
     _validate_brooks_tail_config(raw["brooks_tail"])
     return raw

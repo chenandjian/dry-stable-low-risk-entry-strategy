@@ -46,13 +46,20 @@ def combine_tail_paths(
         "BROOKS": int(brooks.score),
     }
     if paths:
-        score = max(scores[name] for name in paths)
         priority = {"ORIGINAL": 0, "BOX": 1, "BROOKS": 2}
         primary = max(paths, key=lambda name: (scores[name], priority[name]))
     else:
-        # Preserve the pre-feature diagnostic score when no path passes.
-        score = int(original.dry_stable_score)
         primary = "NONE"
+    score = 0
+    if original_pass:
+        score += 10
+    if box_pass:
+        score += 3
+    if brooks_pass and bool(getattr(brooks.trade_trigger, "ready", False)):
+        score += 2
+    if len(paths) >= 2:
+        score += 2
+    score = min(15, score)
     summary = paths[0] if len(paths) == 1 else "MULTI" if paths else "NONE"
     return Strategy6TailPaths(
         original_pass=original_pass,
