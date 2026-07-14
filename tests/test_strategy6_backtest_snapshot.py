@@ -1,4 +1,4 @@
-from strategy6.backtest.snapshot import build_setup_id, rebuild_stock_signals
+from strategy6.backtest.snapshot import authoritative_tail_paths, build_setup_id, rebuild_stock_signals
 from strategy6.engine import StrongVcpTailEngine
 
 
@@ -175,13 +175,49 @@ def test_asof_rebuild_does_not_repeat_last_signal_when_stock_has_no_bar_on_marke
     assert [call[0] for call in engine.calls] == ["2025-01-05"]
 
 
+def test_authoritative_paths_derive_flag_only_brooks_before_legacy_none():
+    assert authoritative_tail_paths({
+        "tail_path": "NONE",
+        "brooks_tail_pass": True,
+    }) == ["BROOKS"]
+
+
+def test_authoritative_paths_derive_all_three_pass_flags_in_canonical_order():
+    assert authoritative_tail_paths({
+        "tail_path": "NONE",
+        "tail_paths": None,
+        "original_tail_pass": True,
+        "box_tail_pass": True,
+        "brooks_tail_pass": True,
+    }) == ["ORIGINAL", "BOX", "BROOKS"]
+
+
+def test_authoritative_paths_derive_multi_path_flags_when_tail_paths_is_invalid():
+    assert authoritative_tail_paths({
+        "tail_path": "BOX",
+        "tail_paths": ["UNKNOWN_PATH"],
+        "original_tail_pass": True,
+        "box_tail_pass": False,
+        "brooks_tail_pass": True,
+    }) == ["ORIGINAL", "BROOKS"]
+
+
+def test_authoritative_paths_keep_explicit_empty_when_all_pass_flags_are_false():
+    assert authoritative_tail_paths({
+        "tail_path": "BOTH",
+        "tail_paths": [],
+        "original_tail_pass": False,
+        "box_tail_pass": False,
+        "brooks_tail_pass": False,
+    }) == []
+
+
 def test_brooks_only_snapshot_is_kept_without_extending_legacy_tail_path_enum():
     class BrooksOnlyEngine(CapturingEngine):
         def evaluate_at(self, rows, **kwargs):
             return FakeEvaluation(
                 rows[-1]["date"],
                 tail_path="NONE",
-                tail_paths=["BROOKS"],
                 tail_path_summary="BROOKS",
                 tail_primary_path="BROOKS",
                 passed_path_count=1,
@@ -197,7 +233,7 @@ def test_brooks_only_snapshot_is_kept_without_extending_legacy_tail_path_enum():
 
     assert len(signals) == 1
     assert signals[0].tail_path == "NONE"
-    assert signals[0].snapshot["tail_paths"] == ["BROOKS"]
+    assert authoritative_tail_paths(signals[0].snapshot) == ["BROOKS"]
 
 
 def test_asof_brooks_trigger_waits_for_next_visible_session_and_ignores_future_bar():

@@ -20,16 +20,33 @@ def authoritative_tail_paths(snapshot: dict) -> list[str]:
                 raw_paths = json.loads(raw_paths)
             except (TypeError, ValueError):
                 raw_paths = []
-        if not isinstance(raw_paths, (list, tuple, set)):
-            return []
-        selected = {str(value).upper() for value in raw_paths}
-        return [path for path in _PATH_ORDER if path in selected]
+        if isinstance(raw_paths, (list, tuple, set)):
+            selected = {str(value).upper() for value in raw_paths}
+            paths = [path for path in _PATH_ORDER if path in selected]
+            if paths:
+                return paths
+    flag_by_path = {
+        "ORIGINAL": "original_tail_pass",
+        "BOX": "box_tail_pass",
+        "BROOKS": "brooks_tail_pass",
+    }
+    if any(key in snapshot for key in flag_by_path.values()):
+        return [
+            path for path in _PATH_ORDER
+            if _pass_flag(snapshot.get(flag_by_path[path]))
+        ]
     legacy_path = str(snapshot.get("tail_path") or "NONE").upper()
     return {
         "ORIGINAL": ["ORIGINAL"],
         "BOX": ["BOX"],
         "BOTH": ["ORIGINAL", "BOX"],
     }.get(legacy_path, [])
+
+
+def _pass_flag(value) -> bool:
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "on"}
+    return bool(value)
 
 
 def brooks_setup_types(snapshot: dict) -> list[str]:

@@ -1,4 +1,8 @@
-from strategy6.backtest.experiments import filter_experiment_signals, summarize_incremental_value
+from strategy6.backtest.experiments import (
+    filter_experiment_signals,
+    group_authoritative_path_metrics,
+    summarize_incremental_value,
+)
 from strategy6.backtest.runner import _derive_experiment_metrics, build_phase_selection_results
 
 
@@ -41,7 +45,7 @@ def test_e6_to_e10_use_authoritative_paths_and_brooks_evidence_without_changing_
 
     assert [s["code"] for s in filter_experiment_signals(signals, "E6_BROOKS_ONLY")] == ["D", "F"]
     assert [s["code"] for s in filter_experiment_signals(signals, "E7_ORIGINAL_OR_BOX_OR_BROOKS")] == [
-        "A", "B", "C", "D", "E",
+        "A", "B", "C", "D", "E", "F",
     ]
     assert [s["code"] for s in filter_experiment_signals(signals, "E8_MULTI_PATH_ONLY")] == ["C", "E"]
     assert [s["code"] for s in filter_experiment_signals(
@@ -53,6 +57,13 @@ def test_e6_to_e10_use_authoritative_paths_and_brooks_evidence_without_changing_
 
     assert [s["code"] for s in filter_experiment_signals(SIGNALS, "E0_ORIGINAL_BASELINE")] == ["A", "C"]
     assert [s["code"] for s in filter_experiment_signals(SIGNALS, "E1_DUAL_DEFAULT")] == ["A", "B", "C"]
+    metrics = group_authoritative_path_metrics([{
+        **flag_only_brooks,
+        "r_multiple": 1.5,
+        "net_return": 0.08,
+        "net_profit": 800,
+    }])
+    assert metrics["BROOKS"]["trades"] == 1
 
 
 def test_runner_adds_parallel_three_path_and_brooks_breakdowns_without_overwriting_legacy_metrics():
