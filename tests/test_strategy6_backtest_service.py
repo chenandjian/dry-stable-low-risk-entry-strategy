@@ -113,6 +113,114 @@ def test_brooks_only_watch_signal_does_not_consume_setup_before_cross_day_trade_
     assert result["orders"][0]["tail_paths"] == ["BROOKS"]
 
 
+def test_brooks_only_scope_excludes_original_and_multi_path_signals_before_execution():
+    class ScopedEvaluation:
+        def __init__(self, date):
+            self.date = date
+
+        def to_candidate_dict(self):
+            date = self.date
+            if date.endswith("01"):
+                paths = ["ORIGINAL"]
+            elif date.endswith("02"):
+                paths = ["ORIGINAL", "BROOKS"]
+            else:
+                paths = ["BROOKS"]
+            return {
+                "code": "000001", "name": "样本", "evaluation_date": date,
+                "candidate_type": "KEY_CANDIDATE", "total_score": 88,
+                "tail_path": "NONE", "tail_paths": paths,
+                "tail_path_summary": "MULTI" if len(paths) > 1 else paths[0],
+                "tail_primary_path": paths[-1], "passed_path_count": len(paths),
+                "tail_pass": True, "original_tail_pass": "ORIGINAL" in paths,
+                "box_tail_pass": False, "brooks_tail_pass": "BROOKS" in paths,
+                "brooks_trade_ready": "BROOKS" in paths,
+                "brooks_status": "BROOKS_SUPPORT_READY",
+                "brooks_result": {"structure": {"setup_types": ["MICRO_DOUBLE_BOTTOM"]}},
+                "start_date": "2024-12-01", "pattern_type": "VCP", "pivot_price": 10.5,
+                "buy_zone_low": 9.8, "buy_zone_high": 10.2,
+                "suggested_limit_price": 10.0, "stop_loss_price": 9.5,
+                "objective_target_2": 11.5,
+            }
+
+    class ScopedEngine:
+        def evaluate_at(self, rows, **kwargs):
+            return ScopedEvaluation(rows[-1]["date"])
+
+    dates = ["2025-01-01", "2025-01-02", "2025-01-03"]
+    result = run_parameter_research(
+        parameter_set_id="s6ps-brooks-only-scope",
+        data_by_code={"000001": {"name": "样本", "rows": _rows()}},
+        evaluation_dates=dates,
+        market_data_by_symbol={"sh000001": _rows()},
+        backtest_config=resolve_backtest_config({}),
+        engine_factory=lambda: ScopedEngine(),
+        minimum_history=1,
+        oos_start="2026-01-01",
+        signal_scope="BROOKS_ONLY",
+    )
+
+    assert [item["evaluation_date"] for item in result["signals"]] == ["2025-01-03"]
+    assert all(item["tail_paths"] == ["BROOKS"] for item in result["signals"])
+    assert all(item["tail_paths"] == ["BROOKS"] for item in result["orders"])
+    assert all(item["tail_paths"] == ["BROOKS"] for item in result["trades"])
+
+
+def test_brooks_path_scope_includes_overlap_but_requires_its_own_trade_trigger():
+    snapshots = [
+        {
+            "evaluation_date": "2025-01-01", "tail_paths": ["ORIGINAL"],
+            "brooks_trade_ready": False,
+        },
+        {
+            "evaluation_date": "2025-01-02", "tail_paths": ["ORIGINAL", "BROOKS"],
+            "brooks_trade_ready": False,
+        },
+        {
+            "evaluation_date": "2025-01-03", "tail_paths": ["ORIGINAL", "BROOKS"],
+            "brooks_trade_ready": True,
+        },
+    ]
+
+    class Evaluation:
+        def __init__(self, snapshot):
+            self.snapshot = snapshot
+
+        def to_candidate_dict(self):
+            paths = self.snapshot["tail_paths"]
+            return {
+                "code": "000001", "name": "样本",
+                "candidate_type": "KEY_CANDIDATE", "total_score": 88,
+                "tail_path": "NONE", "tail_paths": paths,
+                "original_tail_pass": "ORIGINAL" in paths, "box_tail_pass": False,
+                "brooks_tail_pass": "BROOKS" in paths,
+                "brooks_trade_ready": self.snapshot["brooks_trade_ready"],
+                "brooks_status": "BROOKS_SUPPORT_READY",
+                "brooks_result": {"structure": {"setup_types": ["MICRO_DOUBLE_BOTTOM"]}},
+                "start_date": self.snapshot["evaluation_date"], "pattern_type": "VCP",
+                "pivot_price": 10.5, "buy_zone_low": 9.8, "buy_zone_high": 10.2,
+                "suggested_limit_price": 10.0, "stop_loss_price": 9.5,
+                "objective_target_2": 11.5,
+            }
+
+    class Engine:
+        def evaluate_at(self, rows, **kwargs):
+            date = rows[-1]["date"]
+            return Evaluation(next(item for item in snapshots if item["evaluation_date"] == date))
+
+    result = run_parameter_research(
+        parameter_set_id="s6ps-brooks-path-scope",
+        data_by_code={"000001": {"name": "样本", "rows": _rows()}},
+        evaluation_dates=[item["evaluation_date"] for item in snapshots],
+        market_data_by_symbol={"sh000001": _rows()},
+        backtest_config=resolve_backtest_config({}), engine_factory=lambda: Engine(),
+        minimum_history=1, oos_start="2026-01-01", signal_scope="BROOKS_PATH",
+    )
+
+    assert [item["evaluation_date"] for item in result["signals"]] == ["2025-01-02", "2025-01-03"]
+    assert [item["signal_date"] for item in result["orders"]] == ["2025-01-03"]
+
+
 def test_service_group_metrics_use_only_closed_trades(monkeypatch):
     snapshot = {
         "tail_path": "BOTH", "tail_paths": ["ORIGINAL", "BOX", "BROOKS"],

@@ -15,6 +15,7 @@ def build_parser() -> argparse.ArgumentParser:
     sub = parser.add_subparsers(dest="command", required=True)
     for command in (
         "audit-data", "fetch-index", "baseline", "experiments", "optimize",
+        "brooks-optimize", "brooks-validate",
         "comprehensive-plan", "comprehensive-run", "comprehensive-status",
         "comprehensive-report",
     ):
@@ -29,7 +30,16 @@ def build_parser() -> argparse.ArgumentParser:
         child.add_argument("--campaign-id", default="s6opt-20260712")
         child.add_argument("--stage-id", default="")
         child.add_argument("--max-joint-trials", type=int, default=24)
-        child.add_argument("--evaluation-step", type=int, default=5)
+        child.add_argument(
+            "--evaluation-step",
+            type=int,
+            default=(
+                20 if command == "brooks-optimize"
+                else 10 if command == "brooks-validate"
+                else 5
+            ),
+        )
+        child.add_argument("--trial-index", type=int, default=1)
         child.add_argument(
             "--workers",
             type=int,

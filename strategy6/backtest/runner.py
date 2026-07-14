@@ -49,6 +49,74 @@ OPTIMIZATION_SPACE = {
     "box_tail.tail_volume_ratio_max": [0.60, 0.70, 0.75, 0.80],
 }
 
+# Brooks-only research deliberately freezes original-tail, box-tail, market,
+# execution and portfolio parameters. This prevents unrelated paths from
+# improving the objective while a Brooks threshold is being selected.
+BROOKS_OPTIMIZATION_SPACE = {
+    "brooks_tail.selling_pressure.max_strong_bear_bar_count": [0, 1, 2],
+    "brooks_tail.price_stability.close_range_max": [0.06, 0.08, 0.10],
+    "brooks_tail.volume_dry.tail_volume_ratio_max": [0.65, 0.75, 0.85],
+    "brooks_tail.support.support_distance_pct": [0.02, 0.03, 0.04],
+    "brooks_tail.trade_trigger.max_trigger_distance_atr": [1.0, 1.5, 2.0],
+    "brooks_tail.scoring.pass_score_min": [12, 14, 16],
+    "brooks_tail.second_entry.low_similarity_tolerance": [0.02, 0.03],
+    "brooks_tail.second_entry.signal_bar_close_position_min": [0.45, 0.55],
+    "brooks_tail.second_entry.signal_bar_max_body_ratio": [0.03, 0.04],
+    "brooks_tail.failed_breakout.recovery_days": [2, 3],
+    "brooks_tail.failed_breakout.max_break_distance_atr": [0.8, 1.2],
+    "brooks_tail.price_stability.atr_contraction_max": [0.8, 1.0],
+}
+
+_BROOKS_RELAXED_VALUES = {
+    "brooks_tail.selling_pressure.max_strong_bear_bar_count": 2,
+    "brooks_tail.price_stability.close_range_max": 0.10,
+    "brooks_tail.volume_dry.tail_volume_ratio_max": 0.85,
+    "brooks_tail.support.support_distance_pct": 0.04,
+    "brooks_tail.trade_trigger.max_trigger_distance_atr": 2.0,
+    "brooks_tail.scoring.pass_score_min": 12,
+}
+
+_BROOKS_STRUCTURAL_RELAXED_VALUES = {
+    "brooks_tail.second_entry.low_similarity_tolerance": 0.03,
+    "brooks_tail.second_entry.signal_bar_close_position_min": 0.45,
+    "brooks_tail.second_entry.signal_bar_max_body_ratio": 0.04,
+    "brooks_tail.failed_breakout.recovery_days": 3,
+    "brooks_tail.failed_breakout.max_break_distance_atr": 1.2,
+    "brooks_tail.price_stability.atr_contraction_max": 1.0,
+}
+
+
+def build_brooks_trial_configs(base: dict, *, max_trials: int) -> list[dict]:
+    """Build interpretable baseline, one-at-a-time and joint relaxations."""
+    if max_trials < 1:
+        return []
+    configs = [copy.deepcopy(base)]
+    for key, value in _BROOKS_RELAXED_VALUES.items():
+        trial = copy.deepcopy(base)
+        _set_config_value(trial, key, value)
+        configs.append(trial)
+    primary_joint = copy.deepcopy(base)
+    for key, value in _BROOKS_RELAXED_VALUES.items():
+        _set_config_value(primary_joint, key, value)
+    configs.append(primary_joint)
+    for key, value in _BROOKS_STRUCTURAL_RELAXED_VALUES.items():
+        trial = copy.deepcopy(base)
+        _set_config_value(trial, key, value)
+        configs.append(trial)
+    full_joint = copy.deepcopy(primary_joint)
+    for key, value in _BROOKS_STRUCTURAL_RELAXED_VALUES.items():
+        _set_config_value(full_joint, key, value)
+    configs.append(full_joint)
+    return configs[:max_trials]
+
+
+def _set_config_value(config: dict, dotted_key: str, value) -> None:
+    current = config
+    parts = dotted_key.split(".")
+    for part in parts[:-1]:
+        current = current.setdefault(part, {})
+    current[parts[-1]] = value
+
 _STOCK_WORKER_CONTEXT: dict = {}
 
 
@@ -73,6 +141,7 @@ def _evaluate_stock_payload(payload: dict) -> dict:
             }),
             minimum_history=context["minimum_history"],
             oos_start=context["oos_start"],
+            signal_scope=context.get("signal_scope", "ALL"),
         )
         return {"code": code, "name": name, "status": "COMPLETED", "result": result}
     except Exception as exc:
@@ -160,6 +229,86 @@ def run_cli_research(args, coverage) -> int:
             }
             write_backtest_report(final_result, args.output)
         return 0
+    if args.command == "brooks-validate":
+        base = copy.deepcopy(root_config.get("strategy6") or {})
+        configs = build_brooks_trial_configs(base, max_trials=15)
+        trial_index = int(args.trial_index)
+        if not 1 <= trial_index <= len(configs):
+            raise ValueError(f"Brooks validation trial index must be 1..{len(configs)}")
+        args.run_mode = "BROOKS_VALIDATION"
+        result = run_local_parameter_set(
+            experiment_id=f"BROOKS_VALIDATION_{trial_index:04d}",
+            strategy_config=configs[trial_index - 1],
+            backtest_config=backtest_config,
+            coverage=coverage,
+            args=args,
+            signal_scope="BROOKS_PATH",
+        )
+        result["recommendation"] = {
+            "decision": "VALIDATION_ONLY_NO_PARAMETER_WRITE",
+            "production_config_modified": False,
+        }
+        write_backtest_report(result, args.output)
+        return 0
+    if args.command == "brooks-optimize":
+        # Parameter selection is locked to the 2023-2024 training window. The
+        # caller controls anchor spacing; each anchor includes the following
+        # three trading days so short-lived Brooks triggers remain observable.
+        args.run_mode = "BROOKS_COARSE"
+        base = copy.deepcopy(root_config.get("strategy6") or {})
+        configs = build_brooks_trial_configs(base, max_trials=max(1, int(args.max_trials)))
+        trials = []
+        results = []
+        for index, strategy_config in enumerate(configs, start=1):
+            result = run_local_parameter_set(
+                experiment_id=f"BROOKS_ONLY_{index:04d}",
+                strategy_config=strategy_config,
+                backtest_config=backtest_config,
+                coverage=coverage,
+                args=args,
+                signal_scope="BROOKS_PATH",
+            )
+            train = ((result.get("phase_results") or {}).get("TRAIN") or {}).get("selection_metrics") or {}
+            validation = ((result.get("phase_results") or {}).get("VALIDATION") or {}).get("selection_metrics") or {}
+            constraints = check_constraints(train, {
+                "min_total_trades": 20,
+                "min_expectancy_r": 0.05,
+                "min_profit_factor": 1.10,
+                "max_drawdown_pct": 0.25,
+            })
+            robust = calculate_robust_score(train)
+            trial = {
+                "trial_index": index,
+                "parameter_set_id": result["parameter_set_id"],
+                "baseline": index == 1,
+                "train": train,
+                "validation": validation,
+                **robust,
+                "constraint_passed": constraints["passed"] and _is_research_run_complete(result["run"]["status"]),
+                "constraint_checks": constraints["checks"],
+                "brooks_parameters": strategy_config.get("brooks_tail", {}),
+            }
+            trials.append(trial)
+            results.append(result)
+        eligible = [item for item in trials if item["constraint_passed"]]
+        eligible.sort(key=lambda item: (item["robust_score"], float((item["validation"] or {}).get("expectancy_r", 0))), reverse=True)
+        selected = eligible[0] if eligible else trials[0]
+        selected_result = results[int(selected["trial_index"]) - 1]
+        selected_result["parameter_trials"] = trials
+        selected_result["optimization"] = {
+            "scope": "BROOKS_PATH",
+            "eligible_trials": len(eligible),
+            "selected_parameter_set_id": selected["parameter_set_id"],
+            "recommendation": "CONDITIONAL" if eligible else "KEEP_BASELINE_INSUFFICIENT_DATA",
+            "production_config_modified": False,
+            "oos_used_for_selection": False,
+        }
+        selected_result["recommendation"] = {
+            "decision": "MANUAL_APPROVAL_REQUIRED",
+            "production_config_modified": False,
+        }
+        write_backtest_report(selected_result, args.output)
+        return 0
     raise ValueError(f"unsupported command: {args.command}")
 
 
@@ -170,22 +319,23 @@ def run_local_parameter_set(
     backtest_config: dict,
     coverage,
     args,
+    signal_scope: str = "ALL",
 ) -> dict:
     audit = audit_database(args.db)
     data_version = str(getattr(args, "data_version_override", "")) or _database_version(audit, coverage.coverage)
     parameter = ParameterSet.create({"strategy6": strategy_config})
     run_mode = str(getattr(args, "run_mode", "LEGACY_DAILY"))
     evaluation_step = int(getattr(args, "evaluation_step", 1))
-    research_context = {}
+    research_context = {"signal_scope": signal_scope}
     if run_mode != "LEGACY_DAILY":
-        research_context = {
+        research_context.update({
             "run_mode": run_mode,
             "stage_id": str(getattr(args, "stage_id", "")),
             "parent_parameter_set_id": str(getattr(args, "parent_parameter_set_id", "")),
             "evaluation_step": evaluation_step,
             "start_date": args.start,
             "end_date": args.end,
-        }
+        })
     run = BacktestRunSpec.create(
         experiment_id=experiment_id,
         strategy_version=STRATEGY6_VERSION,
@@ -247,6 +397,7 @@ def run_local_parameter_set(
         "strategy_config": strategy_config,
         "minimum_history": minimum_history,
         "oos_start": args.oos_start,
+        "signal_scope": signal_scope,
     }
     row_counts = dict(conn.execute(
         "SELECT code, COUNT(*) FROM daily_ohlc WHERE date<=? GROUP BY code",

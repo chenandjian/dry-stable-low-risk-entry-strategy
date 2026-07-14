@@ -38,6 +38,18 @@ def build_evaluation_schedule(
         all_dates = sorted({date for date in market_calendar if effective_start <= date <= effective_end})
         dates = tuple(all_dates[::evaluation_step])
         final_eligible = False
+    elif mode == "BROOKS_COARSE":
+        effective_start = max(start, "2023-01-01")
+        effective_end = min(end, "2024-12-31", _day_before(oos_start))
+        all_dates = sorted({date for date in market_calendar if effective_start <= date <= effective_end})
+        dates = _sample_trigger_windows(all_dates, evaluation_step)
+        final_eligible = False
+    elif mode == "BROOKS_VALIDATION":
+        effective_start = max(start, "2025-01-01")
+        effective_end = min(end, "2025-12-31", _day_before(oos_start))
+        all_dates = sorted({date for date in market_calendar if effective_start <= date <= effective_end})
+        dates = _sample_trigger_windows(all_dates, evaluation_step)
+        final_eligible = False
     elif mode == "FULL_CONFIRMATION":
         if evaluation_step != 1:
             raise ValueError("full confirmation must use a daily evaluation step")
@@ -46,7 +58,10 @@ def build_evaluation_schedule(
         dates = tuple(sorted({date for date in market_calendar if effective_start <= date <= effective_end}))
         final_eligible = True
     else:
-        raise ValueError("mode must be COARSE_TRAIN or FULL_CONFIRMATION")
+        raise ValueError(
+            "mode must be COARSE_TRAIN, BROOKS_COARSE, "
+            "BROOKS_VALIDATION or FULL_CONFIRMATION"
+        )
     if effective_start > effective_end:
         raise ValueError("evaluation schedule has no legal date range")
     if not dates:
@@ -59,6 +74,14 @@ def build_evaluation_schedule(
         dates=dates,
         final_eligible=final_eligible,
     )
+
+
+def _sample_trigger_windows(all_dates: list[str], evaluation_step: int) -> tuple[str, ...]:
+    """Sample setup anchors while preserving the following 3-day trigger life."""
+    selected: set[str] = set()
+    for anchor in range(0, len(all_dates), evaluation_step):
+        selected.update(all_dates[anchor:anchor + 4])
+    return tuple(date for date in all_dates if date in selected)
 
 
 def _day_before(value: str) -> str:

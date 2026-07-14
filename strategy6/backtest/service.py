@@ -7,7 +7,12 @@ from strategy6.backtest.data import market_calendar_from_indexes
 from strategy6.backtest.execution import simulate_frozen_trade
 from strategy6.backtest.experiments import group_authoritative_path_metrics, group_brooks_structure_metrics
 from strategy6.backtest.metrics import calculate_concentration, calculate_trade_metrics, group_trade_metrics
-from strategy6.backtest.snapshot import is_trade_ready_snapshot, path_metadata, rebuild_stock_signals
+from strategy6.backtest.snapshot import (
+    authoritative_tail_paths,
+    is_trade_ready_snapshot,
+    path_metadata,
+    rebuild_stock_signals,
+)
 
 
 def run_parameter_research(
@@ -20,7 +25,10 @@ def run_parameter_research(
     engine_factory,
     minimum_history: int,
     oos_start: str,
+    signal_scope: str = "ALL",
 ) -> dict:
+    if signal_scope not in {"ALL", "BROOKS_ONLY", "BROOKS_PATH"}:
+        raise ValueError(f"unsupported Strategy6 backtest signal scope: {signal_scope}")
     allowed_dates = sorted(set(date for date in evaluation_dates if date < oos_start))
     market_dates = market_calendar_from_indexes(market_data_by_symbol)
     signals = []
@@ -52,8 +60,17 @@ def run_parameter_research(
                 "name": signal.name,
                 "evaluation_date": signal.evaluation_date,
             }
+            paths = authoritative_tail_paths(signal_record)
+            if signal_scope == "BROOKS_ONLY" and paths != ["BROOKS"]:
+                continue
+            if signal_scope == "BROOKS_PATH" and "BROOKS" not in paths:
+                continue
             signals.append(signal_record)
-            if not is_trade_ready_snapshot(signal.snapshot):
+            if signal_scope in {"BROOKS_ONLY", "BROOKS_PATH"}:
+                trade_ready = bool(signal.snapshot.get("brooks_trade_ready"))
+            else:
+                trade_ready = is_trade_ready_snapshot(signal.snapshot)
+            if not trade_ready:
                 continue
             if signal.setup_id in seen_setups:
                 continue
