@@ -56,11 +56,18 @@ def evaluate_strong_start(rows: list[dict], ind: Strategy6Indicators, config: di
             limit_up_pct=get_limit_up_pct(code),
             days_since_start=len(rows) - idx - 1,
         )
-        candidate.start_grade = _grade(candidate, ind) if start_type in PASSING_START_TYPES else "NONE"
-        # A newer valid S/A event restarts phase segmentation and lifecycle.
-        # This prevents an old high-ranked limit-up from masking a fresh start.
-        if candidate.start_type in PASSING_START_TYPES and candidate.start_grade in {"S", "A"}:
-            best = candidate
+        if start_type in PASSING_START_TYPES:
+            _apply_event_quality(candidate, rows, idx, prev["close"])
+            candidate.start_grade = _grade(candidate.event_quality_score)
+        # Prefer event quality over recency. Recency only wins when the two
+        # events are close enough in quality to represent the same setup.
+        if (
+            candidate.start_type in PASSING_START_TYPES
+            and candidate.start_grade in {"S", "A"}
+            and not candidate.failure_reasons
+        ):
+            if _prefer_event(candidate, best):
+                best = candidate
         elif best.start_type not in PASSING_START_TYPES and _rank(candidate) >= _rank(best):
             best = candidate
     best.high_trigger = _high_trigger(ind, config)
@@ -90,25 +97,91 @@ def _momentum_start(rows: list[dict], ind: Strategy6Indicators) -> tuple[str, in
     return "NONE", -1
 
 
-def _grade(start: Strategy6Start, ind: Strategy6Indicators) -> str:
-    if (
-        ind.return_20 >= 0.40
-        or ind.return_10 >= 0.25
-        or ind.return_5 >= 0.15
-        or start.start_type in {"VOLUME_LIMIT_UP", "ONE_WORD_LIMIT_UP"}
-        or (start.start_day_return >= 0.09 and start.start_day_volume_ratio >= 2.5)
-    ):
+def _grade(event_quality_score: int) -> str:
+    if event_quality_score >= 16:
         return "S"
-    if (
-        ind.return_20 >= 0.30
-        or ind.return_10 >= 0.20
-        or ind.return_5 >= 0.12
-        or start.start_type in {"NORMAL_STRONG_BREAKOUT", "LOW_VOLUME_LIMIT_UP"}
-    ):
+    if event_quality_score >= 11:
         return "A"
-    if ind.return_20 >= 0.20 or ind.return_10 >= 0.12 or ind.return_5 >= 0.08:
+    if event_quality_score >= 8:
         return "B"
     return "NONE"
+
+
+def _apply_event_quality(
+    start: Strategy6Start,
+    rows: list[dict],
+    idx: int,
+    previous_close: float,
+) -> None:
+    start_close = float(rows[idx]["close"])
+    follow = rows[idx + 1:min(len(rows), idx + 6)]
+    last_close = float(follow[-1]["close"]) if follow else start_close
+    observed_closes = [start_close, *(float(row["close"]) for row in follow)]
+    max_close = max(observed_closes)
+    max_gain = _return_between(previous_close, max_close)
+    retained_gain = _return_between(previous_close, last_close)
+    retention = retained_gain / max_gain if max_gain > 0 else 0.0
+    start.follow_through_return_5 = round(_return_between(start_close, last_close), 6)
+    start.gain_retention_ratio = round(max(0.0, min(1.5, retention)), 6)
+    start.max_close_drawdown_5 = round(
+        min(0.0, min(_return_between(start_close, close) for close in observed_closes)),
+        6,
+    )
+
+    failures: list[str] = []
+    if start.start_type != "ONE_WORD_LIMIT_UP" and follow and min(observed_closes[1:]) < start.start_low:
+        failures.append("START_LOW_BROKEN")
+    if len(follow) >= 3 and last_close <= previous_close * 1.005:
+        failures.append("START_GAIN_FULLY_RETRACED")
+    prior = rows[idx]
+    for row in follow:
+        day_return = _return_between(float(prior["close"]), float(row["close"]))
+        if day_return <= -0.04 and float(row["volume"]) >= float(prior["volume"]) * 1.2:
+            failures.append("START_FOLLOW_THROUGH_DISTRIBUTION")
+            break
+        prior = row
+    start.failure_reasons = failures
+
+    type_score = {
+        "NORMAL_STRONG_BREAKOUT": 6,
+        "LOW_VOLUME_LIMIT_UP": 7,
+        "VOLUME_LIMIT_UP": 8,
+        "ONE_WORD_LIMIT_UP": 6,
+    }.get(start.start_type, 0)
+    return_score = 3 if start.start_day_return >= 0.09 else 2 if start.start_day_return >= 0.07 else 1
+    volume_score = 3 if start.start_day_volume_ratio >= 2.5 else 2 if start.start_day_volume_ratio >= 2.0 else 1
+    close_score = 2 if start.start_day_close_position >= 0.75 else 1 if start.start_day_close_position >= 0.65 else 0
+    attention_score = 2 if start.start_day_self_amount_percentile >= 0.90 else 1 if start.start_day_self_amount_percentile >= 0.80 else 0
+    if not follow:
+        retention_score = 1
+    elif start.gain_retention_ratio >= 0.80:
+        retention_score = 4
+    elif start.gain_retention_ratio >= 0.60:
+        retention_score = 3
+    elif start.gain_retention_ratio >= 0.40:
+        retention_score = 1
+    else:
+        retention_score = 0
+    follow_score = 1 if start.follow_through_return_5 >= 0.03 else 0
+    failure_penalty = min(6, len(failures) * 3)
+    start.event_quality_score = max(0, min(
+        20,
+        type_score + return_score + volume_score + close_score
+        + attention_score + retention_score + follow_score - failure_penalty,
+    ))
+
+
+def _prefer_event(candidate: Strategy6Start, current: Strategy6Start) -> bool:
+    if current.start_type not in PASSING_START_TYPES or current.failure_reasons:
+        return True
+    quality_diff = candidate.event_quality_score - current.event_quality_score
+    if quality_diff > 2:
+        return True
+    if quality_diff < -2:
+        return False
+    if candidate.start_date != current.start_date:
+        return candidate.start_date > current.start_date
+    return _rank(candidate) > _rank(current)
 
 
 def _high_trigger(ind: Strategy6Indicators, config: dict) -> str:

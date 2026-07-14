@@ -931,6 +931,73 @@ def test_newer_strong_start_restarts_the_setup_event():
     assert start.days_since_start == 7
 
 
+def test_strong_start_grade_uses_event_local_data_not_evaluation_returns():
+    data = [_row(i, close=10.0, volume=1_000_000, amount=500_000_000) for i in range(300)]
+    idx = len(data) - 20
+    data[idx].update({
+        "open": 10.1, "high": 10.82, "low": 10.0, "close": 10.8,
+        "volume": 3_000_000, "amount": 1_500_000_000,
+    })
+    for offset in range(1, 20):
+        data[idx + offset].update({
+            "open": 10.79, "high": 10.85, "low": 10.75, "close": 10.82,
+            "volume": 800_000, "amount": 800_000_000,
+        })
+    engine = StrongVcpTailEngine({})
+    rows, ind = calculate_indicators(data, engine.config)
+
+    positive_returns = replace(ind, return_5=0.20, return_10=0.30, return_20=0.50)
+    negative_returns = replace(ind, return_5=-0.50, return_10=-0.50, return_20=-0.50)
+    baseline = evaluate_strong_start(rows, positive_returns, engine.config, "000001")
+    repeated = evaluate_strong_start(rows, negative_returns, engine.config, "000001")
+
+    assert repeated.start_date == baseline.start_date
+    assert repeated.start_grade == baseline.start_grade
+    assert repeated.event_quality_score == baseline.event_quality_score
+
+
+def test_low_quality_new_start_does_not_replace_intact_high_quality_event():
+    data = [_row(i, close=10.0, volume=1_000_000, amount=500_000_000) for i in range(300)]
+    older = len(data) - 30
+    data[older].update({
+        "open": 10.1, "high": 10.82, "low": 10.0, "close": 10.8,
+        "volume": 3_500_000, "amount": 1_500_000_000,
+    })
+    for offset in range(1, 22):
+        data[older + offset].update({
+            "open": 10.78, "high": 10.86, "low": 10.74, "close": 10.82,
+            "volume": 800_000, "amount": 800_000_000,
+        })
+    newer = len(data) - 8
+    previous_close = data[newer - 1]["close"]
+    close = previous_close * 1.08
+    data[newer].update({
+        "open": round(previous_close * 1.01, 4),
+        "high": round(close * 1.001, 4),
+        "low": round(previous_close, 4),
+        "close": round(close, 4),
+        "volume": 5_000_000,
+        "amount": 1_500_000_000,
+    })
+    for offset in range(1, 6):
+        retraced = previous_close * (1.01 - offset * 0.003)
+        data[newer + offset].update({
+            "open": round(retraced * 1.002, 4),
+            "high": round(retraced * 1.006, 4),
+            "low": round(retraced * 0.994, 4),
+            "close": round(retraced, 4),
+            "volume": 1_500_000,
+            "amount": 1_000_000_000,
+        })
+    engine = StrongVcpTailEngine({})
+    rows, ind = calculate_indicators(data, engine.config)
+
+    start = evaluate_strong_start(rows, ind, engine.config, "000001")
+
+    assert start.start_date == rows[older]["date"]
+    assert "START_GAIN_FULLY_RETRACED" not in start.failure_reasons
+
+
 def test_normal_start_requires_two_yi_and_top_ten_percent_self_amount():
     data = build_strategy6_candidate_data()
     idx = len(data) - 10
