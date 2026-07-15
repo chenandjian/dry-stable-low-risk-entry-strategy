@@ -373,6 +373,9 @@ describe('Strategy6Results', () => {
         code: '002156', name: '通富微电', candidate_type: 'KEY_CANDIDATE',
         lifecycle_status: 'READY', total_score: 82, current_price: 78.71,
         vcp_observation_eligible: true, vcp_lifecycle_status: 'VCP_EXTENDED',
+        vcp_history_qualified: true, vcp_history_candidate_date: '2026-07-08',
+        vcp_history_candidate_type: 'WATCH_CANDIDATE', vcp_history_candidate_score: 67,
+        vcp_history_source: 'DAILY_AS_OF_REPLAY',
         vcp_contraction_count: 2, vcp_pivot_price: 68.21, vcp_structure_low: 65.61,
         vcp_distance_to_pivot_pct: 0.154, vcp_breakout_date: '2026-07-09',
         vcp_contractions: [
@@ -386,6 +389,7 @@ describe('Strategy6Results', () => {
         code: '300001', name: '观察样本', candidate_type: 'REJECTED',
         classification: 'observation', lifecycle_status: 'FAILED', total_score: 51,
         vcp_observation_eligible: true, vcp_lifecycle_status: 'VCP_NEAR_PIVOT',
+        vcp_history_qualified: false,
         vcp_contraction_count: 3, vcp_pivot_price: 12.5, vcp_structure_low: 11.8,
         vcp_distance_to_pivot_pct: -0.012, vcp_observation_risk_tags: [],
       },
@@ -417,7 +421,7 @@ describe('Strategy6Results', () => {
     expect(text.indexOf('重点候选')).toBeLessThan(text.indexOf('观察候选'))
     expect(text.indexOf('观察候选')).toBeLessThan(text.indexOf('VCP形态候选'))
     expect(wrapper.find('[data-test="vcp-row-002156"]').exists()).toBe(true)
-    expect(wrapper.find('[data-test="vcp-row-300001"]').exists()).toBe(true)
+    expect(wrapper.find('[data-test="vcp-row-300001"]').exists()).toBe(false)
     expect(wrapper.find('[data-test="vcp-row-300002"]').exists()).toBe(false)
     expect(wrapper.find('[data-test="vcp-row-600001"]').exists()).toBe(false)
     expect(wrapper.find('[data-test="candidate-row-002156"]').exists()).toBe(true)
@@ -429,11 +433,15 @@ describe('Strategy6Results', () => {
     expect(text).not.toContain('伪退出样本')
     expect(text).toContain('VCP结构低点被跌破')
     expect(text).toContain('突破后过度延伸')
-    expect(text).toContain('接近VCP支点')
+    expect(text).not.toContain('接近VCP支点')
     expect(text).toContain('VCP价格偏离支点过远')
     expect(text).toContain('68.21')
     expect(text).toContain('65.61')
     expect(text).toContain('15.40%')
+    expect(text).toContain('2026-07-08')
+    expect(text).toContain('观察候选')
+    expect(text).toContain('67')
+    expect(text).toContain('逐日真实数据重放')
 
     await wrapper.find('[data-test="vcp-row-002156"]').trigger('click')
     expect(wrapper.text()).toContain('VCP生命周期')
@@ -458,6 +466,22 @@ describe('Strategy6Results', () => {
 
     expect(wrapper.text()).toContain('VCP形态候选')
     expect(wrapper.text()).toContain('该任务由策略6 4.2.0生成，尚未计算VCP观察数据，请重新扫描策略6')
+  })
+
+  it('explains that V4.3 tasks require a rescan for historical VCP qualification', async () => {
+    api.getStrategy6Candidates.mockResolvedValue({ candidates: [{
+      code: '000001', name: '旧VCP任务', candidate_type: 'KEY_CANDIDATE',
+      strategy_version: '4.3.0', total_score: 82,
+      vcp_observation_eligible: true, vcp_lifecycle_status: 'VCP_NEAR_PIVOT',
+      vcp_history_qualified: false,
+    }] })
+
+    const wrapper = mount(Strategy6Results, {
+      global: { mocks: { $route: { query: { task: 's6-v43' } } } },
+    })
+    await flushUi()
+
+    expect(wrapper.text()).toContain('该任务由策略6 4.3.0生成，尚未计算历史正式候选资格，请重新扫描策略6')
   })
 
   it('shows unknown instead of fake zero quality scores for legacy tasks', async () => {

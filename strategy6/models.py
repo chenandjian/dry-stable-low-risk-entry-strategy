@@ -295,6 +295,12 @@ class Strategy6VcpObservation:
     reasons: list[str] = field(default_factory=list)
     risk_tags: list[str] = field(default_factory=list)
     invalidation_reason: str = ""
+    history_qualified: bool = False
+    history_candidate_date: str = ""
+    history_candidate_type: str = ""
+    history_candidate_score: int = 0
+    history_source: str = ""
+    history_origin_start_date: str = ""
 
 
 @dataclass
@@ -559,6 +565,12 @@ class Strategy6Evaluation:
             "vcp_observation_reasons": vcp.reasons,
             "vcp_observation_risk_tags": vcp.risk_tags,
             "vcp_invalidation_reason": vcp.invalidation_reason,
+            "vcp_history_qualified": vcp.history_qualified,
+            "vcp_history_candidate_date": vcp.history_candidate_date,
+            "vcp_history_candidate_type": vcp.history_candidate_type,
+            "vcp_history_candidate_score": vcp.history_candidate_score,
+            "vcp_history_source": vcp.history_source,
+            "vcp_history_origin_start_date": vcp.history_origin_start_date,
             "candidate_type": self.candidate_type,
             "classification": self.classification,
             "lifecycle_status": self.lifecycle_status,

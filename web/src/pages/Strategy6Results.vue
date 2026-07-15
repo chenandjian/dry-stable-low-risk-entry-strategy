@@ -135,13 +135,13 @@
     <section v-if="selectedTaskId" class="panel vcp-panel">
       <div class="panel-header">VCP形态候选</div>
       <template v-if="vcpCandidates.length">
-        <div class="panel-note">独立形态观察，不改变原重点/观察分类；过度延伸只保留跟踪，不代表立即买入。</div>
+        <div class="panel-note">仅跟踪本轮VCP起点后曾进入策略6正式候选的股票；过度延伸只保留跟踪，不代表立即买入。</div>
         <div class="table-scroll">
         <table class="candidate-table vcp-table">
           <thead>
             <tr>
               <th>股票</th><th>VCP状态</th><th>收缩次数</th><th>VCP支点</th><th>结构低点</th>
-              <th>距支点</th><th>突破日期</th><th>总分</th><th>原交易分类</th><th>风险提示</th>
+              <th>距支点</th><th>突破日期</th><th>历史正式候选</th><th>总分</th><th>原交易分类</th><th>风险提示</th>
             </tr>
           </thead>
           <tbody>
@@ -159,6 +159,10 @@
               <td>{{ fmt(c.vcp_structure_low) }}</td>
               <td>{{ pct(c.vcp_distance_to_pivot_pct) }}</td>
               <td>{{ c.vcp_breakout_date || '--' }}</td>
+              <td>
+                <div>{{ c.vcp_history_candidate_date || '--' }} · {{ label('candidateType', c.vcp_history_candidate_type) }}</div>
+                <div class="muted">{{ fmt(c.vcp_history_candidate_score, 0) }}分 · {{ label('source', c.vcp_history_source) }}</div>
+              </td>
               <td class="score">{{ fmt(c.total_score, 0) }}</td>
               <td>{{ candidateTypeText(c) }}</td>
               <td>
@@ -336,6 +340,7 @@ export default {
     vcpCandidates() {
       return this.sortedCandidates.filter(c => (
         c.vcp_observation_eligible === true
+        && c.vcp_history_qualified === true
         && c.vcp_lifecycle_status !== 'VCP_INVALID'
         && c.vcp_lifecycle_status !== 'VCP_NONE'
       ))
@@ -351,6 +356,9 @@ export default {
       const [major = 0, minor = 0] = version.split('.').map(value => Number(value) || 0)
       if (version && (major < 4 || (major === 4 && minor < 3))) {
         return `该任务由策略6 ${version}生成，尚未计算VCP观察数据，请重新扫描策略6`
+      }
+      if (version && major === 4 && minor < 4) {
+        return `该任务由策略6 ${version}生成，尚未计算历史正式候选资格，请重新扫描策略6`
       }
       return '本任务未发现符合条件的VCP形态候选'
     },
@@ -638,6 +646,12 @@ export default {
           { header: 'VCP观察原因', value: c => strategy6Labels('tag', c.vcp_observation_reasons).join('|') },
           { header: 'VCP观察风险', value: c => strategy6Labels('tag', c.vcp_observation_risk_tags).join('|') },
           { header: 'VCP失效原因', value: c => c.vcp_invalidation_reason ? this.label('tag', c.vcp_invalidation_reason) : '' },
+          { header: 'VCP历史正式候选资格', value: c => c.vcp_history_qualified ? '是' : '否' },
+          { header: 'VCP历史候选日期', value: c => c.vcp_history_candidate_date || '' },
+          { header: 'VCP历史候选类型', value: c => c.vcp_history_candidate_type || '' },
+          { header: 'VCP历史候选分数', value: c => c.vcp_history_candidate_score ?? '' },
+          { header: 'VCP历史资格来源', value: c => c.vcp_history_source || '' },
+          { header: 'VCP历史资格起点', value: c => c.vcp_history_origin_start_date || '' },
           { header: '总分', value: c => c.total_score ?? '' },
           { header: '市场过滤', value: c => c.enable_market_filter ? '开启' : '关闭' },
           { header: '市场过滤模式', value: c => this.label('marketFilterMode', c.market_filter_mode) },

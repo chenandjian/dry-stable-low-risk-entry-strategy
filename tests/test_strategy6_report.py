@@ -1,7 +1,22 @@
 from io import BytesIO
 import zipfile
 
-from strategy6.report import build_strategy6_report_xlsx
+from strategy6.report import build_strategy6_report_xlsx, is_strategy6_observation_record
+
+
+def test_strategy6_vcp_observation_requires_historical_formal_candidate():
+    structural_only = {
+        "candidate_type": "REJECTED",
+        "classification": "observation",
+        "vcp_observation_eligible": True,
+        "vcp_history_qualified": False,
+    }
+
+    assert is_strategy6_observation_record(structural_only) is False
+    assert is_strategy6_observation_record({
+        **structural_only,
+        "vcp_history_qualified": True,
+    }) is True
 
 
 def test_strategy6_report_xlsx_handles_empty_candidates():

@@ -102,7 +102,10 @@ const LABELS = {
   },
   marketFilterMode: { strict: '严格过滤', downgrade: '降级处理', score_only: '仅调整评分', disabled: '已关闭' },
   marketDataStatus: { FRESH: '新鲜', STALE: '已过期', MISSING: '缺失' },
-  source: { sina: '新浪', tencent: '腾讯', baidu: '百度' },
+  source: {
+    sina: '新浪', tencent: '腾讯', baidu: '百度',
+    DAILY_AS_OF_REPLAY: '逐日真实数据重放',
+  },
   priceBasis: { FORWARD_ADJUSTED: '前复权' },
   executionNote: {
     NEXT_TRADING_DAY_ONLY: '仅限下一交易日执行', SIGNAL_AFTER_CLOSE: '收盘后生成信号',

@@ -257,6 +257,9 @@ def test_strategy6_candidate_schema_contains_all_box_tail_output_fields(tmp_path
         "vcp_structure_low", "vcp_distance_to_pivot_pct", "vcp_breakout_date",
         "vcp_days_since_breakout", "vcp_observation_reasons",
         "vcp_observation_risk_tags", "vcp_invalidation_reason", "vcp_exit_audit",
+        "vcp_history_qualified", "vcp_history_candidate_date",
+        "vcp_history_candidate_type", "vcp_history_candidate_score",
+        "vcp_history_source", "vcp_history_origin_start_date",
     }
 
     assert required <= columns
@@ -286,6 +289,12 @@ def test_strategy6_candidate_round_trips_vcp_observation_fields(tmp_path):
         "vcp_observation_risk_tags": ["VCP_PIVOT_LOST"],
         "vcp_invalidation_reason": "",
         "vcp_exit_audit": True,
+        "vcp_history_qualified": True,
+        "vcp_history_candidate_date": "2026-07-08",
+        "vcp_history_candidate_type": "WATCH_CANDIDATE",
+        "vcp_history_candidate_score": 67,
+        "vcp_history_source": "DAILY_AS_OF_REPLAY",
+        "vcp_history_origin_start_date": "2026-05-25",
     })
 
     db.upsert_strategy6_candidate("s6-vcp", candidate)
@@ -298,6 +307,11 @@ def test_strategy6_candidate_round_trips_vcp_observation_fields(tmp_path):
     assert row["vcp_observation_reasons"] == ["VCP_POST_BREAKOUT"]
     assert row["vcp_observation_risk_tags"] == ["VCP_PIVOT_LOST"]
     assert row["vcp_exit_audit"] is True
+    assert row["vcp_history_qualified"] is True
+    assert row["vcp_history_candidate_date"] == "2026-07-08"
+    assert row["vcp_history_candidate_type"] == "WATCH_CANDIDATE"
+    assert row["vcp_history_candidate_score"] == 67
+    assert row["vcp_history_source"] == "DAILY_AS_OF_REPLAY"
 
 
 def test_strategy6_candidates_api_separates_trading_and_observation_totals(tmp_path, monkeypatch):
@@ -307,6 +321,7 @@ def test_strategy6_candidates_api_separates_trading_and_observation_totals(tmp_p
     trading = _candidate()
     trading.update({
         "vcp_observation_eligible": True,
+        "vcp_history_qualified": True,
         "vcp_lifecycle_status": "VCP_BREAKOUT_CONFIRMED",
     })
     db.upsert_strategy6_candidate("s6-api-totals", trading)
@@ -317,6 +332,7 @@ def test_strategy6_candidates_api_separates_trading_and_observation_totals(tmp_p
         "candidate_type": "REJECTED",
         "classification": "observation",
         "vcp_observation_eligible": True,
+        "vcp_history_qualified": True,
         "vcp_lifecycle_status": "VCP_NEAR_PIVOT",
     })
     db.upsert_strategy6_candidate("s6-api-totals", observation)

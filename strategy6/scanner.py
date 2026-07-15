@@ -23,6 +23,7 @@ from strategy6 import STRATEGY6_TYPE
 from strategy6.engine import StrongVcpTailEngine
 from strategy6.market import build_market_snapshot
 from strategy6.validation import resolve_strategy6_config
+from strategy6.vcp_history import evaluate_vcp_candidate_history
 
 logger = logging.getLogger(__name__)
 
@@ -204,11 +205,28 @@ def scan_strategy6_all(
                     quote_status=fetch_result.quote_status or "",
                     market_data_by_symbol=_market_data_until(market_data_by_symbol, latest_trade_date or ""),
                 )
-                candidate = evaluation.to_candidate_dict() if evaluation.passed else None
                 observation = None
                 vcp = evaluation.vcp_observation
+                if vcp.eligible:
+                    history = evaluate_vcp_candidate_history(
+                        rows=data,
+                        market_data_by_symbol=market_data_by_symbol,
+                        strategy_config=cfg,
+                        code=code,
+                        name=name,
+                        origin_start_date=vcp.origin_start_date,
+                        evaluation_date=evaluation.indicators.evaluation_date,
+                    )
+                    vcp.history_qualified = history.qualified
+                    vcp.history_candidate_date = history.candidate_date
+                    vcp.history_candidate_type = history.candidate_type
+                    vcp.history_candidate_score = history.candidate_score
+                    vcp.history_source = history.source
+                    vcp.history_origin_start_date = history.origin_start_date
+                candidate = evaluation.to_candidate_dict() if evaluation.passed else None
                 vcp_exit_audit = (
                     bool(prior_vcp_states.get(code, {}).get("vcp_observation_eligible"))
+                    and bool(prior_vcp_states.get(code, {}).get("vcp_history_qualified"))
                     and (
                         vcp.lifecycle_status == "VCP_INVALID"
                         or "VCP_OBSERVATION_EXPIRED" in vcp.risk_tags
@@ -217,7 +235,7 @@ def scan_strategy6_all(
                 )
                 if candidate is not None and vcp_exit_audit:
                     candidate["vcp_exit_audit"] = True
-                if vcp.eligible or vcp_exit_audit:
+                if (vcp.eligible and vcp.history_qualified) or vcp_exit_audit:
                     observation = evaluation.to_candidate_dict()
                     observation.update({
                         "candidate_type": "REJECTED",

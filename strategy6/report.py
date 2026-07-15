@@ -229,11 +229,15 @@ def is_strategy6_observation_record(candidate: dict) -> bool:
         candidate.get("candidate_type") == "REJECTED"
         and candidate.get("classification") == "observation"
         and candidate.get("vcp_observation_eligible") is True
+        and candidate.get("vcp_history_qualified") is True
     )
 
 
 def is_strategy6_vcp_eligible(candidate: dict) -> bool:
-    return candidate.get("vcp_observation_eligible") is True
+    return (
+        candidate.get("vcp_observation_eligible") is True
+        and candidate.get("vcp_history_qualified") is True
+    )
 
 
 def is_strategy6_exit_audit_record(candidate: dict) -> bool:

@@ -2880,6 +2880,12 @@ def _ensure_strategy6_candidates_table(conn: sqlite3.Connection):
         "vcp_observation_risk_tags": "TEXT",
         "vcp_invalidation_reason": "TEXT",
         "vcp_exit_audit": "INTEGER DEFAULT 0",
+        "vcp_history_qualified": "INTEGER DEFAULT 0",
+        "vcp_history_candidate_date": "TEXT",
+        "vcp_history_candidate_type": "TEXT",
+        "vcp_history_candidate_score": "INTEGER DEFAULT 0",
+        "vcp_history_source": "TEXT",
+        "vcp_history_origin_start_date": "TEXT",
     }.items():
         _ensure_column(conn, "strategy6_candidates", column, col_type)
     conn.execute(
@@ -3909,6 +3915,9 @@ def upsert_strategy6_candidate(
         "vcp_structure_low", "vcp_distance_to_pivot_pct", "vcp_breakout_date",
         "vcp_days_since_breakout", "vcp_observation_reasons",
         "vcp_observation_risk_tags", "vcp_invalidation_reason", "vcp_exit_audit",
+        "vcp_history_qualified", "vcp_history_candidate_date",
+        "vcp_history_candidate_type", "vcp_history_candidate_score",
+        "vcp_history_source", "vcp_history_origin_start_date",
     ]
     extra_values = [
         "" if observation_only else d.get("first_seen_date", first_pool_date),
@@ -4069,6 +4078,12 @@ def upsert_strategy6_candidate(
         _json_any(d.get("vcp_observation_risk_tags", [])),
         d.get("vcp_invalidation_reason", ""),
         1 if d.get("vcp_exit_audit") else 0,
+        1 if d.get("vcp_history_qualified") else 0,
+        d.get("vcp_history_candidate_date", ""),
+        d.get("vcp_history_candidate_type", ""),
+        d.get("vcp_history_candidate_score", 0),
+        d.get("vcp_history_source", ""),
+        d.get("vcp_history_origin_start_date", ""),
     ]
     columns.extend(extra_columns)
     values.extend(extra_values)
@@ -4152,7 +4167,8 @@ def get_latest_strategy6_vcp_states(exclude_task_id: str | None = None) -> dict[
     params: tuple = ()
     where = (
         "WHERE LOWER(COALESCE(t.status, ''))='completed' "
-        "AND (c.vcp_observation_eligible=1 OR c.vcp_exit_audit=1)"
+        "AND ((c.vcp_observation_eligible=1 AND c.vcp_history_qualified=1) "
+        "OR c.vcp_exit_audit=1)"
     )
     if exclude_task_id:
         where += " AND c.task_id<>?"
@@ -5386,7 +5402,7 @@ def _deserialize_strategy6_row(row: dict) -> dict:
         "box_tail_pass", "tail_pass", "compact_kline_enabled", "compact_kline_pass",
         "brooks_tail_enabled", "brooks_tail_pass", "brooks_tail_premium",
         "brooks_trade_ready", "multi_path_confirmed",
-        "vcp_observation_eligible", "vcp_exit_audit",
+        "vcp_observation_eligible", "vcp_exit_audit", "vcp_history_qualified",
     ):
         if field in row:
             row[field] = _strategy6_safe_bool(row.get(field))

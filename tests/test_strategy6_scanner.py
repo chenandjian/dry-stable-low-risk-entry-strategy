@@ -74,6 +74,8 @@ def test_strategy6_scan_persists_candidate_from_fetched_data(tmp_path, monkeypat
 
 
 def test_strategy6_scan_persists_observer_only_row_without_counting_trade_candidate(tmp_path, monkeypatch):
+    import strategy6.scanner as scanner_mod
+    from strategy6.vcp_history import Strategy6VcpCandidateHistory
     from tests.test_strategy6_core_rules import build_strategy6_candidate_data
 
     _empty_market(monkeypatch)
@@ -91,6 +93,18 @@ def test_strategy6_scan_persists_observer_only_row_without_counting_trade_candid
         },
     }
     stocks = [{"code": "000001", "name": "平安银行", "market": "SZ"}]
+    monkeypatch.setattr(
+        scanner_mod,
+        "evaluate_vcp_candidate_history",
+        lambda **kwargs: Strategy6VcpCandidateHistory(
+            qualified=True,
+            candidate_date="2026-01-20",
+            candidate_type="WATCH_CANDIDATE",
+            candidate_score=68,
+            source="DAILY_AS_OF_REPLAY",
+            origin_start_date="2026-01-10",
+        ),
+    )
 
     def fake_fetch(*args, **kwargs):
         return FetchResult(
@@ -113,8 +127,107 @@ def test_strategy6_scan_persists_observer_only_row_without_counting_trade_candid
     assert len(rows) == 1
     assert rows[0]["candidate_type"] == "REJECTED"
     assert rows[0]["vcp_observation_eligible"] is True
+    assert rows[0]["vcp_history_qualified"] is True
+    assert rows[0]["vcp_history_candidate_date"] == "2026-01-20"
     assert db.get_task_stocks("s6-observer-only")[0]["status"] == "scanned"
     assert db.get_strategy6_lifecycle("000001") is None
+
+
+def test_strategy6_scan_does_not_persist_vcp_without_formal_candidate_history(tmp_path, monkeypatch):
+    import strategy6.scanner as scanner_mod
+    from strategy6.vcp_history import Strategy6VcpCandidateHistory
+    from tests.test_strategy6_core_rules import build_strategy6_candidate_data
+
+    _empty_market(monkeypatch)
+    db_path = str(tmp_path / "s6-vcp-unqualified.db")
+    config = {
+        "data": {"database_path": db_path, "daily_sources": ["baidu", "sina", "tencent"], "worker_count": 1},
+        "strategy6": {"rr2_min_watch": 10.0, "rr2_min_key": 10.0, "rr2_min_ready": 10.0},
+    }
+    data = build_strategy6_candidate_data()
+    monkeypatch.setattr(
+        scanner_mod,
+        "evaluate_vcp_candidate_history",
+        lambda **kwargs: Strategy6VcpCandidateHistory(
+            qualified=False,
+            origin_start_date=kwargs["origin_start_date"],
+        ),
+    )
+
+    scan_strategy6_all(
+        config,
+        task_id="s6-vcp-unqualified",
+        stocks=[{"code": "000001", "name": "平安银行", "market": "SZ"}],
+        fetch_daily_fn=lambda *args, **kwargs: FetchResult(
+            data=data, primary_source="baidu", fallback_source="baidu",
+        ),
+        worker_count=1,
+    )
+
+    assert db.get_strategy6_candidates("s6-vcp-unqualified") == []
+
+
+def test_strategy6_scan_persists_history_evidence_on_formal_vcp_candidate(tmp_path, monkeypatch):
+    import strategy6.scanner as scanner_mod
+    from strategy6.engine import StrongVcpTailEngine
+    from strategy6.models import Strategy6VcpObservation
+    from strategy6.vcp_history import Strategy6VcpCandidateHistory
+    from tests.test_strategy6_core_rules import build_strategy6_candidate_data
+
+    _empty_market(monkeypatch)
+    db_path = str(tmp_path / "s6-formal-vcp-history.db")
+    config = {
+        "data": {"database_path": db_path, "daily_sources": ["baidu", "sina", "tencent"], "worker_count": 1},
+        "strategy6": {},
+    }
+    data = build_strategy6_candidate_data()
+    evaluation = StrongVcpTailEngine(config).evaluate_at(data, code="000001", name="平安银行")
+    assert evaluation.passed is True
+    evaluation.vcp_observation = Strategy6VcpObservation(
+        eligible=True,
+        lifecycle_status="VCP_NEAR_PIVOT",
+        origin_start_date=data[-20]["date"],
+        pattern_start_date=data[-10]["date"],
+        pattern_end_date=data[-1]["date"],
+        contraction_count=2,
+    )
+
+    class FakeEngine:
+        def __init__(self, _config):
+            pass
+
+        def evaluate_at(self, *_args, **_kwargs):
+            return evaluation
+
+    monkeypatch.setattr(scanner_mod, "StrongVcpTailEngine", FakeEngine)
+    monkeypatch.setattr(
+        scanner_mod,
+        "evaluate_vcp_candidate_history",
+        lambda **kwargs: Strategy6VcpCandidateHistory(
+            qualified=True,
+            candidate_date=evaluation.indicators.evaluation_date,
+            candidate_type=evaluation.candidate_type,
+            candidate_score=evaluation.score.total_score,
+            source="DAILY_AS_OF_REPLAY",
+            origin_start_date=evaluation.vcp_observation.origin_start_date,
+        ),
+    )
+
+    scan_strategy6_all(
+        config,
+        task_id="s6-formal-vcp-history",
+        stocks=[{"code": "000001", "name": "平安银行", "market": "SZ"}],
+        fetch_daily_fn=lambda *args, **kwargs: FetchResult(
+            data=data, primary_source="baidu", fallback_source="baidu",
+        ),
+        worker_count=1,
+    )
+
+    row = db.get_strategy6_candidates("s6-formal-vcp-history")[0]
+    assert row["candidate_type"] != "REJECTED"
+    assert row["vcp_observation_eligible"] is True
+    assert row["vcp_history_qualified"] is True
+    assert row["vcp_history_candidate_date"] == evaluation.indicators.evaluation_date
 
 
 def test_strategy6_scan_does_not_persist_vcp_exit_without_prior_observation(tmp_path, monkeypatch):
@@ -205,6 +318,12 @@ def test_strategy6_scan_persists_one_vcp_exit_after_prior_eligible_observation(t
         "candidate_type": "REJECTED",
         "classification": "observation",
         "vcp_observation_eligible": True,
+        "vcp_history_qualified": True,
+        "vcp_history_candidate_date": "2026-07-07",
+        "vcp_history_candidate_type": "WATCH_CANDIDATE",
+        "vcp_history_candidate_score": 66,
+        "vcp_history_source": "DAILY_AS_OF_REPLAY",
+        "vcp_history_origin_start_date": "2026-06-20",
         "vcp_lifecycle_status": "VCP_NEAR_PIVOT",
     }
     db.upsert_strategy6_candidate("s6-vcp-prior", prior)
