@@ -26,6 +26,7 @@ const mockApi = {
   getCandidates: vi.fn(), getTaskStocks: vi.fn(), retryFailedStocks: vi.fn(),
   retryStrategy2FailedStocks: vi.fn(), retryStrategy3FailedStocks: vi.fn(),
   getStrategy2Candidates: vi.fn(), getStrategy3Candidates: vi.fn(), getScanTasks: vi.fn(),
+  getStrategy6Candidates: vi.fn(),
 }
 vi.mock('../../composables/useApi.js', () => ({ useApi: () => mockApi }))
 
@@ -36,6 +37,7 @@ function defaults() {
   mockApi.getTaskStocks.mockResolvedValue({ ok: true, stocks: [], total: 0, strategy_type: null, summary: {} })
   mockApi.getCandidates.mockResolvedValue({ candidates: [], total: 0 })
   mockApi.getStrategy2Candidates.mockResolvedValue({ candidates: [], total: 0 })
+  mockApi.getStrategy6Candidates.mockResolvedValue({ candidates: [], total: 0 })
   mockApi.getScanTasks.mockResolvedValue({ tasks: [] })
 }
 
@@ -335,5 +337,28 @@ describe('ScannerConsole history task context', () => {
     mockApi.getStrategy2Candidates.mockResolvedValue({ candidates: [{ code: '000002', name: 'hist-cand', total_score: 82, level: '重点观察' }] })
     wrapper = mountPage(); await flushUi()
     expect(wrapper.text()).toContain('hist-cand')
+  })
+
+  it('[26] Strategy6 scan console only shows formal trading candidates', async () => {
+    mockRoute.query = { task: 's6-completed' }
+    mockApi.getTaskStocks.mockResolvedValue({
+      ok: true,
+      total: 0,
+      strategy_type: 'STRATEGY_6_STRONG_VCP_TAIL',
+      stocks: [],
+      summary: { total_stocks: 100, processed: 100, candidate: 1, failed: 0 },
+    })
+    mockApi.getStrategy6Candidates.mockResolvedValue({ candidates: [
+      { code: '000001', name: '正式候选', candidate_type: 'KEY_CANDIDATE', total_score: 82 },
+      { code: '000002', name: 'VCP观察', candidate_type: 'REJECTED', classification: 'observation', vcp_observation_eligible: true, total_score: 52 },
+      { code: '000003', name: '退出审计', candidate_type: 'REJECTED', classification: 'observation', vcp_exit_audit: true, total_score: 48 },
+    ], total: 1 })
+
+    wrapper = mountPage(); await flushUi()
+
+    expect(wrapper.text()).toContain('正式候选')
+    expect(wrapper.text()).not.toContain('VCP观察')
+    expect(wrapper.text()).not.toContain('退出审计')
+    expect(wrapper.get('[data-test="scan-summary"]').text()).toContain('candidates=1')
   })
 })

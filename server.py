@@ -29,8 +29,11 @@ from strategy5.validation import resolve_strategy5_config
 from strategy6 import STRATEGY6_TYPE
 from strategy6.report import (
     build_strategy6_report_xlsx,
+    is_strategy6_exit_audit_record,
     is_strategy6_observation_record,
     is_strategy6_trading_candidate,
+    is_strategy6_vcp_eligible,
+    is_strategy6_visible_record,
 )
 from strategy6.scanner import scan_strategy6_all
 from strategy6.validation import resolve_strategy6_config
@@ -2462,15 +2465,20 @@ async def strategy6_candidates(task_id: str):
     _, err = _require_task_strategy(task_id, STRATEGY6_TYPE)
     if err:
         return err
-    candidates = db.get_strategy6_candidates(task_id)
+    stored = db.get_strategy6_candidates(task_id)
+    candidates = [item for item in stored if is_strategy6_visible_record(item)]
     trading_total = sum(1 for item in candidates if is_strategy6_trading_candidate(item))
     observation_total = sum(1 for item in candidates if is_strategy6_observation_record(item))
+    vcp_eligible_total = sum(1 for item in candidates if is_strategy6_vcp_eligible(item))
+    exit_audit_total = sum(1 for item in candidates if is_strategy6_exit_audit_record(item))
     return {
         "taskId": task_id,
         "candidates": candidates,
         "total": trading_total,
         "recordTotal": len(candidates),
         "observationTotal": observation_total,
+        "vcpEligibleTotal": vcp_eligible_total,
+        "exitAuditTotal": exit_audit_total,
     }
 
 
@@ -2480,7 +2488,7 @@ async def strategy6_candidate_detail(task_id: str, code: str):
     if err:
         return err
     candidate = db.get_strategy6_candidate(code, task_id=task_id)
-    if not candidate:
+    if not candidate or not is_strategy6_visible_record(candidate):
         return JSONResponse({"error": "NOT_FOUND", "taskId": task_id, "code": code}, status_code=404)
     return {"taskId": task_id, "candidate": candidate}
 

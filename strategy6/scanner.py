@@ -76,6 +76,7 @@ def scan_strategy6_all(
             expected_trade_date=market_target_date,
         ),
     )
+    prior_vcp_states = db.get_latest_strategy6_vcp_states(exclude_task_id=task_id)
     candidate_by_code: dict[str, dict] = {}
     candidate_lock = threading.Lock()
     busy_retries_by_code: dict[str, int] = {}
@@ -207,10 +208,15 @@ def scan_strategy6_all(
                 observation = None
                 vcp = evaluation.vcp_observation
                 vcp_exit_audit = (
-                    vcp.lifecycle_status == "VCP_INVALID"
-                    or "VCP_OBSERVATION_EXPIRED" in vcp.risk_tags
-                    or (bool(vcp.origin_start_date) and "VCP_BASE_FILTER_FAILED" in vcp.risk_tags)
+                    bool(prior_vcp_states.get(code, {}).get("vcp_observation_eligible"))
+                    and (
+                        vcp.lifecycle_status == "VCP_INVALID"
+                        or "VCP_OBSERVATION_EXPIRED" in vcp.risk_tags
+                        or (bool(vcp.origin_start_date) and "VCP_BASE_FILTER_FAILED" in vcp.risk_tags)
+                    )
                 )
+                if candidate is not None and vcp_exit_audit:
+                    candidate["vcp_exit_audit"] = True
                 if vcp.eligible or vcp_exit_audit:
                     observation = evaluation.to_candidate_dict()
                     observation.update({
@@ -221,6 +227,7 @@ def scan_strategy6_all(
                         "last_seen_date": "",
                         "days_in_pool": 0,
                         "pool_age_trading_days": 0,
+                        "vcp_exit_audit": vcp_exit_audit,
                     })
                 lifecycle, discovery = db.persist_strategy6_evaluation(
                     task_id,

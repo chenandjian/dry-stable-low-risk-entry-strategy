@@ -535,11 +535,13 @@ async function fetchMappedResults(taskId, strategyType) {
   }
   if (isS6) {
     const res = await getStrategy6Candidates(taskId)
-    return (res.candidates || []).map(c => ({
+    return (res.candidates || [])
+      .filter(c => c.candidate_type !== 'REJECTED')
+      .map(c => ({
       code: c.code, name: c.name, score: c.total_score || 0,
       rating: c.candidate_type || '', status: c.candidate_type || '',
       detail: `${c.start_type || '--'} / ${c.start_grade || '--'} · ${c.support_status || '--'} · RR2 ${Number(c.risk_reward_ratio_2 || 0).toFixed(1)}`,
-    }))
+      }))
   }
   const params = taskId ? { task_id: taskId } : {}
   const data = await getCandidates(params)

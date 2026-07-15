@@ -256,7 +256,7 @@ def test_strategy6_candidate_schema_contains_all_box_tail_output_fields(tmp_path
         "vcp_contraction_count", "vcp_contractions", "vcp_pivot_price",
         "vcp_structure_low", "vcp_distance_to_pivot_pct", "vcp_breakout_date",
         "vcp_days_since_breakout", "vcp_observation_reasons",
-        "vcp_observation_risk_tags", "vcp_invalidation_reason",
+        "vcp_observation_risk_tags", "vcp_invalidation_reason", "vcp_exit_audit",
     }
 
     assert required <= columns
@@ -285,6 +285,7 @@ def test_strategy6_candidate_round_trips_vcp_observation_fields(tmp_path):
         "vcp_observation_reasons": ["VCP_POST_BREAKOUT"],
         "vcp_observation_risk_tags": ["VCP_PIVOT_LOST"],
         "vcp_invalidation_reason": "",
+        "vcp_exit_audit": True,
     })
 
     db.upsert_strategy6_candidate("s6-vcp", candidate)
@@ -296,13 +297,19 @@ def test_strategy6_candidate_round_trips_vcp_observation_fields(tmp_path):
     assert row["vcp_contractions"][1]["amplitude"] == 0.0381
     assert row["vcp_observation_reasons"] == ["VCP_POST_BREAKOUT"]
     assert row["vcp_observation_risk_tags"] == ["VCP_PIVOT_LOST"]
+    assert row["vcp_exit_audit"] is True
 
 
 def test_strategy6_candidates_api_separates_trading_and_observation_totals(tmp_path, monkeypatch):
     db_path = str(tmp_path / "s6-api-totals.db")
     db.init_db(db_path)
     db.create_scan_task("s6-api-totals", "2026-07-09 10:00:00", strategy_type=STRATEGY6_TYPE)
-    db.upsert_strategy6_candidate("s6-api-totals", _candidate())
+    trading = _candidate()
+    trading.update({
+        "vcp_observation_eligible": True,
+        "vcp_lifecycle_status": "VCP_BREAKOUT_CONFIRMED",
+    })
+    db.upsert_strategy6_candidate("s6-api-totals", trading)
     observation = _candidate()
     observation.update({
         "code": "000002",
@@ -313,16 +320,39 @@ def test_strategy6_candidates_api_separates_trading_and_observation_totals(tmp_p
         "vcp_lifecycle_status": "VCP_NEAR_PIVOT",
     })
     db.upsert_strategy6_candidate("s6-api-totals", observation)
+    exit_audit = _candidate()
+    exit_audit.update({
+        "code": "000003",
+        "name": "真实退出",
+        "candidate_type": "REJECTED",
+        "classification": "observation",
+        "vcp_observation_eligible": False,
+        "vcp_lifecycle_status": "VCP_INVALID",
+        "vcp_exit_audit": True,
+    })
+    db.upsert_strategy6_candidate("s6-api-totals", exit_audit)
+    false_audit = dict(exit_audit)
+    false_audit.update({"code": "000004", "name": "伪退出", "vcp_exit_audit": False})
+    db.upsert_strategy6_candidate("s6-api-totals", false_audit)
     monkeypatch.setattr(server_mod, "load_config", lambda: {"data": {"database_path": db_path}})
 
     payload = TestClient(server_mod.app).get(
         "/api/strategy6/tasks/s6-api-totals/candidates",
     ).json()
 
-    assert len(payload["candidates"]) == 2
+    assert len(payload["candidates"]) == 3
     assert payload["total"] == 1
-    assert payload["recordTotal"] == 2
+    assert payload["recordTotal"] == 3
     assert payload["observationTotal"] == 1
+    assert payload["vcpEligibleTotal"] == 2
+    assert payload["exitAuditTotal"] == 1
+    assert {row["code"] for row in payload["candidates"]} == {"000001", "000002", "000003"}
+
+    client = TestClient(server_mod.app)
+    assert client.get("/api/strategy6/tasks/s6-api-totals/candidates/000003").status_code == 200
+    hidden = client.get("/api/strategy6/tasks/s6-api-totals/candidates/000004")
+    assert hidden.status_code == 404
+    assert hidden.json()["error"] == "NOT_FOUND"
 
 
 def test_strategy6_candidate_persists_brooks_only_path_and_structured_result(tmp_path):

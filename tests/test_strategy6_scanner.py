@@ -117,7 +117,7 @@ def test_strategy6_scan_persists_observer_only_row_without_counting_trade_candid
     assert db.get_strategy6_lifecycle("000001") is None
 
 
-def test_strategy6_scan_persists_vcp_exit_audit_without_counting_candidate(tmp_path, monkeypatch):
+def test_strategy6_scan_does_not_persist_vcp_exit_without_prior_observation(tmp_path, monkeypatch):
     import strategy6.scanner as scanner_mod
     from strategy6.engine import StrongVcpTailEngine
     from strategy6.models import Strategy6VcpObservation
@@ -172,14 +172,162 @@ def test_strategy6_scan_persists_vcp_exit_audit_without_counting_candidate(tmp_p
     )
 
     assert result["stats"]["candidates_found"] == 0
-    rows = db.get_strategy6_candidates("s6-vcp-exit")
-    assert len(rows) == 1
-    assert rows[0]["classification"] == "observation"
-    assert rows[0]["vcp_observation_eligible"] is False
-    assert rows[0]["vcp_lifecycle_status"] == "VCP_INVALID"
-    assert rows[0]["vcp_invalidation_reason"] == "VCP_STRUCTURE_LOW_BROKEN"
-    assert rows[0]["first_pool_date"] == ""
+    assert db.get_strategy6_candidates("s6-vcp-exit") == []
     assert db.get_strategy6_lifecycle("000001") is None
+
+
+def test_strategy6_scan_persists_one_vcp_exit_after_prior_eligible_observation(tmp_path, monkeypatch):
+    import strategy6.scanner as scanner_mod
+    from strategy6.engine import StrongVcpTailEngine
+    from strategy6.models import Strategy6VcpObservation
+    from tests.test_strategy6_core_rules import build_strategy6_candidate_data
+
+    _empty_market(monkeypatch)
+    db_path = str(tmp_path / "s6-vcp-real-exit.db")
+    config = {
+        "data": {
+            "database_path": db_path,
+            "daily_sources": ["baidu", "sina", "tencent"],
+            "worker_count": 1,
+        },
+        "strategy6": {
+            "rr2_min_watch": 10.0,
+            "rr2_min_key": 10.0,
+            "rr2_min_ready": 10.0,
+        },
+    }
+    db.init_db(db_path)
+    db.create_scan_task("s6-vcp-prior", "2026-07-08 10:00:00", strategy_type=STRATEGY6_TYPE)
+    prior = {
+        "code": "000001",
+        "name": "平安银行",
+        "evaluation_date": "2026-07-08",
+        "candidate_type": "REJECTED",
+        "classification": "observation",
+        "vcp_observation_eligible": True,
+        "vcp_lifecycle_status": "VCP_NEAR_PIVOT",
+    }
+    db.upsert_strategy6_candidate("s6-vcp-prior", prior)
+    db.finish_scan_task(
+        "s6-vcp-prior", "2026-07-08 16:00:00", candidates_count=0, elapsed_seconds=1.0,
+    )
+
+    data = build_strategy6_candidate_data()
+    evaluation = StrongVcpTailEngine(config).evaluate_at(data, code="000001", name="平安银行")
+    evaluation.vcp_observation = Strategy6VcpObservation(
+        eligible=False,
+        lifecycle_status="VCP_INVALID",
+        contraction_count=2,
+        pivot_price=12.5,
+        structure_low=11.8,
+        risk_tags=["VCP_STRUCTURE_LOW_BROKEN"],
+        invalidation_reason="VCP_STRUCTURE_LOW_BROKEN",
+    )
+
+    class FakeEngine:
+        def __init__(self, _config):
+            pass
+
+        def evaluate_at(self, *_args, **_kwargs):
+            return evaluation
+
+    monkeypatch.setattr(scanner_mod, "StrongVcpTailEngine", FakeEngine)
+    fake_fetch = lambda *args, **kwargs: FetchResult(
+        data=data,
+        primary_source="baidu",
+        fallback_source="baidu",
+    )
+
+    scan_strategy6_all(
+        config,
+        task_id="s6-vcp-real-exit",
+        stocks=[{"code": "000001", "name": "平安银行", "market": "SZ"}],
+        fetch_daily_fn=fake_fetch,
+        worker_count=1,
+    )
+    rows = db.get_strategy6_candidates("s6-vcp-real-exit")
+    assert len(rows) == 1
+    assert rows[0]["vcp_exit_audit"] is True
+    assert rows[0]["vcp_observation_eligible"] is False
+    db.finish_scan_task(
+        "s6-vcp-real-exit", "2026-07-09 16:00:00", candidates_count=0, elapsed_seconds=1.0,
+    )
+
+    scan_strategy6_all(
+        config,
+        task_id="s6-vcp-still-invalid",
+        stocks=[{"code": "000001", "name": "平安银行", "market": "SZ"}],
+        fetch_daily_fn=fake_fetch,
+        worker_count=1,
+    )
+    assert db.get_strategy6_candidates("s6-vcp-still-invalid") == []
+
+
+def test_strategy6_scan_ignores_vcp_state_from_failed_task(tmp_path, monkeypatch):
+    import strategy6.scanner as scanner_mod
+    from strategy6.engine import StrongVcpTailEngine
+    from strategy6.models import Strategy6VcpObservation
+    from tests.test_strategy6_core_rules import build_strategy6_candidate_data
+
+    _empty_market(monkeypatch)
+    db_path = str(tmp_path / "s6-vcp-failed-state.db")
+    config = {
+        "data": {
+            "database_path": db_path,
+            "daily_sources": ["baidu", "sina", "tencent"],
+            "worker_count": 1,
+        },
+        "strategy6": {
+            "rr2_min_watch": 10.0,
+            "rr2_min_key": 10.0,
+            "rr2_min_ready": 10.0,
+        },
+    }
+    db.init_db(db_path)
+    db.create_scan_task("s6-vcp-failed-prior", "2026-07-08 10:00:00", strategy_type=STRATEGY6_TYPE)
+    db.upsert_strategy6_candidate("s6-vcp-failed-prior", {
+        "code": "000001",
+        "name": "平安银行",
+        "evaluation_date": "2026-07-08",
+        "candidate_type": "REJECTED",
+        "classification": "observation",
+        "vcp_observation_eligible": True,
+        "vcp_lifecycle_status": "VCP_NEAR_PIVOT",
+    })
+    conn = db.get_conn()
+    conn.execute("UPDATE scan_tasks SET status='failed', finished_at=? WHERE id=?", (
+        "2026-07-08 16:00:00", "s6-vcp-failed-prior",
+    ))
+    conn.commit()
+
+    data = build_strategy6_candidate_data()
+    evaluation = StrongVcpTailEngine(config).evaluate_at(data, code="000001", name="平安银行")
+    evaluation.vcp_observation = Strategy6VcpObservation(
+        eligible=False,
+        lifecycle_status="VCP_INVALID",
+        risk_tags=["VCP_STRUCTURE_LOW_BROKEN"],
+        invalidation_reason="VCP_STRUCTURE_LOW_BROKEN",
+    )
+
+    class FakeEngine:
+        def __init__(self, _config):
+            pass
+
+        def evaluate_at(self, *_args, **_kwargs):
+            return evaluation
+
+    monkeypatch.setattr(scanner_mod, "StrongVcpTailEngine", FakeEngine)
+    scan_strategy6_all(
+        config,
+        task_id="s6-after-failed",
+        stocks=[{"code": "000001", "name": "平安银行", "market": "SZ"}],
+        fetch_daily_fn=lambda *args, **kwargs: FetchResult(
+            data=data, primary_source="baidu", fallback_source="baidu",
+        ),
+        worker_count=1,
+    )
+
+    assert db.get_strategy6_candidates("s6-after-failed") == []
 
 
 def test_strategy6_scan_persists_failed_lifecycle_audit_without_candidate(tmp_path, monkeypatch):
@@ -212,11 +360,7 @@ def test_strategy6_scan_persists_failed_lifecycle_audit_without_candidate(tmp_pa
 
     scan_strategy6_all(config, task_id="s6-exit", stocks=stocks, fetch_daily_fn=fake_fetch, worker_count=1)
 
-    exit_snapshots = db.get_strategy6_candidates("s6-exit")
-    assert len(exit_snapshots) == 1
-    assert exit_snapshots[0]["candidate_type"] == "REJECTED"
-    assert exit_snapshots[0]["classification"] == "observation"
-    assert exit_snapshots[0]["vcp_lifecycle_status"] == "VCP_INVALID"
+    assert db.get_strategy6_candidates("s6-exit") == []
     audit = db.get_strategy6_task_lifecycle("s6-exit")
     assert audit[0]["lifecycle_status"] == "FAILED"
     assert audit[0]["blocked"] is True

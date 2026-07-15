@@ -394,6 +394,12 @@ describe('Strategy6Results', () => {
         classification: 'observation', entry_archetype: 'WAIT_BREAKOUT',
         vcp_observation_eligible: false, vcp_lifecycle_status: 'VCP_INVALID',
         vcp_invalidation_reason: 'VCP_STRUCTURE_LOW_BROKEN',
+        vcp_exit_audit: true,
+      },
+      {
+        code: '300003', name: '伪退出样本', candidate_type: 'REJECTED',
+        classification: 'observation', vcp_observation_eligible: false,
+        vcp_lifecycle_status: 'VCP_INVALID', vcp_exit_audit: false,
       },
       {
         code: '600001', name: '旧任务样本', candidate_type: 'WATCH_CANDIDATE',
@@ -407,8 +413,9 @@ describe('Strategy6Results', () => {
     await flushUi()
 
     const text = wrapper.text()
-    expect(text.indexOf('市场过滤数据')).toBeLessThan(text.indexOf('VCP形态候选'))
-    expect(text.indexOf('VCP形态候选')).toBeLessThan(text.indexOf('重点候选'))
+    expect(text.indexOf('市场过滤数据')).toBeLessThan(text.indexOf('重点候选'))
+    expect(text.indexOf('重点候选')).toBeLessThan(text.indexOf('观察候选'))
+    expect(text.indexOf('观察候选')).toBeLessThan(text.indexOf('VCP形态候选'))
     expect(wrapper.find('[data-test="vcp-row-002156"]').exists()).toBe(true)
     expect(wrapper.find('[data-test="vcp-row-300001"]').exists()).toBe(true)
     expect(wrapper.find('[data-test="vcp-row-300002"]').exists()).toBe(false)
@@ -419,6 +426,7 @@ describe('Strategy6Results', () => {
     expect(text).toContain('候选数 2')
     expect(text).toContain('VCP观察退出审计')
     expect(text).toContain('失效样本')
+    expect(text).not.toContain('伪退出样本')
     expect(text).toContain('VCP结构低点被跌破')
     expect(text).toContain('突破后过度延伸')
     expect(text).toContain('接近VCP支点')

@@ -76,6 +76,62 @@
       </div>
     </section>
 
+    <section v-for="group in candidateGroups" :key="group.type" class="panel">
+      <div class="panel-header">{{ group.title }}</div>
+      <div class="table-scroll">
+        <table class="candidate-table">
+          <thead>
+            <tr>
+              <th>股票</th><th>现价</th><th>总分</th><th>入场/质量</th><th>分类</th><th>生命周期</th>
+              <th>启动类型/等级</th><th>支撑状态</th><th>关键/前置支撑</th><th>执行区间/状态</th>
+              <th>止损</th><th>客观目标1/2</th><th>客观RR2</th><th>形态</th><th>权威路径/Brooks</th><th>尾段/前20量比</th><th>市场/RS</th><th>入池</th><th>风险/警告</th><th>数据日</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="c in group.items" :key="c.code" :data-test="`candidate-row-${c.code}`" class="clickable" @click="selected = c">
+              <td><span class="code">{{ c.code }}</span> {{ c.name }}</td>
+              <td>{{ fmt(c.current_price) }}</td>
+              <td class="score">{{ fmt(c.total_score, 0) }}</td>
+              <td>
+                <div>{{ entryArchetypeText(c) }}</div>
+                <div class="muted">整理 {{ qualityValue(c, 'setup_quality_score') }} · 支撑 {{ qualityValue(c, 'support_reaction_score') }}</div>
+              </td>
+              <td><span :data-test="`candidate-type-${c.code}`" class="type-badge" :class="classFor(c)">{{ candidateTypeText(c) }}</span></td>
+              <td :data-test="`candidate-lifecycle-${c.code}`">{{ lifecycleText(c) }}</td>
+              <td>{{ label('startType', c.start_type) }} / {{ label('startGrade', c.start_grade) }}</td>
+              <td>{{ label('supportStatus', c.support_status) }}</td>
+              <td>{{ fmt(c.key_support_price) }} / {{ fmt(c.prior_key_support_price) }}</td>
+              <td :data-test="`candidate-buy-zone-${c.code}`">{{ executionZoneText(c) }}</td>
+              <td>{{ fmt(c.stop_loss_price) }}</td>
+              <td>{{ fmt(c.objective_target_1 ?? c.target_price_1) }} / {{ fmt(c.objective_target_2 ?? c.target_price_2) }}</td>
+              <td class="rr">{{ fmt(c.objective_rr_2 ?? c.risk_reward_ratio_2) }}</td>
+              <td>{{ label('patternType', c.pattern_type || 'UNKNOWN') }}</td>
+              <td>
+                <div>{{ label('tailPathSummary', authoritativeSummary(c)) }}</div>
+                <div class="muted">主路径 {{ label('tailPrimaryPath', authoritativePrimary(c)) }}</div>
+                <div v-if="c.brooks_tail_enabled" class="muted">{{ label('brooksStatus', c.brooks_status || 'BROOKS_WATCH') }} · {{ brooksTradeState(c) }}</div>
+                <div v-else class="muted">旧路径 {{ label('tailPath', c.tail_path || 'NONE') }}</div>
+              </td>
+              <td>{{ tailVolumeDisplay(c) }}</td>
+              <td>
+                <div>{{ label('marketStatus', c.market_status || 'UNKNOWN') }}</div>
+                <div class="muted">RS20 {{ pct(c.relative_strength_20) }}</div>
+              </td>
+              <td>
+                <div>首次入池 {{ c.first_pool_date || '--' }}</div>
+                <div class="muted">池龄 {{ c.pool_age_trading_days ?? 0 }}日</div>
+              </td>
+              <td>
+                <span v-for="tag in c.risk_tags || []" :key="'r'+tag" class="tag risk">{{ label('tag', tag) }}</span>
+                <span v-for="tag in c.warn_tags || []" :key="'w'+tag" class="tag warn">{{ label('tag', tag) }}</span>
+              </td>
+              <td>{{ c.kline_latest_date || c.evaluation_date || '--' }}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
     <section v-if="selectedTaskId" class="panel vcp-panel">
       <div class="panel-header">VCP形态候选</div>
       <template v-if="vcpCandidates.length">
@@ -149,62 +205,6 @@
               <td>{{ row.exit_reason ? label('tag', row.exit_reason) : joinedLabels('tag', row.reject_reasons, ' / ') }}</td>
               <td>{{ row.cooldown_until_date || '--' }}</td>
               <td>{{ row.reentry_count ?? 0 }}</td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
-    </section>
-
-    <section v-for="group in candidateGroups" :key="group.type" class="panel">
-      <div class="panel-header">{{ group.title }}</div>
-      <div class="table-scroll">
-        <table class="candidate-table">
-          <thead>
-            <tr>
-              <th>股票</th><th>现价</th><th>总分</th><th>入场/质量</th><th>分类</th><th>生命周期</th>
-              <th>启动类型/等级</th><th>支撑状态</th><th>关键/前置支撑</th><th>执行区间/状态</th>
-              <th>止损</th><th>客观目标1/2</th><th>客观RR2</th><th>形态</th><th>权威路径/Brooks</th><th>尾段/前20量比</th><th>市场/RS</th><th>入池</th><th>风险/警告</th><th>数据日</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="c in group.items" :key="c.code" :data-test="`candidate-row-${c.code}`" class="clickable" @click="selected = c">
-              <td><span class="code">{{ c.code }}</span> {{ c.name }}</td>
-              <td>{{ fmt(c.current_price) }}</td>
-              <td class="score">{{ fmt(c.total_score, 0) }}</td>
-              <td>
-                <div>{{ entryArchetypeText(c) }}</div>
-                <div class="muted">整理 {{ qualityValue(c, 'setup_quality_score') }} · 支撑 {{ qualityValue(c, 'support_reaction_score') }}</div>
-              </td>
-              <td><span :data-test="`candidate-type-${c.code}`" class="type-badge" :class="classFor(c)">{{ candidateTypeText(c) }}</span></td>
-              <td :data-test="`candidate-lifecycle-${c.code}`">{{ lifecycleText(c) }}</td>
-              <td>{{ label('startType', c.start_type) }} / {{ label('startGrade', c.start_grade) }}</td>
-              <td>{{ label('supportStatus', c.support_status) }}</td>
-              <td>{{ fmt(c.key_support_price) }} / {{ fmt(c.prior_key_support_price) }}</td>
-              <td :data-test="`candidate-buy-zone-${c.code}`">{{ executionZoneText(c) }}</td>
-              <td>{{ fmt(c.stop_loss_price) }}</td>
-              <td>{{ fmt(c.objective_target_1 ?? c.target_price_1) }} / {{ fmt(c.objective_target_2 ?? c.target_price_2) }}</td>
-              <td class="rr">{{ fmt(c.objective_rr_2 ?? c.risk_reward_ratio_2) }}</td>
-              <td>{{ label('patternType', c.pattern_type || 'UNKNOWN') }}</td>
-              <td>
-                <div>{{ label('tailPathSummary', authoritativeSummary(c)) }}</div>
-                <div class="muted">主路径 {{ label('tailPrimaryPath', authoritativePrimary(c)) }}</div>
-                <div v-if="c.brooks_tail_enabled" class="muted">{{ label('brooksStatus', c.brooks_status || 'BROOKS_WATCH') }} · {{ brooksTradeState(c) }}</div>
-                <div v-else class="muted">旧路径 {{ label('tailPath', c.tail_path || 'NONE') }}</div>
-              </td>
-              <td>{{ tailVolumeDisplay(c) }}</td>
-              <td>
-                <div>{{ label('marketStatus', c.market_status || 'UNKNOWN') }}</div>
-                <div class="muted">RS20 {{ pct(c.relative_strength_20) }}</div>
-              </td>
-              <td>
-                <div>首次入池 {{ c.first_pool_date || '--' }}</div>
-                <div class="muted">池龄 {{ c.pool_age_trading_days ?? 0 }}日</div>
-              </td>
-              <td>
-                <span v-for="tag in c.risk_tags || []" :key="'r'+tag" class="tag risk">{{ label('tag', tag) }}</span>
-                <span v-for="tag in c.warn_tags || []" :key="'w'+tag" class="tag warn">{{ label('tag', tag) }}</span>
-              </td>
-              <td>{{ c.kline_latest_date || c.evaluation_date || '--' }}</td>
             </tr>
           </tbody>
         </table>
@@ -341,14 +341,7 @@ export default {
       ))
     },
     vcpExitAuditRows() {
-      return this.sortedCandidates.filter(c => (
-        c.vcp_observation_eligible !== true
-        && (
-          c.vcp_lifecycle_status === 'VCP_INVALID'
-          || (c.vcp_observation_risk_tags || []).includes('VCP_OBSERVATION_EXPIRED')
-          || (c.vcp_observation_risk_tags || []).includes('VCP_BASE_FILTER_FAILED')
-        )
-      ))
+      return this.sortedCandidates.filter(c => c.vcp_exit_audit === true)
     },
     taskStrategyVersion() {
       return this.sortedCandidates.find(c => c.strategy_version)?.strategy_version || ''

@@ -2879,6 +2879,7 @@ def _ensure_strategy6_candidates_table(conn: sqlite3.Connection):
         "vcp_observation_reasons": "TEXT",
         "vcp_observation_risk_tags": "TEXT",
         "vcp_invalidation_reason": "TEXT",
+        "vcp_exit_audit": "INTEGER DEFAULT 0",
     }.items():
         _ensure_column(conn, "strategy6_candidates", column, col_type)
     conn.execute(
@@ -3907,7 +3908,7 @@ def upsert_strategy6_candidate(
         "vcp_contraction_count", "vcp_contractions", "vcp_pivot_price",
         "vcp_structure_low", "vcp_distance_to_pivot_pct", "vcp_breakout_date",
         "vcp_days_since_breakout", "vcp_observation_reasons",
-        "vcp_observation_risk_tags", "vcp_invalidation_reason",
+        "vcp_observation_risk_tags", "vcp_invalidation_reason", "vcp_exit_audit",
     ]
     extra_values = [
         "" if observation_only else d.get("first_seen_date", first_pool_date),
@@ -4067,6 +4068,7 @@ def upsert_strategy6_candidate(
         _json_any(d.get("vcp_observation_reasons", [])),
         _json_any(d.get("vcp_observation_risk_tags", [])),
         d.get("vcp_invalidation_reason", ""),
+        1 if d.get("vcp_exit_audit") else 0,
     ]
     columns.extend(extra_columns)
     values.extend(extra_values)
@@ -4142,6 +4144,30 @@ def get_strategy6_candidate(code: str, task_id: str = None) -> dict | None:
         return None
     cols = [d[1] for d in conn.execute("PRAGMA table_info(strategy6_candidates)").fetchall()]
     return _deserialize_strategy6_row(dict(zip(cols, row)))
+
+
+def get_latest_strategy6_vcp_states(exclude_task_id: str | None = None) -> dict[str, dict]:
+    """Return each stock's latest VCP state from completed scans only."""
+    conn = get_conn()
+    params: tuple = ()
+    where = (
+        "WHERE LOWER(COALESCE(t.status, ''))='completed' "
+        "AND (c.vcp_observation_eligible=1 OR c.vcp_exit_audit=1)"
+    )
+    if exclude_task_id:
+        where += " AND c.task_id<>?"
+        params = (exclude_task_id,)
+    rows = conn.execute(
+        f"SELECT c.* FROM strategy6_candidates c "
+        f"JOIN scan_tasks t ON t.id=c.task_id {where} ORDER BY c.id DESC",
+        params,
+    ).fetchall()
+    cols = [d[1] for d in conn.execute("PRAGMA table_info(strategy6_candidates)").fetchall()]
+    latest: dict[str, dict] = {}
+    for raw in rows:
+        row = _deserialize_strategy6_row(dict(zip(cols, raw)))
+        latest.setdefault(str(row.get("code") or ""), row)
+    return latest
 
 
 def save_strategy6_market_snapshot(task_id: str, snapshot: dict):
@@ -5360,7 +5386,7 @@ def _deserialize_strategy6_row(row: dict) -> dict:
         "box_tail_pass", "tail_pass", "compact_kline_enabled", "compact_kline_pass",
         "brooks_tail_enabled", "brooks_tail_pass", "brooks_tail_premium",
         "brooks_trade_ready", "multi_path_confirmed",
-        "vcp_observation_eligible",
+        "vcp_observation_eligible", "vcp_exit_audit",
     ):
         if field in row:
             row[field] = _strategy6_safe_bool(row.get(field))

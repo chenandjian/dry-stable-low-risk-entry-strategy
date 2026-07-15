@@ -228,6 +228,23 @@ def is_strategy6_observation_record(candidate: dict) -> bool:
     return (
         candidate.get("candidate_type") == "REJECTED"
         and candidate.get("classification") == "observation"
+        and candidate.get("vcp_observation_eligible") is True
+    )
+
+
+def is_strategy6_vcp_eligible(candidate: dict) -> bool:
+    return candidate.get("vcp_observation_eligible") is True
+
+
+def is_strategy6_exit_audit_record(candidate: dict) -> bool:
+    return bool(candidate.get("vcp_exit_audit"))
+
+
+def is_strategy6_visible_record(candidate: dict) -> bool:
+    return (
+        is_strategy6_trading_candidate(candidate)
+        or is_strategy6_observation_record(candidate)
+        or is_strategy6_exit_audit_record(candidate)
     )
 
 
