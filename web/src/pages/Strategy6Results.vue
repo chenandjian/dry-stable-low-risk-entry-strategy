@@ -76,10 +76,11 @@
       </div>
     </section>
 
-    <section v-if="vcpCandidates.length" class="panel vcp-panel">
+    <section v-if="selectedTaskId" class="panel vcp-panel">
       <div class="panel-header">VCP形态候选</div>
-      <div class="panel-note">独立形态观察，不改变原重点/观察分类；过度延伸只保留跟踪，不代表立即买入。</div>
-      <div class="table-scroll">
+      <template v-if="vcpCandidates.length">
+        <div class="panel-note">独立形态观察，不改变原重点/观察分类；过度延伸只保留跟踪，不代表立即买入。</div>
+        <div class="table-scroll">
         <table class="candidate-table vcp-table">
           <thead>
             <tr>
@@ -111,7 +112,9 @@
             </tr>
           </tbody>
         </table>
-      </div>
+        </div>
+      </template>
+      <div v-else class="panel-empty">{{ vcpEmptyMessage }}</div>
     </section>
 
     <section v-if="vcpExitAuditRows.length" class="panel vcp-audit-panel">
@@ -346,6 +349,17 @@ export default {
           || (c.vcp_observation_risk_tags || []).includes('VCP_BASE_FILTER_FAILED')
         )
       ))
+    },
+    taskStrategyVersion() {
+      return this.sortedCandidates.find(c => c.strategy_version)?.strategy_version || ''
+    },
+    vcpEmptyMessage() {
+      const version = this.taskStrategyVersion
+      const [major = 0, minor = 0] = version.split('.').map(value => Number(value) || 0)
+      if (version && (major < 4 || (major === 4 && minor < 3))) {
+        return `该任务由策略6 ${version}生成，尚未计算VCP观察数据，请重新扫描策略6`
+      }
+      return '本任务未发现符合条件的VCP形态候选'
     },
     readyCandidates() {
       return this.sortedCandidates.filter(c => this.effectiveCandidateType(c) === 'READY_CANDIDATE')
@@ -819,6 +833,7 @@ select { background: var(--bg-panel); color: var(--text-primary); border: 1px so
 .vcp-panel { border-color: rgba(20, 184, 166, 0.35); }
 .vcp-audit-panel { border-color: rgba(239, 68, 68, 0.28); }
 .panel-note { padding: 9px 14px; color: var(--text-secondary); font-size: 12px; border-bottom: 1px solid var(--border); }
+.panel-empty { padding: 18px 14px; color: var(--text-secondary); }
 .vcp-table { min-width: 1120px; }
 .table-scroll { overflow-x: auto; }
 .candidate-table { width: 100%; min-width: 1520px; border-collapse: collapse; font-size: 13px; }

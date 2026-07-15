@@ -436,6 +436,22 @@ describe('Strategy6Results', () => {
     expect(wrapper.text()).toContain('VCP振幅依次收缩')
   })
 
+  it('explains that historical pre-V4.3 tasks require a rescan for VCP observations', async () => {
+    api.getStrategy6Candidates.mockResolvedValue({ candidates: [{
+      code: '000001', name: '旧任务样本', candidate_type: 'KEY_CANDIDATE',
+      strategy_version: '4.2.0', total_score: 82,
+      vcp_observation_eligible: false, vcp_lifecycle_status: 'VCP_NONE',
+    }] })
+
+    const wrapper = mount(Strategy6Results, {
+      global: { mocks: { $route: { query: { task: 's6-20260715-173615' } } } },
+    })
+    await flushUi()
+
+    expect(wrapper.text()).toContain('VCP形态候选')
+    expect(wrapper.text()).toContain('该任务由策略6 4.2.0生成，尚未计算VCP观察数据，请重新扫描策略6')
+  })
+
   it('shows unknown instead of fake zero quality scores for legacy tasks', async () => {
     const wrapper = mount(Strategy6Results, {
       global: { mocks: { $route: { query: { task: 's6-task' } } } },
