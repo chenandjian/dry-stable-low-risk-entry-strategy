@@ -2864,6 +2864,21 @@ def _ensure_strategy6_candidates_table(conn: sqlite3.Connection):
         "path_evidence_score": "INTEGER DEFAULT 0",
         "entry_archetype": "TEXT",
         "score_model_version": "TEXT",
+        "vcp_observation_eligible": "INTEGER DEFAULT 0",
+        "vcp_lifecycle_status": "TEXT DEFAULT 'VCP_NONE'",
+        "vcp_origin_start_date": "TEXT",
+        "vcp_pattern_start_date": "TEXT",
+        "vcp_pattern_end_date": "TEXT",
+        "vcp_contraction_count": "INTEGER DEFAULT 0",
+        "vcp_contractions": "TEXT",
+        "vcp_pivot_price": "REAL DEFAULT 0",
+        "vcp_structure_low": "REAL DEFAULT 0",
+        "vcp_distance_to_pivot_pct": "REAL DEFAULT 0",
+        "vcp_breakout_date": "TEXT",
+        "vcp_days_since_breakout": "INTEGER DEFAULT 0",
+        "vcp_observation_reasons": "TEXT",
+        "vcp_observation_risk_tags": "TEXT",
+        "vcp_invalidation_reason": "TEXT",
     }.items():
         _ensure_column(conn, "strategy6_candidates", column, col_type)
     conn.execute(
@@ -3711,7 +3726,13 @@ def upsert_strategy6_candidate(
 ):
     """Insert or update one Strategy6 candidate."""
     conn = _conn or get_conn()
-    first_pool_date = str(d.get("first_seen_date") or d.get("first_pool_date") or d.get("evaluation_date") or "")
+    observation_only = bool(
+        d.get("candidate_type") == "REJECTED"
+        and d.get("classification") == "observation"
+    )
+    first_pool_date = "" if observation_only else str(
+        d.get("first_seen_date") or d.get("first_pool_date") or d.get("evaluation_date") or ""
+    )
     pool_age = int(d.get("days_in_pool", d.get("pool_age_trading_days", 0)) or 0)
     lifecycle_status = d.get("lifecycle_status", "")
     columns = [
@@ -3881,10 +3902,16 @@ def upsert_strategy6_candidate(
         "relative_strength_trend", "setup_quality_reasons", "setup_quality_risk_tags",
         "support_reaction_score", "support_reaction_reasons", "support_reaction_risk_tags",
         "path_evidence_score", "entry_archetype", "score_model_version",
+        "vcp_observation_eligible", "vcp_lifecycle_status",
+        "vcp_origin_start_date", "vcp_pattern_start_date", "vcp_pattern_end_date",
+        "vcp_contraction_count", "vcp_contractions", "vcp_pivot_price",
+        "vcp_structure_low", "vcp_distance_to_pivot_pct", "vcp_breakout_date",
+        "vcp_days_since_breakout", "vcp_observation_reasons",
+        "vcp_observation_risk_tags", "vcp_invalidation_reason",
     ]
     extra_values = [
-        d.get("first_seen_date", first_pool_date),
-        d.get("last_seen_date", d.get("evaluation_date", "")),
+        "" if observation_only else d.get("first_seen_date", first_pool_date),
+        "" if observation_only else d.get("last_seen_date", d.get("evaluation_date", "")),
         d.get("days_in_pool", pool_age),
         d.get("exit_date", ""),
         d.get("exit_reason", ""),
@@ -4025,6 +4052,21 @@ def upsert_strategy6_candidate(
         d.get("path_evidence_score", 0),
         d.get("entry_archetype", "NONE"),
         d.get("score_model_version", "S6_QUALITY_V2"),
+        1 if d.get("vcp_observation_eligible") else 0,
+        d.get("vcp_lifecycle_status", "VCP_NONE"),
+        d.get("vcp_origin_start_date", ""),
+        d.get("vcp_pattern_start_date", ""),
+        d.get("vcp_pattern_end_date", ""),
+        d.get("vcp_contraction_count", 0),
+        _json_any(d.get("vcp_contractions", [])),
+        d.get("vcp_pivot_price", 0.0),
+        d.get("vcp_structure_low", 0.0),
+        d.get("vcp_distance_to_pivot_pct", 0.0),
+        d.get("vcp_breakout_date", ""),
+        d.get("vcp_days_since_breakout", 0),
+        _json_any(d.get("vcp_observation_reasons", [])),
+        _json_any(d.get("vcp_observation_risk_tags", [])),
+        d.get("vcp_invalidation_reason", ""),
     ]
     columns.extend(extra_columns)
     values.extend(extra_values)
@@ -4476,6 +4518,7 @@ def persist_strategy6_evaluation(
     expired_cooldown_days: int,
     failed_cooldown_days: int,
     candidate: dict | None,
+    observation_candidate: dict | None = None,
 ) -> tuple[dict, dict | None]:
     """Atomically persist Strategy6 lifecycle, task audit and active candidate."""
     conn = get_conn()
@@ -4526,6 +4569,19 @@ def persist_strategy6_evaluation(
             upsert_strategy6_candidate(
                 task_id,
                 discovery,
+                _conn=conn,
+                _commit=False,
+            )
+        elif observation_candidate is not None:
+            observation = dict(observation_candidate)
+            if candidate is not None and lifecycle.get("blocked"):
+                observation["vcp_observation_risk_tags"] = list(dict.fromkeys([
+                    *observation.get("vcp_observation_risk_tags", []),
+                    "TRADING_LIFECYCLE_BLOCKED",
+                ]))
+            upsert_strategy6_candidate(
+                task_id,
+                observation,
                 _conn=conn,
                 _commit=False,
             )
@@ -5288,6 +5344,7 @@ def _deserialize_strategy6_row(row: dict) -> dict:
         "compact_kline_reasons", "compact_kline_risk_tags",
         "start_failure_reasons", "setup_quality_reasons", "setup_quality_risk_tags",
         "support_reaction_reasons", "support_reaction_risk_tags",
+        "vcp_contractions", "vcp_observation_reasons", "vcp_observation_risk_tags",
     ):
         value = row.get(field)
         if isinstance(value, str) and value:
@@ -5303,6 +5360,7 @@ def _deserialize_strategy6_row(row: dict) -> dict:
         "box_tail_pass", "tail_pass", "compact_kline_enabled", "compact_kline_pass",
         "brooks_tail_enabled", "brooks_tail_pass", "brooks_tail_premium",
         "brooks_trade_ready", "multi_path_confirmed",
+        "vcp_observation_eligible",
     ):
         if field in row:
             row[field] = _strategy6_safe_bool(row.get(field))
@@ -5374,6 +5432,16 @@ def _deserialize_strategy6_row(row: dict) -> dict:
     # A missing version identifies a pre-V2 row.  Keep it empty so clients do
     # not present migration defaults such as zero scores as measured V2 data.
     row["score_model_version"] = row.get("score_model_version") or ""
+    row["vcp_lifecycle_status"] = row.get("vcp_lifecycle_status") or "VCP_NONE"
+    for field in (
+        "vcp_origin_start_date", "vcp_pattern_start_date", "vcp_pattern_end_date",
+        "vcp_breakout_date", "vcp_invalidation_reason",
+    ):
+        row[field] = row.get(field) or ""
+    for field in ("vcp_contraction_count", "vcp_days_since_breakout"):
+        row[field] = _strategy6_safe_int(row.get(field))
+    for field in ("vcp_pivot_price", "vcp_structure_low", "vcp_distance_to_pivot_pct"):
+        row[field] = float(row.get(field) or 0.0)
     return row
 
 

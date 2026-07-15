@@ -73,6 +73,115 @@ def test_strategy6_scan_persists_candidate_from_fetched_data(tmp_path, monkeypat
     assert db.get_task_stocks("s6-candidate")[0]["status"] == "candidate"
 
 
+def test_strategy6_scan_persists_observer_only_row_without_counting_trade_candidate(tmp_path, monkeypatch):
+    from tests.test_strategy6_core_rules import build_strategy6_candidate_data
+
+    _empty_market(monkeypatch)
+    db_path = str(tmp_path / "s6-observer-only.db")
+    config = {
+        "data": {
+            "database_path": db_path,
+            "daily_sources": ["baidu", "sina", "tencent"],
+            "worker_count": 1,
+        },
+        "strategy6": {
+            "rr2_min_watch": 10.0,
+            "rr2_min_key": 10.0,
+            "rr2_min_ready": 10.0,
+        },
+    }
+    stocks = [{"code": "000001", "name": "平安银行", "market": "SZ"}]
+
+    def fake_fetch(*args, **kwargs):
+        return FetchResult(
+            data=build_strategy6_candidate_data(),
+            primary_source="baidu",
+            fallback_source="baidu",
+        )
+
+    result = scan_strategy6_all(
+        config,
+        task_id="s6-observer-only",
+        stocks=stocks,
+        fetch_daily_fn=fake_fetch,
+        worker_count=1,
+    )
+
+    assert result["stats"]["candidates_found"] == 0
+    assert result["candidates"] == []
+    rows = db.get_strategy6_candidates("s6-observer-only")
+    assert len(rows) == 1
+    assert rows[0]["candidate_type"] == "REJECTED"
+    assert rows[0]["vcp_observation_eligible"] is True
+    assert db.get_task_stocks("s6-observer-only")[0]["status"] == "scanned"
+    assert db.get_strategy6_lifecycle("000001") is None
+
+
+def test_strategy6_scan_persists_vcp_exit_audit_without_counting_candidate(tmp_path, monkeypatch):
+    import strategy6.scanner as scanner_mod
+    from strategy6.engine import StrongVcpTailEngine
+    from strategy6.models import Strategy6VcpObservation
+    from tests.test_strategy6_core_rules import build_strategy6_candidate_data
+
+    _empty_market(monkeypatch)
+    db_path = str(tmp_path / "s6-vcp-exit.db")
+    config = {
+        "data": {
+            "database_path": db_path,
+            "daily_sources": ["baidu", "sina", "tencent"],
+            "worker_count": 1,
+        },
+        "strategy6": {
+            "rr2_min_watch": 10.0,
+            "rr2_min_key": 10.0,
+            "rr2_min_ready": 10.0,
+        },
+    }
+    data = build_strategy6_candidate_data()
+    evaluation = StrongVcpTailEngine(config).evaluate_at(data, code="000001", name="平安银行")
+    evaluation.vcp_observation = Strategy6VcpObservation(
+        eligible=False,
+        lifecycle_status="VCP_INVALID",
+        contraction_count=2,
+        pivot_price=12.5,
+        structure_low=11.8,
+        risk_tags=["VCP_STRUCTURE_LOW_BROKEN"],
+        invalidation_reason="VCP_STRUCTURE_LOW_BROKEN",
+    )
+
+    class FakeEngine:
+        def __init__(self, _config):
+            pass
+
+        def evaluate_at(self, *_args, **_kwargs):
+            return evaluation
+
+    monkeypatch.setattr(scanner_mod, "StrongVcpTailEngine", FakeEngine)
+    fake_fetch = lambda *args, **kwargs: FetchResult(
+        data=data,
+        primary_source="baidu",
+        fallback_source="baidu",
+    )
+
+    result = scan_strategy6_all(
+        config,
+        task_id="s6-vcp-exit",
+        stocks=[{"code": "000001", "name": "平安银行", "market": "SZ"}],
+        fetch_daily_fn=fake_fetch,
+        worker_count=1,
+    )
+
+    assert result["stats"]["candidates_found"] == 0
+    rows = db.get_strategy6_candidates("s6-vcp-exit")
+    assert len(rows) == 1
+    assert rows[0]["classification"] == "observation"
+    assert rows[0]["vcp_observation_eligible"] is False
+    assert rows[0]["vcp_lifecycle_status"] == "VCP_INVALID"
+    assert rows[0]["vcp_invalidation_reason"] == "VCP_STRUCTURE_LOW_BROKEN"
+    assert rows[0]["first_pool_date"] == ""
+    assert db.get_strategy6_lifecycle("000001") is None
+
+
 def test_strategy6_scan_persists_failed_lifecycle_audit_without_candidate(tmp_path, monkeypatch):
     from tests.test_strategy6_core_rules import build_strategy6_candidate_data
 
@@ -103,7 +212,11 @@ def test_strategy6_scan_persists_failed_lifecycle_audit_without_candidate(tmp_pa
 
     scan_strategy6_all(config, task_id="s6-exit", stocks=stocks, fetch_daily_fn=fake_fetch, worker_count=1)
 
-    assert db.get_strategy6_candidates("s6-exit") == []
+    exit_snapshots = db.get_strategy6_candidates("s6-exit")
+    assert len(exit_snapshots) == 1
+    assert exit_snapshots[0]["candidate_type"] == "REJECTED"
+    assert exit_snapshots[0]["classification"] == "observation"
+    assert exit_snapshots[0]["vcp_lifecycle_status"] == "VCP_INVALID"
     audit = db.get_strategy6_task_lifecycle("s6-exit")
     assert audit[0]["lifecycle_status"] == "FAILED"
     assert audit[0]["blocked"] is True

@@ -279,6 +279,25 @@ class Strategy6Score:
 
 
 @dataclass
+class Strategy6VcpObservation:
+    eligible: bool = False
+    lifecycle_status: str = "VCP_NONE"
+    origin_start_date: str = ""
+    pattern_start_date: str = ""
+    pattern_end_date: str = ""
+    contraction_count: int = 0
+    contractions: list[dict] = field(default_factory=list)
+    pivot_price: float = 0.0
+    structure_low: float = 0.0
+    distance_to_pivot_pct: float = 0.0
+    breakout_date: str = ""
+    days_since_breakout: int = 0
+    reasons: list[str] = field(default_factory=list)
+    risk_tags: list[str] = field(default_factory=list)
+    invalidation_reason: str = ""
+
+
+@dataclass
 class Strategy6Evaluation:
     code: str
     name: str
@@ -295,6 +314,7 @@ class Strategy6Evaluation:
     trade_plan: Strategy6TradePlan
     score: Strategy6Score
     setup_quality: Strategy6SetupQuality = field(default_factory=Strategy6SetupQuality)
+    vcp_observation: Strategy6VcpObservation = field(default_factory=Strategy6VcpObservation)
     strategy_version: str = ""
     config_hash: str = ""
     candidate_type: str = "REJECTED"
@@ -321,6 +341,7 @@ class Strategy6Evaluation:
         compact = box.compact_kline
         tail = self.tail_paths
         quality = self.setup_quality
+        vcp = self.vcp_observation
         return {
             "strategy_version": self.strategy_version,
             "config_hash": self.config_hash,
@@ -523,6 +544,21 @@ class Strategy6Evaluation:
             "relative_strength_risk_score": score.relative_strength_risk_score,
             "path_evidence_score": score.path_evidence_score,
             "score_model_version": score.score_model_version,
+            "vcp_observation_eligible": vcp.eligible,
+            "vcp_lifecycle_status": vcp.lifecycle_status,
+            "vcp_origin_start_date": vcp.origin_start_date,
+            "vcp_pattern_start_date": vcp.pattern_start_date,
+            "vcp_pattern_end_date": vcp.pattern_end_date,
+            "vcp_contraction_count": vcp.contraction_count,
+            "vcp_contractions": vcp.contractions,
+            "vcp_pivot_price": vcp.pivot_price,
+            "vcp_structure_low": vcp.structure_low,
+            "vcp_distance_to_pivot_pct": vcp.distance_to_pivot_pct,
+            "vcp_breakout_date": vcp.breakout_date,
+            "vcp_days_since_breakout": vcp.days_since_breakout,
+            "vcp_observation_reasons": vcp.reasons,
+            "vcp_observation_risk_tags": vcp.risk_tags,
+            "vcp_invalidation_reason": vcp.invalidation_reason,
             "candidate_type": self.candidate_type,
             "classification": self.classification,
             "lifecycle_status": self.lifecycle_status,

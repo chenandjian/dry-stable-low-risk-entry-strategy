@@ -92,3 +92,29 @@ def test_strategy6_report_serializes_brooks_details_as_stable_json():
     assert "MICRO_DOUBLE_BOTTOM" in shared
     assert "<v>10.18</v>" in sheet
     assert '{"context":{"context_type":"TRADING_RANGE","passed":true},"status":"MICRO_DOUBLE_BOTTOM"}' in shared
+
+
+def test_strategy6_formal_report_excludes_observation_and_exit_audit_rows():
+    content = build_strategy6_report_xlsx([
+        {
+            "code": "000001",
+            "name": "正式候选",
+            "candidate_type": "KEY_CANDIDATE",
+        },
+        {
+            "code": "000002",
+            "name": "VCP观察审计",
+            "candidate_type": "REJECTED",
+            "classification": "observation",
+            "vcp_lifecycle_status": "VCP_INVALID",
+        },
+    ])
+
+    workbook = zipfile.ZipFile(BytesIO(content))
+    shared = workbook.read("xl/sharedStrings.xml").decode("utf-8")
+    sheet = workbook.read("xl/worksheets/sheet1.xml").decode("utf-8")
+
+    assert "正式候选" in shared
+    assert "VCP观察审计" not in shared
+    assert '<row r="2">' in sheet
+    assert '<row r="3">' not in sheet

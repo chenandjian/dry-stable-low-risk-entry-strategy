@@ -367,6 +367,75 @@ describe('Strategy6Results', () => {
     expect(wrapper.text()).toContain('支撑失效')
   })
 
+  it('renders an independent VCP observation section without removing trade groups', async () => {
+    api.getStrategy6Candidates.mockResolvedValue({ candidates: [
+      {
+        code: '002156', name: '通富微电', candidate_type: 'KEY_CANDIDATE',
+        lifecycle_status: 'READY', total_score: 82, current_price: 78.71,
+        vcp_observation_eligible: true, vcp_lifecycle_status: 'VCP_EXTENDED',
+        vcp_contraction_count: 2, vcp_pivot_price: 68.21, vcp_structure_low: 65.61,
+        vcp_distance_to_pivot_pct: 0.154, vcp_breakout_date: '2026-07-09',
+        vcp_contractions: [
+          { peak_date: '2026-06-30', low_date: '2026-07-03', amplitude: 0.1459, avg_volume: 138603150 },
+          { peak_date: '2026-07-07', low_date: '2026-07-08', amplitude: 0.0381, avg_volume: 120261046 },
+        ],
+        vcp_observation_reasons: ['VCP_RANGE_CONTRACTING', 'VCP_VOLUME_CONTRACTING'],
+        vcp_observation_risk_tags: ['VCP_PRICE_EXTENDED'],
+      },
+      {
+        code: '300001', name: '观察样本', candidate_type: 'REJECTED',
+        classification: 'observation', lifecycle_status: 'FAILED', total_score: 51,
+        vcp_observation_eligible: true, vcp_lifecycle_status: 'VCP_NEAR_PIVOT',
+        vcp_contraction_count: 3, vcp_pivot_price: 12.5, vcp_structure_low: 11.8,
+        vcp_distance_to_pivot_pct: -0.012, vcp_observation_risk_tags: [],
+      },
+      {
+        code: '300002', name: '失效样本', candidate_type: 'REJECTED',
+        classification: 'observation', entry_archetype: 'WAIT_BREAKOUT',
+        vcp_observation_eligible: false, vcp_lifecycle_status: 'VCP_INVALID',
+        vcp_invalidation_reason: 'VCP_STRUCTURE_LOW_BROKEN',
+      },
+      {
+        code: '600001', name: '旧任务样本', candidate_type: 'WATCH_CANDIDATE',
+        lifecycle_status: 'SETUP_FORMING', total_score: 65,
+      },
+    ] })
+
+    const wrapper = mount(Strategy6Results, {
+      global: { mocks: { $route: { query: { task: 's6-task' } } } },
+    })
+    await flushUi()
+
+    const text = wrapper.text()
+    expect(text.indexOf('市场过滤数据')).toBeLessThan(text.indexOf('VCP形态候选'))
+    expect(text.indexOf('VCP形态候选')).toBeLessThan(text.indexOf('重点候选'))
+    expect(wrapper.find('[data-test="vcp-row-002156"]').exists()).toBe(true)
+    expect(wrapper.find('[data-test="vcp-row-300001"]').exists()).toBe(true)
+    expect(wrapper.find('[data-test="vcp-row-300002"]').exists()).toBe(false)
+    expect(wrapper.find('[data-test="vcp-row-600001"]').exists()).toBe(false)
+    expect(wrapper.find('[data-test="candidate-row-002156"]').exists()).toBe(true)
+    expect(wrapper.find('[data-test="candidate-row-300001"]').exists()).toBe(false)
+    expect(wrapper.find('[data-test="candidate-row-300002"]').exists()).toBe(false)
+    expect(text).toContain('候选数 2')
+    expect(text).toContain('VCP观察退出审计')
+    expect(text).toContain('失效样本')
+    expect(text).toContain('VCP结构低点被跌破')
+    expect(text).toContain('突破后过度延伸')
+    expect(text).toContain('接近VCP支点')
+    expect(text).toContain('VCP价格偏离支点过远')
+    expect(text).toContain('68.21')
+    expect(text).toContain('65.61')
+    expect(text).toContain('15.40%')
+
+    await wrapper.find('[data-test="vcp-row-002156"]').trigger('click')
+    expect(wrapper.text()).toContain('VCP生命周期')
+    expect(wrapper.text()).toContain('2026-07-09')
+    expect(wrapper.text()).toContain('VCP收缩证据')
+    expect(wrapper.text()).toContain('第1段 2026-06-30 至 2026-07-03')
+    expect(wrapper.text()).toContain('振幅 14.59%')
+    expect(wrapper.text()).toContain('VCP振幅依次收缩')
+  })
+
   it('shows unknown instead of fake zero quality scores for legacy tasks', async () => {
     const wrapper = mount(Strategy6Results, {
       global: { mocks: { $route: { query: { task: 's6-task' } } } },
@@ -591,6 +660,8 @@ describe('Strategy6Results', () => {
     expect(csv).toContain('000001,平安银行,,就绪候选,READY_CANDIDATE,买入区间,BUY_ZONE,2026-07-01,6')
     expect(csv).toContain('降级处理,downgrade,市场偏弱,MARKET_WEAK,18.00%,12.34')
     expect(csv).toContain('接近120日压力位,NEAR_120D_PRESSURE')
+    expect(csv).toContain('VCP观察资格,VCP状态,VCP状态原始值,VCP起点,VCP形态开始,VCP形态结束,VCP收缩次数')
+    expect(csv).toContain('VCP支点,VCP结构低点,距VCP支点,VCP突破日期,VCP突破后天数')
   })
 
   it('exports Brooks-only waiting candidates without READY or immediate-buy semantics', async () => {

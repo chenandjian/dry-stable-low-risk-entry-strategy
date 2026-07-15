@@ -39,6 +39,10 @@ DEFAULT_STRATEGY6_CONFIG = {
     "vcp_contraction_range_ratio": 0.90,
     "vcp_contraction_volume_ratio": 0.90,
     "vcp_min_first_range": 0.08,
+    "vcp_observer_enabled": True,
+    "vcp_observer_lookback_days": 60,
+    "vcp_observer_breakout_retention_days": 10,
+    "vcp_observer_extension_pct": 0.08,
     "cup_depth_min": 0.12,
     "cup_depth_max": 0.35,
     "platform_max_range": 0.12,
@@ -247,6 +251,8 @@ def resolve_strategy6_config(config: dict | None) -> dict:
     _validate_int_range(raw, "kline_days", 260, 3000)
     _validate_int_range(raw, "minimum_trading_days", 260, raw["kline_days"])
     _validate_int_range(raw, "start_lookback_days", 20, 250)
+    _validate_int_range(raw, "vcp_observer_lookback_days", 20, 250)
+    _validate_int_range(raw, "vcp_observer_breakout_retention_days", 1, 60)
     _validate_int_range(raw, "start_age_min_days", 1, 20)
     _validate_int_range(raw, "start_age_max_days", raw["start_age_min_days"], raw["start_lookback_days"])
     _validate_int_range(raw, "consolidation_min_days", 1, 40)
@@ -273,7 +279,8 @@ def resolve_strategy6_config(config: dict | None) -> dict:
         "big_down_volume_ratio", "rr2_min_watch", "rr2_min_key", "rr2_min_ready",
         "target_2_cap_pct", "stop_key_support_pct", "stop_atr_multiplier",
         "vcp_contraction_range_ratio", "vcp_contraction_volume_ratio",
-        "vcp_min_first_range", "cup_depth_min", "cup_depth_max", "platform_max_range",
+        "vcp_min_first_range", "vcp_observer_extension_pct",
+        "cup_depth_min", "cup_depth_max", "platform_max_range",
         "pattern_pivot_proximity_pct",
         "breakout_extended_max_pct",
         "support_cluster_price_pct", "support_cluster_atr_multiplier",
@@ -302,6 +309,7 @@ def resolve_strategy6_config(config: dict | None) -> dict:
     _validate_between(raw, "normal_start_self_amount_percentile", 0, 1)
     _validate_between(raw, "vcp_contraction_range_ratio", 0, 1)
     _validate_between(raw, "vcp_contraction_volume_ratio", 0, 1)
+    _validate_between(raw, "vcp_observer_extension_pct", 0, 1, lower_exclusive=True)
     _validate_between(raw, "cup_depth_min", 0, 1)
     _validate_between(raw, "cup_depth_max", raw["cup_depth_min"], 1)
     _validate_between(raw, "platform_max_range", 0, 1)

@@ -12,6 +12,7 @@ from strategy6.models import (
     Strategy6Indicators,
     Strategy6Score,
     Strategy6TradePlan,
+    Strategy6VcpObservation,
 )
 from strategy6.strong_start import evaluate_strong_start
 from strategy6.scorer import _relative_strength_risk_score
@@ -152,6 +153,96 @@ def test_engine_outputs_full_candidate_trade_plan():
         "WAIT_BREAKOUT", "NONE",
     }
     assert candidate["score_model_version"] == "S6_QUALITY_V2"
+
+
+def test_engine_candidate_dict_exposes_safe_vcp_observation_defaults():
+    result = StrongVcpTailEngine({
+        "strategy6": {"vcp_observer_enabled": False},
+    }).evaluate_at(
+        build_strategy6_candidate_data(),
+        code="000001",
+        name="平安银行",
+    )
+
+    candidate = result.to_candidate_dict()
+
+    assert candidate["vcp_observation_eligible"] is False
+    assert candidate["vcp_lifecycle_status"] == "VCP_NONE"
+    assert candidate["vcp_origin_start_date"] == ""
+    assert candidate["vcp_pattern_start_date"] == ""
+    assert candidate["vcp_pattern_end_date"] == ""
+    assert candidate["vcp_contraction_count"] == 0
+    assert candidate["vcp_contractions"] == []
+    assert candidate["vcp_pivot_price"] == 0.0
+    assert candidate["vcp_structure_low"] == 0.0
+    assert candidate["vcp_distance_to_pivot_pct"] == 0.0
+    assert candidate["vcp_breakout_date"] == ""
+    assert candidate["vcp_days_since_breakout"] == 0
+    assert candidate["vcp_observation_reasons"] == []
+    assert candidate["vcp_observation_risk_tags"] == []
+    assert candidate["vcp_invalidation_reason"] == ""
+
+
+def test_vcp_observation_is_orthogonal_to_main_strategy_decision(monkeypatch):
+    import strategy6.engine as engine_mod
+
+    data = build_strategy6_candidate_data()
+    monkeypatch.setattr(
+        engine_mod,
+        "evaluate_vcp_observation",
+        lambda rows, config, **kwargs: Strategy6VcpObservation(),
+        raising=False,
+    )
+    baseline = StrongVcpTailEngine({}).evaluate_at(data, code="000001")
+
+    monkeypatch.setattr(
+        engine_mod,
+        "evaluate_vcp_observation",
+        lambda rows, config, **kwargs: Strategy6VcpObservation(
+            eligible=True,
+            lifecycle_status="VCP_EXTENDED",
+            pivot_price=12.0,
+            structure_low=10.0,
+            risk_tags=["VCP_PRICE_EXTENDED"],
+        ),
+        raising=False,
+    )
+    observed = StrongVcpTailEngine({}).evaluate_at(data, code="000001")
+
+    assert observed.vcp_observation.lifecycle_status == "VCP_EXTENDED"
+    assert observed.pattern == baseline.pattern
+    assert observed.score == baseline.score
+    assert observed.candidate_type == baseline.candidate_type
+    assert observed.classification == baseline.classification
+    assert observed.reject_reasons == baseline.reject_reasons
+    assert observed.trade_plan == baseline.trade_plan
+
+
+def test_vcp_observation_does_not_bypass_strategy6_data_and_liquidity_floor(monkeypatch):
+    import strategy6.engine as engine_mod
+
+    monkeypatch.setattr(
+        engine_mod,
+        "evaluate_vcp_observation",
+        lambda rows, config, **kwargs: Strategy6VcpObservation(
+            eligible=True,
+            lifecycle_status="VCP_NEAR_PIVOT",
+            pivot_price=12.0,
+            structure_low=10.0,
+        ),
+    )
+    result = StrongVcpTailEngine({
+        "strategy6": {
+            "min_avg_amount_60d_yi": 100,
+            "min_avg_amount_30d_yi": 100,
+            "min_avg_amount_10d_yi": 100,
+        },
+    }).evaluate_at(build_strategy6_candidate_data(), code="000001")
+
+    assert result.vcp_observation.eligible is False
+    assert result.vcp_observation.lifecycle_status == "VCP_NONE"
+    assert "VCP_BASE_FILTER_FAILED" in result.vcp_observation.risk_tags
+    assert "AVG60D_LT_MIN" in result.vcp_observation.risk_tags
 
 
 def test_engine_outputs_brooks_and_authoritative_three_path_fields():

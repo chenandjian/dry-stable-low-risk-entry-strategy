@@ -14,6 +14,12 @@ const LABELS = {
     BUY_ZONE: '买入区间', BREAKOUT_CONFIRMED: '突破已确认', EXTENDED: '涨幅已过度延伸',
     FAILED: '结构失效', EXPIRED: '已过期', COOLDOWN: '冷却期',
   },
+  vcpStatus: {
+    VCP_NONE: '未形成VCP观察结构', VCP_FORMING: 'VCP形成中',
+    VCP_NEAR_PIVOT: '接近VCP支点', VCP_BREAKOUT_CONFIRMED: 'VCP突破已确认',
+    VCP_POST_BREAKOUT: 'VCP突破后观察', VCP_EXTENDED: '突破后过度延伸',
+    VCP_INVALID: 'VCP结构失效',
+  },
   entryArchetype: {
     SUPPORT_PULLBACK: '支撑低吸', PIVOT_BREAKOUT: '枢轴突破',
     FAILED_BREAKOUT_RECLAIM: '假跌破收复', WAIT_BREAKOUT: '等待突破', NONE: '无有效入场',
@@ -176,6 +182,16 @@ const LABELS = {
     RELATIVE_STRENGTH_FADING: '相对强度走弱', REPEATED_FAILED_BREAKOUTS: '反复假突破',
     RS_TREND_UNAVAILABLE: '相对强度趋势数据不可用', START_LOW_BROKEN: '启动低点被跌破',
     START_GAIN_FULLY_RETRACED: '启动涨幅已完全回吐', START_FOLLOW_THROUGH_DISTRIBUTION: '启动后出现放量派发',
+    VCP_ORIGIN_STRONG_START: 'VCP结构前存在强势启动', VCP_ORIGIN_START_MISSING: 'VCP结构缺少历史强势启动',
+    VCP_SWING_CONTRACTIONS: 'VCP波段收缩成立', VCP_RANGE_CONTRACTING: 'VCP振幅依次收缩',
+    VCP_VOLUME_CONTRACTING: 'VCP成交量依次收缩', VCP_LOW_NOT_FALLING: 'VCP低点未下移',
+    VCP_NEAR_PIVOT: '接近VCP支点', VCP_BREAKOUT_CONFIRMED: 'VCP突破已确认',
+    VCP_POST_BREAKOUT: 'VCP突破后观察', VCP_PRICE_EXTENDED: 'VCP价格偏离支点过远',
+    VCP_PIVOT_LOST: 'VCP突破后跌回支点下方', VCP_STRUCTURE_LOW_BROKEN: 'VCP结构低点被跌破',
+    VCP_VOLUME_BREAKDOWN_UNRECOVERED: 'VCP放量跌回支点后3日未收复',
+    VCP_OBSERVATION_EXPIRED: 'VCP突破观察期已结束', VCP_DATA_INSUFFICIENT: 'VCP观察数据不足',
+    VCP_BASE_FILTER_FAILED: 'VCP观察未通过基础数据或流动性门槛',
+    TRADING_LIFECYCLE_BLOCKED: '原交易生命周期处于退出或冷却状态',
   },
 }
 

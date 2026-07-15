@@ -20,6 +20,7 @@ from strategy6.support import evaluate_support
 from strategy6.trade_plan import calculate_trade_plan
 from strategy6.validation import resolve_strategy6_config, strategy6_config_hash
 from strategy6.version import STRATEGY6_VERSION
+from strategy6.vcp_observer import apply_vcp_base_filters, evaluate_vcp_observation
 
 
 class StrongVcpTailEngine:
@@ -48,6 +49,7 @@ class StrongVcpTailEngine:
             trading_days_override=trading_days_override,
             rows_normalized=rows_normalized,
         )
+        vcp_observation = evaluate_vcp_observation(rows, self.config, code=code)
         market_context = evaluate_market_context(
             market_data_by_symbol,
             expected_trade_date=indicators.evaluation_date,
@@ -149,6 +151,7 @@ class StrongVcpTailEngine:
             reject_reasons.append("LATEST_TRADE_SUSPENDED")
         elif normalized_quote_status == "no_trade":
             reject_reasons.append("LATEST_TRADE_NO_TRADE")
+        apply_vcp_base_filters(vcp_observation, reject_reasons)
         candidate_type, classification, lifecycle_status, suggestion = classify_candidate(
             indicators,
             start,
@@ -179,6 +182,7 @@ class StrongVcpTailEngine:
             trade_plan=trade_plan,
             score=score,
             setup_quality=setup_quality,
+            vcp_observation=vcp_observation,
             strategy_version=STRATEGY6_VERSION,
             config_hash=strategy6_config_hash(self.config),
             candidate_type=candidate_type,

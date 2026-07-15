@@ -220,13 +220,25 @@ LIFECYCLE_REPORT_COLUMNS = [
 ]
 
 
+def is_strategy6_trading_candidate(candidate: dict) -> bool:
+    return candidate.get("candidate_type") != "REJECTED"
+
+
+def is_strategy6_observation_record(candidate: dict) -> bool:
+    return (
+        candidate.get("candidate_type") == "REJECTED"
+        and candidate.get("classification") == "observation"
+    )
+
+
 def build_strategy6_report_xlsx(
     candidates: list[dict],
     lifecycle_rows: list[dict] | None = None,
 ) -> bytes:
     shared_strings: list[str] = []
     shared_index: dict[str, int] = {}
-    candidate_rows = _report_rows(candidates, STRATEGY6_REPORT_COLUMNS)
+    trading_candidates = [item for item in candidates if is_strategy6_trading_candidate(item)]
+    candidate_rows = _report_rows(trading_candidates, STRATEGY6_REPORT_COLUMNS)
     lifecycle_report_rows = _report_rows(lifecycle_rows or [], LIFECYCLE_REPORT_COLUMNS)
     sheet_rows = _encode_sheet_rows(candidate_rows, shared_strings, shared_index)
     lifecycle_sheet_rows = _encode_sheet_rows(lifecycle_report_rows, shared_strings, shared_index)

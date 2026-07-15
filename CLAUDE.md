@@ -119,6 +119,7 @@ npm --prefix web run preview
 - **策略6全面调优门槛：** 验证期交易不少于30、期望R不低于0.10、PF不低于1.20、平均盈利R/平均亏损R不低于2.5、固定风险最大回撤不超过20%、前五股票盈利贡献不超过55%、单月不超过35%，并要求关键指标至少保留训练期60%。
 - **策略6执行调优：** 信号参数冻结后，买入有效期和最大持有期仅对冻结信号重放。费用不得低于BASE，T+1、一字涨跌停、缺失K线和STOP_FIRST固定；高成本、70%成交率和延迟一天必须实际重放。
 - **策略6全面调优CLI：** `comprehensive-plan` 创建身份，`comprehensive-run` 串行推进一层，`comprehensive-status` 查看恢复状态，`comprehensive-report` 输出Markdown/JSON及参数、候选、订单、交易CSV。所有结论只供人工审批，禁止自动写生产配置。
+- **策略6 VCP观察池（V4.3）：** `strategy6/vcp_observer.py` 独立识别最近窗口内的VCP形成、近支点、突破后和延伸状态；它与原交易候选主链正交，不参与评分、硬过滤或分类。符合条件的股票在前端“VCP形态候选”独立展示，并可同时保留在重点/观察候选中；纯观察记录持久化为 `REJECTED/observation`，不得赋予虚假的交易入池日期或买入语义。
 - **形态评分维度：** 杯体结构 35 + 柄部结构 25 + 成交量结构 20 + 前置趋势 10 + 突破确认 10 = 100 分。
 - **A股配色：** 红涨绿跌。金色仅用于 ≥80 分 A 级信号。
 - **SQLite 持久化：** 数据存储于 `data/cuphandle.db`（stock_pool, daily_ohlc, scan_tasks, candidates）。线程级连接 + WAL 模式。

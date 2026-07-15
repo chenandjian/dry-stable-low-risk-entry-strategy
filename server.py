@@ -27,7 +27,11 @@ from strategy4.config import resolve_strategy4_config
 from strategy5.scanner import STRATEGY5_TYPE, scan_strategy5_all
 from strategy5.validation import resolve_strategy5_config
 from strategy6 import STRATEGY6_TYPE
-from strategy6.report import build_strategy6_report_xlsx
+from strategy6.report import (
+    build_strategy6_report_xlsx,
+    is_strategy6_observation_record,
+    is_strategy6_trading_candidate,
+)
 from strategy6.scanner import scan_strategy6_all
 from strategy6.validation import resolve_strategy6_config
 from scanner.strategy_engine import (
@@ -2459,7 +2463,15 @@ async def strategy6_candidates(task_id: str):
     if err:
         return err
     candidates = db.get_strategy6_candidates(task_id)
-    return {"taskId": task_id, "candidates": candidates, "total": len(candidates)}
+    trading_total = sum(1 for item in candidates if is_strategy6_trading_candidate(item))
+    observation_total = sum(1 for item in candidates if is_strategy6_observation_record(item))
+    return {
+        "taskId": task_id,
+        "candidates": candidates,
+        "total": trading_total,
+        "recordTotal": len(candidates),
+        "observationTotal": observation_total,
+    }
 
 
 @app.get("/api/strategy6/tasks/{task_id}/candidates/{code}")

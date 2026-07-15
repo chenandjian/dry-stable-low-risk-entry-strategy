@@ -28,7 +28,8 @@
     <div v-if="error" class="error-banner">{{ error }}</div>
 
     <div class="summary-bar" v-if="candidates.length">
-      <span>候选数 <strong>{{ candidates.length }}</strong></span>
+      <span>候选数 <strong>{{ tradingCandidates.length }}</strong></span>
+      <span class="chip vcp">VCP观察 {{ vcpCandidates.length }}</span>
       <span class="chip ready">就绪 {{ readyCandidates.length }}</span>
       <span class="chip key">重点 {{ keyCandidates.length }}</span>
       <span class="chip watch">观察 {{ watchCandidates.length }}</span>
@@ -69,6 +70,61 @@
               <td>{{ label('source', idx.source) }}</td>
               <td>{{ idx.fetched_at || '--' }}</td>
               <td>{{ idx.rows_count ?? 0 }}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section v-if="vcpCandidates.length" class="panel vcp-panel">
+      <div class="panel-header">VCP形态候选</div>
+      <div class="panel-note">独立形态观察，不改变原重点/观察分类；过度延伸只保留跟踪，不代表立即买入。</div>
+      <div class="table-scroll">
+        <table class="candidate-table vcp-table">
+          <thead>
+            <tr>
+              <th>股票</th><th>VCP状态</th><th>收缩次数</th><th>VCP支点</th><th>结构低点</th>
+              <th>距支点</th><th>突破日期</th><th>总分</th><th>原交易分类</th><th>风险提示</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr
+              v-for="c in vcpCandidates"
+              :key="c.code"
+              :data-test="`vcp-row-${c.code}`"
+              class="clickable"
+              @click="selected = c"
+            >
+              <td><span class="code">{{ c.code }}</span> {{ c.name }}</td>
+              <td>{{ label('vcpStatus', c.vcp_lifecycle_status) }}</td>
+              <td>{{ c.vcp_contraction_count ?? 0 }}</td>
+              <td>{{ fmt(c.vcp_pivot_price) }}</td>
+              <td>{{ fmt(c.vcp_structure_low) }}</td>
+              <td>{{ pct(c.vcp_distance_to_pivot_pct) }}</td>
+              <td>{{ c.vcp_breakout_date || '--' }}</td>
+              <td class="score">{{ fmt(c.total_score, 0) }}</td>
+              <td>{{ candidateTypeText(c) }}</td>
+              <td>
+                <span v-for="tag in c.vcp_observation_risk_tags || []" :key="tag" class="tag warn">{{ label('tag', tag) }}</span>
+                <span v-if="!(c.vcp_observation_risk_tags || []).length" class="muted">--</span>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section v-if="vcpExitAuditRows.length" class="panel vcp-audit-panel">
+      <div class="panel-header">VCP观察退出审计</div>
+      <div class="table-scroll">
+        <table class="lifecycle-table">
+          <thead><tr><th>股票</th><th>VCP状态</th><th>评估日期</th><th>失效/退出原因</th></tr></thead>
+          <tbody>
+            <tr v-for="row in vcpExitAuditRows" :key="`vcp-exit-${row.code}`">
+              <td><span class="code">{{ row.code }}</span> {{ row.name }}</td>
+              <td>{{ label('vcpStatus', row.vcp_lifecycle_status) }}</td>
+              <td>{{ row.evaluation_date || '--' }}</td>
+              <td>{{ vcpExitReasonText(row) }}</td>
             </tr>
           </tbody>
         </table>
@@ -155,6 +211,9 @@
     <section v-if="selected" class="panel detail-panel">
       <div class="panel-header">候选详情 · {{ selected.code }} {{ selected.name }}</div>
       <div class="detail-grid">
+        <div v-if="selected.vcp_observation_eligible"><span>VCP生命周期</span><strong>{{ label('vcpStatus', selected.vcp_lifecycle_status) }} · {{ selected.vcp_pattern_start_date || '--' }} 至 {{ selected.vcp_pattern_end_date || '--' }}</strong></div>
+        <div v-if="selected.vcp_observation_eligible"><span>VCP关键位</span><strong>支点 {{ fmt(selected.vcp_pivot_price) }} · 结构低点 {{ fmt(selected.vcp_structure_low) }} · 距支点 {{ pct(selected.vcp_distance_to_pivot_pct) }}</strong></div>
+        <div v-if="selected.vcp_observation_eligible"><span>VCP突破</span><strong>{{ selected.vcp_breakout_date || '--' }} · 突破后 {{ selected.vcp_days_since_breakout ?? 0 }} 个交易日</strong></div>
         <div><span>分类</span><strong>{{ candidateTypeText(selected) }} / {{ isExecutionWaiting(selected) ? '观察' : label('classification', selected.classification) }}</strong></div>
         <div><span>生命周期</span><strong>{{ lifecycleText(selected) }}</strong></div>
         <div><span>强势启动</span><strong>{{ label('startType', selected.start_type) }} / {{ label('startGrade', selected.start_grade) }} / {{ pct(selected.start_day_return) }} · 启动后{{ selected.days_since_start ?? 0 }}日</strong></div>
@@ -187,6 +246,18 @@
         <div><span>价格口径</span><strong>{{ label('priceBasis', selected.price_basis || 'FORWARD_ADJUSTED') }} · 未复权报价 {{ fmt(selected.current_price_raw) }}</strong></div>
         <div><span>涨跌幅</span><strong>5日 {{ pct(selected.return_5) }} · 10日 {{ pct(selected.return_10) }} · 20日 {{ pct(selected.return_20) }}</strong></div>
         <div data-test="detail-suggestion"><span>建议</span><strong>{{ isExecutionWaiting(selected) ? '观察/等待触发' : (selected.suggestion || '--') }}</strong></div>
+      </div>
+      <div v-if="selected.vcp_observation_eligible" class="vcp-evidence">
+        <div class="subsection-title">VCP收缩证据</div>
+        <div v-if="!(selected.vcp_contractions || []).length" class="muted">暂无收缩明细</div>
+        <div v-for="(item, index) in selected.vcp_contractions || []" :key="`${item.peak_date}-${item.low_date}-${index}`" class="vcp-contraction-row">
+          {{ vcpContractionText(item, index) }}
+        </div>
+        <div class="tags vcp-tags">
+          <span v-for="reason in selected.vcp_observation_reasons || []" :key="'vr'+reason" class="tag info">{{ label('tag', reason) }}</span>
+          <span v-for="risk in selected.vcp_observation_risk_tags || []" :key="'vk'+risk" class="tag warn">{{ label('tag', risk) }}</span>
+          <span v-if="selected.vcp_invalidation_reason" class="tag risk">{{ label('tag', selected.vcp_invalidation_reason) }}</span>
+        </div>
       </div>
       <div class="brooks-evidence">
         <div class="subsection-title">Brooks价格行为证据</div>
@@ -256,6 +327,26 @@ export default {
     sortedCandidates() {
       return [...this.candidates].sort((a, b) => (b.total_score || 0) - (a.total_score || 0))
     },
+    tradingCandidates() {
+      return this.sortedCandidates.filter(c => this.effectiveCandidateType(c) !== 'REJECTED')
+    },
+    vcpCandidates() {
+      return this.sortedCandidates.filter(c => (
+        c.vcp_observation_eligible === true
+        && c.vcp_lifecycle_status !== 'VCP_INVALID'
+        && c.vcp_lifecycle_status !== 'VCP_NONE'
+      ))
+    },
+    vcpExitAuditRows() {
+      return this.sortedCandidates.filter(c => (
+        c.vcp_observation_eligible !== true
+        && (
+          c.vcp_lifecycle_status === 'VCP_INVALID'
+          || (c.vcp_observation_risk_tags || []).includes('VCP_OBSERVATION_EXPIRED')
+          || (c.vcp_observation_risk_tags || []).includes('VCP_BASE_FILTER_FAILED')
+        )
+      ))
+    },
     readyCandidates() {
       return this.sortedCandidates.filter(c => this.effectiveCandidateType(c) === 'READY_CANDIDATE')
     },
@@ -273,10 +364,10 @@ export default {
       ].filter(group => group.items.length)
     },
     topScore() {
-      return this.sortedCandidates[0]?.total_score ?? '--'
+      return this.tradingCandidates[0]?.total_score ?? '--'
     },
     topRr2() {
-      const best = this.sortedCandidates.reduce((max, c) => Math.max(max, Number(c.objective_rr_2 ?? c.risk_reward_ratio_2 ?? 0)), 0)
+      const best = this.tradingCandidates.reduce((max, c) => Math.max(max, Number(c.objective_rr_2 ?? c.risk_reward_ratio_2 ?? 0)), 0)
       return best ? best.toFixed(2) : '--'
     },
     marketIndexes() {
@@ -354,7 +445,11 @@ export default {
       return paths.length === 1 && paths[0] === 'BROOKS' && !this.brooksTradeConfirmed(candidate)
     },
     isExecutionWaiting(candidate) {
+      if (this.isObservationRecord(candidate)) return false
       return this.isBrooksOnlyWaiting(candidate) || candidate?.entry_archetype === 'WAIT_BREAKOUT'
+    },
+    isObservationRecord(candidate) {
+      return candidate?.candidate_type === 'REJECTED' && candidate?.classification === 'observation'
     },
     isQualityV2(candidate) {
       return candidate?.score_model_version === 'S6_QUALITY_V2'
@@ -367,6 +462,7 @@ export default {
       return this.isQualityV2(candidate) ? this.label('entryArchetype', candidate?.entry_archetype) : '--'
     },
     effectiveCandidateType(candidate) {
+      if (this.isObservationRecord(candidate)) return 'REJECTED'
       return this.isExecutionWaiting(candidate) ? 'WATCH_CANDIDATE' : (candidate?.candidate_type || 'WATCH_CANDIDATE')
     },
     candidateTypeText(candidate) {
@@ -482,6 +578,16 @@ export default {
     marketDataStatusText(status) {
       return this.label('marketDataStatus', status || 'MISSING')
     },
+    vcpContractionText(item, index) {
+      return `第${index + 1}段 ${item?.peak_date || '--'} 至 ${item?.low_date || '--'} · 振幅 ${this.pct(item?.amplitude)} · 均量 ${this.fmt(item?.avg_volume, 0)}`
+    },
+    vcpExitReasonText(row) {
+      const reasons = [
+        row.vcp_invalidation_reason,
+        ...(row.vcp_observation_risk_tags || []),
+      ].filter(Boolean)
+      return this.joinedLabels('tag', [...new Set(reasons)], ' / ')
+    },
     exportCandidates() {
       downloadCsv({
         filename: `strategy6-candidates-${this.selectedTaskId || 'latest'}.csv`,
@@ -510,6 +616,21 @@ export default {
           { header: '阶段状态原始值', value: c => c.phase_status || '' },
           { header: '形态类型', value: c => this.label('patternType', c.pattern_type) },
           { header: '形态类型原始值', value: c => c.pattern_type || '' },
+          { header: 'VCP观察资格', value: c => c.vcp_observation_eligible ? '是' : '否' },
+          { header: 'VCP状态', value: c => this.label('vcpStatus', c.vcp_lifecycle_status || 'VCP_NONE') },
+          { header: 'VCP状态原始值', value: c => c.vcp_lifecycle_status || 'VCP_NONE' },
+          { header: 'VCP起点', value: c => c.vcp_origin_start_date || '' },
+          { header: 'VCP形态开始', value: c => c.vcp_pattern_start_date || '' },
+          { header: 'VCP形态结束', value: c => c.vcp_pattern_end_date || '' },
+          { header: 'VCP收缩次数', value: c => c.vcp_contraction_count ?? 0 },
+          { header: 'VCP支点', value: c => this.fmt(c.vcp_pivot_price) },
+          { header: 'VCP结构低点', value: c => this.fmt(c.vcp_structure_low) },
+          { header: '距VCP支点', value: c => this.pct(c.vcp_distance_to_pivot_pct) },
+          { header: 'VCP突破日期', value: c => c.vcp_breakout_date || '' },
+          { header: 'VCP突破后天数', value: c => c.vcp_days_since_breakout ?? 0 },
+          { header: 'VCP观察原因', value: c => strategy6Labels('tag', c.vcp_observation_reasons).join('|') },
+          { header: 'VCP观察风险', value: c => strategy6Labels('tag', c.vcp_observation_risk_tags).join('|') },
+          { header: 'VCP失效原因', value: c => c.vcp_invalidation_reason ? this.label('tag', c.vcp_invalidation_reason) : '' },
           { header: '总分', value: c => c.total_score ?? '' },
           { header: '市场过滤', value: c => c.enable_market_filter ? '开启' : '关闭' },
           { header: '市场过滤模式', value: c => this.label('marketFilterMode', c.market_filter_mode) },
@@ -692,8 +813,13 @@ select { background: var(--bg-panel); color: var(--text-primary); border: 1px so
 .chip.ready, .type-badge.ready { background: rgba(59, 130, 246, 0.18); color: #93c5fd; }
 .chip.key, .type-badge.key { background: rgba(168, 85, 247, 0.18); color: #d8b4fe; }
 .chip.watch, .type-badge.watch { background: rgba(234, 179, 8, 0.15); color: #fde68a; }
+.chip.vcp { background: rgba(20, 184, 166, 0.16); color: #99f6e4; }
 .panel { background: var(--bg-panel); border: 1px solid var(--border); border-radius: 6px; margin: 14px 0; overflow: hidden; }
 .panel-header { padding: 12px 14px; border-bottom: 1px solid var(--border); font-weight: 700; color: var(--text-secondary); }
+.vcp-panel { border-color: rgba(20, 184, 166, 0.35); }
+.vcp-audit-panel { border-color: rgba(239, 68, 68, 0.28); }
+.panel-note { padding: 9px 14px; color: var(--text-secondary); font-size: 12px; border-bottom: 1px solid var(--border); }
+.vcp-table { min-width: 1120px; }
 .table-scroll { overflow-x: auto; }
 .candidate-table { width: 100%; min-width: 1520px; border-collapse: collapse; font-size: 13px; }
 .market-table { width: 100%; min-width: 980px; border-collapse: collapse; font-size: 13px; }
@@ -714,6 +840,9 @@ td { vertical-align: top; }
 .detail-grid span { color: var(--text-secondary); font-size: 12px; }
 .detail-grid strong { color: var(--text-primary); }
 .brooks-evidence { margin: 0 14px 14px; padding: 14px; border: 1px solid rgba(77, 163, 255, 0.25); border-radius: 8px; background: rgba(77, 163, 255, 0.04); }
+.vcp-evidence { margin: 0 14px 14px; padding: 14px; border: 1px solid rgba(20, 184, 166, 0.3); border-radius: 8px; background: rgba(20, 184, 166, 0.04); }
+.vcp-contraction-row { padding: 5px 0; color: var(--text-primary); font-family: var(--font-mono); font-size: 13px; }
+.vcp-tags { padding: 8px 0 0; }
 .subsection-title { color: var(--text-primary); font-weight: 700; margin-bottom: 10px; }
 .brooks-empty { color: var(--text-secondary); }
 .brooks-summary { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; margin-bottom: 12px; color: var(--text-secondary); }

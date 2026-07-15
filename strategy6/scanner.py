@@ -203,6 +203,25 @@ def scan_strategy6_all(
                     quote_status=fetch_result.quote_status or "",
                     market_data_by_symbol=_market_data_until(market_data_by_symbol, latest_trade_date or ""),
                 )
+                candidate = evaluation.to_candidate_dict() if evaluation.passed else None
+                observation = None
+                vcp = evaluation.vcp_observation
+                vcp_exit_audit = (
+                    vcp.lifecycle_status == "VCP_INVALID"
+                    or "VCP_OBSERVATION_EXPIRED" in vcp.risk_tags
+                    or (bool(vcp.origin_start_date) and "VCP_BASE_FILTER_FAILED" in vcp.risk_tags)
+                )
+                if vcp.eligible or vcp_exit_audit:
+                    observation = evaluation.to_candidate_dict()
+                    observation.update({
+                        "candidate_type": "REJECTED",
+                        "classification": "observation",
+                        "first_pool_date": "",
+                        "first_seen_date": "",
+                        "last_seen_date": "",
+                        "days_in_pool": 0,
+                        "pool_age_trading_days": 0,
+                    })
                 lifecycle, discovery = db.persist_strategy6_evaluation(
                     task_id,
                     code=code,
@@ -215,7 +234,8 @@ def scan_strategy6_all(
                     max_watch_days=int(cfg["max_watch_days"]),
                     expired_cooldown_days=int(cfg["expired_cooldown_days"]),
                     failed_cooldown_days=int(cfg["failed_cooldown_days"]),
-                    candidate=evaluation.to_candidate_dict() if evaluation.passed else None,
+                    candidate=candidate,
+                    observation_candidate=observation,
                 )
                 if lifecycle["blocked"] and evaluation.passed:
                     _finish_stock(

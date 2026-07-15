@@ -215,6 +215,11 @@ def test_strategy6_candidate_table_is_independent(tmp_path):
     assert detail["path_evidence_score"] == 13
     assert detail["entry_archetype"] == "SUPPORT_PULLBACK"
     assert detail["score_model_version"] == "S6_QUALITY_V2"
+    assert detail["vcp_observation_eligible"] is False
+    assert detail["vcp_lifecycle_status"] == "VCP_NONE"
+    assert detail["vcp_contractions"] == []
+    assert detail["vcp_observation_reasons"] == []
+    assert detail["vcp_observation_risk_tags"] == []
     assert db.get_candidates(task_id="s6-task") == []
     assert db.get_strategy2_candidates(task_id="s6-task") == []
     assert db.get_strategy3_candidates(task_id="s6-task") == []
@@ -246,9 +251,78 @@ def test_strategy6_candidate_schema_contains_all_box_tail_output_fields(tmp_path
         "brooks_trade_trigger_type", "brooks_trigger_price", "brooks_trigger_valid_until", "tail_paths",
         "tail_path_summary", "tail_primary_path", "passed_path_count",
         "multi_path_confirmed", "brooks_result_json",
+        "vcp_observation_eligible", "vcp_lifecycle_status",
+        "vcp_origin_start_date", "vcp_pattern_start_date", "vcp_pattern_end_date",
+        "vcp_contraction_count", "vcp_contractions", "vcp_pivot_price",
+        "vcp_structure_low", "vcp_distance_to_pivot_pct", "vcp_breakout_date",
+        "vcp_days_since_breakout", "vcp_observation_reasons",
+        "vcp_observation_risk_tags", "vcp_invalidation_reason",
     }
 
     assert required <= columns
+
+
+def test_strategy6_candidate_round_trips_vcp_observation_fields(tmp_path):
+    db.init_db(str(tmp_path / "s6-vcp-observation.db"))
+    db.create_scan_task("s6-vcp", "2026-07-09 10:00:00", strategy_type=STRATEGY6_TYPE)
+    candidate = _candidate()
+    candidate.update({
+        "vcp_observation_eligible": True,
+        "vcp_lifecycle_status": "VCP_POST_BREAKOUT",
+        "vcp_origin_start_date": "2026-05-25",
+        "vcp_pattern_start_date": "2026-06-30",
+        "vcp_pattern_end_date": "2026-07-08",
+        "vcp_contraction_count": 2,
+        "vcp_contractions": [
+            {"peak_date": "2026-06-30", "low_date": "2026-07-03", "amplitude": 0.1459},
+            {"peak_date": "2026-07-07", "low_date": "2026-07-08", "amplitude": 0.0381},
+        ],
+        "vcp_pivot_price": 68.21,
+        "vcp_structure_low": 65.61,
+        "vcp_distance_to_pivot_pct": 0.057,
+        "vcp_breakout_date": "2026-07-09",
+        "vcp_days_since_breakout": 2,
+        "vcp_observation_reasons": ["VCP_POST_BREAKOUT"],
+        "vcp_observation_risk_tags": ["VCP_PIVOT_LOST"],
+        "vcp_invalidation_reason": "",
+    })
+
+    db.upsert_strategy6_candidate("s6-vcp", candidate)
+
+    row = db.get_strategy6_candidate("000001", task_id="s6-vcp")
+    assert row["vcp_observation_eligible"] is True
+    assert row["vcp_lifecycle_status"] == "VCP_POST_BREAKOUT"
+    assert row["vcp_contraction_count"] == 2
+    assert row["vcp_contractions"][1]["amplitude"] == 0.0381
+    assert row["vcp_observation_reasons"] == ["VCP_POST_BREAKOUT"]
+    assert row["vcp_observation_risk_tags"] == ["VCP_PIVOT_LOST"]
+
+
+def test_strategy6_candidates_api_separates_trading_and_observation_totals(tmp_path, monkeypatch):
+    db_path = str(tmp_path / "s6-api-totals.db")
+    db.init_db(db_path)
+    db.create_scan_task("s6-api-totals", "2026-07-09 10:00:00", strategy_type=STRATEGY6_TYPE)
+    db.upsert_strategy6_candidate("s6-api-totals", _candidate())
+    observation = _candidate()
+    observation.update({
+        "code": "000002",
+        "name": "VCP观察样本",
+        "candidate_type": "REJECTED",
+        "classification": "observation",
+        "vcp_observation_eligible": True,
+        "vcp_lifecycle_status": "VCP_NEAR_PIVOT",
+    })
+    db.upsert_strategy6_candidate("s6-api-totals", observation)
+    monkeypatch.setattr(server_mod, "load_config", lambda: {"data": {"database_path": db_path}})
+
+    payload = TestClient(server_mod.app).get(
+        "/api/strategy6/tasks/s6-api-totals/candidates",
+    ).json()
+
+    assert len(payload["candidates"]) == 2
+    assert payload["total"] == 1
+    assert payload["recordTotal"] == 2
+    assert payload["observationTotal"] == 1
 
 
 def test_strategy6_candidate_persists_brooks_only_path_and_structured_result(tmp_path):
@@ -659,6 +733,46 @@ def test_strategy6_atomic_persist_rolls_back_lifecycle_when_candidate_write_fail
     assert db.get_strategy6_lifecycle("000001") is None
     assert db.get_strategy6_task_lifecycle("s6-atomic") == []
     assert db.get_strategy6_candidates("s6-atomic") == []
+
+
+def test_strategy6_atomic_persist_rolls_back_lifecycle_when_observation_write_fails(tmp_path, monkeypatch):
+    db.init_db(str(tmp_path / "s6-observation-atomic.db"))
+    db.create_scan_task("s6-observation-atomic", "2026-07-09 10:00:00", strategy_type=STRATEGY6_TYPE)
+    db.update_strategy6_lifecycle(
+        code="000001", evaluation_date="2026-07-08",
+        candidate_type="KEY_CANDIDATE", lifecycle_status="READY",
+        event_key="stable-event", reject_reasons=[], max_watch_days=10,
+        expired_cooldown_days=5, failed_cooldown_days=10,
+    )
+    observation = _candidate()
+    observation.update({
+        "candidate_type": "REJECTED",
+        "classification": "observation",
+        "vcp_observation_eligible": True,
+        "vcp_lifecycle_status": "VCP_NEAR_PIVOT",
+    })
+
+    monkeypatch.setattr(
+        db,
+        "upsert_strategy6_candidate",
+        lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("observation write failed")),
+    )
+    with pytest.raises(RuntimeError, match="observation write failed"):
+        db.persist_strategy6_evaluation(
+            "s6-observation-atomic",
+            code="000001", name="平安银行", evaluation_date="2026-07-09",
+            candidate_type="REJECTED", lifecycle_status="FAILED",
+            event_key="stable-event", reject_reasons=["SUPPORT_FAILED"], max_watch_days=10,
+            expired_cooldown_days=5, failed_cooldown_days=10,
+            candidate=None,
+            observation_candidate=observation,
+        )
+
+    lifecycle = db.get_strategy6_lifecycle("000001")
+    assert lifecycle["lifecycle_status"] == "READY"
+    assert lifecycle["last_seen_date"] == "2026-07-08"
+    assert db.get_strategy6_task_lifecycle("s6-observation-atomic") == []
+    assert db.get_strategy6_candidates("s6-observation-atomic") == []
 
 
 def test_strategy6_atomic_persist_rolls_back_when_task_audit_write_fails(tmp_path, monkeypatch):

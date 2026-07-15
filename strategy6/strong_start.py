@@ -13,52 +13,7 @@ def evaluate_strong_start(rows: list[dict], ind: Strategy6Indicators, config: di
     best = Strategy6Start(limit_up_pct=get_limit_up_pct(code))
     start_idx = max(1, len(rows) - int(config["start_lookback_days"]) - 1)
     for idx in range(start_idx, len(rows)):
-        prev = rows[idx - 1]
-        row = rows[idx]
-        v20 = _avg_prior_volume(rows, idx, 20)
-        day_return = _return_between(prev["close"], row["close"])
-        volume_ratio = row["volume"] / v20 if v20 > 0 else 0.0
-        close_position = _close_position(row)
-        amount_yi = row["amount"] / 100_000_000
-        self_amount_percentile = _prior_amount_percentile(rows, idx, 60)
-        one_word = is_one_word_limit_up(code, prev["close"], row["open"], row["high"], row["low"], row["close"])
-        limit_up = is_limit_up_day(code, prev["close"], row["close"])
-        touched_failed = is_touched_limit_up_failed(code, prev["close"], row["high"], row["close"])
-        start_type = "NONE"
-        if one_word:
-            start_type = "ONE_WORD_LIMIT_UP"
-        elif limit_up and volume_ratio >= config["limit_up_volume_ratio"]:
-            start_type = "VOLUME_LIMIT_UP"
-        elif limit_up and config["low_volume_limit_up_min_ratio"] <= volume_ratio < config["limit_up_volume_ratio"]:
-            start_type = "LOW_VOLUME_LIMIT_UP"
-        elif (
-            day_return >= config["normal_start_return"]
-            and volume_ratio >= config["normal_start_volume_ratio"]
-            and close_position >= config["normal_start_close_position"]
-            and amount_yi >= config["normal_start_min_amount_yi"]
-            and self_amount_percentile >= config["normal_start_self_amount_percentile"]
-        ):
-            start_type = "NORMAL_STRONG_BREAKOUT"
-        elif touched_failed:
-            start_type = "TOUCHED_LIMIT_UP_FAILED"
-
-        candidate = Strategy6Start(
-            start_date=row["date"],
-            start_type=start_type,
-            start_day_return=day_return,
-            start_day_volume_ratio=round(volume_ratio, 6),
-            start_day_amount=round(amount_yi, 4),
-            start_day_close_position=round(close_position, 6),
-            start_day_self_amount_percentile=round(self_amount_percentile, 6),
-            start_low=row["low"],
-            is_limit_up=limit_up,
-            is_one_word_limit_up=one_word,
-            limit_up_pct=get_limit_up_pct(code),
-            days_since_start=len(rows) - idx - 1,
-        )
-        if start_type in PASSING_START_TYPES:
-            _apply_event_quality(candidate, rows, idx, prev["close"])
-            candidate.start_grade = _grade(candidate.event_quality_score)
+        candidate = _build_start_candidate(rows, idx, config, code)
         # Prefer event quality over recency. Recency only wins when the two
         # events are close enough in quality to represent the same setup.
         if (
@@ -85,6 +40,77 @@ def evaluate_strong_start(rows: list[dict], ind: Strategy6Indicators, config: di
                 high_trigger=_high_trigger(ind, config),
             )
     return best
+
+
+def find_historical_start_anchor(
+    rows: list[dict],
+    config: dict,
+    code: str,
+    *,
+    end_index: int,
+) -> Strategy6Start | None:
+    """Return the strongest event-day start at or before a VCP's first peak."""
+    if end_index < 1:
+        return None
+    first = max(1, end_index - int(config["start_lookback_days"]))
+    candidates = [
+        _build_start_candidate(rows, index, config, code)
+        for index in range(first, min(end_index, len(rows) - 1) + 1)
+    ]
+    passing = [item for item in candidates if item.start_type in PASSING_START_TYPES]
+    if not passing:
+        return None
+    return max(passing, key=lambda item: (item.event_quality_score, item.start_date))
+
+
+def _build_start_candidate(rows: list[dict], idx: int, config: dict, code: str) -> Strategy6Start:
+    prev = rows[idx - 1]
+    row = rows[idx]
+    v20 = _avg_prior_volume(rows, idx, 20)
+    day_return = _return_between(prev["close"], row["close"])
+    volume_ratio = row["volume"] / v20 if v20 > 0 else 0.0
+    close_position = _close_position(row)
+    amount_yi = row["amount"] / 100_000_000
+    self_amount_percentile = _prior_amount_percentile(rows, idx, 60)
+    one_word = is_one_word_limit_up(code, prev["close"], row["open"], row["high"], row["low"], row["close"])
+    limit_up = is_limit_up_day(code, prev["close"], row["close"])
+    touched_failed = is_touched_limit_up_failed(code, prev["close"], row["high"], row["close"])
+    start_type = "NONE"
+    if one_word:
+        start_type = "ONE_WORD_LIMIT_UP"
+    elif limit_up and volume_ratio >= config["limit_up_volume_ratio"]:
+        start_type = "VOLUME_LIMIT_UP"
+    elif limit_up and config["low_volume_limit_up_min_ratio"] <= volume_ratio < config["limit_up_volume_ratio"]:
+        start_type = "LOW_VOLUME_LIMIT_UP"
+    elif (
+        day_return >= config["normal_start_return"]
+        and volume_ratio >= config["normal_start_volume_ratio"]
+        and close_position >= config["normal_start_close_position"]
+        and amount_yi >= config["normal_start_min_amount_yi"]
+        and self_amount_percentile >= config["normal_start_self_amount_percentile"]
+    ):
+        start_type = "NORMAL_STRONG_BREAKOUT"
+    elif touched_failed:
+        start_type = "TOUCHED_LIMIT_UP_FAILED"
+
+    candidate = Strategy6Start(
+        start_date=row["date"],
+        start_type=start_type,
+        start_day_return=day_return,
+        start_day_volume_ratio=round(volume_ratio, 6),
+        start_day_amount=round(amount_yi, 4),
+        start_day_close_position=round(close_position, 6),
+        start_day_self_amount_percentile=round(self_amount_percentile, 6),
+        start_low=row["low"],
+        is_limit_up=limit_up,
+        is_one_word_limit_up=one_word,
+        limit_up_pct=get_limit_up_pct(code),
+        days_since_start=len(rows) - idx - 1,
+    )
+    if start_type in PASSING_START_TYPES:
+        _apply_event_quality(candidate, rows, idx, prev["close"])
+        candidate.start_grade = _grade(candidate.event_quality_score)
+    return candidate
 
 
 def _momentum_start(rows: list[dict], ind: Strategy6Indicators) -> tuple[str, int]:
