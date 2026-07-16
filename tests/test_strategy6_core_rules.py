@@ -219,7 +219,7 @@ def test_vcp_observation_is_orthogonal_to_main_strategy_decision(monkeypatch):
     assert observed.trade_plan == baseline.trade_plan
 
 
-def test_vcp_quality_is_serialized_but_does_not_change_main_strategy(monkeypatch):
+def test_engine_leaves_vcp_quality_unscored_until_history_is_confirmed(monkeypatch):
     import strategy6.engine as engine_mod
 
     data = build_strategy6_candidate_data()
@@ -250,34 +250,14 @@ def test_vcp_quality_is_serialized_but_does_not_change_main_strategy(monkeypatch
         ),
         raising=False,
     )
-    high = StrongVcpTailEngine({}).evaluate_at(data, code="000001")
+    result = StrongVcpTailEngine({}).evaluate_at(data, code="000001")
 
-    monkeypatch.setattr(
-        engine_mod,
-        "evaluate_vcp_quality",
-        lambda rows, current: Strategy6VcpQuality(
-            scored=True,
-            score=41,
-            grade="WEAK",
-            model_version="VCP_QUALITY_V1",
-        ),
-        raising=False,
-    )
-    low = StrongVcpTailEngine({}).evaluate_at(data, code="000001")
-
-    assert high.candidate_type == low.candidate_type
-    assert high.classification == low.classification
-    assert high.reject_reasons == low.reject_reasons
-    assert high.score == low.score
-    assert high.trade_plan == low.trade_plan
-    assert high.vcp_observation.eligible == low.vcp_observation.eligible
-    high_candidate = high.to_candidate_dict()
-    low_candidate = low.to_candidate_dict()
-    assert high_candidate["vcp_quality_score"] == 94
-    assert high_candidate["vcp_quality_grade"] == "TOP"
-    assert high_candidate["vcp_quality_model_version"] == "VCP_QUALITY_V1"
-    assert low_candidate["vcp_quality_score"] == 41
-    assert low_candidate["vcp_quality_grade"] == "WEAK"
+    candidate = result.to_candidate_dict()
+    assert result.vcp_observation.eligible is True
+    assert result.vcp_observation.history_qualified is False
+    assert candidate["vcp_quality_score"] is None
+    assert candidate["vcp_quality_grade"] == ""
+    assert candidate["vcp_quality_model_version"] == ""
 
 
 def test_vcp_observation_does_not_bypass_strategy6_data_and_liquidity_floor(monkeypatch):

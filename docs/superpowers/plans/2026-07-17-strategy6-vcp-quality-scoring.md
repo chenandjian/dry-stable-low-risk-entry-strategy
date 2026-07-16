@@ -4,7 +4,7 @@
 
 **目标：** 为策略6历史正式候选VCP持续观察池增加可解释的绝对形态质量分、等级、前端排序和任务快照，且不改变任何候选资格或交易规则。
 
-**架构：** 新增纯函数评分模块，使用当日可见K线和既有VCP收缩证据计算 `VCP_QUALITY_V1` 六维评分。引擎在VCP基础过滤通过后附加评分结果，模型和SQLite只负责兼容序列化，前端按独立形态分排序并展示明细。旧任务保留原候选，缺失分数显示“未评分”。
+**架构：** 新增纯函数评分模块，使用当日可见K线和既有VCP收缩证据计算 `VCP_QUALITY_V1` 六维评分。单股引擎保持未评分，扫描器在VCP基础过滤和历史正式候选资格重放均通过后附加评分结果；模型和SQLite只负责兼容序列化，前端按独立形态分排序并展示明细。旧任务保留原候选，缺失分数显示“未评分”。
 
 **技术栈：** Python 3、dataclasses、SQLite、pytest、Vue 3、Vitest。
 
@@ -15,7 +15,8 @@
 - 创建 `strategy6/vcp_quality.py`：VCP评分纯函数、分档、半向上舍入、原因和警告。
 - 创建 `tests/test_strategy6_vcp_quality.py`：全部公式边界、缺失数据、噪声封顶、输入不变和未来数据隔离。
 - 修改 `strategy6/models.py`：新增 `Strategy6VcpQuality`，挂到VCP观察结果并序列化输出。
-- 修改 `strategy6/engine.py`：只在VCP基础过滤通过后计算评分，不参与正式分类。
+- 修改 `strategy6/engine.py`：保持历史资格确认前未评分，不让评分参与正式分类。
+- 修改 `strategy6/scanner.py`：仅在VCP基础过滤和历史正式候选资格均通过后计算评分。
 - 修改 `strategy6/version.py`：策略版本升级为 `4.5.0`。
 - 修改 `scanner/db.py`：新增可空评分字段、JSON字段和兼容读写。
 - 修改 `tests/test_strategy6_core_rules.py`、`tests/test_strategy6_db_api.py`、`tests/test_strategy6_versioning.py`：验证主链隔离、数据库往返和版本。
@@ -126,10 +127,11 @@ git add strategy6/vcp_quality.py strategy6/models.py tests/test_strategy6_vcp_qu
 git commit -m "feat: add strategy6 vcp quality scorer"
 ```
 
-### 任务2：引擎接入、序列化和主链隔离
+### 任务2：扫描接入、序列化和主链隔离
 
 **文件：**
 - 修改：`strategy6/engine.py`
+- 修改：`strategy6/scanner.py`
 - 修改：`strategy6/models.py`
 - 修改：`strategy6/version.py`
 - 修改：`tests/test_strategy6_core_rules.py`
@@ -145,13 +147,13 @@ git commit -m "feat: add strategy6 vcp quality scorer"
 
 预期：新增断言FAIL，候选字典缺少 `vcp_quality_score` 或版本仍为4.4.0。
 
-- [x] **步骤3：在基础过滤之后附加评分**
+- [x] **步骤3：在历史正式候选资格确认之后附加评分**
 
-在 `apply_vcp_base_filters(vcp_observation, reject_reasons)` 之后执行：
+单股引擎完成 `apply_vcp_base_filters(vcp_observation, reject_reasons)` 后仍保持未评分。扫描器完成 `evaluate_vcp_candidate_history()` 并写入历史资格后执行：
 
 ```python
-if vcp_observation.eligible:
-    vcp_observation.quality = evaluate_vcp_quality(rows, vcp_observation)
+if vcp.eligible and vcp.history_qualified:
+    vcp.quality = evaluate_vcp_quality(normalize_rows(data), vcp)
 ```
 
 不得把评分传给 `score_strategy6()`、`hard_filter_reasons()` 或 `classify_candidate()`。
@@ -245,7 +247,7 @@ git commit -m "feat: persist strategy6 vcp quality snapshots"
 
 预期：测试和生产构建全部成功。
 
-- [ ] **步骤7：提交前端改动**
+- [x] **步骤7：提交前端改动**
 
 ```bash
 git add web/src/pages/Strategy6Results.vue web/src/utils/strategy6Labels.js web/src/pages/__tests__/Strategy6Results.test.js
@@ -258,19 +260,19 @@ git commit -m "feat: rank strategy6 vcp candidates by quality"
 - 创建：`docs/reviews/2026-07-17-strategy6-vcp-quality-scoring-validation.md`
 - 修改：`CLAUDE.md`
 
-- [ ] **步骤1：使用本地真实数据生成同口径评分报告**
+- [x] **步骤1：使用本地真实数据生成同口径评分报告**
 
 使用 `data/cuphandle.db` 中最新策略6任务对应股票日线和真实指数数据重新执行扫描或等价当日评估。报告记录任务ID、评分前后VCP池代码集合差异、全部评分、前10名六项明细、五档分布、异常高低分和微小收缩样本。
 
-- [ ] **步骤2：核查已讨论样本**
+- [x] **步骤2：核查已讨论样本**
 
 报告单列 `002156`、`002281` 的评分、等级、六项分数、VCP状态和解释。若样本在验收日不具备当前VCP持续观察资格，必须明确写出不在池原因，不能伪造评分排名。
 
-- [ ] **步骤3：更新项目事实文档**
+- [x] **步骤3：更新项目事实文档**
 
 在 `CLAUDE.md` 增加V4.5边界：VCP形态分只排序展示、模型固定、旧任务NULL、不得进入正式策略评分或过滤。
 
-- [ ] **步骤4：运行完整验证门禁**
+- [x] **步骤4：运行完整验证门禁**
 
 运行：
 
@@ -284,11 +286,11 @@ npm.cmd --prefix web run build
 
 预期：全部通过。
 
-- [ ] **步骤5：切换审核专家角色验收**
+- [x] **步骤5：切换审核专家角色验收**
 
 重点检查未来数据、评分与入池隔离、NULL兼容、舍入边界、任务快照、前端稳定排序、CSV空值和策略1至策略5回归。发现中高等级问题时先增加失败测试，再做最小修复并重跑门禁，直到没有中高等级问题。
 
-- [ ] **步骤6：提交验收文档并推送**
+- [x] **步骤6：提交验收文档并推送**
 
 先用 `git status --short` 和 `git diff --cached --name-only` 排除用户已有报告改动。提交验收文档：
 

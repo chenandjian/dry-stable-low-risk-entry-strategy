@@ -21,9 +21,11 @@ from scanner.daily_data_service import (
 from scanner.data_source import DataSourceManager
 from strategy6 import STRATEGY6_TYPE
 from strategy6.engine import StrongVcpTailEngine
+from strategy6.indicators import normalize_rows
 from strategy6.market import build_market_snapshot
 from strategy6.validation import resolve_strategy6_config
 from strategy6.vcp_history import evaluate_vcp_candidate_history
+from strategy6.vcp_quality import evaluate_vcp_quality
 
 logger = logging.getLogger(__name__)
 
@@ -223,6 +225,8 @@ def scan_strategy6_all(
                     vcp.history_candidate_score = history.candidate_score
                     vcp.history_source = history.source
                     vcp.history_origin_start_date = history.origin_start_date
+                    if vcp.history_qualified:
+                        vcp.quality = evaluate_vcp_quality(normalize_rows(data), vcp)
                 candidate = evaluation.to_candidate_dict() if evaluation.passed else None
                 vcp_exit_audit = (
                     bool(prior_vcp_states.get(code, {}).get("vcp_observation_eligible"))

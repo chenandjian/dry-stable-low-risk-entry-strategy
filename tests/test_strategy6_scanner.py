@@ -135,6 +135,7 @@ def test_strategy6_scan_persists_observer_only_row_without_counting_trade_candid
 
 def test_strategy6_scan_does_not_persist_vcp_without_formal_candidate_history(tmp_path, monkeypatch):
     import strategy6.scanner as scanner_mod
+    from strategy6.models import Strategy6VcpQuality
     from strategy6.vcp_history import Strategy6VcpCandidateHistory
     from tests.test_strategy6_core_rules import build_strategy6_candidate_data
 
@@ -153,6 +154,17 @@ def test_strategy6_scan_does_not_persist_vcp_without_formal_candidate_history(tm
             origin_start_date=kwargs["origin_start_date"],
         ),
     )
+    quality_calls = []
+    monkeypatch.setattr(
+        scanner_mod,
+        "evaluate_vcp_quality",
+        lambda *_args, **_kwargs: quality_calls.append(True) or Strategy6VcpQuality(
+            scored=True,
+            score=99,
+            grade="TOP",
+            model_version="VCP_QUALITY_V1",
+        ),
+    )
 
     scan_strategy6_all(
         config,
@@ -165,12 +177,13 @@ def test_strategy6_scan_does_not_persist_vcp_without_formal_candidate_history(tm
     )
 
     assert db.get_strategy6_candidates("s6-vcp-unqualified") == []
+    assert quality_calls == []
 
 
 def test_strategy6_scan_persists_history_evidence_on_formal_vcp_candidate(tmp_path, monkeypatch):
     import strategy6.scanner as scanner_mod
     from strategy6.engine import StrongVcpTailEngine
-    from strategy6.models import Strategy6VcpObservation
+    from strategy6.models import Strategy6VcpObservation, Strategy6VcpQuality
     from strategy6.vcp_history import Strategy6VcpCandidateHistory
     from tests.test_strategy6_core_rules import build_strategy6_candidate_data
 
@@ -212,6 +225,24 @@ def test_strategy6_scan_persists_history_evidence_on_formal_vcp_candidate(tmp_pa
             origin_start_date=evaluation.vcp_observation.origin_start_date,
         ),
     )
+    quality_calls = []
+    monkeypatch.setattr(
+        scanner_mod,
+        "evaluate_vcp_quality",
+        lambda rows, observation: quality_calls.append((rows, observation)) or Strategy6VcpQuality(
+            scored=True,
+            score=85,
+            grade="HIGH",
+            contraction_score=12,
+            range_score=25,
+            volume_score=20,
+            low_score=13,
+            time_score=10,
+            pivot_score=5,
+            model_version="VCP_QUALITY_V1",
+        ),
+        raising=False,
+    )
 
     scan_strategy6_all(
         config,
@@ -228,6 +259,10 @@ def test_strategy6_scan_persists_history_evidence_on_formal_vcp_candidate(tmp_pa
     assert row["vcp_observation_eligible"] is True
     assert row["vcp_history_qualified"] is True
     assert row["vcp_history_candidate_date"] == evaluation.indicators.evaluation_date
+    assert row["vcp_quality_score"] == 85
+    assert row["vcp_quality_grade"] == "HIGH"
+    assert row["vcp_quality_model_version"] == "VCP_QUALITY_V1"
+    assert len(quality_calls) == 1
 
 
 def test_strategy6_scan_does_not_persist_vcp_exit_without_prior_observation(tmp_path, monkeypatch):
@@ -351,6 +386,13 @@ def test_strategy6_scan_persists_one_vcp_exit_after_prior_eligible_observation(t
             return evaluation
 
     monkeypatch.setattr(scanner_mod, "StrongVcpTailEngine", FakeEngine)
+    monkeypatch.setattr(
+        scanner_mod,
+        "evaluate_vcp_quality",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("ineligible VCP exit audit must not be scored")
+        ),
+    )
     fake_fetch = lambda *args, **kwargs: FetchResult(
         data=data,
         primary_source="baidu",
@@ -368,6 +410,8 @@ def test_strategy6_scan_persists_one_vcp_exit_after_prior_eligible_observation(t
     assert len(rows) == 1
     assert rows[0]["vcp_exit_audit"] is True
     assert rows[0]["vcp_observation_eligible"] is False
+    assert rows[0]["vcp_quality_score"] is None
+    assert not rows[0]["vcp_quality_model_version"]
     db.finish_scan_task(
         "s6-vcp-real-exit", "2026-07-09 16:00:00", candidates_count=0, elapsed_seconds=1.0,
     )

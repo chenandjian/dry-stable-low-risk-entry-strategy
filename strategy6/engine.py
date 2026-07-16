@@ -21,7 +21,6 @@ from strategy6.trade_plan import calculate_trade_plan
 from strategy6.validation import resolve_strategy6_config, strategy6_config_hash
 from strategy6.version import STRATEGY6_VERSION
 from strategy6.vcp_observer import apply_vcp_base_filters, evaluate_vcp_observation
-from strategy6.vcp_quality import evaluate_vcp_quality
 
 
 class StrongVcpTailEngine:
@@ -153,8 +152,6 @@ class StrongVcpTailEngine:
         elif normalized_quote_status == "no_trade":
             reject_reasons.append("LATEST_TRADE_NO_TRADE")
         apply_vcp_base_filters(vcp_observation, reject_reasons)
-        if vcp_observation.eligible:
-            vcp_observation.quality = evaluate_vcp_quality(rows, vcp_observation)
         candidate_type, classification, lifecycle_status, suggestion = classify_candidate(
             indicators,
             start,
