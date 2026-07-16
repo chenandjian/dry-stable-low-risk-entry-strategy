@@ -260,6 +260,12 @@ def test_strategy6_candidate_schema_contains_all_box_tail_output_fields(tmp_path
         "vcp_history_qualified", "vcp_history_candidate_date",
         "vcp_history_candidate_type", "vcp_history_candidate_score",
         "vcp_history_source", "vcp_history_origin_start_date",
+        "vcp_quality_score", "vcp_quality_grade",
+        "vcp_quality_contraction_score", "vcp_quality_range_score",
+        "vcp_quality_volume_score", "vcp_quality_low_score",
+        "vcp_quality_time_score", "vcp_quality_pivot_score",
+        "vcp_quality_reasons", "vcp_quality_warnings",
+        "vcp_quality_model_version",
     }
 
     assert required <= columns
@@ -295,6 +301,17 @@ def test_strategy6_candidate_round_trips_vcp_observation_fields(tmp_path):
         "vcp_history_candidate_score": 67,
         "vcp_history_source": "DAILY_AS_OF_REPLAY",
         "vcp_history_origin_start_date": "2026-05-25",
+        "vcp_quality_score": 83,
+        "vcp_quality_grade": "HIGH",
+        "vcp_quality_contraction_score": 12,
+        "vcp_quality_range_score": 25,
+        "vcp_quality_volume_score": 25,
+        "vcp_quality_low_score": 13,
+        "vcp_quality_time_score": 8,
+        "vcp_quality_pivot_score": 0,
+        "vcp_quality_reasons": ["VCP_QUALITY_RANGE_TIGHT"],
+        "vcp_quality_warnings": ["VCP_QUALITY_PIVOT_LOOSE"],
+        "vcp_quality_model_version": "VCP_QUALITY_V1",
     })
 
     db.upsert_strategy6_candidate("s6-vcp", candidate)
@@ -312,6 +329,28 @@ def test_strategy6_candidate_round_trips_vcp_observation_fields(tmp_path):
     assert row["vcp_history_candidate_type"] == "WATCH_CANDIDATE"
     assert row["vcp_history_candidate_score"] == 67
     assert row["vcp_history_source"] == "DAILY_AS_OF_REPLAY"
+    assert row["vcp_quality_score"] == 83
+    assert row["vcp_quality_grade"] == "HIGH"
+    assert row["vcp_quality_contraction_score"] == 12
+    assert row["vcp_quality_range_score"] == 25
+    assert row["vcp_quality_volume_score"] == 25
+    assert row["vcp_quality_low_score"] == 13
+    assert row["vcp_quality_time_score"] == 8
+    assert row["vcp_quality_pivot_score"] == 0
+    assert row["vcp_quality_reasons"] == ["VCP_QUALITY_RANGE_TIGHT"]
+    assert row["vcp_quality_warnings"] == ["VCP_QUALITY_PIVOT_LOOSE"]
+    assert row["vcp_quality_model_version"] == "VCP_QUALITY_V1"
+
+
+def test_strategy6_legacy_candidate_keeps_missing_vcp_quality_as_null(tmp_path):
+    db.init_db(str(tmp_path / "s6-vcp-quality-legacy.db"))
+    db.create_scan_task("s6-vcp-legacy", "2026-07-09 10:00:00", strategy_type=STRATEGY6_TYPE)
+    db.upsert_strategy6_candidate("s6-vcp-legacy", _candidate())
+
+    row = db.get_strategy6_candidate("000001", task_id="s6-vcp-legacy")
+
+    assert row["vcp_quality_score"] is None
+    assert row["vcp_quality_grade"] in {None, ""}
 
 
 def test_strategy6_candidates_api_separates_trading_and_observation_totals(tmp_path, monkeypatch):

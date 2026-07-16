@@ -181,27 +181,27 @@ git commit -m "feat: attach vcp quality to strategy6 evaluations"
 - 修改：`scanner/db.py`
 - 修改：`tests/test_strategy6_db_api.py`
 
-- [ ] **步骤1：编写字段迁移和完整往返失败测试**
+- [x] **步骤1：编写字段迁移和完整往返失败测试**
 
 扩展策略6候选表字段集合测试，并写入一个总分83、等级 `HIGH`、六个分项、原因、警告和模型版本的候选。断言读取值完全一致；另写入旧候选，断言 `vcp_quality_score is None`。
 
-- [ ] **步骤2：运行数据库测试确认缺列失败**
+- [x] **步骤2：运行数据库测试确认缺列失败**
 
 运行：`python -m pytest tests/test_strategy6_db_api.py -q`
 
 预期：FAIL，缺少 `vcp_quality_*` 列或往返字段。
 
-- [ ] **步骤3：增加兼容列和读写**
+- [x] **步骤3：增加兼容列和读写**
 
 总分列声明为 `INTEGER`，不要使用 `DEFAULT 0`；等级和版本为 `TEXT`；六个分项为 `INTEGER`；原因和警告使用项目现有JSON序列化辅助函数。反序列化时将两项JSON字段恢复为列表，不把NULL转换为0。
 
-- [ ] **步骤4：运行数据库和扫描集成测试**
+- [x] **步骤4：运行数据库和扫描集成测试**
 
 运行：`python -m pytest tests/test_strategy6_db_api.py tests/test_strategy6_scanner.py tests/test_strategy6_report.py -q`
 
 预期：全部PASS，评分前后观察记录集合测试保持一致。
 
-- [ ] **步骤5：提交持久化改动**
+- [x] **步骤5：提交持久化改动**
 
 ```bash
 git add scanner/db.py tests/test_strategy6_db_api.py

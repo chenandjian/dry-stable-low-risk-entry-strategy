@@ -2886,6 +2886,17 @@ def _ensure_strategy6_candidates_table(conn: sqlite3.Connection):
         "vcp_history_candidate_score": "INTEGER DEFAULT 0",
         "vcp_history_source": "TEXT",
         "vcp_history_origin_start_date": "TEXT",
+        "vcp_quality_score": "INTEGER",
+        "vcp_quality_grade": "TEXT",
+        "vcp_quality_contraction_score": "INTEGER",
+        "vcp_quality_range_score": "INTEGER",
+        "vcp_quality_volume_score": "INTEGER",
+        "vcp_quality_low_score": "INTEGER",
+        "vcp_quality_time_score": "INTEGER",
+        "vcp_quality_pivot_score": "INTEGER",
+        "vcp_quality_reasons": "TEXT",
+        "vcp_quality_warnings": "TEXT",
+        "vcp_quality_model_version": "TEXT",
     }.items():
         _ensure_column(conn, "strategy6_candidates", column, col_type)
     conn.execute(
@@ -3918,6 +3929,12 @@ def upsert_strategy6_candidate(
         "vcp_history_qualified", "vcp_history_candidate_date",
         "vcp_history_candidate_type", "vcp_history_candidate_score",
         "vcp_history_source", "vcp_history_origin_start_date",
+        "vcp_quality_score", "vcp_quality_grade",
+        "vcp_quality_contraction_score", "vcp_quality_range_score",
+        "vcp_quality_volume_score", "vcp_quality_low_score",
+        "vcp_quality_time_score", "vcp_quality_pivot_score",
+        "vcp_quality_reasons", "vcp_quality_warnings",
+        "vcp_quality_model_version",
     ]
     extra_values = [
         "" if observation_only else d.get("first_seen_date", first_pool_date),
@@ -4084,6 +4101,17 @@ def upsert_strategy6_candidate(
         d.get("vcp_history_candidate_score", 0),
         d.get("vcp_history_source", ""),
         d.get("vcp_history_origin_start_date", ""),
+        d.get("vcp_quality_score"),
+        d.get("vcp_quality_grade"),
+        d.get("vcp_quality_contraction_score"),
+        d.get("vcp_quality_range_score"),
+        d.get("vcp_quality_volume_score"),
+        d.get("vcp_quality_low_score"),
+        d.get("vcp_quality_time_score"),
+        d.get("vcp_quality_pivot_score"),
+        _json_any(d.get("vcp_quality_reasons", [])),
+        _json_any(d.get("vcp_quality_warnings", [])),
+        d.get("vcp_quality_model_version"),
     ]
     columns.extend(extra_columns)
     values.extend(extra_values)
@@ -5387,6 +5415,7 @@ def _deserialize_strategy6_row(row: dict) -> dict:
         "start_failure_reasons", "setup_quality_reasons", "setup_quality_risk_tags",
         "support_reaction_reasons", "support_reaction_risk_tags",
         "vcp_contractions", "vcp_observation_reasons", "vcp_observation_risk_tags",
+        "vcp_quality_reasons", "vcp_quality_warnings",
     ):
         value = row.get(field)
         if isinstance(value, str) and value:
