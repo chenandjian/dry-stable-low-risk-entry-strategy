@@ -279,6 +279,22 @@ class Strategy6Score:
 
 
 @dataclass
+class Strategy6VcpQuality:
+    scored: bool = False
+    score: int | None = None
+    grade: str = ""
+    contraction_score: int = 0
+    range_score: int = 0
+    volume_score: int = 0
+    low_score: int = 0
+    time_score: int = 0
+    pivot_score: int = 0
+    reasons: list[str] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
+    model_version: str = ""
+
+
+@dataclass
 class Strategy6VcpObservation:
     eligible: bool = False
     lifecycle_status: str = "VCP_NONE"
@@ -301,6 +317,7 @@ class Strategy6VcpObservation:
     history_candidate_score: int = 0
     history_source: str = ""
     history_origin_start_date: str = ""
+    quality: Strategy6VcpQuality = field(default_factory=Strategy6VcpQuality)
 
 
 @dataclass

@@ -32,7 +32,7 @@
 - 创建：`tests/test_strategy6_vcp_quality.py`
 - 修改：`strategy6/models.py`
 
-- [ ] **步骤1：为输出模型和未评分语义编写失败测试**
+- [x] **步骤1：为输出模型和未评分语义编写失败测试**
 
 测试构造 `Strategy6VcpObservation`，断言少于2轮收缩返回 `scored=False`、`score=None`、空等级，并断言输入对象在评分前后深度相等。
 
@@ -47,13 +47,13 @@ def test_vcp_quality_returns_unscored_without_two_complete_contractions():
     assert observation == original
 ```
 
-- [ ] **步骤2：运行测试确认因模块或类型缺失而失败**
+- [x] **步骤2：运行测试确认因模块或类型缺失而失败**
 
 运行：`python -m pytest tests/test_strategy6_vcp_quality.py -q`
 
 预期：FAIL，提示 `strategy6.vcp_quality` 或 `Strategy6VcpQuality` 不存在。
 
-- [ ] **步骤3：新增评分数据模型和纯函数骨架**
+- [x] **步骤3：新增评分数据模型和纯函数骨架**
 
 `Strategy6VcpQuality` 固定包含：
 
@@ -84,7 +84,7 @@ def evaluate_vcp_quality(
     return Strategy6VcpQuality()
 ```
 
-- [ ] **步骤4：为六个维度的全部边界编写参数化失败测试**
+- [x] **步骤4：为六个维度的全部边界编写参数化失败测试**
 
 分别覆盖规格中的轮数、相邻振幅比、末轮振幅、首轮深度、相邻量比、累计量比、低点变化、总周期、收缩腿间隔和最后两峰差异。测试直接断言对应分项，不只断言总分。
 
@@ -98,7 +98,7 @@ def test_vcp_quality_range_ratio_boundaries(ratio, expected):
     assert _score_range_ratio(ratio) == expected
 ```
 
-- [ ] **步骤5：实现V1精确公式**
+- [x] **步骤5：实现V1精确公式**
 
 实现私有分档函数和非负平均值半向上舍入：
 
@@ -109,17 +109,17 @@ def _round_half_up(value: float) -> int:
 
 日期必须先映射到 `rows` 中不晚于评估日的交易日索引。总周期使用 `last_low_index - first_peak_index + 1`，收缩腿间隔使用 `low_index - peak_index`。最后一轮振幅小于1%且间隔为1时添加 `VCP_MICRO_CONTRACTION_NOISE` 并将总分封顶79。
 
-- [ ] **步骤6：补充数据质量、舍入和未来数据测试**
+- [x] **步骤6：补充数据质量、舍入和未来数据测试**
 
 覆盖成交量为0时对应分项为0并产生 `VCP_QUALITY_VOLUME_MISSING`；日期无法映射时返回未评分并产生 `VCP_QUALITY_DATE_MAPPING_FAILED`；在评估日后追加极端K线不得改变结果；构造平均值为 `x.5` 验证使用 `floor(x+0.5)`。
 
-- [ ] **步骤7：运行评分专项测试**
+- [x] **步骤7：运行评分专项测试**
 
 运行：`python -m pytest tests/test_strategy6_vcp_quality.py -q`
 
 预期：全部PASS。
 
-- [ ] **步骤8：提交评分核心**
+- [x] **步骤8：提交评分核心**
 
 ```bash
 git add strategy6/vcp_quality.py strategy6/models.py tests/test_strategy6_vcp_quality.py
