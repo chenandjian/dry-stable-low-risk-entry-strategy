@@ -484,6 +484,87 @@ describe('Strategy6Results', () => {
     expect(wrapper.text()).toContain('该任务由策略6 4.3.0生成，尚未计算历史正式候选资格，请重新扫描策略6')
   })
 
+  it('sorts VCP observations by quality, lifecycle readiness, strategy score and code', async () => {
+    const base = {
+      name: 'VCP排序样本', candidate_type: 'WATCH_CANDIDATE',
+      vcp_observation_eligible: true, vcp_history_qualified: true,
+      strategy_version: '4.5.0', vcp_quality_grade: 'HIGH',
+    }
+    api.getStrategy6Candidates.mockResolvedValue({ candidates: [
+      { ...base, code: '000004', vcp_quality_score: 83, vcp_lifecycle_status: 'VCP_EXTENDED', total_score: 90 },
+      { ...base, code: '000002', vcp_quality_score: 83, vcp_lifecycle_status: 'VCP_NEAR_PIVOT', total_score: 50 },
+      { ...base, code: '000005', vcp_quality_score: null, vcp_quality_grade: '', vcp_lifecycle_status: 'VCP_NEAR_PIVOT', total_score: 99 },
+      { ...base, code: '000003', vcp_quality_score: 72, vcp_quality_grade: 'GOOD', vcp_lifecycle_status: 'VCP_POST_BREAKOUT', total_score: 99 },
+      { ...base, code: '000001', vcp_quality_score: 83, vcp_lifecycle_status: 'VCP_NEAR_PIVOT', total_score: 60 },
+    ] })
+
+    const wrapper = mount(Strategy6Results, {
+      global: { mocks: { $route: { query: { task: 's6-vcp-quality-sort' } } } },
+    })
+    await flushUi()
+
+    expect(wrapper.findAll('[data-test^="vcp-row-"]').map(row => row.attributes('data-test'))).toEqual([
+      'vcp-row-000001',
+      'vcp-row-000002',
+      'vcp-row-000004',
+      'vcp-row-000003',
+      'vcp-row-000005',
+    ])
+  })
+
+  it('shows VCP quality score, grade, components, reasons and warnings', async () => {
+    api.getStrategy6Candidates.mockResolvedValue({ candidates: [{
+      code: '000001', name: '高质量VCP', candidate_type: 'WATCH_CANDIDATE',
+      vcp_observation_eligible: true, vcp_history_qualified: true,
+      vcp_lifecycle_status: 'VCP_NEAR_PIVOT', strategy_version: '4.5.0', total_score: 61,
+      vcp_quality_score: 83, vcp_quality_grade: 'HIGH',
+      vcp_quality_contraction_score: 12, vcp_quality_range_score: 25,
+      vcp_quality_volume_score: 25, vcp_quality_low_score: 13,
+      vcp_quality_time_score: 8, vcp_quality_pivot_score: 0,
+      vcp_quality_reasons: ['VCP_QUALITY_RANGE_TIGHT', 'VCP_QUALITY_VOLUME_DRY'],
+      vcp_quality_warnings: ['VCP_MICRO_CONTRACTION_NOISE'],
+      vcp_quality_model_version: 'VCP_QUALITY_V1',
+    }] })
+
+    const wrapper = mount(Strategy6Results, {
+      global: { mocks: { $route: { query: { task: 's6-vcp-quality' } } } },
+    })
+    await flushUi()
+
+    expect(wrapper.text()).toContain('83分')
+    expect(wrapper.text()).toContain('高质量VCP')
+    await wrapper.find('[data-test="vcp-row-000001"]').trigger('click')
+    const detail = wrapper.find('[data-test="vcp-quality-detail"]')
+    expect(detail.text()).toContain('收缩层次 12/20')
+    expect(detail.text()).toContain('振幅递减 25/25')
+    expect(detail.text()).toContain('成交量递减 25/25')
+    expect(detail.text()).toContain('低点稳定 13/15')
+    expect(detail.text()).toContain('时间结构 8/10')
+    expect(detail.text()).toContain('支点清晰 0/5')
+    expect(detail.text()).toContain('VCP_QUALITY_V1')
+    expect(wrapper.text()).toContain('VCP振幅收缩质量高')
+    expect(wrapper.text()).toContain('VCP成交量收缩质量高')
+    expect(wrapper.text()).toContain('单日微小收缩，形态分已封顶')
+  })
+
+  it('keeps V4.4 VCP observations visible and labels missing quality as unscored', async () => {
+    api.getStrategy6Candidates.mockResolvedValue({ candidates: [{
+      code: '000001', name: '旧评分任务', candidate_type: 'WATCH_CANDIDATE',
+      strategy_version: '4.4.0', total_score: 62,
+      vcp_observation_eligible: true, vcp_history_qualified: true,
+      vcp_lifecycle_status: 'VCP_NEAR_PIVOT', vcp_quality_score: null,
+    }] })
+
+    const wrapper = mount(Strategy6Results, {
+      global: { mocks: { $route: { query: { task: 's6-v44' } } } },
+    })
+    await flushUi()
+
+    expect(wrapper.find('[data-test="vcp-row-000001"]').exists()).toBe(true)
+    expect(wrapper.text()).toContain('未评分')
+    expect(wrapper.text()).toContain('该任务由策略6 4.4.0生成，尚未计算VCP形态质量分，可重新扫描生成')
+  })
+
   it('shows unknown instead of fake zero quality scores for legacy tasks', async () => {
     const wrapper = mount(Strategy6Results, {
       global: { mocks: { $route: { query: { task: 's6-task' } } } },
@@ -710,6 +791,8 @@ describe('Strategy6Results', () => {
     expect(csv).toContain('接近120日压力位,NEAR_120D_PRESSURE')
     expect(csv).toContain('VCP观察资格,VCP状态,VCP状态原始值,VCP起点,VCP形态开始,VCP形态结束,VCP收缩次数')
     expect(csv).toContain('VCP支点,VCP结构低点,距VCP支点,VCP突破日期,VCP突破后天数')
+    expect(csv).toContain('VCP形态分,VCP等级,VCP收缩层次分,VCP振幅递减分,VCP成交量递减分,VCP低点稳定分,VCP时间结构分,VCP支点清晰分')
+    expect(csv).toContain('VCP评分原因,VCP评分警告,VCP评分模型版本')
   })
 
   it('exports Brooks-only waiting candidates without READY or immediate-buy semantics', async () => {

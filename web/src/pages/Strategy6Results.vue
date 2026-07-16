@@ -136,12 +136,13 @@
       <div class="panel-header">VCP形态候选</div>
       <template v-if="vcpCandidates.length">
         <div class="panel-note">仅跟踪本轮VCP起点后曾进入策略6正式候选的股票；过度延伸只保留跟踪，不代表立即买入。</div>
+        <div v-if="vcpQualityNotice" class="panel-note">{{ vcpQualityNotice }}</div>
         <div class="table-scroll">
         <table class="candidate-table vcp-table">
           <thead>
             <tr>
-              <th>股票</th><th>VCP状态</th><th>收缩次数</th><th>VCP支点</th><th>结构低点</th>
-              <th>距支点</th><th>突破日期</th><th>历史正式候选</th><th>总分</th><th>原交易分类</th><th>风险提示</th>
+              <th>股票</th><th>VCP形态分/等级</th><th>VCP状态</th><th>收缩次数</th><th>VCP支点</th><th>结构低点</th>
+              <th>距支点</th><th>突破日期</th><th>历史正式候选</th><th>策略总分</th><th>原交易分类</th><th>风险提示</th>
             </tr>
           </thead>
           <tbody>
@@ -153,6 +154,13 @@
               @click="selected = c"
             >
               <td><span class="code">{{ c.code }}</span> {{ c.name }}</td>
+              <td>
+                <template v-if="hasVcpQuality(c)">
+                  <strong class="score">{{ c.vcp_quality_score }}分</strong>
+                  <div class="muted">{{ label('vcpQualityGrade', c.vcp_quality_grade) }}</div>
+                </template>
+                <span v-else class="muted">未评分</span>
+              </td>
               <td>{{ label('vcpStatus', c.vcp_lifecycle_status) }}</td>
               <td>{{ c.vcp_contraction_count ?? 0 }}</td>
               <td>{{ fmt(c.vcp_pivot_price) }}</td>
@@ -256,6 +264,27 @@
       </div>
       <div v-if="selected.vcp_observation_eligible" class="vcp-evidence">
         <div class="subsection-title">VCP收缩证据</div>
+        <div data-test="vcp-quality-detail" class="vcp-quality-detail">
+          <template v-if="hasVcpQuality(selected)">
+            <div class="vcp-quality-summary">
+              <strong>{{ selected.vcp_quality_score }}分 · {{ label('vcpQualityGrade', selected.vcp_quality_grade) }}</strong>
+              <span class="muted">{{ selected.vcp_quality_model_version || '--' }}</span>
+            </div>
+            <div class="vcp-quality-components">
+              <span>收缩层次 {{ selected.vcp_quality_contraction_score }}/20</span>
+              <span>振幅递减 {{ selected.vcp_quality_range_score }}/25</span>
+              <span>成交量递减 {{ selected.vcp_quality_volume_score }}/25</span>
+              <span>低点稳定 {{ selected.vcp_quality_low_score }}/15</span>
+              <span>时间结构 {{ selected.vcp_quality_time_score }}/10</span>
+              <span>支点清晰 {{ selected.vcp_quality_pivot_score }}/5</span>
+            </div>
+            <div class="tags vcp-quality-tags">
+              <span v-for="reason in selected.vcp_quality_reasons || []" :key="'vqr'+reason" class="tag info">{{ label('tag', reason) }}</span>
+              <span v-for="warning in selected.vcp_quality_warnings || []" :key="'vqw'+warning" class="tag warn">{{ label('tag', warning) }}</span>
+            </div>
+          </template>
+          <span v-else class="muted">VCP形态质量：未评分</span>
+        </div>
         <div v-if="!(selected.vcp_contractions || []).length" class="muted">暂无收缩明细</div>
         <div v-for="(item, index) in selected.vcp_contractions || []" :key="`${item.peak_date}-${item.low_date}-${index}`" class="vcp-contraction-row">
           {{ vcpContractionText(item, index) }}
@@ -338,12 +367,32 @@ export default {
       return this.sortedCandidates.filter(c => this.effectiveCandidateType(c) !== 'REJECTED')
     },
     vcpCandidates() {
-      return this.sortedCandidates.filter(c => (
+      const statusPriority = {
+        VCP_NEAR_PIVOT: 0,
+        VCP_BREAKOUT_CONFIRMED: 1,
+        VCP_POST_BREAKOUT: 2,
+        VCP_FORMING: 3,
+        VCP_EXTENDED: 4,
+      }
+      return this.candidates.filter(c => (
         c.vcp_observation_eligible === true
         && c.vcp_history_qualified === true
         && c.vcp_lifecycle_status !== 'VCP_INVALID'
         && c.vcp_lifecycle_status !== 'VCP_NONE'
-      ))
+      )).sort((left, right) => {
+        const leftScored = this.hasVcpQuality(left)
+        const rightScored = this.hasVcpQuality(right)
+        if (leftScored !== rightScored) return leftScored ? -1 : 1
+        if (leftScored && left.vcp_quality_score !== right.vcp_quality_score) {
+          return right.vcp_quality_score - left.vcp_quality_score
+        }
+        const leftStatus = statusPriority[left.vcp_lifecycle_status] ?? 99
+        const rightStatus = statusPriority[right.vcp_lifecycle_status] ?? 99
+        if (leftStatus !== rightStatus) return leftStatus - rightStatus
+        const scoreDifference = (right.total_score ?? -1) - (left.total_score ?? -1)
+        if (scoreDifference !== 0) return scoreDifference
+        return String(left.code || '').localeCompare(String(right.code || ''))
+      })
     },
     vcpExitAuditRows() {
       return this.sortedCandidates.filter(c => c.vcp_exit_audit === true)
@@ -361,6 +410,15 @@ export default {
         return `该任务由策略6 ${version}生成，尚未计算历史正式候选资格，请重新扫描策略6`
       }
       return '本任务未发现符合条件的VCP形态候选'
+    },
+    vcpQualityNotice() {
+      const version = this.taskStrategyVersion
+      if (!version || !this.vcpCandidates.length) return ''
+      const [major, minor] = version.split('.').map(Number)
+      if (major === 4 && minor === 4) {
+        return `该任务由策略6 ${version}生成，尚未计算VCP形态质量分，可重新扫描生成`
+      }
+      return ''
     },
     readyCandidates() {
       return this.sortedCandidates.filter(c => this.effectiveCandidateType(c) === 'READY_CANDIDATE')
@@ -411,6 +469,10 @@ export default {
     }
   },
   methods: {
+    hasVcpQuality(candidate) {
+      return typeof candidate?.vcp_quality_score === 'number'
+        && Number.isFinite(candidate.vcp_quality_score)
+    },
     label(group, value) {
       return strategy6Label(group, value)
     },
@@ -646,6 +708,17 @@ export default {
           { header: 'VCP观察原因', value: c => strategy6Labels('tag', c.vcp_observation_reasons).join('|') },
           { header: 'VCP观察风险', value: c => strategy6Labels('tag', c.vcp_observation_risk_tags).join('|') },
           { header: 'VCP失效原因', value: c => c.vcp_invalidation_reason ? this.label('tag', c.vcp_invalidation_reason) : '' },
+          { header: 'VCP形态分', value: c => this.hasVcpQuality(c) ? c.vcp_quality_score : '' },
+          { header: 'VCP等级', value: c => this.hasVcpQuality(c) ? this.label('vcpQualityGrade', c.vcp_quality_grade) : '' },
+          { header: 'VCP收缩层次分', value: c => this.hasVcpQuality(c) ? (c.vcp_quality_contraction_score ?? '') : '' },
+          { header: 'VCP振幅递减分', value: c => this.hasVcpQuality(c) ? (c.vcp_quality_range_score ?? '') : '' },
+          { header: 'VCP成交量递减分', value: c => this.hasVcpQuality(c) ? (c.vcp_quality_volume_score ?? '') : '' },
+          { header: 'VCP低点稳定分', value: c => this.hasVcpQuality(c) ? (c.vcp_quality_low_score ?? '') : '' },
+          { header: 'VCP时间结构分', value: c => this.hasVcpQuality(c) ? (c.vcp_quality_time_score ?? '') : '' },
+          { header: 'VCP支点清晰分', value: c => this.hasVcpQuality(c) ? (c.vcp_quality_pivot_score ?? '') : '' },
+          { header: 'VCP评分原因', value: c => strategy6Labels('tag', c.vcp_quality_reasons).join('|') },
+          { header: 'VCP评分警告', value: c => strategy6Labels('tag', c.vcp_quality_warnings).join('|') },
+          { header: 'VCP评分模型版本', value: c => c.vcp_quality_model_version || '' },
           { header: 'VCP历史正式候选资格', value: c => c.vcp_history_qualified ? '是' : '否' },
           { header: 'VCP历史候选日期', value: c => c.vcp_history_candidate_date || '' },
           { header: 'VCP历史候选类型', value: c => c.vcp_history_candidate_type || '' },

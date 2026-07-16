@@ -20,6 +20,10 @@ const LABELS = {
     VCP_POST_BREAKOUT: 'VCP突破后观察', VCP_EXTENDED: '突破后过度延伸',
     VCP_INVALID: 'VCP结构失效',
   },
+  vcpQualityGrade: {
+    TOP: '顶级VCP', HIGH: '高质量VCP', GOOD: '良好VCP',
+    NORMAL: '普通VCP', WEAK: '结构偏弱',
+  },
   entryArchetype: {
     SUPPORT_PULLBACK: '支撑低吸', PIVOT_BREAKOUT: '枢轴突破',
     FAILED_BREAKOUT_RECLAIM: '假跌破收复', WAIT_BREAKOUT: '等待突破', NONE: '无有效入场',
@@ -194,6 +198,16 @@ const LABELS = {
     VCP_VOLUME_BREAKDOWN_UNRECOVERED: 'VCP放量跌回支点后3日未收复',
     VCP_OBSERVATION_EXPIRED: 'VCP突破观察期已结束', VCP_DATA_INSUFFICIENT: 'VCP观察数据不足',
     VCP_BASE_FILTER_FAILED: 'VCP观察未通过基础数据或流动性门槛',
+    VCP_QUALITY_MULTI_CONTRACTION: 'VCP多轮收缩层次清晰',
+    VCP_QUALITY_RANGE_TIGHT: 'VCP振幅收缩质量高',
+    VCP_QUALITY_VOLUME_DRY: 'VCP成交量收缩质量高',
+    VCP_QUALITY_LOW_STABLE: 'VCP低点稳定或抬高',
+    VCP_QUALITY_TIME_COMPACT: 'VCP时间结构紧凑',
+    VCP_QUALITY_PIVOT_CLEAR: 'VCP支点清晰',
+    VCP_QUALITY_VOLUME_MISSING: 'VCP成交量证据不足',
+    VCP_QUALITY_DATE_MAPPING_FAILED: 'VCP收缩日期无法映射到交易日',
+    VCP_QUALITY_EVIDENCE_INVALID: 'VCP评分证据无效',
+    VCP_MICRO_CONTRACTION_NOISE: '单日微小收缩，形态分已封顶',
     TRADING_LIFECYCLE_BLOCKED: '原交易生命周期处于退出或冷却状态',
   },
 }
