@@ -365,6 +365,7 @@ class Strategy6Evaluation:
         tail = self.tail_paths
         quality = self.setup_quality
         vcp = self.vcp_observation
+        vcp_quality = vcp.quality
         return {
             "strategy_version": self.strategy_version,
             "config_hash": self.config_hash,
@@ -588,6 +589,17 @@ class Strategy6Evaluation:
             "vcp_history_candidate_score": vcp.history_candidate_score,
             "vcp_history_source": vcp.history_source,
             "vcp_history_origin_start_date": vcp.history_origin_start_date,
+            "vcp_quality_score": vcp_quality.score if vcp_quality.scored else None,
+            "vcp_quality_grade": vcp_quality.grade,
+            "vcp_quality_contraction_score": vcp_quality.contraction_score,
+            "vcp_quality_range_score": vcp_quality.range_score,
+            "vcp_quality_volume_score": vcp_quality.volume_score,
+            "vcp_quality_low_score": vcp_quality.low_score,
+            "vcp_quality_time_score": vcp_quality.time_score,
+            "vcp_quality_pivot_score": vcp_quality.pivot_score,
+            "vcp_quality_reasons": vcp_quality.reasons,
+            "vcp_quality_warnings": vcp_quality.warnings,
+            "vcp_quality_model_version": vcp_quality.model_version,
             "candidate_type": self.candidate_type,
             "classification": self.classification,
             "lifecycle_status": self.lifecycle_status,

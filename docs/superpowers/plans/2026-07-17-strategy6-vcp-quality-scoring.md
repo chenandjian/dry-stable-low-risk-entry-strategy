@@ -135,17 +135,17 @@ git commit -m "feat: add strategy6 vcp quality scorer"
 - 修改：`tests/test_strategy6_core_rules.py`
 - 修改：`tests/test_strategy6_versioning.py`
 
-- [ ] **步骤1：编写失败测试证明评分不影响正式结果**
+- [x] **步骤1：编写失败测试证明评分不影响正式结果**
 
 对同一真实构造数据分别让评分函数返回高分和低分，断言两次结果的 `candidate_type`、`classification`、`reject_reasons`、`total_score`、交易计划和VCP资格完全一致，仅新增评分字段不同。
 
-- [ ] **步骤2：运行主链测试确认评分尚未接入**
+- [x] **步骤2：运行主链测试确认评分尚未接入**
 
 运行：`python -m pytest tests/test_strategy6_core_rules.py tests/test_strategy6_versioning.py -q`
 
 预期：新增断言FAIL，候选字典缺少 `vcp_quality_score` 或版本仍为4.4.0。
 
-- [ ] **步骤3：在基础过滤之后附加评分**
+- [x] **步骤3：在基础过滤之后附加评分**
 
 在 `apply_vcp_base_filters(vcp_observation, reject_reasons)` 之后执行：
 
@@ -156,11 +156,11 @@ if vcp_observation.eligible:
 
 不得把评分传给 `score_strategy6()`、`hard_filter_reasons()` 或 `classify_candidate()`。
 
-- [ ] **步骤4：序列化全部评分字段**
+- [x] **步骤4：序列化全部评分字段**
 
 候选字典使用可空总分，字段名严格与规格一致。`vcp_quality_reasons` 和 `vcp_quality_warnings` 输出列表，`vcp_quality_model_version` 输出 `VCP_QUALITY_V1`。
 
-- [ ] **步骤5：升级策略版本并运行专项测试**
+- [x] **步骤5：升级策略版本并运行专项测试**
 
 将 `STRATEGY6_VERSION` 改为 `4.5.0`。
 
@@ -168,7 +168,7 @@ if vcp_observation.eligible:
 
 预期：全部PASS，旧VCP识别和历史资格测试不变。
 
-- [ ] **步骤6：提交引擎接入**
+- [x] **步骤6：提交引擎接入**
 
 ```bash
 git add strategy6/engine.py strategy6/models.py strategy6/version.py tests/test_strategy6_core_rules.py tests/test_strategy6_versioning.py

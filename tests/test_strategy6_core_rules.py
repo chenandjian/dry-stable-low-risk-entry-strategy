@@ -13,6 +13,7 @@ from strategy6.models import (
     Strategy6Score,
     Strategy6TradePlan,
     Strategy6VcpObservation,
+    Strategy6VcpQuality,
 )
 from strategy6.strong_start import evaluate_strong_start
 from strategy6.scorer import _relative_strength_risk_score
@@ -216,6 +217,67 @@ def test_vcp_observation_is_orthogonal_to_main_strategy_decision(monkeypatch):
     assert observed.classification == baseline.classification
     assert observed.reject_reasons == baseline.reject_reasons
     assert observed.trade_plan == baseline.trade_plan
+
+
+def test_vcp_quality_is_serialized_but_does_not_change_main_strategy(monkeypatch):
+    import strategy6.engine as engine_mod
+
+    data = build_strategy6_candidate_data()
+    monkeypatch.setattr(
+        engine_mod,
+        "evaluate_vcp_observation",
+        lambda rows, config, **kwargs: Strategy6VcpObservation(
+            eligible=True,
+            lifecycle_status="VCP_NEAR_PIVOT",
+        ),
+    )
+    monkeypatch.setattr(
+        engine_mod,
+        "evaluate_vcp_quality",
+        lambda rows, current: Strategy6VcpQuality(
+            scored=True,
+            score=94,
+            grade="TOP",
+            contraction_score=17,
+            range_score=23,
+            volume_score=24,
+            low_score=15,
+            time_score=10,
+            pivot_score=5,
+            reasons=["VCP_QUALITY_RANGE_TIGHT"],
+            warnings=[],
+            model_version="VCP_QUALITY_V1",
+        ),
+        raising=False,
+    )
+    high = StrongVcpTailEngine({}).evaluate_at(data, code="000001")
+
+    monkeypatch.setattr(
+        engine_mod,
+        "evaluate_vcp_quality",
+        lambda rows, current: Strategy6VcpQuality(
+            scored=True,
+            score=41,
+            grade="WEAK",
+            model_version="VCP_QUALITY_V1",
+        ),
+        raising=False,
+    )
+    low = StrongVcpTailEngine({}).evaluate_at(data, code="000001")
+
+    assert high.candidate_type == low.candidate_type
+    assert high.classification == low.classification
+    assert high.reject_reasons == low.reject_reasons
+    assert high.score == low.score
+    assert high.trade_plan == low.trade_plan
+    assert high.vcp_observation.eligible == low.vcp_observation.eligible
+    high_candidate = high.to_candidate_dict()
+    low_candidate = low.to_candidate_dict()
+    assert high_candidate["vcp_quality_score"] == 94
+    assert high_candidate["vcp_quality_grade"] == "TOP"
+    assert high_candidate["vcp_quality_model_version"] == "VCP_QUALITY_V1"
+    assert low_candidate["vcp_quality_score"] == 41
+    assert low_candidate["vcp_quality_grade"] == "WEAK"
 
 
 def test_vcp_observation_does_not_bypass_strategy6_data_and_liquidity_floor(monkeypatch):
