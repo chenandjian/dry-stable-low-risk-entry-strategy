@@ -218,6 +218,7 @@ def scan_strategy6_all(
                         name=name,
                         origin_start_date=vcp.origin_start_date,
                         evaluation_date=evaluation.indicators.evaluation_date,
+                        pattern_start_date=vcp.pattern_start_date,
                     )
                     vcp.history_qualified = history.qualified
                     vcp.history_candidate_date = history.candidate_date

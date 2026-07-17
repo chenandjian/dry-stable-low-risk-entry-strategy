@@ -223,10 +223,11 @@ def test_strategy6_scan_persists_history_evidence_on_formal_vcp_candidate(tmp_pa
             return evaluation
 
     monkeypatch.setattr(scanner_mod, "StrongVcpTailEngine", FakeEngine)
+    history_calls = []
     monkeypatch.setattr(
         scanner_mod,
         "evaluate_vcp_candidate_history",
-        lambda **kwargs: Strategy6VcpCandidateHistory(
+        lambda **kwargs: history_calls.append(kwargs) or Strategy6VcpCandidateHistory(
             qualified=True,
             candidate_date=evaluation.indicators.evaluation_date,
             candidate_type=evaluation.candidate_type,
@@ -273,6 +274,7 @@ def test_strategy6_scan_persists_history_evidence_on_formal_vcp_candidate(tmp_pa
     assert row["vcp_quality_grade"] == "HIGH"
     assert row["vcp_quality_model_version"] == "VCP_QUALITY_V1"
     assert len(quality_calls) == 1
+    assert history_calls[0]["pattern_start_date"] == evaluation.vcp_observation.pattern_start_date
 
 
 def test_strategy6_scan_does_not_persist_vcp_exit_without_prior_observation(tmp_path, monkeypatch):

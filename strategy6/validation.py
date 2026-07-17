@@ -47,6 +47,9 @@ DEFAULT_STRATEGY6_CONFIG = {
     "vcp_observer_lookback_days": 60,
     "vcp_observer_breakout_retention_days": 10,
     "vcp_observer_extension_pct": 0.08,
+    "vcp_history_max_start_loss_pct": 0.15,
+    "vcp_history_max_drawdown_pct": 0.20,
+    "vcp_history_bearish_trend_days": 5,
     "cup_depth_min": 0.12,
     "cup_depth_max": 0.35,
     "platform_max_range": 0.12,
@@ -266,6 +269,7 @@ def resolve_strategy6_config(config: dict | None) -> dict:
     _validate_int_range(raw, "start_lookback_days", 20, 250)
     _validate_int_range(raw, "vcp_observer_lookback_days", 20, 250)
     _validate_int_range(raw, "vcp_observer_breakout_retention_days", 1, 60)
+    _validate_int_range(raw, "vcp_history_bearish_trend_days", 1, 20)
     _validate_int_range(raw, "start_age_min_days", 1, 20)
     _validate_int_range(raw, "start_age_max_days", raw["start_age_min_days"], raw["start_lookback_days"])
     _validate_int_range(raw, "consolidation_min_days", 1, 40)
@@ -296,6 +300,7 @@ def resolve_strategy6_config(config: dict | None) -> dict:
         "vcp_min_first_range", "vcp_first_contraction_max_range",
         "vcp_rebound_min_pct", "vcp_low_warning_ratio",
         "vcp_observer_extension_pct",
+        "vcp_history_max_start_loss_pct", "vcp_history_max_drawdown_pct",
         "cup_depth_min", "cup_depth_max", "platform_max_range",
         "pattern_pivot_proximity_pct",
         "breakout_extended_max_pct",
@@ -335,6 +340,8 @@ def resolve_strategy6_config(config: dict | None) -> dict:
     _validate_between(raw, "vcp_rebound_min_pct", 0, 0.20, lower_exclusive=True)
     _validate_between(raw, "vcp_low_warning_ratio", 0.97, 1.0)
     _validate_between(raw, "vcp_observer_extension_pct", 0, 1, lower_exclusive=True)
+    _validate_between(raw, "vcp_history_max_start_loss_pct", 0, 0.50, lower_exclusive=True)
+    _validate_between(raw, "vcp_history_max_drawdown_pct", 0, 0.50, lower_exclusive=True)
     _validate_between(raw, "cup_depth_min", 0, 1)
     _validate_between(raw, "cup_depth_max", raw["cup_depth_min"], 1)
     _validate_between(raw, "platform_max_range", 0, 1)

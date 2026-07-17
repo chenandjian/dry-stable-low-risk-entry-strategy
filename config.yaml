@@ -315,6 +315,9 @@ strategy6:
   vcp_rebound_min_pct: 0.03
   vcp_rebound_confirm_days: 2
   vcp_low_warning_ratio: 0.99
+  vcp_history_max_start_loss_pct: 0.15
+  vcp_history_max_drawdown_pct: 0.20
+  vcp_history_bearish_trend_days: 5
   cup_depth_min: 0.12
   cup_depth_max: 0.35
   platform_max_range: 0.12

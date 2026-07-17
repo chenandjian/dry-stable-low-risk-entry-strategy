@@ -845,6 +845,21 @@
           <span class="default">默认 0.99</span>
         </div>
         <div class="param">
+          <label title="历史正式候选日到当前VCP第一轮起点的收盘跌幅超过该比例时，旧资格失效">历史候选至VCP起点最大跌幅</label>
+          <input data-test="strategy6-vcp-history-max-start-loss" type="number" v-model.number="config.strategy6.vcp_history_max_start_loss_pct" @input="markDirty" min="0.01" max="0.50" step="0.01" />
+          <span class="default">默认 0.15</span>
+        </div>
+        <div class="param">
+          <label title="历史正式候选日到当前VCP第一轮起点的滚动最高收盘最大回撤超过该比例时，旧资格失效">历史资格最大回撤</label>
+          <input data-test="strategy6-vcp-history-max-drawdown" type="number" v-model.number="config.strategy6.vcp_history_max_drawdown_pct" @input="markDirty" min="0.01" max="0.50" step="0.01" />
+          <span class="default">默认 0.20</span>
+        </div>
+        <div class="param">
+          <label title="VCP起点连续满足收盘低于MA20且MA20低于MA50达到该天数时，旧资格失效">历史资格空头失效天数</label>
+          <input data-test="strategy6-vcp-history-bearish-days" type="number" v-model.number="config.strategy6.vcp_history_bearish_trend_days" @input="markDirty" min="1" max="20" step="1" />
+          <span class="default">默认 5</span>
+        </div>
+        <div class="param">
           <label title="杯柄形态允许的杯体最小深度">杯体最小深度</label>
           <input type="number" v-model.number="config.strategy6.cup_depth_min" @input="markDirty" min="0" max="1" step="0.01" />
           <span class="default">默认 0.12</span>
@@ -1347,6 +1362,9 @@ const defaultStrategy6Config = {
   vcp_rebound_min_pct: 0.03,
   vcp_rebound_confirm_days: 2,
   vcp_low_warning_ratio: 0.99,
+  vcp_history_max_start_loss_pct: 0.15,
+  vcp_history_max_drawdown_pct: 0.20,
+  vcp_history_bearish_trend_days: 5,
   cup_depth_min: 0.12,
   cup_depth_max: 0.35,
   platform_max_range: 0.12,
@@ -1919,6 +1937,9 @@ function validate() {
   if (s6.vcp_rebound_min_pct <= 0 || s6.vcp_rebound_min_pct > 0.20) errors.push('策略6: VCP有效反弹最小涨幅需在 (0,0.20]')
   if (!Number.isInteger(s6.vcp_rebound_confirm_days) || s6.vcp_rebound_confirm_days < 2 || s6.vcp_rebound_confirm_days > 10) errors.push('策略6: VCP反弹确认交易日需为2-10的整数')
   if (s6.vcp_low_warning_ratio < 0.97 || s6.vcp_low_warning_ratio > 1) errors.push('策略6: VCP低点下移提示比例需在 0.97-1')
+  if (s6.vcp_history_max_start_loss_pct <= 0 || s6.vcp_history_max_start_loss_pct > 0.50) errors.push('策略6: 历史候选至VCP起点最大跌幅需在 (0,0.50]')
+  if (s6.vcp_history_max_drawdown_pct <= 0 || s6.vcp_history_max_drawdown_pct > 0.50) errors.push('策略6: 历史资格最大回撤需在 (0,0.50]')
+  if (!Number.isInteger(s6.vcp_history_bearish_trend_days) || s6.vcp_history_bearish_trend_days < 1 || s6.vcp_history_bearish_trend_days > 20) errors.push('策略6: 历史资格空头失效天数需为1-20的整数')
   if (s6.cup_depth_min < 0 || s6.cup_depth_min > s6.cup_depth_max || s6.cup_depth_max > 1) errors.push('策略6: 杯体深度需满足 0 <= 最小值 <= 最大值 <= 1')
   if (s6.support_test_lookback < 5 || s6.support_test_lookback > 40) errors.push('策略6: 支撑测试回看需在 5-40')
   if (s6.min_relative_strength_20 < -1 || s6.min_relative_strength_20 > 1) errors.push('策略6: 最低RS20需在 -1 到 1')

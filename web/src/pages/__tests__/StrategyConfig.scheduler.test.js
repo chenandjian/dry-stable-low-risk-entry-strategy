@@ -313,6 +313,9 @@ describe('StrategyConfig scheduler controls', () => {
     expect(payload.strategy6.vcp_rebound_min_pct).toBe(0.03)
     expect(payload.strategy6.vcp_rebound_confirm_days).toBe(2)
     expect(payload.strategy6.vcp_low_warning_ratio).toBe(0.99)
+    expect(payload.strategy6.vcp_history_max_start_loss_pct).toBe(0.15)
+    expect(payload.strategy6.vcp_history_max_drawdown_pct).toBe(0.20)
+    expect(payload.strategy6.vcp_history_bearish_trend_days).toBe(5)
     expect(payload.strategy6.stop_atr_multiplier).toBe(0.8)
     expect(payload.strategy6.max_watch_days).toBe(10)
   })
@@ -327,6 +330,18 @@ describe('StrategyConfig scheduler controls', () => {
 
     expect(wrapper.text()).toContain('形态距突破枢轴最大下偏')
     expect(wrapper.text()).not.toContain('形态距Pivot最大下偏')
+  })
+
+  it('shows editable strategy6 VCP history continuity thresholds', async () => {
+    const wrapper = mount(StrategyConfig)
+    await flushUi()
+
+    expect(wrapper.find('[data-test="strategy6-vcp-history-max-start-loss"]').exists()).toBe(true)
+    expect(wrapper.find('[data-test="strategy6-vcp-history-max-drawdown"]').exists()).toBe(true)
+    expect(wrapper.find('[data-test="strategy6-vcp-history-bearish-days"]').exists()).toBe(true)
+    expect(wrapper.text()).toContain('历史候选至VCP起点最大跌幅')
+    expect(wrapper.text()).toContain('历史资格最大回撤')
+    expect(wrapper.text()).toContain('历史资格空头失效天数')
   })
 
   it('renders and saves nested strategy6 box-tail and compact-kline controls', async () => {
