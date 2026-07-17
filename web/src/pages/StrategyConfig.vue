@@ -825,6 +825,26 @@
           <span class="default">默认 0.90</span>
         </div>
         <div class="param">
+          <label title="第一轮完整收缩允许的最大振幅，超过后不视为健康VCP第一轮">VCP第一轮最大振幅</label>
+          <input data-test="strategy6-vcp-first-max-range" type="number" v-model.number="config.strategy6.vcp_first_contraction_max_range" @input="markDirty" min="0.08" max="0.50" step="0.01" />
+          <span class="default">默认 0.32</span>
+        </div>
+        <div class="param">
+          <label title="低点后累计反弹至少达到该比例，才可能确认完整一轮">VCP有效反弹最小涨幅</label>
+          <input data-test="strategy6-vcp-rebound-min" type="number" v-model.number="config.strategy6.vcp_rebound_min_pct" @input="markDirty" min="0.01" max="0.20" step="0.01" />
+          <span class="default">默认 0.03</span>
+        </div>
+        <div class="param">
+          <label title="普通反弹峰值至少需要经过的可见交易日，强势直接突破不受此限制">VCP反弹确认交易日</label>
+          <input data-test="strategy6-vcp-rebound-confirm-days" type="number" v-model.number="config.strategy6.vcp_rebound_confirm_days" @input="markDirty" min="2" max="10" step="1" />
+          <span class="default">默认 2</span>
+        </div>
+        <div class="param">
+          <label title="后轮低点低于前轮低点且低于该比例时输出小幅下移风险提示">VCP低点下移提示比例</label>
+          <input data-test="strategy6-vcp-low-warning-ratio" type="number" v-model.number="config.strategy6.vcp_low_warning_ratio" @input="markDirty" min="0.97" max="1" step="0.01" />
+          <span class="default">默认 0.99</span>
+        </div>
+        <div class="param">
           <label title="杯柄形态允许的杯体最小深度">杯体最小深度</label>
           <input type="number" v-model.number="config.strategy6.cup_depth_min" @input="markDirty" min="0" max="1" step="0.01" />
           <span class="default">默认 0.12</span>
@@ -1323,6 +1343,10 @@ const defaultStrategy6Config = {
   vcp_contraction_range_ratio: 0.90,
   vcp_contraction_volume_ratio: 0.90,
   vcp_min_first_range: 0.08,
+  vcp_first_contraction_max_range: 0.32,
+  vcp_rebound_min_pct: 0.03,
+  vcp_rebound_confirm_days: 2,
+  vcp_low_warning_ratio: 0.99,
   cup_depth_min: 0.12,
   cup_depth_max: 0.35,
   platform_max_range: 0.12,
@@ -1891,6 +1915,10 @@ function validate() {
   if (s6.consolidation_min_days < 1 || s6.consolidation_min_days > s6.consolidation_max_days) errors.push('策略6: 最小整理天数需不高于最大整理天数')
   if (s6.vcp_contraction_range_ratio <= 0 || s6.vcp_contraction_range_ratio > 1) errors.push('策略6: VCP振幅收缩比需在 (0,1]')
   if (s6.vcp_contraction_volume_ratio <= 0 || s6.vcp_contraction_volume_ratio > 1) errors.push('策略6: VCP量能收缩比需在 (0,1]')
+  if (s6.vcp_first_contraction_max_range < s6.vcp_min_first_range || s6.vcp_first_contraction_max_range > 0.50) errors.push('策略6: VCP第一轮最大振幅需不低于最小振幅且不超过0.50')
+  if (s6.vcp_rebound_min_pct <= 0 || s6.vcp_rebound_min_pct > 0.20) errors.push('策略6: VCP有效反弹最小涨幅需在 (0,0.20]')
+  if (!Number.isInteger(s6.vcp_rebound_confirm_days) || s6.vcp_rebound_confirm_days < 2 || s6.vcp_rebound_confirm_days > 10) errors.push('策略6: VCP反弹确认交易日需为2-10的整数')
+  if (s6.vcp_low_warning_ratio < 0.97 || s6.vcp_low_warning_ratio > 1) errors.push('策略6: VCP低点下移提示比例需在 0.97-1')
   if (s6.cup_depth_min < 0 || s6.cup_depth_min > s6.cup_depth_max || s6.cup_depth_max > 1) errors.push('策略6: 杯体深度需满足 0 <= 最小值 <= 最大值 <= 1')
   if (s6.support_test_lookback < 5 || s6.support_test_lookback > 40) errors.push('策略6: 支撑测试回看需在 5-40')
   if (s6.min_relative_strength_20 < -1 || s6.min_relative_strength_20 > 1) errors.push('策略6: 最低RS20需在 -1 到 1')

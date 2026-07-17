@@ -16,9 +16,14 @@ const LABELS = {
   },
   vcpStatus: {
     VCP_NONE: '未形成VCP观察结构', VCP_FORMING: 'VCP形成中',
+    VCP_ROUND1_FORMING: '第一轮形成中', VCP_ROUND1_CONFIRMED: '第一轮已确认',
+    VCP_CONFIRMED: 'VCP完整结构已确认',
     VCP_NEAR_PIVOT: '接近VCP支点', VCP_BREAKOUT_CONFIRMED: 'VCP突破已确认',
     VCP_POST_BREAKOUT: 'VCP突破后观察', VCP_EXTENDED: '突破后过度延伸',
     VCP_INVALID: 'VCP结构失效',
+  },
+  vcpFormingPhase: {
+    DECLINING: '下跌段形成中', REBOUNDING: '反弹段待确认',
   },
   vcpQualityGrade: {
     TOP: '顶级VCP', HIGH: '高质量VCP', GOOD: '良好VCP',
@@ -50,6 +55,7 @@ const LABELS = {
   patternType: { VCP: 'VCP', CUP_HANDLE: '杯柄', PLATFORM: '平台', UNKNOWN: '未识别形态' },
   pivotSource: {
     VCP_LAST_CONTRACTION: 'VCP最后一次收缩', CUP_HANDLE_PIVOT: '杯柄突破枢轴', PLATFORM_TOP: '平台上沿',
+    VCP_LAST_RECOVERY_PEAK: 'VCP末轮反弹峰值',
   },
   supportSource: {
     MA5: 'MA5', MA10: 'MA10', MA20: 'MA20', PATTERN_LOW: '形态低点', PLATFORM_LOW: '平台低点',
@@ -204,6 +210,10 @@ const LABELS = {
     VCP_QUALITY_LOW_STABLE: 'VCP低点稳定或抬高',
     VCP_QUALITY_TIME_COMPACT: 'VCP时间结构紧凑',
     VCP_QUALITY_PIVOT_CLEAR: 'VCP支点清晰',
+    VCP_QUALITY_START_GAIN_RETAINED: 'VCP启动涨幅保持良好',
+    VCP_QUALITY_BREAKOUT_CONFIRMED: 'VCP突破质量已确认',
+    VCP_COMPLETE_ROUNDS: 'VCP完整收缩轮次成立',
+    VCP_LOW_SLIGHTLY_LOWER: 'VCP后轮低点小幅下移',
     VCP_QUALITY_VOLUME_MISSING: 'VCP成交量证据不足',
     VCP_QUALITY_DATE_MAPPING_FAILED: 'VCP收缩日期无法映射到交易日',
     VCP_QUALITY_EVIDENCE_INVALID: 'VCP评分证据无效',

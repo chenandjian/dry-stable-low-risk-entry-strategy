@@ -379,11 +379,19 @@ describe('Strategy6Results', () => {
         vcp_contraction_count: 2, vcp_pivot_price: 68.21, vcp_structure_low: 65.61,
         vcp_distance_to_pivot_pct: 0.154, vcp_breakout_date: '2026-07-09',
         vcp_contractions: [
-          { peak_date: '2026-06-30', low_date: '2026-07-03', amplitude: 0.1459, avg_volume: 138603150 },
-          { peak_date: '2026-07-07', low_date: '2026-07-08', amplitude: 0.0381, avg_volume: 120261046 },
+          { peak_date: '2026-06-30', low_date: '2026-07-03', recovery_peak_date: '2026-07-07', amplitude: 0.1459, rebound: 0.08, decline_avg_volume: 138603150 },
+          { peak_date: '2026-07-07', low_date: '2026-07-08', recovery_peak_date: '2026-07-09', amplitude: 0.0381, rebound: 0.06, decline_avg_volume: 120261046 },
         ],
         vcp_observation_reasons: ['VCP_RANGE_CONTRACTING', 'VCP_VOLUME_CONTRACTING'],
         vcp_observation_risk_tags: ['VCP_PRICE_EXTENDED'],
+      },
+      {
+        code: '002056', name: '早期观察样本', candidate_type: 'REJECTED',
+        classification: 'observation', total_score: 58,
+        vcp_observation_eligible: true, vcp_lifecycle_status: 'VCP_ROUND1_CONFIRMED',
+        vcp_history_qualified: true, vcp_history_candidate_date: '2026-07-01',
+        vcp_contraction_count: 1, vcp_pivot_price: 21.5, vcp_structure_low: 18.8,
+        vcp_forming_round: { peak_date: '2026-07-08', low_date: '2026-07-10', phase: 'REBOUNDING' },
       },
       {
         code: '300001', name: '观察样本', candidate_type: 'REJECTED',
@@ -419,8 +427,10 @@ describe('Strategy6Results', () => {
     const text = wrapper.text()
     expect(text.indexOf('市场过滤数据')).toBeLessThan(text.indexOf('重点候选'))
     expect(text.indexOf('重点候选')).toBeLessThan(text.indexOf('观察候选'))
-    expect(text.indexOf('观察候选')).toBeLessThan(text.indexOf('VCP形态候选'))
+    expect(text.indexOf('观察候选')).toBeLessThan(text.indexOf('VCP确认候选'))
+    expect(text.indexOf('VCP确认候选')).toBeLessThan(text.indexOf('VCP早期观察'))
     expect(wrapper.find('[data-test="vcp-row-002156"]').exists()).toBe(true)
+    expect(wrapper.find('[data-test="vcp-row-002056"]').exists()).toBe(true)
     expect(wrapper.find('[data-test="vcp-row-300001"]').exists()).toBe(false)
     expect(wrapper.find('[data-test="vcp-row-300002"]').exists()).toBe(false)
     expect(wrapper.find('[data-test="vcp-row-600001"]').exists()).toBe(false)
@@ -447,8 +457,9 @@ describe('Strategy6Results', () => {
     expect(wrapper.text()).toContain('VCP生命周期')
     expect(wrapper.text()).toContain('2026-07-09')
     expect(wrapper.text()).toContain('VCP收缩证据')
-    expect(wrapper.text()).toContain('第1段 2026-06-30 至 2026-07-03')
+    expect(wrapper.text()).toContain('第1轮 2026-06-30 → 2026-07-03 → 2026-07-07')
     expect(wrapper.text()).toContain('振幅 14.59%')
+    expect(wrapper.text()).toContain('反弹 8.00%')
     expect(wrapper.text()).toContain('VCP振幅依次收缩')
   })
 
@@ -464,7 +475,8 @@ describe('Strategy6Results', () => {
     })
     await flushUi()
 
-    expect(wrapper.text()).toContain('VCP形态候选')
+    expect(wrapper.text()).toContain('VCP确认候选')
+    expect(wrapper.text()).toContain('VCP早期观察')
     expect(wrapper.text()).toContain('该任务由策略6 4.2.0生成，尚未计算VCP观察数据，请重新扫描策略6')
   })
 
@@ -518,12 +530,13 @@ describe('Strategy6Results', () => {
       vcp_observation_eligible: true, vcp_history_qualified: true,
       vcp_lifecycle_status: 'VCP_NEAR_PIVOT', strategy_version: '4.5.0', total_score: 61,
       vcp_quality_score: 83, vcp_quality_grade: 'HIGH',
-      vcp_quality_contraction_score: 12, vcp_quality_range_score: 25,
-      vcp_quality_volume_score: 25, vcp_quality_low_score: 13,
-      vcp_quality_time_score: 8, vcp_quality_pivot_score: 0,
-      vcp_quality_reasons: ['VCP_QUALITY_RANGE_TIGHT', 'VCP_QUALITY_VOLUME_DRY'],
+      vcp_quality_contraction_score: 10, vcp_quality_range_score: 18,
+      vcp_quality_volume_score: 17, vcp_quality_low_score: 13,
+      vcp_quality_start_retention_score: 10, vcp_quality_time_score: 5,
+      vcp_quality_pivot_score: 5, vcp_quality_breakout_score: 5,
+      vcp_quality_reasons: ['VCP_QUALITY_RANGE_TIGHT', 'VCP_QUALITY_VOLUME_DRY', 'VCP_QUALITY_START_GAIN_RETAINED'],
       vcp_quality_warnings: ['VCP_MICRO_CONTRACTION_NOISE'],
-      vcp_quality_model_version: 'VCP_QUALITY_V1',
+      vcp_quality_model_version: 'VCP_QUALITY_V2',
     }] })
 
     const wrapper = mount(Strategy6Results, {
@@ -535,15 +548,18 @@ describe('Strategy6Results', () => {
     expect(wrapper.text()).toContain('高质量VCP')
     await wrapper.find('[data-test="vcp-row-000001"]').trigger('click')
     const detail = wrapper.find('[data-test="vcp-quality-detail"]')
-    expect(detail.text()).toContain('收缩层次 12/20')
-    expect(detail.text()).toContain('振幅递减 25/25')
-    expect(detail.text()).toContain('成交量递减 25/25')
+    expect(detail.text()).toContain('完整轮次 10/15')
+    expect(detail.text()).toContain('振幅递减 18/20')
+    expect(detail.text()).toContain('下跌量递减 17/20')
     expect(detail.text()).toContain('低点稳定 13/15')
-    expect(detail.text()).toContain('时间结构 8/10')
-    expect(detail.text()).toContain('支点清晰 0/5')
-    expect(detail.text()).toContain('VCP_QUALITY_V1')
+    expect(detail.text()).toContain('启动涨幅保留 10/10')
+    expect(detail.text()).toContain('时间结构 5/5')
+    expect(detail.text()).toContain('支点收紧 5/10')
+    expect(detail.text()).toContain('突破质量 5/5')
+    expect(detail.text()).toContain('VCP_QUALITY_V2')
     expect(wrapper.text()).toContain('VCP振幅收缩质量高')
     expect(wrapper.text()).toContain('VCP成交量收缩质量高')
+    expect(wrapper.text()).toContain('VCP启动涨幅保持良好')
     expect(wrapper.text()).toContain('单日微小收缩，形态分已封顶')
   })
 
@@ -791,7 +807,7 @@ describe('Strategy6Results', () => {
     expect(csv).toContain('接近120日压力位,NEAR_120D_PRESSURE')
     expect(csv).toContain('VCP观察资格,VCP状态,VCP状态原始值,VCP起点,VCP形态开始,VCP形态结束,VCP收缩次数')
     expect(csv).toContain('VCP支点,VCP结构低点,距VCP支点,VCP突破日期,VCP突破后天数')
-    expect(csv).toContain('VCP形态分,VCP等级,VCP收缩层次分,VCP振幅递减分,VCP成交量递减分,VCP低点稳定分,VCP时间结构分,VCP支点清晰分')
+    expect(csv).toContain('VCP形态分,VCP等级,VCP完整轮次分,VCP振幅递减分,VCP下跌量递减分,VCP低点稳定分,VCP启动涨幅保留分,VCP时间结构分,VCP支点收紧分,VCP突破质量分')
     expect(csv).toContain('VCP评分原因,VCP评分警告,VCP评分模型版本')
   })
 

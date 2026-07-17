@@ -287,8 +287,10 @@ class Strategy6VcpQuality:
     range_score: int = 0
     volume_score: int = 0
     low_score: int = 0
+    start_retention_score: int = 0
     time_score: int = 0
     pivot_score: int = 0
+    breakout_score: int = 0
     reasons: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
     model_version: str = ""
@@ -597,8 +599,10 @@ class Strategy6Evaluation:
             "vcp_quality_range_score": vcp_quality.range_score,
             "vcp_quality_volume_score": vcp_quality.volume_score,
             "vcp_quality_low_score": vcp_quality.low_score,
+            "vcp_quality_start_retention_score": vcp_quality.start_retention_score,
             "vcp_quality_time_score": vcp_quality.time_score,
             "vcp_quality_pivot_score": vcp_quality.pivot_score,
+            "vcp_quality_breakout_score": vcp_quality.breakout_score,
             "vcp_quality_reasons": vcp_quality.reasons,
             "vcp_quality_warnings": vcp_quality.warnings,
             "vcp_quality_model_version": vcp_quality.model_version,

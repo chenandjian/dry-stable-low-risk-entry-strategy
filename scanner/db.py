@@ -2871,6 +2871,7 @@ def _ensure_strategy6_candidates_table(conn: sqlite3.Connection):
         "vcp_pattern_end_date": "TEXT",
         "vcp_contraction_count": "INTEGER DEFAULT 0",
         "vcp_contractions": "TEXT",
+        "vcp_forming_round": "TEXT",
         "vcp_pivot_price": "REAL DEFAULT 0",
         "vcp_structure_low": "REAL DEFAULT 0",
         "vcp_distance_to_pivot_pct": "REAL DEFAULT 0",
@@ -2892,8 +2893,10 @@ def _ensure_strategy6_candidates_table(conn: sqlite3.Connection):
         "vcp_quality_range_score": "INTEGER",
         "vcp_quality_volume_score": "INTEGER",
         "vcp_quality_low_score": "INTEGER",
+        "vcp_quality_start_retention_score": "INTEGER",
         "vcp_quality_time_score": "INTEGER",
         "vcp_quality_pivot_score": "INTEGER",
+        "vcp_quality_breakout_score": "INTEGER",
         "vcp_quality_reasons": "TEXT",
         "vcp_quality_warnings": "TEXT",
         "vcp_quality_model_version": "TEXT",
@@ -3922,7 +3925,7 @@ def upsert_strategy6_candidate(
         "path_evidence_score", "entry_archetype", "score_model_version",
         "vcp_observation_eligible", "vcp_lifecycle_status",
         "vcp_origin_start_date", "vcp_pattern_start_date", "vcp_pattern_end_date",
-        "vcp_contraction_count", "vcp_contractions", "vcp_pivot_price",
+        "vcp_contraction_count", "vcp_contractions", "vcp_forming_round", "vcp_pivot_price",
         "vcp_structure_low", "vcp_distance_to_pivot_pct", "vcp_breakout_date",
         "vcp_days_since_breakout", "vcp_observation_reasons",
         "vcp_observation_risk_tags", "vcp_invalidation_reason", "vcp_exit_audit",
@@ -3932,7 +3935,8 @@ def upsert_strategy6_candidate(
         "vcp_quality_score", "vcp_quality_grade",
         "vcp_quality_contraction_score", "vcp_quality_range_score",
         "vcp_quality_volume_score", "vcp_quality_low_score",
-        "vcp_quality_time_score", "vcp_quality_pivot_score",
+        "vcp_quality_start_retention_score", "vcp_quality_time_score",
+        "vcp_quality_pivot_score", "vcp_quality_breakout_score",
         "vcp_quality_reasons", "vcp_quality_warnings",
         "vcp_quality_model_version",
     ]
@@ -4086,6 +4090,7 @@ def upsert_strategy6_candidate(
         d.get("vcp_pattern_end_date", ""),
         d.get("vcp_contraction_count", 0),
         _json_any(d.get("vcp_contractions", [])),
+        _json_any(d.get("vcp_forming_round", {})),
         d.get("vcp_pivot_price", 0.0),
         d.get("vcp_structure_low", 0.0),
         d.get("vcp_distance_to_pivot_pct", 0.0),
@@ -4107,8 +4112,10 @@ def upsert_strategy6_candidate(
         d.get("vcp_quality_range_score"),
         d.get("vcp_quality_volume_score"),
         d.get("vcp_quality_low_score"),
+        d.get("vcp_quality_start_retention_score"),
         d.get("vcp_quality_time_score"),
         d.get("vcp_quality_pivot_score"),
+        d.get("vcp_quality_breakout_score"),
         _json_any(d.get("vcp_quality_reasons", [])),
         _json_any(d.get("vcp_quality_warnings", [])),
         d.get("vcp_quality_model_version"),
@@ -5425,6 +5432,17 @@ def _deserialize_strategy6_row(row: dict) -> dict:
                 row[field] = []
         elif not value:
             row[field] = []
+    raw_forming_round = row.get("vcp_forming_round")
+    if isinstance(raw_forming_round, str) and raw_forming_round:
+        try:
+            decoded_forming_round = json.loads(raw_forming_round)
+            row["vcp_forming_round"] = (
+                decoded_forming_round if isinstance(decoded_forming_round, dict) else {}
+            )
+        except (json.JSONDecodeError, TypeError):
+            row["vcp_forming_round"] = {}
+    elif not isinstance(raw_forming_round, dict):
+        row["vcp_forming_round"] = {}
     for field in (
         "is_limit_up", "is_one_word_limit_up", "enable_market_filter",
         "relative_strength_20_observed", "original_tail_pass", "box_tail_enabled",

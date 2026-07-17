@@ -253,7 +253,7 @@ def test_strategy6_candidate_schema_contains_all_box_tail_output_fields(tmp_path
         "multi_path_confirmed", "brooks_result_json",
         "vcp_observation_eligible", "vcp_lifecycle_status",
         "vcp_origin_start_date", "vcp_pattern_start_date", "vcp_pattern_end_date",
-        "vcp_contraction_count", "vcp_contractions", "vcp_pivot_price",
+        "vcp_contraction_count", "vcp_contractions", "vcp_forming_round", "vcp_pivot_price",
         "vcp_structure_low", "vcp_distance_to_pivot_pct", "vcp_breakout_date",
         "vcp_days_since_breakout", "vcp_observation_reasons",
         "vcp_observation_risk_tags", "vcp_invalidation_reason", "vcp_exit_audit",
@@ -263,7 +263,8 @@ def test_strategy6_candidate_schema_contains_all_box_tail_output_fields(tmp_path
         "vcp_quality_score", "vcp_quality_grade",
         "vcp_quality_contraction_score", "vcp_quality_range_score",
         "vcp_quality_volume_score", "vcp_quality_low_score",
-        "vcp_quality_time_score", "vcp_quality_pivot_score",
+        "vcp_quality_start_retention_score", "vcp_quality_time_score",
+        "vcp_quality_pivot_score", "vcp_quality_breakout_score",
         "vcp_quality_reasons", "vcp_quality_warnings",
         "vcp_quality_model_version",
     }
@@ -286,6 +287,11 @@ def test_strategy6_candidate_round_trips_vcp_observation_fields(tmp_path):
             {"peak_date": "2026-06-30", "low_date": "2026-07-03", "amplitude": 0.1459},
             {"peak_date": "2026-07-07", "low_date": "2026-07-08", "amplitude": 0.0381},
         ],
+        "vcp_forming_round": {
+            "peak_date": "2026-07-09",
+            "low_date": "2026-07-10",
+            "phase": "REBOUNDING",
+        },
         "vcp_pivot_price": 68.21,
         "vcp_structure_low": 65.61,
         "vcp_distance_to_pivot_pct": 0.057,
@@ -307,8 +313,10 @@ def test_strategy6_candidate_round_trips_vcp_observation_fields(tmp_path):
         "vcp_quality_range_score": 25,
         "vcp_quality_volume_score": 25,
         "vcp_quality_low_score": 13,
+        "vcp_quality_start_retention_score": 10,
         "vcp_quality_time_score": 8,
         "vcp_quality_pivot_score": 0,
+        "vcp_quality_breakout_score": 5,
         "vcp_quality_reasons": ["VCP_QUALITY_RANGE_TIGHT"],
         "vcp_quality_warnings": ["VCP_QUALITY_PIVOT_LOOSE"],
         "vcp_quality_model_version": "VCP_QUALITY_V1",
@@ -321,6 +329,7 @@ def test_strategy6_candidate_round_trips_vcp_observation_fields(tmp_path):
     assert row["vcp_lifecycle_status"] == "VCP_POST_BREAKOUT"
     assert row["vcp_contraction_count"] == 2
     assert row["vcp_contractions"][1]["amplitude"] == 0.0381
+    assert row["vcp_forming_round"]["phase"] == "REBOUNDING"
     assert row["vcp_observation_reasons"] == ["VCP_POST_BREAKOUT"]
     assert row["vcp_observation_risk_tags"] == ["VCP_PIVOT_LOST"]
     assert row["vcp_exit_audit"] is True
@@ -335,8 +344,10 @@ def test_strategy6_candidate_round_trips_vcp_observation_fields(tmp_path):
     assert row["vcp_quality_range_score"] == 25
     assert row["vcp_quality_volume_score"] == 25
     assert row["vcp_quality_low_score"] == 13
+    assert row["vcp_quality_start_retention_score"] == 10
     assert row["vcp_quality_time_score"] == 8
     assert row["vcp_quality_pivot_score"] == 0
+    assert row["vcp_quality_breakout_score"] == 5
     assert row["vcp_quality_reasons"] == ["VCP_QUALITY_RANGE_TIGHT"]
     assert row["vcp_quality_warnings"] == ["VCP_QUALITY_PIVOT_LOOSE"]
     assert row["vcp_quality_model_version"] == "VCP_QUALITY_V1"

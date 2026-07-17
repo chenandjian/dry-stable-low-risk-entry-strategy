@@ -311,6 +311,10 @@ strategy6:
   vcp_contraction_range_ratio: 0.9
   vcp_contraction_volume_ratio: 0.9
   vcp_min_first_range: 0.08
+  vcp_first_contraction_max_range: 0.32
+  vcp_rebound_min_pct: 0.03
+  vcp_rebound_confirm_days: 2
+  vcp_low_warning_ratio: 0.99
   cup_depth_min: 0.12
   cup_depth_max: 0.35
   platform_max_range: 0.12

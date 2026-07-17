@@ -6,7 +6,7 @@ import math
 from strategy6.models import Strategy6VcpObservation, Strategy6VcpQuality
 
 
-MODEL_VERSION = "VCP_QUALITY_V1"
+MODEL_VERSION = "VCP_QUALITY_V2"
 
 
 def evaluate_vcp_quality(
@@ -23,20 +23,36 @@ def evaluate_vcp_quality(
         for index, row in enumerate(rows)
     }
     intervals: list[int] = []
+    recovery_indexes: list[int] = []
     for item in contractions:
         peak_index = indexes.get(str(item.get("peak_date") or ""))
         low_index = indexes.get(str(item.get("low_date") or ""))
-        if peak_index is None or low_index is None or low_index <= peak_index:
+        recovery_index = indexes.get(str(item.get("recovery_peak_date") or ""))
+        if (
+            peak_index is None
+            or low_index is None
+            or recovery_index is None
+            or low_index <= peak_index
+            or recovery_index <= low_index
+        ):
             return Strategy6VcpQuality(
                 warnings=["VCP_QUALITY_DATE_MAPPING_FAILED"],
                 model_version=MODEL_VERSION,
             )
         intervals.append(low_index - peak_index)
+        recovery_indexes.append(recovery_index)
 
     amplitudes = [_positive_float(item.get("amplitude")) for item in contractions]
     lows = [_positive_float(item.get("low_close")) for item in contractions]
-    peaks = [_positive_float(item.get("peak_close")) for item in contractions]
-    if any(value is None for value in (*amplitudes, *lows, *peaks)):
+    pivots = [
+        _positive_float(
+            item.get("peak_close")
+            if item.get("breakout_confirmed")
+            else item.get("recovery_peak_close")
+        )
+        for item in contractions
+    ]
+    if any(value is None for value in (*amplitudes, *lows, *pivots)):
         return Strategy6VcpQuality(
             warnings=["VCP_QUALITY_EVIDENCE_INVALID"],
             model_version=MODEL_VERSION,
@@ -44,7 +60,7 @@ def evaluate_vcp_quality(
 
     amplitude_values = [float(value) for value in amplitudes]
     low_values = [float(value) for value in lows]
-    peak_values = [float(value) for value in peaks]
+    pivot_values = [float(value) for value in pivots]
     range_ratios = [
         amplitude_values[index] / amplitude_values[index - 1]
         for index in range(1, len(amplitude_values))
@@ -52,11 +68,13 @@ def evaluate_vcp_quality(
     range_score = (
         _average_score(range_ratios, _score_range_ratio)
         + _score_last_amplitude(amplitude_values[-1])
-        + _score_first_amplitude(amplitude_values[0])
     )
 
     warnings: list[str] = []
-    volumes = [_positive_float(item.get("avg_volume")) for item in contractions]
+    volumes = [
+        _positive_float(item.get("decline_avg_volume", item.get("avg_volume")))
+        for item in contractions
+    ]
     if any(value is None for value in volumes):
         volume_score = 0
         warnings.append("VCP_QUALITY_VOLUME_MISSING")
@@ -78,22 +96,36 @@ def evaluate_vcp_quality(
     low_score = _average_score(low_changes, _score_low_change)
 
     first_peak_index = indexes[str(contractions[0].get("peak_date") or "")]
-    last_low_index = indexes[str(contractions[-1].get("low_date") or "")]
-    total_days = last_low_index - first_peak_index + 1
-    one_day_count = sum(interval == 1 for interval in intervals)
-    leg_score = 5 if one_day_count == 0 else 3 if one_day_count == 1 else 0
-    time_score = _score_total_days(total_days) + leg_score
+    total_days = recovery_indexes[-1] - first_peak_index + 1
+    time_score = _score_total_days(total_days)
 
-    peak_gap = abs(peak_values[-1] / peak_values[-2] - 1)
+    origin_index = indexes.get(str(observation.origin_start_date or ""))
+    origin_close = (
+        _positive_float(rows[origin_index].get("close"))
+        if origin_index is not None
+        else None
+    )
+    if origin_close is None:
+        start_retention_score = 0
+        warnings.append("VCP_QUALITY_START_PRICE_MISSING")
+    else:
+        start_retention_score = _score_start_retention(
+            low_values[-1] / origin_close - 1
+        )
+
+    peak_gap = abs(pivot_values[-1] / pivot_values[-2] - 1)
     pivot_score = _score_pivot_gap(peak_gap)
+    breakout_score = 5 if bool(contractions[-1].get("breakout_confirmed")) else 0
     contraction_score = _score_contraction_count(len(contractions))
     total = (
         contraction_score
         + range_score
         + volume_score
         + low_score
+        + start_retention_score
         + time_score
         + pivot_score
+        + breakout_score
     )
     if amplitude_values[-1] < 0.01 and intervals[-1] == 1:
         warnings.append("VCP_MICRO_CONTRACTION_NOISE")
@@ -104,8 +136,10 @@ def evaluate_vcp_quality(
         range_score=range_score,
         volume_score=volume_score,
         low_score=low_score,
+        start_retention_score=start_retention_score,
         time_score=time_score,
         pivot_score=pivot_score,
+        breakout_score=breakout_score,
     )
     return Strategy6VcpQuality(
         scored=True,
@@ -115,8 +149,10 @@ def evaluate_vcp_quality(
         range_score=range_score,
         volume_score=volume_score,
         low_score=low_score,
+        start_retention_score=start_retention_score,
         time_score=time_score,
         pivot_score=pivot_score,
+        breakout_score=breakout_score,
         reasons=reasons,
         warnings=warnings,
         model_version=MODEL_VERSION,
@@ -143,20 +179,20 @@ def _round_half_up(value: float) -> int:
 
 def _score_contraction_count(count: int) -> int:
     if count >= 4:
-        return 20
+        return 15
     if count == 3:
-        return 17
+        return 13
     if count == 2:
-        return 12
+        return 10
     return 0
 
 
 def _score_range_ratio(ratio: float) -> int:
-    return _bucket(ratio, ((0.35, 12), (0.50, 10), (0.65, 8), (0.80, 5), (0.90, 2)))
+    return _bucket(ratio, ((0.35, 15), (0.50, 12), (0.65, 9), (0.80, 6), (0.90, 3)))
 
 
 def _score_last_amplitude(amplitude: float) -> int:
-    return _bucket(amplitude, ((0.03, 8), (0.05, 6), (0.08, 4), (0.10, 2)))
+    return _bucket(amplitude, ((0.03, 5), (0.05, 4), (0.08, 3), (0.10, 2)))
 
 
 def _score_first_amplitude(amplitude: float) -> int:
@@ -174,7 +210,7 @@ def _score_volume_ratio(ratio: float) -> int:
 
 
 def _score_total_volume_ratio(ratio: float) -> int:
-    return _bucket(ratio, ((0.35, 10), (0.50, 8), (0.65, 6), (0.80, 3), (0.90, 1)))
+    return _bucket(ratio, ((0.35, 5), (0.50, 4), (0.65, 3), (0.80, 2), (0.90, 1)))
 
 
 def _score_low_change(change: float) -> int:
@@ -200,7 +236,17 @@ def _score_total_days(days: int) -> int:
 
 
 def _score_pivot_gap(gap: float) -> int:
-    return _bucket(gap, ((0.03, 5), (0.05, 3), (0.08, 1)))
+    return _bucket(gap, ((0.03, 10), (0.05, 6), (0.08, 2)))
+
+
+def _score_start_retention(retention: float) -> int:
+    if retention >= 0:
+        return 10
+    if retention >= -0.05:
+        return 7
+    if retention >= -0.10:
+        return 3
+    return 0
 
 
 def _bucket(value: float, levels: tuple[tuple[float, int], ...]) -> int:
@@ -224,12 +270,14 @@ def _grade_for_score(score: int) -> str:
 
 def _quality_reasons(**scores: int) -> list[str]:
     thresholds = {
-        "contraction_score": (17, "VCP_QUALITY_MULTI_CONTRACTION"),
-        "range_score": (20, "VCP_QUALITY_RANGE_TIGHT"),
-        "volume_score": (20, "VCP_QUALITY_VOLUME_DRY"),
+        "contraction_score": (13, "VCP_QUALITY_MULTI_CONTRACTION"),
+        "range_score": (15, "VCP_QUALITY_RANGE_TIGHT"),
+        "volume_score": (15, "VCP_QUALITY_VOLUME_DRY"),
         "low_score": (13, "VCP_QUALITY_LOW_STABLE"),
-        "time_score": (8, "VCP_QUALITY_TIME_COMPACT"),
-        "pivot_score": (3, "VCP_QUALITY_PIVOT_CLEAR"),
+        "start_retention_score": (7, "VCP_QUALITY_START_GAIN_RETAINED"),
+        "time_score": (5, "VCP_QUALITY_TIME_COMPACT"),
+        "pivot_score": (6, "VCP_QUALITY_PIVOT_CLEAR"),
+        "breakout_score": (5, "VCP_QUALITY_BREAKOUT_CONFIRMED"),
     }
     return [
         reason

@@ -39,6 +39,10 @@ DEFAULT_STRATEGY6_CONFIG = {
     "vcp_contraction_range_ratio": 0.90,
     "vcp_contraction_volume_ratio": 0.90,
     "vcp_min_first_range": 0.08,
+    "vcp_first_contraction_max_range": 0.32,
+    "vcp_rebound_min_pct": 0.03,
+    "vcp_rebound_confirm_days": 2,
+    "vcp_low_warning_ratio": 0.99,
     "vcp_observer_enabled": True,
     "vcp_observer_lookback_days": 60,
     "vcp_observer_breakout_retention_days": 10,
@@ -247,6 +251,15 @@ def resolve_strategy6_config(config: dict | None) -> dict:
             else:
                 raw[key] = value
 
+    override_keys = set(overrides) if isinstance(overrides, dict) else set()
+    if (
+        "vcp_min_first_range" in override_keys
+        and "vcp_first_contraction_max_range" not in override_keys
+        and raw["vcp_min_first_range"] > raw["vcp_first_contraction_max_range"]
+    ):
+        # Preserve old partial configs that predate the explicit first-round cap.
+        raw["vcp_first_contraction_max_range"] = raw["vcp_min_first_range"]
+
     raw["enabled"] = bool(raw.get("enabled", True))
     _validate_int_range(raw, "kline_days", 260, 3000)
     _validate_int_range(raw, "minimum_trading_days", 260, raw["kline_days"])
@@ -264,6 +277,7 @@ def resolve_strategy6_config(config: dict | None) -> dict:
     _validate_int_range(raw, "dynamic_tail_baseline_days", 10, 60)
     _validate_int_range(raw, "dynamic_tail_min_score", 1, 4)
     _validate_int_range(raw, "support_test_lookback", 5, 40)
+    _validate_int_range(raw, "vcp_rebound_confirm_days", 2, 10)
     _validate_int_range(raw, "buy_zone_valid_days", 1, 10)
     _validate_int_range(raw, "max_watch_days", 1, 60)
     _validate_int_range(raw, "expired_cooldown_days", 1, 30)
@@ -279,7 +293,9 @@ def resolve_strategy6_config(config: dict | None) -> dict:
         "big_down_volume_ratio", "rr2_min_watch", "rr2_min_key", "rr2_min_ready",
         "target_2_cap_pct", "stop_key_support_pct", "stop_atr_multiplier",
         "vcp_contraction_range_ratio", "vcp_contraction_volume_ratio",
-        "vcp_min_first_range", "vcp_observer_extension_pct",
+        "vcp_min_first_range", "vcp_first_contraction_max_range",
+        "vcp_rebound_min_pct", "vcp_low_warning_ratio",
+        "vcp_observer_extension_pct",
         "cup_depth_min", "cup_depth_max", "platform_max_range",
         "pattern_pivot_proximity_pct",
         "breakout_extended_max_pct",
@@ -309,6 +325,15 @@ def resolve_strategy6_config(config: dict | None) -> dict:
     _validate_between(raw, "normal_start_self_amount_percentile", 0, 1)
     _validate_between(raw, "vcp_contraction_range_ratio", 0, 1)
     _validate_between(raw, "vcp_contraction_volume_ratio", 0, 1)
+    _validate_between(raw, "vcp_min_first_range", 0, 0.50, lower_exclusive=True)
+    _validate_between(
+        raw,
+        "vcp_first_contraction_max_range",
+        raw["vcp_min_first_range"],
+        0.50,
+    )
+    _validate_between(raw, "vcp_rebound_min_pct", 0, 0.20, lower_exclusive=True)
+    _validate_between(raw, "vcp_low_warning_ratio", 0.97, 1.0)
     _validate_between(raw, "vcp_observer_extension_pct", 0, 1, lower_exclusive=True)
     _validate_between(raw, "cup_depth_min", 0, 1)
     _validate_between(raw, "cup_depth_max", raw["cup_depth_min"], 1)

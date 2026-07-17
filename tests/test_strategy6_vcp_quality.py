@@ -29,7 +29,12 @@ def _contraction(
     volume: float,
     peak_close: float,
     low_close: float,
+    recovery_index: int | None = None,
+    recovery_peak_close: float | None = None,
+    breakout_confirmed: bool = False,
 ) -> dict:
+    recovery_index = low_index + 2 if recovery_index is None else recovery_index
+    recovery_peak_close = peak_close if recovery_peak_close is None else recovery_peak_close
     return {
         "peak_date": rows[peak_index]["date"],
         "low_date": rows[low_index]["date"],
@@ -37,6 +42,10 @@ def _contraction(
         "low_close": low_close,
         "amplitude": amplitude,
         "avg_volume": volume,
+        "decline_avg_volume": volume,
+        "recovery_peak_date": rows[recovery_index]["date"],
+        "recovery_peak_close": recovery_peak_close,
+        "breakout_confirmed": breakout_confirmed,
     }
 
 
@@ -44,6 +53,7 @@ def _observation(rows: list[dict], contractions: list[dict]) -> Strategy6VcpObse
     return Strategy6VcpObservation(
         eligible=True,
         lifecycle_status="VCP_NEAR_PIVOT",
+        origin_start_date=rows[0]["date"],
         pattern_start_date=contractions[0]["peak_date"] if contractions else "",
         pattern_end_date=contractions[-1]["low_date"] if contractions else "",
         contraction_count=len(contractions),
@@ -53,7 +63,7 @@ def _observation(rows: list[dict], contractions: list[dict]) -> Strategy6VcpObse
 
 @pytest.mark.parametrize(
     ("count", "expected"),
-    [(0, 0), (1, 0), (2, 12), (3, 17), (4, 20), (6, 20)],
+    [(0, 0), (1, 0), (2, 10), (3, 13), (4, 15), (6, 15)],
 )
 def test_vcp_quality_contraction_count_boundaries(count, expected):
     from strategy6.vcp_quality import _score_contraction_count
@@ -63,7 +73,7 @@ def test_vcp_quality_contraction_count_boundaries(count, expected):
 
 @pytest.mark.parametrize(
     ("ratio", "expected"),
-    [(0.35, 12), (0.50, 10), (0.65, 8), (0.80, 5), (0.90, 2), (0.9001, 0)],
+    [(0.35, 15), (0.50, 12), (0.65, 9), (0.80, 6), (0.90, 3), (0.9001, 0)],
 )
 def test_vcp_quality_range_ratio_boundaries(ratio, expected):
     from strategy6.vcp_quality import _score_range_ratio
@@ -73,7 +83,7 @@ def test_vcp_quality_range_ratio_boundaries(ratio, expected):
 
 @pytest.mark.parametrize(
     ("amplitude", "expected"),
-    [(0.03, 8), (0.05, 6), (0.08, 4), (0.10, 2), (0.1001, 0)],
+    [(0.03, 5), (0.05, 4), (0.08, 3), (0.10, 2), (0.1001, 0)],
 )
 def test_vcp_quality_last_amplitude_boundaries(amplitude, expected):
     from strategy6.vcp_quality import _score_last_amplitude
@@ -103,7 +113,7 @@ def test_vcp_quality_volume_ratio_boundaries(ratio, expected):
 
 @pytest.mark.parametrize(
     ("ratio", "expected"),
-    [(0.35, 10), (0.50, 8), (0.65, 6), (0.80, 3), (0.90, 1), (0.9001, 0)],
+    [(0.35, 5), (0.50, 4), (0.65, 3), (0.80, 2), (0.90, 1), (0.9001, 0)],
 )
 def test_vcp_quality_total_volume_ratio_boundaries(ratio, expected):
     from strategy6.vcp_quality import _score_total_volume_ratio
@@ -133,7 +143,7 @@ def test_vcp_quality_total_days_boundaries(days, expected):
 
 @pytest.mark.parametrize(
     ("gap", "expected"),
-    [(0.03, 5), (0.05, 3), (0.08, 1), (0.0801, 0)],
+    [(0.03, 10), (0.05, 6), (0.08, 2), (0.0801, 0)],
 )
 def test_vcp_quality_pivot_gap_boundaries(gap, expected):
     from strategy6.vcp_quality import _score_pivot_gap
@@ -177,26 +187,29 @@ def test_vcp_quality_calculates_all_components_without_mutating_inputs():
 
     rows = _rows()
     contractions = [
-        _contraction(rows, 2, 7, amplitude=0.20, volume=2_000_000, peak_close=100, low_close=80),
-        _contraction(rows, 10, 14, amplitude=0.08, volume=1_200_000, peak_close=98, low_close=82),
-        _contraction(rows, 17, 20, amplitude=0.03, volume=600_000, peak_close=97, low_close=84),
+        _contraction(rows, 2, 7, amplitude=0.20, volume=2_000_000, peak_close=100, low_close=80, recovery_index=10, recovery_peak_close=98),
+        _contraction(rows, 10, 14, amplitude=0.08, volume=1_200_000, peak_close=98, low_close=82, recovery_index=17, recovery_peak_close=97),
+        _contraction(rows, 17, 20, amplitude=0.03, volume=600_000, peak_close=97, low_close=84, recovery_index=22, recovery_peak_close=96, breakout_confirmed=True),
     ]
     observation = _observation(rows, contractions)
+    rows[0]["close"] = 75.0
     original_rows = copy.deepcopy(rows)
     original_observation = copy.deepcopy(observation)
 
     result = evaluate_vcp_quality(rows, observation)
 
     assert result.scored is True
-    assert result.contraction_score == 17
-    assert result.range_score == 23
-    assert result.volume_score == 24
+    assert result.contraction_score == 13
+    assert result.range_score == 17
+    assert result.volume_score == 19
     assert result.low_score == 15
-    assert result.time_score == 10
-    assert result.pivot_score == 5
+    assert result.start_retention_score == 10
+    assert result.time_score == 5
+    assert result.pivot_score == 10
+    assert result.breakout_score == 5
     assert result.score == 94
     assert result.grade == "TOP"
-    assert result.model_version == "VCP_QUALITY_V1"
+    assert result.model_version == "VCP_QUALITY_V2"
     assert rows == original_rows
     assert observation == original_observation
 
@@ -258,10 +271,57 @@ def test_vcp_quality_ignores_rows_after_the_contraction_evidence():
         _contraction(rows, 2, 7, amplitude=0.20, volume=2_000_000, peak_close=100, low_close=80),
         _contraction(rows, 10, 14, amplitude=0.05, volume=1_000_000, peak_close=98, low_close=82),
     ])
-    baseline = evaluate_vcp_quality(rows[:15], observation)
+    baseline = evaluate_vcp_quality(rows[:17], observation)
     future = rows[15:] + [{
         "date": "2027-01-01", "open": 1, "high": 999, "low": 1,
         "close": 999, "volume": 999_999_999,
     }]
 
-    assert evaluate_vcp_quality(rows[:15] + future, observation) == baseline
+    assert evaluate_vcp_quality(rows[:17] + future, observation) == baseline
+
+
+@pytest.mark.parametrize(
+    ("retention", "expected"),
+    [(0.0, 10), (-0.05, 7), (-0.10, 3), (-0.1001, 0)],
+)
+def test_vcp_quality_start_retention_boundaries(retention, expected):
+    from strategy6.vcp_quality import _score_start_retention
+
+    assert _score_start_retention(retention) == expected
+
+
+def test_vcp_quality_requires_visible_complete_round_recovery_date():
+    from strategy6.vcp_quality import evaluate_vcp_quality
+
+    rows = _rows()
+    contractions = [
+        _contraction(rows, 2, 6, amplitude=0.20, volume=2_000_000, peak_close=100, low_close=80),
+        _contraction(rows, 10, 14, amplitude=0.05, volume=1_000_000, peak_close=98, low_close=82),
+    ]
+    contractions[-1]["recovery_peak_date"] = "2027-01-01"
+
+    result = evaluate_vcp_quality(rows, _observation(rows, contractions))
+
+    assert result.scored is False
+    assert result.warnings == ["VCP_QUALITY_DATE_MAPPING_FAILED"]
+
+
+def test_vcp_quality_uses_starting_peak_as_direct_breakout_pivot():
+    from strategy6.vcp_quality import evaluate_vcp_quality
+
+    rows = _rows()
+    contractions = [
+        _contraction(
+            rows, 2, 6, amplitude=0.20, volume=2_000_000,
+            peak_close=105, low_close=84, recovery_index=10, recovery_peak_close=100,
+        ),
+        _contraction(
+            rows, 10, 14, amplitude=0.06, volume=1_000_000,
+            peak_close=100, low_close=94, recovery_index=16,
+            recovery_peak_close=110, breakout_confirmed=True,
+        ),
+    ]
+
+    result = evaluate_vcp_quality(rows, _observation(rows, contractions))
+
+    assert result.pivot_score == 10

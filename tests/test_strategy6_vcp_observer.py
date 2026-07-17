@@ -49,6 +49,10 @@ def test_vcp_observer_defaults_are_explicit_and_validated():
     assert config["vcp_observer_lookback_days"] == 60
     assert config["vcp_observer_breakout_retention_days"] == 10
     assert config["vcp_observer_extension_pct"] == pytest.approx(0.08)
+    assert config["vcp_first_contraction_max_range"] == pytest.approx(0.32)
+    assert config["vcp_rebound_min_pct"] == pytest.approx(0.03)
+    assert config["vcp_rebound_confirm_days"] == 2
+    assert config["vcp_low_warning_ratio"] == pytest.approx(0.99)
 
 
 def test_vcp_observer_marks_one_complete_round_as_early_observation(monkeypatch):
@@ -83,6 +87,10 @@ def test_vcp_observer_marks_one_complete_round_as_early_observation(monkeypatch)
         ("vcp_observer_lookback_days", 19),
         ("vcp_observer_breakout_retention_days", 0),
         ("vcp_observer_extension_pct", 0),
+        ("vcp_first_contraction_max_range", 0.07),
+        ("vcp_rebound_min_pct", 0),
+        ("vcp_rebound_confirm_days", 1),
+        ("vcp_low_warning_ratio", 0.96),
     ],
 )
 def test_vcp_observer_rejects_invalid_config(key, value):

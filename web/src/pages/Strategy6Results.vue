@@ -132,9 +132,9 @@
       </div>
     </section>
 
-    <section v-if="selectedTaskId" class="panel vcp-panel">
-      <div class="panel-header">VCP形态候选</div>
-      <template v-if="vcpCandidates.length">
+    <section v-for="group in vcpGroups" :key="group.key" class="panel vcp-panel">
+      <div class="panel-header">{{ group.title }}</div>
+      <template v-if="group.rows.length">
         <div class="panel-note">仅跟踪本轮VCP起点后曾进入策略6正式候选的股票；过度延伸只保留跟踪，不代表立即买入。</div>
         <div v-if="vcpQualityNotice" class="panel-note">{{ vcpQualityNotice }}</div>
         <div class="table-scroll">
@@ -147,7 +147,7 @@
           </thead>
           <tbody>
             <tr
-              v-for="c in vcpCandidates"
+              v-for="c in group.rows"
               :key="c.code"
               :data-test="`vcp-row-${c.code}`"
               class="clickable"
@@ -182,7 +182,7 @@
         </table>
         </div>
       </template>
-      <div v-else class="panel-empty">{{ vcpEmptyMessage }}</div>
+      <div v-else class="panel-empty">{{ group.emptyMessage }}</div>
     </section>
 
     <section v-if="vcpExitAuditRows.length" class="panel vcp-audit-panel">
@@ -270,7 +270,17 @@
               <strong>{{ selected.vcp_quality_score }}分 · {{ label('vcpQualityGrade', selected.vcp_quality_grade) }}</strong>
               <span class="muted">{{ selected.vcp_quality_model_version || '--' }}</span>
             </div>
-            <div class="vcp-quality-components">
+            <div v-if="isVcpQualityV2(selected)" class="vcp-quality-components">
+              <span>完整轮次 {{ selected.vcp_quality_contraction_score }}/15</span>
+              <span>振幅递减 {{ selected.vcp_quality_range_score }}/20</span>
+              <span>下跌量递减 {{ selected.vcp_quality_volume_score }}/20</span>
+              <span>低点稳定 {{ selected.vcp_quality_low_score }}/15</span>
+              <span>启动涨幅保留 {{ selected.vcp_quality_start_retention_score }}/10</span>
+              <span>时间结构 {{ selected.vcp_quality_time_score }}/5</span>
+              <span>支点收紧 {{ selected.vcp_quality_pivot_score }}/10</span>
+              <span>突破质量 {{ selected.vcp_quality_breakout_score }}/5</span>
+            </div>
+            <div v-else class="vcp-quality-components">
               <span>收缩层次 {{ selected.vcp_quality_contraction_score }}/20</span>
               <span>振幅递减 {{ selected.vcp_quality_range_score }}/25</span>
               <span>成交量递减 {{ selected.vcp_quality_volume_score }}/25</span>
@@ -288,6 +298,9 @@
         <div v-if="!(selected.vcp_contractions || []).length" class="muted">暂无收缩明细</div>
         <div v-for="(item, index) in selected.vcp_contractions || []" :key="`${item.peak_date}-${item.low_date}-${index}`" class="vcp-contraction-row">
           {{ vcpContractionText(item, index) }}
+        </div>
+        <div v-if="selected.vcp_forming_round && Object.keys(selected.vcp_forming_round).length" class="vcp-contraction-row muted">
+          {{ vcpFormingRoundText(selected.vcp_forming_round) }}
         </div>
         <div class="tags vcp-tags">
           <span v-for="reason in selected.vcp_observation_reasons || []" :key="'vr'+reason" class="tag info">{{ label('tag', reason) }}</span>
@@ -393,6 +406,29 @@ export default {
         if (scoreDifference !== 0) return scoreDifference
         return String(left.code || '').localeCompare(String(right.code || ''))
       })
+    },
+    vcpGroups() {
+      if (!this.selectedTaskId) return []
+      const confirmed = this.vcpCandidates.filter(
+        candidate => candidate.vcp_lifecycle_status !== 'VCP_ROUND1_CONFIRMED',
+      )
+      const early = this.vcpCandidates.filter(
+        candidate => candidate.vcp_lifecycle_status === 'VCP_ROUND1_CONFIRMED',
+      )
+      return [
+        {
+          key: 'confirmed',
+          title: 'VCP确认候选',
+          rows: confirmed,
+          emptyMessage: this.vcpCandidates.length ? '本任务暂无已完成两轮收缩的VCP确认候选' : this.vcpEmptyMessage,
+        },
+        {
+          key: 'early',
+          title: 'VCP早期观察',
+          rows: early,
+          emptyMessage: this.vcpCandidates.length ? '本任务暂无仅完成第一轮收缩的VCP早期观察' : this.vcpEmptyMessage,
+        },
+      ]
     },
     vcpExitAuditRows() {
       return this.sortedCandidates.filter(c => c.vcp_exit_audit === true)
@@ -656,7 +692,16 @@ export default {
       return this.label('marketDataStatus', status || 'MISSING')
     },
     vcpContractionText(item, index) {
-      return `第${index + 1}段 ${item?.peak_date || '--'} 至 ${item?.low_date || '--'} · 振幅 ${this.pct(item?.amplitude)} · 均量 ${this.fmt(item?.avg_volume, 0)}`
+      if (!item?.recovery_peak_date) {
+        return `旧任务第${index + 1}段 ${item?.peak_date || '--'} 至 ${item?.low_date || '--'} · 振幅 ${this.pct(item?.amplitude)} · 均量 ${this.fmt(item?.avg_volume, 0)}`
+      }
+      return `第${index + 1}轮 ${item.peak_date || '--'} → ${item.low_date || '--'} → ${item.recovery_peak_date} · 振幅 ${this.pct(item.amplitude)} · 反弹 ${this.pct(item.rebound)} · 下跌均量 ${this.fmt(item.decline_avg_volume, 0)}`
+    },
+    vcpFormingRoundText(item) {
+      return `形成中轮次 ${item?.peak_date || '--'} → ${item?.low_date || '--'} · ${this.label('vcpFormingPhase', item?.phase)}`
+    },
+    isVcpQualityV2(candidate) {
+      return candidate?.vcp_quality_model_version === 'VCP_QUALITY_V2'
     },
     vcpExitReasonText(row) {
       const reasons = [
@@ -710,12 +755,14 @@ export default {
           { header: 'VCP失效原因', value: c => c.vcp_invalidation_reason ? this.label('tag', c.vcp_invalidation_reason) : '' },
           { header: 'VCP形态分', value: c => this.hasVcpQuality(c) ? c.vcp_quality_score : '' },
           { header: 'VCP等级', value: c => this.hasVcpQuality(c) ? this.label('vcpQualityGrade', c.vcp_quality_grade) : '' },
-          { header: 'VCP收缩层次分', value: c => this.hasVcpQuality(c) ? (c.vcp_quality_contraction_score ?? '') : '' },
+          { header: 'VCP完整轮次分', value: c => this.hasVcpQuality(c) ? (c.vcp_quality_contraction_score ?? '') : '' },
           { header: 'VCP振幅递减分', value: c => this.hasVcpQuality(c) ? (c.vcp_quality_range_score ?? '') : '' },
-          { header: 'VCP成交量递减分', value: c => this.hasVcpQuality(c) ? (c.vcp_quality_volume_score ?? '') : '' },
+          { header: 'VCP下跌量递减分', value: c => this.hasVcpQuality(c) ? (c.vcp_quality_volume_score ?? '') : '' },
           { header: 'VCP低点稳定分', value: c => this.hasVcpQuality(c) ? (c.vcp_quality_low_score ?? '') : '' },
+          { header: 'VCP启动涨幅保留分', value: c => this.hasVcpQuality(c) ? (c.vcp_quality_start_retention_score ?? '') : '' },
           { header: 'VCP时间结构分', value: c => this.hasVcpQuality(c) ? (c.vcp_quality_time_score ?? '') : '' },
-          { header: 'VCP支点清晰分', value: c => this.hasVcpQuality(c) ? (c.vcp_quality_pivot_score ?? '') : '' },
+          { header: 'VCP支点收紧分', value: c => this.hasVcpQuality(c) ? (c.vcp_quality_pivot_score ?? '') : '' },
+          { header: 'VCP突破质量分', value: c => this.hasVcpQuality(c) ? (c.vcp_quality_breakout_score ?? '') : '' },
           { header: 'VCP评分原因', value: c => strategy6Labels('tag', c.vcp_quality_reasons).join('|') },
           { header: 'VCP评分警告', value: c => strategy6Labels('tag', c.vcp_quality_warnings).join('|') },
           { header: 'VCP评分模型版本', value: c => c.vcp_quality_model_version || '' },
