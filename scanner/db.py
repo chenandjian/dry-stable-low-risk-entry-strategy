@@ -2555,6 +2555,7 @@ def _ensure_strategy6_candidates_table(conn: sqlite3.Connection):
             sector_name TEXT,
             evaluation_date TEXT NOT NULL,
             candidate_type TEXT NOT NULL,
+            pre_market_candidate_type TEXT,
             classification TEXT NOT NULL,
             lifecycle_status TEXT,
             first_pool_date TEXT,
@@ -2707,6 +2708,7 @@ def _ensure_strategy6_candidates_table(conn: sqlite3.Connection):
     ''')
     for column, col_type in {
         "sector_name": "TEXT",
+        "pre_market_candidate_type": "TEXT",
         "lifecycle_status": "TEXT",
         "first_pool_date": "TEXT",
         "pool_age_trading_days": "INTEGER DEFAULT 0",
@@ -3758,7 +3760,7 @@ def upsert_strategy6_candidate(
     lifecycle_status = d.get("lifecycle_status", "")
     columns = [
         "task_id", "code", "name", "sector_name", "evaluation_date",
-        "candidate_type", "classification", "lifecycle_status", "first_pool_date", "pool_age_trading_days",
+        "candidate_type", "pre_market_candidate_type", "classification", "lifecycle_status", "first_pool_date", "pool_age_trading_days",
         "current_price", "close", "daily_return", "current_close_position", "trading_days",
         "ma5", "ma10", "ma20", "ma50", "ma120", "ma250",
         "return_5", "return_10", "return_20",
@@ -3791,6 +3793,7 @@ def upsert_strategy6_candidate(
         d.get("sector_name", ""),
         d.get("evaluation_date", ""),
         d.get("candidate_type", "REJECTED"),
+        d.get("pre_market_candidate_type", ""),
         d.get("classification", "rejected"),
         lifecycle_status,
         first_pool_date,

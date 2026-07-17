@@ -2,7 +2,7 @@ from datetime import date, timedelta
 from dataclasses import replace
 
 from strategy6.engine import StrongVcpTailEngine
-from strategy6.filters import classify_candidate
+from strategy6.filters import classify_candidate, classify_candidate_before_market_downgrade
 from strategy6.indicators import calculate_indicators
 from strategy6.market import build_market_snapshot
 from strategy6.models import (
@@ -739,7 +739,7 @@ def test_market_filter_off_reports_weak_market_without_downgrading():
     assert "MARKET_WEAK_STRICT" not in candidate["warn_tags"]
 
 
-def test_market_filter_downgrade_moves_ready_or_key_to_watch():
+def test_market_filter_downgrade_does_not_claim_origin_for_native_watch_candidate():
     data = build_strategy6_candidate_data()
     weak_market = {
         "sh000001": _market_rows([120 - i * 0.2 for i in range(80)]),
@@ -757,10 +757,67 @@ def test_market_filter_downgrade_moves_ready_or_key_to_watch():
 
     assert result.passed is True
     assert result.candidate_type == "WATCH_CANDIDATE"
+    assert result.pre_market_candidate_type == ""
+    assert candidate["pre_market_candidate_type"] == ""
     assert candidate["classification"] == "observe"
     assert candidate["market_status"] == "MARKET_WEAK"
     assert candidate["enable_market_filter"] is True
-    assert "MARKET_WEAK_DOWNGRADED" in candidate["warn_tags"]
+    assert "MARKET_WEAK_DOWNGRADED" not in candidate["warn_tags"]
+
+
+def test_market_filter_downgrade_records_true_ready_or_key_origin():
+    engine = StrongVcpTailEngine({"strategy6": {"enable_market_filter": True, "market_filter_mode": "downgrade"}})
+    result = engine.evaluate_at(build_strategy6_candidate_data(), code="000001", name="平安银行")
+    indicators = replace(
+        result.indicators,
+        current_price=(result.support.support_zone_low + result.support.support_zone_high) / 2,
+        market_filter_enabled=True,
+        market_filter_mode="downgrade",
+        market_status="MARKET_WEAK",
+        relative_strength_20_observed=True,
+        warn_tags=[],
+    )
+    score = replace(result.score, total_score=90, pattern_score_component=20)
+
+    final_type, *_ = classify_candidate(
+        indicators, result.start, result.phase, result.pattern, result.support,
+        result.dry_tail, result.trade_plan, score, [], engine.config,
+    )
+    pre_market_type = classify_candidate_before_market_downgrade(
+        indicators, result.start, result.phase, result.pattern, result.support,
+        result.dry_tail, result.trade_plan, score, [], engine.config,
+    )
+
+    assert final_type == "WATCH_CANDIDATE"
+    assert pre_market_type in {"READY_CANDIDATE", "KEY_CANDIDATE"}
+
+
+def test_engine_outputs_true_pre_market_candidate_type(monkeypatch):
+    monkeypatch.setattr("strategy6.engine.apply_pressure_tags", lambda rows, indicators: None)
+    weak_market = {
+        "sh000001": _market_rows([120 - i * 0.2 for i in range(80)]),
+        "sz399001": _market_rows([130 - i * 0.2 for i in range(80)]),
+        "sz399006": _market_rows([140 - i * 0.2 for i in range(80)]),
+    }
+    shared = {
+        "pattern_filter_enabled": False,
+        "key_min_score": 60,
+        "setup_quality_min_key": 0,
+        "support_reaction_min_key": 0,
+        "market_filter_mode": "downgrade",
+    }
+    without_filter = StrongVcpTailEngine({"strategy6": {**shared, "enable_market_filter": False}}).evaluate_at(
+        build_strategy6_candidate_data(), code="000001", market_data_by_symbol=weak_market,
+    )
+    downgraded = StrongVcpTailEngine({"strategy6": {**shared, "enable_market_filter": True}}).evaluate_at(
+        build_strategy6_candidate_data(), code="000001", market_data_by_symbol=weak_market,
+    )
+
+    assert without_filter.candidate_type in {"READY_CANDIDATE", "KEY_CANDIDATE"}
+    assert downgraded.candidate_type == "WATCH_CANDIDATE"
+    assert downgraded.pre_market_candidate_type == without_filter.candidate_type
+    assert downgraded.to_candidate_dict()["pre_market_candidate_type"] == without_filter.candidate_type
+    assert "MARKET_WEAK_DOWNGRADED" in downgraded.indicators.warn_tags
 
 
 def test_market_filter_score_only_deducts_score_without_downgrading_candidate_type():
@@ -786,6 +843,8 @@ def test_market_filter_score_only_deducts_score_without_downgrading_candidate_ty
 
     assert score_only.passed is True
     assert score_only.candidate_type == filter_off.candidate_type
+    assert score_only.pre_market_candidate_type == ""
+    assert score_only.to_candidate_dict()["pre_market_candidate_type"] == ""
     assert score_only.score.risk_control_score == max(0, filter_off.score.risk_control_score - 2)
     assert "MARKET_WEAK_DOWNGRADED" not in score_only.indicators.warn_tags
 

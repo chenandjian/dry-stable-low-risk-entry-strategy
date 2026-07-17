@@ -234,11 +234,13 @@ describe('Strategy6Results', () => {
           code: '000003',
           name: '观察股',
           candidate_type: 'WATCH_CANDIDATE',
+          pre_market_candidate_type: 'KEY_CANDIDATE',
           classification: 'watch',
           lifecycle_status: 'SETUP_FORMING',
           total_score: 68,
           support_status: 'MA50_TESTING',
           risk_reward_ratio_2: 1.6,
+          warn_tags: ['MARKET_WEAK_DOWNGRADED'],
         },
       ],
     })
@@ -298,6 +300,7 @@ describe('Strategy6Results', () => {
     expect(wrapper.text()).toContain('就绪候选')
     expect(wrapper.text()).toContain('重点候选')
     expect(wrapper.text()).toContain('观察候选')
+    expect(wrapper.text()).toContain('原重点候选 · 因市场偏弱降级')
     expect(wrapper.text()).not.toContain('READY_CANDIDATE')
     expect(wrapper.text()).not.toContain('KEY_CANDIDATE')
     expect(wrapper.text()).not.toContain('WATCH_CANDIDATE')
@@ -365,6 +368,35 @@ describe('Strategy6Results', () => {
     expect(wrapper.text()).toContain('生命周期退出/冷却审计')
     expect(wrapper.text()).toContain('退出样本')
     expect(wrapper.text()).toContain('支撑失效')
+  })
+
+  it('shows the exact pre-market tier in candidate detail', async () => {
+    const wrapper = mount(Strategy6Results, {
+      global: { mocks: { $route: { query: { task: 's6-task' } } } },
+    })
+    await flushUi()
+
+    await wrapper.find('[data-test="candidate-row-000003"]').trigger('click')
+
+    expect(wrapper.find('[data-test="detail-market-downgrade"]').text()).toContain(
+      '原重点候选 · 因市场偏弱降级',
+    )
+  })
+
+  it('does not guess the original tier for legacy downgraded tasks', async () => {
+    api.getStrategy6Candidates.mockResolvedValue({ candidates: [{
+      code: '000099', name: '旧任务样本', candidate_type: 'WATCH_CANDIDATE',
+      classification: 'observe', warn_tags: ['MARKET_WEAK_DOWNGRADED'],
+    }] })
+
+    const wrapper = mount(Strategy6Results, {
+      global: { mocks: { $route: { query: { task: 's6-task' } } } },
+    })
+    await flushUi()
+
+    expect(wrapper.text()).toContain('市场降级 · 原等级未记录')
+    expect(wrapper.text()).not.toContain('原重点候选')
+    expect(wrapper.text()).not.toContain('原就绪候选')
   })
 
   it('renders an independent VCP observation section without removing trade groups', async () => {
@@ -783,7 +815,9 @@ describe('Strategy6Results', () => {
     const blob = mocks.createObjectURL.mock.calls[0][0]
     const csv = await blob.text()
     expect(csv).toContain('代码,名称,板块,候选类型,候选类型原始值,生命周期,生命周期原始值,首次入池,池龄交易日')
-    expect(csv).toContain('市场状态,市场状态原始值,RS20')
+    expect(csv).toContain('市场降级前等级,市场降级前等级原始值')
+    expect(csv).toContain('原重点候选,KEY_CANDIDATE')
+    expect(csv).toContain('市场状态,市场状态原始值,市场降级前等级,市场降级前等级原始值,RS20')
     expect(csv).not.toContain('板块状态')
     expect(csv).not.toContain('板块RS10')
     expect(csv).toContain('启动日低点,启动后天数')
@@ -803,7 +837,7 @@ describe('Strategy6Results', () => {
     expect(csv).toContain('2026-07-14,通过,通过,通过,通过,通过,上涨背景,BULL_CONTEXT')
     expect(csv).toContain('1.5R目标,2R目标,2.5R目标,3.5R目标')
     expect(csv).toContain('000001,平安银行,,就绪候选,READY_CANDIDATE,买入区间,BUY_ZONE,2026-07-01,6')
-    expect(csv).toContain('降级处理,downgrade,市场偏弱,MARKET_WEAK,18.00%,12.34')
+    expect(csv).toContain('降级处理,downgrade,市场偏弱,MARKET_WEAK,,,18.00%,12.34')
     expect(csv).toContain('接近120日压力位,NEAR_120D_PRESSURE')
     expect(csv).toContain('VCP观察资格,VCP状态,VCP状态原始值,VCP起点,VCP形态开始,VCP形态结束,VCP收缩次数')
     expect(csv).toContain('VCP支点,VCP结构低点,距VCP支点,VCP突破日期,VCP突破后天数')

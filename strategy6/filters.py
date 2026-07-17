@@ -1,6 +1,8 @@
 """Strategy6 hard filters and candidate classification."""
 from __future__ import annotations
 
+from dataclasses import replace
+
 from strategy6.models import (
     Strategy6BoxTail,
     Strategy6DryTail,
@@ -179,6 +181,47 @@ def classify_candidate(
     if score.total_score >= config["watch_min_score"] or trade_plan.objective_rr_2 >= config["rr2_min_watch"]:
         return "WATCH_CANDIDATE", "observe", lifecycle, "观察：形态部分满足，等待进一步确认"
     return "REJECTED", "rejected", lifecycle, "排除：评分不足"
+
+
+def classify_candidate_before_market_downgrade(
+    ind: Strategy6Indicators,
+    start: Strategy6Start,
+    phase: Strategy6Phase,
+    pattern: Strategy6Pattern,
+    support: Strategy6Support,
+    dry_tail: Strategy6DryTail,
+    trade_plan: Strategy6TradePlan,
+    score: Strategy6Score,
+    reject_reasons: list[str],
+    config: dict,
+    *,
+    box_tail: Strategy6BoxTail | None = None,
+    brooks_tail: BrooksTailResult | None = None,
+) -> str:
+    """Return the tier before weak-market downgrade without mutating indicators."""
+    audit_indicators = replace(
+        ind,
+        market_filter_enabled=False,
+        warn_tags=[
+            tag for tag in ind.warn_tags
+            if tag not in {"MARKET_WEAK_DOWNGRADED", "MARKET_WEAK_STRICT"}
+        ],
+    )
+    candidate_type, *_ = classify_candidate(
+        audit_indicators,
+        start,
+        phase,
+        pattern,
+        support,
+        dry_tail,
+        trade_plan,
+        score,
+        reject_reasons,
+        config,
+        box_tail=box_tail,
+        brooks_tail=brooks_tail,
+    )
+    return candidate_type
 
 
 def _brooks_only_waiting_for_trigger(

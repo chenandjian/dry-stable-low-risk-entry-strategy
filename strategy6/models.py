@@ -343,6 +343,7 @@ class Strategy6Evaluation:
     vcp_observation: Strategy6VcpObservation = field(default_factory=Strategy6VcpObservation)
     strategy_version: str = ""
     config_hash: str = ""
+    pre_market_candidate_type: str = ""
     candidate_type: str = "REJECTED"
     classification: str = "rejected"
     lifecycle_status: str = "FAILED"
@@ -606,6 +607,7 @@ class Strategy6Evaluation:
             "vcp_quality_reasons": vcp_quality.reasons,
             "vcp_quality_warnings": vcp_quality.warnings,
             "vcp_quality_model_version": vcp_quality.model_version,
+            "pre_market_candidate_type": self.pre_market_candidate_type,
             "candidate_type": self.candidate_type,
             "classification": self.classification,
             "lifecycle_status": self.lifecycle_status,

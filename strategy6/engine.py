@@ -6,7 +6,11 @@ from strategy6.entry import identify_entry_archetype
 from strategy6.box_tail import combine_tail_paths, evaluate_box_tail, evaluate_compact_kline
 from strategy6.brooks.tail import analyze_brooks_tail
 from strategy6.brooks.trigger import evaluate_brooks_trade_trigger
-from strategy6.filters import classify_candidate, hard_filter_reasons
+from strategy6.filters import (
+    classify_candidate,
+    classify_candidate_before_market_downgrade,
+    hard_filter_reasons,
+)
 from strategy6.indicators import _atr, calculate_indicators
 from strategy6.market import compute_relative_strength_20, evaluate_market_context, has_relative_strength_20_market
 from strategy6.models import Strategy6Evaluation
@@ -166,6 +170,34 @@ class StrongVcpTailEngine:
             box_tail=box_tail,
             brooks_tail=brooks_tail,
         )
+        pre_market_candidate_type = ""
+        if (
+            candidate_type == "WATCH_CANDIDATE"
+            and indicators.market_filter_enabled
+            and indicators.market_filter_mode == "downgrade"
+            and indicators.market_status in {"MARKET_WEAK", "MARKET_RISK"}
+        ):
+            audited_type = classify_candidate_before_market_downgrade(
+                indicators,
+                start,
+                phase,
+                pattern,
+                support,
+                dry_tail,
+                trade_plan,
+                score,
+                reject_reasons,
+                self.config,
+                box_tail=box_tail,
+                brooks_tail=brooks_tail,
+            )
+            if audited_type in {"READY_CANDIDATE", "KEY_CANDIDATE"}:
+                pre_market_candidate_type = audited_type
+            else:
+                indicators.warn_tags = [
+                    tag for tag in indicators.warn_tags
+                    if tag != "MARKET_WEAK_DOWNGRADED"
+                ]
         return Strategy6Evaluation(
             code=code,
             name=name,
@@ -185,6 +217,7 @@ class StrongVcpTailEngine:
             vcp_observation=vcp_observation,
             strategy_version=STRATEGY6_VERSION,
             config_hash=strategy6_config_hash(self.config),
+            pre_market_candidate_type=pre_market_candidate_type,
             candidate_type=candidate_type,
             classification=classification,
             lifecycle_status=lifecycle_status,

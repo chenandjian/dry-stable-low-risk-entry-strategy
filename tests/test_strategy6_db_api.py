@@ -162,12 +162,19 @@ def test_strategy6_candidate_table_is_independent(tmp_path):
     db.init_db(str(tmp_path / "s6.db"))
     db.create_scan_task("s6-task", "2026-07-09 10:00:00", strategy_type=STRATEGY6_TYPE)
 
-    db.upsert_strategy6_candidate("s6-task", _candidate())
+    candidate = _candidate()
+    candidate.update({
+        "candidate_type": "WATCH_CANDIDATE",
+        "classification": "observe",
+        "pre_market_candidate_type": "KEY_CANDIDATE",
+    })
+    db.upsert_strategy6_candidate("s6-task", candidate)
 
     rows = db.get_strategy6_candidates("s6-task")
     detail = db.get_strategy6_candidate("000001", task_id="s6-task")
     assert rows[0]["code"] == "000001"
-    assert rows[0]["candidate_type"] == "KEY_CANDIDATE"
+    assert rows[0]["candidate_type"] == "WATCH_CANDIDATE"
+    assert rows[0]["pre_market_candidate_type"] == "KEY_CANDIDATE"
     assert rows[0]["days_since_start"] == 5
     assert rows[0]["start_low"] == 11.5
     assert rows[0]["prior_key_support_price"] == 11.8
@@ -176,6 +183,7 @@ def test_strategy6_candidate_table_is_independent(tmp_path):
     assert rows[0]["warn_tags"] == ["PRESSURE_NEAR_HIGH"]
     assert detail["risk_reward_ratio_2"] == 2.5
     assert detail["strategy_version"] == "4.0.0"
+    assert detail["pre_market_candidate_type"] == "KEY_CANDIDATE"
     assert detail["pattern_type"] == "VCP"
     assert detail["support_cluster_sources"] == ["MA10", "PATTERN_LOW"]
     assert detail["objective_rr_2"] == 2.6

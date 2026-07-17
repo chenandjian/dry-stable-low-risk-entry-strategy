@@ -96,7 +96,10 @@
                 <div>{{ entryArchetypeText(c) }}</div>
                 <div class="muted">整理 {{ qualityValue(c, 'setup_quality_score') }} · 支撑 {{ qualityValue(c, 'support_reaction_score') }}</div>
               </td>
-              <td><span :data-test="`candidate-type-${c.code}`" class="type-badge" :class="classFor(c)">{{ candidateTypeText(c) }}</span></td>
+              <td>
+                <span :data-test="`candidate-type-${c.code}`" class="type-badge" :class="classFor(c)">{{ candidateTypeText(c) }}</span>
+                <div v-if="marketDowngradeText(c)" class="downgrade-note">{{ marketDowngradeText(c) }}</div>
+              </td>
               <td :data-test="`candidate-lifecycle-${c.code}`">{{ lifecycleText(c) }}</td>
               <td>{{ label('startType', c.start_type) }} / {{ label('startGrade', c.start_grade) }}</td>
               <td>{{ label('supportStatus', c.support_status) }}</td>
@@ -230,6 +233,7 @@
         <div v-if="selected.vcp_observation_eligible"><span>VCP关键位</span><strong>支点 {{ fmt(selected.vcp_pivot_price) }} · 结构低点 {{ fmt(selected.vcp_structure_low) }} · 距支点 {{ pct(selected.vcp_distance_to_pivot_pct) }}</strong></div>
         <div v-if="selected.vcp_observation_eligible"><span>VCP突破</span><strong>{{ selected.vcp_breakout_date || '--' }} · 突破后 {{ selected.vcp_days_since_breakout ?? 0 }} 个交易日</strong></div>
         <div><span>分类</span><strong>{{ candidateTypeText(selected) }} / {{ isExecutionWaiting(selected) ? '观察' : label('classification', selected.classification) }}</strong></div>
+        <div v-if="marketDowngradeText(selected)" data-test="detail-market-downgrade"><span>市场降级前等级</span><strong>{{ marketDowngradeText(selected) }}</strong></div>
         <div><span>生命周期</span><strong>{{ lifecycleText(selected) }}</strong></div>
         <div><span>强势启动</span><strong>{{ label('startType', selected.start_type) }} / {{ label('startGrade', selected.start_grade) }} / {{ pct(selected.start_day_return) }} · 启动后{{ selected.days_since_start ?? 0 }}日</strong></div>
         <div><span>启动日低点</span><strong>{{ fmt(selected.start_low) }}</strong></div>
@@ -581,6 +585,16 @@ export default {
     candidateTypeText(candidate) {
       return this.label('candidateType', this.effectiveCandidateType(candidate))
     },
+    marketDowngradeText(candidate) {
+      const origin = candidate?.pre_market_candidate_type
+      if (origin === 'READY_CANDIDATE' || origin === 'KEY_CANDIDATE') {
+        return `原${this.label('candidateType', origin)} · 因市场偏弱降级`
+      }
+      if ((candidate?.warn_tags || []).includes('MARKET_WEAK_DOWNGRADED')) {
+        return '市场降级 · 原等级未记录'
+      }
+      return ''
+    },
     lifecycleText(candidate) {
       return this.isExecutionWaiting(candidate) ? '观察/等待触发' : this.label('lifecycleStatus', candidate?.lifecycle_status)
     },
@@ -778,6 +792,8 @@ export default {
           { header: '市场过滤模式原始值', value: c => c.market_filter_mode || '' },
           { header: '市场状态', value: c => this.label('marketStatus', c.market_status) },
           { header: '市场状态原始值', value: c => c.market_status || '' },
+          { header: '市场降级前等级', value: c => c.pre_market_candidate_type ? `原${this.label('candidateType', c.pre_market_candidate_type)}` : '' },
+          { header: '市场降级前等级原始值', value: c => c.pre_market_candidate_type || '' },
           { header: 'RS20', value: c => this.pct(c.relative_strength_20) },
           { header: '现价', value: c => this.fmt(c.current_price) },
           { header: '日涨跌', value: c => this.pct(c.daily_return) },
@@ -954,6 +970,7 @@ select { background: var(--bg-panel); color: var(--text-primary); border: 1px so
 .chip.ready, .type-badge.ready { background: rgba(59, 130, 246, 0.18); color: #93c5fd; }
 .chip.key, .type-badge.key { background: rgba(168, 85, 247, 0.18); color: #d8b4fe; }
 .chip.watch, .type-badge.watch { background: rgba(234, 179, 8, 0.15); color: #fde68a; }
+.downgrade-note { margin-top: 5px; color: #fdba74; font-size: 12px; font-weight: 600; white-space: nowrap; }
 .chip.vcp { background: rgba(20, 184, 166, 0.16); color: #99f6e4; }
 .panel { background: var(--bg-panel); border: 1px solid var(--border); border-radius: 6px; margin: 14px 0; overflow: hidden; }
 .panel-header { padding: 12px 14px; border-bottom: 1px solid var(--border); font-weight: 700; color: var(--text-secondary); }
