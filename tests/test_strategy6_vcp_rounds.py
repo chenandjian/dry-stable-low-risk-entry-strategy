@@ -49,6 +49,33 @@ def test_deep_decline_and_weak_bounce_do_not_form_a_vcp_round():
     assert result.confirmed is False
 
 
+def test_main_pattern_does_not_score_deep_decline_as_vcp():
+    from strategy6.pattern import _detect_vcp
+
+    rows = _rows([
+        ("2026-07-01", 22.17, 51_190_208),
+        ("2026-07-02", 24.39, 107_107_441),
+        ("2026-07-03", 22.14, 93_862_855),
+        ("2026-07-06", 20.24, 61_908_140),
+        ("2026-07-07", 19.34, 37_416_874),
+        ("2026-07-08", 17.88, 43_403_482),
+        ("2026-07-09", 17.12, 43_806_144),
+        ("2026-07-10", 16.71, 43_447_914),
+        ("2026-07-13", 15.82, 33_471_987),
+        ("2026-07-14", 16.17, 22_011_457),
+        ("2026-07-15", 15.98, 19_650_480),
+        ("2026-07-16", 15.84, 14_853_605),
+        ("2026-07-17", 16.08, 27_503_322),
+    ])
+
+    pattern = _detect_vcp(rows, rows[-1]["close"], resolve_strategy6_config({}))
+
+    assert pattern.pattern_type == "UNKNOWN"
+    assert pattern.pattern_score == 0
+    assert pattern.pivot_price == 0.0
+    assert pattern.pattern_low == 0.0
+
+
 def test_weak_intermediate_bounce_is_merged_into_the_same_round():
     from strategy6.vcp_rounds import detect_vcp_rounds
 

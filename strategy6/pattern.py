@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from strategy6.models import Strategy6Pattern, Strategy6Phase
+from strategy6.vcp_rounds import detect_vcp_rounds
 
 
 def detect_pattern(rows: list[dict], phase: Strategy6Phase, config: dict) -> Strategy6Pattern:
@@ -33,28 +34,28 @@ def detect_pattern(rows: list[dict], phase: Strategy6Phase, config: dict) -> Str
 def _detect_vcp(rows: list[dict], signal_price: float, config: dict) -> Strategy6Pattern:
     if len(rows) < 10:
         return Strategy6Pattern()
-    contractions = _swing_contractions(rows)
-    chain = _best_vcp_chain(contractions, config)
-    if len(chain) < 2:
+    detection = detect_vcp_rounds(rows, config)
+    if not detection.confirmed:
         return Strategy6Pattern()
-    last = chain[-1]
-    pivot = last["peak_close"]
-    low = last["low_close"]
+    rounds = detection.completed_rounds
+    last = rounds[-1]
+    pivot = last.recovery_peak_close
+    low = last.low_close
     proximity = float(config["pattern_pivot_proximity_pct"])
     if pivot <= 0 or signal_price < pivot * (1 - proximity):
         return Strategy6Pattern()
     return Strategy6Pattern(
         pattern_type="VCP",
-        pattern_score=min(20, 16 + len(chain)),
-        pattern_start_date=rows[chain[0]["peak_index"]]["date"],
-        pattern_end_date=rows[last["low_index"]]["date"],
-        pivot_source="VCP_LAST_CONTRACTION",
+        pattern_score=min(20, 16 + len(rounds)),
+        pattern_start_date=str(rounds[0].peak_date or ""),
+        pattern_end_date=str(last.recovery_peak_date or ""),
+        pivot_source="VCP_LAST_RECOVERY_PEAK",
         pivot_price=round(pivot, 4),
         pattern_low=round(low, 4),
         pattern_height=round(max(0.0, pivot - low), 4),
-        depth_pct=round((pivot - low) / pivot, 6) if pivot > 0 else 0.0,
-        contraction_count=len(chain),
-        reasons=["VCP_SWING_CONTRACTIONS", "VCP_RANGE_CONTRACTING", "VCP_VOLUME_CONTRACTING"],
+        depth_pct=round(last.amplitude, 6),
+        contraction_count=len(rounds),
+        reasons=["VCP_COMPLETE_ROUNDS", "VCP_RANGE_CONTRACTING", "VCP_VOLUME_CONTRACTING"],
     )
 
 
