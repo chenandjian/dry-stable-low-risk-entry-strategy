@@ -132,6 +132,7 @@ def test_two_complete_rounds_include_a_direct_breakout_round():
         ("2026-07-07", "2026-07-08", "2026-07-09"),
     ]
     assert result.completed_rounds[-1].breakout_confirmed is True
+    assert result.completed_rounds[-1].pivot_close == pytest.approx(68.21)
     assert result.confirmed is True
 
 

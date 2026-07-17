@@ -21,6 +21,14 @@ class VcpRound:
     rebound_avg_volume: float
     breakout_confirmed: bool = False
 
+    @property
+    def pivot_close(self) -> float:
+        return self.peak_close if self.breakout_confirmed else self.recovery_peak_close
+
+    @property
+    def pivot_date(self) -> str:
+        return self.peak_date if self.breakout_confirmed else self.recovery_peak_date
+
 
 @dataclass(frozen=True)
 class VcpFormingRound:

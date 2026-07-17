@@ -39,7 +39,7 @@ def _detect_vcp(rows: list[dict], signal_price: float, config: dict) -> Strategy
         return Strategy6Pattern()
     rounds = detection.completed_rounds
     last = rounds[-1]
-    pivot = last.recovery_peak_close
+    pivot = last.pivot_close
     low = last.low_close
     proximity = float(config["pattern_pivot_proximity_pct"])
     if pivot <= 0 or signal_price < pivot * (1 - proximity):
@@ -57,67 +57,6 @@ def _detect_vcp(rows: list[dict], signal_price: float, config: dict) -> Strategy
         contraction_count=len(rounds),
         reasons=["VCP_COMPLETE_ROUNDS", "VCP_RANGE_CONTRACTING", "VCP_VOLUME_CONTRACTING"],
     )
-
-
-def _swing_contractions(rows: list[dict]) -> list[dict]:
-    closes = [float(row["close"]) for row in rows]
-    peak_indexes: list[int] = []
-    for idx in range(len(rows) - 1):
-        current = closes[idx]
-        previous = closes[idx - 1] if idx > 0 else float("-inf")
-        following = closes[idx + 1]
-        if current >= previous and current > following:
-            peak_indexes.append(idx)
-
-    contractions: list[dict] = []
-    for position, peak_index in enumerate(peak_indexes):
-        boundary = peak_indexes[position + 1] if position + 1 < len(peak_indexes) else len(rows)
-        if peak_index + 1 >= boundary:
-            continue
-        low_index = min(range(peak_index + 1, boundary), key=lambda idx: closes[idx])
-        peak_close = closes[peak_index]
-        low_close = closes[low_index]
-        amplitude = (peak_close - low_close) / peak_close if peak_close > 0 else 0.0
-        if amplitude <= 0:
-            continue
-        segment = rows[peak_index:low_index + 1]
-        contractions.append({
-            "peak_index": peak_index,
-            "low_index": low_index,
-            "peak_close": peak_close,
-            "low_close": low_close,
-            "amplitude": amplitude,
-            "avg_volume": _mean(row["volume"] for row in segment),
-        })
-    return contractions
-
-
-def _best_vcp_chain(contractions: list[dict], config: dict) -> list[dict]:
-    range_ratio = float(config["vcp_contraction_range_ratio"])
-    volume_ratio = float(config["vcp_contraction_volume_ratio"])
-    minimum_first = float(config["vcp_min_first_range"])
-    best: list[dict] = []
-    for index, first in enumerate(contractions):
-        if first["amplitude"] < minimum_first or first["avg_volume"] <= 0:
-            continue
-        chain = [first]
-        for candidate in contractions[index + 1:]:
-            previous = chain[-1]
-            if (
-                candidate["peak_index"] > previous["low_index"]
-                and candidate["amplitude"] < previous["amplitude"] * range_ratio
-                and candidate["avg_volume"] < previous["avg_volume"] * volume_ratio
-                and candidate["low_close"] >= previous["low_close"] * 0.97
-            ):
-                chain.append(candidate)
-            else:
-                break
-        if len(chain) >= 2 and (
-            len(chain) > len(best)
-            or (len(chain) == len(best) and chain[-1]["low_index"] > best[-1]["low_index"])
-        ):
-            best = chain
-    return best
 
 
 def _detect_cup_handle(rows: list[dict], config: dict) -> Strategy6Pattern:

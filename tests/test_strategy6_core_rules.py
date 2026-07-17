@@ -174,6 +174,7 @@ def test_engine_candidate_dict_exposes_safe_vcp_observation_defaults():
     assert candidate["vcp_pattern_end_date"] == ""
     assert candidate["vcp_contraction_count"] == 0
     assert candidate["vcp_contractions"] == []
+    assert candidate["vcp_forming_round"] == {}
     assert candidate["vcp_pivot_price"] == 0.0
     assert candidate["vcp_structure_low"] == 0.0
     assert candidate["vcp_distance_to_pivot_pct"] == 0.0

@@ -57,7 +57,10 @@ def find_historical_start_anchor(
         _build_start_candidate(rows, index, config, code)
         for index in range(first, min(end_index, len(rows) - 1) + 1)
     ]
-    passing = [item for item in candidates if item.start_type in PASSING_START_TYPES]
+    passing = [
+        item for item in candidates
+        if item.start_type in PASSING_START_TYPES and not item.failure_reasons
+    ]
     if not passing:
         return None
     return max(passing, key=lambda item: (item.event_quality_score, item.start_date))

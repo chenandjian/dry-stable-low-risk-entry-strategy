@@ -1,4 +1,5 @@
 from datetime import date, timedelta
+from types import SimpleNamespace
 
 import pytest
 
@@ -28,6 +29,19 @@ def _contracted_rows():
     return _rows(closes, volumes)
 
 
+def _force_valid_anchor(monkeypatch):
+    from strategy6 import vcp_observer
+
+    monkeypatch.setattr(
+        vcp_observer,
+        "find_historical_start_anchor",
+        lambda rows, *args, **kwargs: SimpleNamespace(
+            start_date=rows[0]["date"],
+            failure_reasons=[],
+        ),
+    )
+
+
 def test_vcp_observer_defaults_are_explicit_and_validated():
     config = resolve_strategy6_config({})
 
@@ -35,6 +49,32 @@ def test_vcp_observer_defaults_are_explicit_and_validated():
     assert config["vcp_observer_lookback_days"] == 60
     assert config["vcp_observer_breakout_retention_days"] == 10
     assert config["vcp_observer_extension_pct"] == pytest.approx(0.08)
+
+
+def test_vcp_observer_marks_one_complete_round_as_early_observation(monkeypatch):
+    from strategy6 import vcp_observer
+
+    rows = _rows(
+        [29.20, 30.95, 28.10, 26.30, 25.10, 24.08, 24.80, 25.74, 24.80, 24.04],
+        [70_000_000, 90_000_000, 85_000_000, 80_000_000, 75_000_000,
+         65_000_000, 55_000_000, 60_000_000, 50_000_000, 45_000_000],
+    )
+    monkeypatch.setattr(
+        vcp_observer,
+        "find_historical_start_anchor",
+        lambda *args, **kwargs: SimpleNamespace(start_date=rows[0]["date"], failure_reasons=[]),
+    )
+
+    result = vcp_observer.evaluate_vcp_observation(
+        rows,
+        resolve_strategy6_config({}),
+        code="002056",
+    )
+
+    assert result.eligible is True
+    assert result.lifecycle_status == "VCP_ROUND1_CONFIRMED"
+    assert result.contraction_count == 1
+    assert result.contractions[0]["recovery_peak_date"] == rows[7]["date"]
 
 
 @pytest.mark.parametrize(
@@ -50,8 +90,10 @@ def test_vcp_observer_rejects_invalid_config(key, value):
         resolve_strategy6_config({"strategy6": {key: value}})
 
 
-def test_vcp_observer_detects_contracting_structure_near_pivot():
+def test_vcp_observer_detects_contracting_structure_near_pivot(monkeypatch):
     from strategy6.vcp_observer import evaluate_vcp_observation
+
+    _force_valid_anchor(monkeypatch)
 
     result = evaluate_vcp_observation(
         _contracted_rows(),
@@ -61,14 +103,14 @@ def test_vcp_observer_detects_contracting_structure_near_pivot():
     assert result.eligible is True
     assert result.lifecycle_status == "VCP_NEAR_PIVOT"
     assert result.contraction_count >= 2
-    assert result.pivot_price == pytest.approx(102.0)
-    assert result.structure_low == pytest.approx(101.5)
-    assert result.distance_to_pivot_pct == pytest.approx(101.5 / 102.0 - 1, abs=1e-6)
+    assert result.pivot_price == pytest.approx(103.0)
+    assert result.structure_low == pytest.approx(100.0)
+    assert result.distance_to_pivot_pct == pytest.approx(101.5 / 103.0 - 1, abs=1e-6)
     assert result.pattern_start_date < result.pattern_end_date
-    assert result.origin_start_date == "2026-01-02"
+    assert result.origin_start_date == "2026-01-01"
     assert result.reasons == [
         "VCP_ORIGIN_STRONG_START",
-        "VCP_SWING_CONTRACTIONS",
+        "VCP_COMPLETE_ROUNDS",
         "VCP_RANGE_CONTRACTING",
         "VCP_VOLUME_CONTRACTING",
         "VCP_LOW_NOT_FALLING",
@@ -76,8 +118,10 @@ def test_vcp_observer_detects_contracting_structure_near_pivot():
     ]
 
 
-def test_vcp_observer_classifies_forming_when_price_is_not_near_pivot():
+def test_vcp_observer_classifies_forming_when_price_is_not_near_pivot(monkeypatch):
     from strategy6.vcp_observer import evaluate_vcp_observation
+
+    _force_valid_anchor(monkeypatch)
 
     rows = _contracted_rows()
     config = resolve_strategy6_config({
@@ -87,7 +131,7 @@ def test_vcp_observer_classifies_forming_when_price_is_not_near_pivot():
     result = evaluate_vcp_observation(rows, config)
 
     assert result.eligible is True
-    assert result.lifecycle_status == "VCP_FORMING"
+    assert result.lifecycle_status == "VCP_CONFIRMED"
 
 
 def test_vcp_observer_requires_a_historical_passing_strong_start():
@@ -108,15 +152,70 @@ def test_vcp_observer_requires_a_historical_passing_strong_start():
         code="000001",
     )
 
-    assert result.contraction_count >= 2
+    assert result.contraction_count >= 1
     assert result.eligible is False
     assert result.lifecycle_status == "VCP_NONE"
     assert result.origin_start_date == ""
     assert "VCP_ORIGIN_START_MISSING" in result.risk_tags
 
 
-def test_vcp_observer_tracks_breakout_post_breakout_and_extension():
+def test_historical_start_anchor_ignores_failed_higher_score_event(monkeypatch):
+    from strategy6 import strong_start
+
+    failed = SimpleNamespace(
+        start_type="VOLUME_LIMIT_UP",
+        event_quality_score=20,
+        start_date="2026-01-02",
+        failure_reasons=["START_LOW_BROKEN"],
+    )
+    valid = SimpleNamespace(
+        start_type="NORMAL_STRONG_BREAKOUT",
+        event_quality_score=15,
+        start_date="2026-01-03",
+        failure_reasons=[],
+    )
+    candidates = iter([failed, valid])
+    monkeypatch.setattr(strong_start, "_build_start_candidate", lambda *args: next(candidates))
+
+    result = strong_start.find_historical_start_anchor(
+        _rows([100, 110, 112]),
+        resolve_strategy6_config({}),
+        "000001",
+        end_index=2,
+    )
+
+    assert result is valid
+
+
+@pytest.mark.parametrize(
+    "reason",
+    [
+        "SUPPORT_FAILED",
+        "BIG_DOWN_VOLUME",
+        "DISTRIBUTION_PRESSURE_HIGH",
+        "SUPPORT_VOLUME_BREAK_UNRECOVERED",
+    ],
+)
+def test_vcp_observer_rejects_structural_and_distribution_failures(reason):
+    from strategy6.models import Strategy6VcpObservation
+    from strategy6.vcp_observer import apply_vcp_base_filters
+
+    observation = Strategy6VcpObservation(
+        eligible=True,
+        lifecycle_status="VCP_ROUND1_CONFIRMED",
+    )
+
+    apply_vcp_base_filters(observation, [reason])
+
+    assert observation.eligible is False
+    assert observation.lifecycle_status == "VCP_INVALID"
+    assert reason in observation.risk_tags
+
+
+def test_vcp_observer_tracks_breakout_post_breakout_and_extension(monkeypatch):
     from strategy6.vcp_observer import evaluate_vcp_observation
+
+    _force_valid_anchor(monkeypatch)
 
     rows = _contracted_rows()
     breakout_volume = 1_200_000
@@ -145,8 +244,10 @@ def test_vcp_observer_tracks_breakout_post_breakout_and_extension():
     assert "VCP_PRICE_EXTENDED" in extended_result.risk_tags
 
 
-def test_vcp_observer_does_not_call_pivot_loss_post_breakout_and_invalidates_unrecovered_volume_break():
+def test_vcp_observer_does_not_call_pivot_loss_post_breakout_and_invalidates_unrecovered_volume_break(monkeypatch):
     from strategy6.vcp_observer import evaluate_vcp_observation
+
+    _force_valid_anchor(monkeypatch)
 
     rows = _contracted_rows()
     for close, volume in (
@@ -174,8 +275,10 @@ def test_vcp_observer_does_not_call_pivot_loss_post_breakout_and_invalidates_unr
     assert "VCP_VOLUME_BREAKDOWN_UNRECOVERED" in invalid.risk_tags
 
 
-def test_vcp_observer_invalidates_structure_break_and_expires_old_breakout():
+def test_vcp_observer_invalidates_structure_break_and_expires_old_breakout(monkeypatch):
     from strategy6.vcp_observer import evaluate_vcp_observation
+
+    _force_valid_anchor(monkeypatch)
 
     base = _contracted_rows()
     breakout = _rows([106.0], [1_200_000])[0]
@@ -202,8 +305,10 @@ def test_vcp_observer_invalidates_structure_break_and_expires_old_breakout():
     assert "VCP_OBSERVATION_EXPIRED" in old.risk_tags
 
 
-def test_vcp_observer_does_not_revive_same_structure_after_low_was_broken():
+def test_vcp_observer_does_not_revive_same_structure_after_low_was_broken(monkeypatch):
     from strategy6.vcp_observer import evaluate_vcp_observation
+
+    _force_valid_anchor(monkeypatch)
 
     rows = _contracted_rows()
     for close, volume in ((106.0, 1_200_000), (95.0, 2_000_000), (105.0, 700_000)):
@@ -218,8 +323,10 @@ def test_vcp_observer_does_not_revive_same_structure_after_low_was_broken():
     assert result.invalidation_reason == "VCP_STRUCTURE_LOW_BROKEN"
 
 
-def test_vcp_observer_is_as_of_and_does_not_mutate_historical_result():
+def test_vcp_observer_is_as_of_and_does_not_mutate_historical_result(monkeypatch):
     from strategy6.vcp_observer import evaluate_vcp_observation
+
+    _force_valid_anchor(monkeypatch)
 
     historical_rows = _contracted_rows()
     historical = evaluate_vcp_observation(historical_rows, resolve_strategy6_config({}))
@@ -234,8 +341,10 @@ def test_vcp_observer_is_as_of_and_does_not_mutate_historical_result():
     ) == historical
 
 
-def test_vcp_observer_replays_real_002156_structure_without_future_leakage():
+def test_vcp_observer_replays_real_002156_structure_without_future_leakage(monkeypatch):
     from strategy6.vcp_observer import evaluate_vcp_observation
+
+    _force_valid_anchor(monkeypatch)
 
     samples = [
         ("2026-05-20", 62.28, 198689180.0), ("2026-05-21", 61.76, 239668006.0),
@@ -269,7 +378,7 @@ def test_vcp_observer_replays_real_002156_structure_without_future_leakage():
     config = resolve_strategy6_config({})
 
     expected = {
-        "2026-07-08": "VCP_NEAR_PIVOT",
+        "2026-07-08": "VCP_ROUND1_CONFIRMED",
         "2026-07-09": "VCP_BREAKOUT_CONFIRMED",
         "2026-07-10": "VCP_POST_BREAKOUT",
         "2026-07-13": "VCP_POST_BREAKOUT",
@@ -283,6 +392,7 @@ def test_vcp_observer_replays_real_002156_structure_without_future_leakage():
         assert result.lifecycle_status == expected_status
         assert result.eligible is True
         assert result.pivot_price == pytest.approx(68.21)
-        assert result.structure_low == pytest.approx(65.61)
+        expected_low = 64.80 if day == "2026-07-08" else 65.61
+        assert result.structure_low == pytest.approx(expected_low)
 
-    assert observed["2026-07-08"] == "VCP_NEAR_PIVOT"
+    assert observed["2026-07-08"] == "VCP_ROUND1_CONFIRMED"

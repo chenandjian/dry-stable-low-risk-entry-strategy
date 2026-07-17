@@ -75,6 +75,8 @@ def test_strategy6_scan_persists_candidate_from_fetched_data(tmp_path, monkeypat
 
 def test_strategy6_scan_persists_observer_only_row_without_counting_trade_candidate(tmp_path, monkeypatch):
     import strategy6.scanner as scanner_mod
+    import strategy6.vcp_observer as observer_mod
+    from types import SimpleNamespace
     from strategy6.vcp_history import Strategy6VcpCandidateHistory
     from tests.test_strategy6_core_rules import build_strategy6_candidate_data
 
@@ -103,6 +105,14 @@ def test_strategy6_scan_persists_observer_only_row_without_counting_trade_candid
             candidate_score=68,
             source="DAILY_AS_OF_REPLAY",
             origin_start_date="2026-01-10",
+        ),
+    )
+    monkeypatch.setattr(
+        observer_mod,
+        "find_historical_start_anchor",
+        lambda rows, *args, **kwargs: SimpleNamespace(
+            start_date=rows[0]["date"],
+            failure_reasons=[],
         ),
     )
 

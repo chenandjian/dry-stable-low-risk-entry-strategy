@@ -303,6 +303,7 @@ class Strategy6VcpObservation:
     pattern_end_date: str = ""
     contraction_count: int = 0
     contractions: list[dict] = field(default_factory=list)
+    forming_round: dict = field(default_factory=dict)
     pivot_price: float = 0.0
     structure_low: float = 0.0
     distance_to_pivot_pct: float = 0.0
@@ -575,6 +576,7 @@ class Strategy6Evaluation:
             "vcp_pattern_end_date": vcp.pattern_end_date,
             "vcp_contraction_count": vcp.contraction_count,
             "vcp_contractions": vcp.contractions,
+            "vcp_forming_round": vcp.forming_round,
             "vcp_pivot_price": vcp.pivot_price,
             "vcp_structure_low": vcp.structure_low,
             "vcp_distance_to_pivot_pct": vcp.distance_to_pivot_pct,
