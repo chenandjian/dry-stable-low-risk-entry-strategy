@@ -8,7 +8,8 @@ from strategy6.models import (
     Strategy6Support,
     Strategy6TradePlan,
 )
-from strategy6.pattern import _best_vcp_chain, detect_pattern
+from strategy6.pattern import detect_pattern
+from strategy6.vcp_rounds import detect_vcp_rounds
 from strategy6.scorer import score_strategy6
 from strategy6.validation import resolve_strategy6_config
 
@@ -54,7 +55,7 @@ def test_detects_vcp_from_two_contracting_price_and_volume_segments():
 
     assert pattern.pattern_type == "VCP"
     assert pattern.pattern_score > 0
-    assert pattern.pivot_source == "VCP_LAST_CONTRACTION"
+    assert pattern.pivot_source == "VCP_LAST_RECOVERY_PEAK"
     assert pattern.pivot_price > pattern.pattern_low
     assert pattern.pattern_height > 0
     assert pattern.contraction_count >= 2
@@ -151,13 +152,20 @@ def test_vcp_rejects_signal_price_far_below_last_contraction_pivot():
     assert pattern.pattern_type != "VCP"
 
 
-def test_vcp_chain_cannot_skip_an_intermediate_failed_contraction():
-    contractions = [
-        {"peak_index": 1, "low_index": 2, "amplitude": 0.12, "avg_volume": 100, "low_close": 90},
-        {"peak_index": 3, "low_index": 4, "amplitude": 0.14, "avg_volume": 120, "low_close": 100},
-        {"peak_index": 5, "low_index": 6, "amplitude": 0.09, "avg_volume": 80, "low_close": 90},
-    ]
+def test_vcp_chain_restarts_instead_of_skipping_an_intermediate_failed_round():
+    rows = _rows(
+        [99, 100, 88, 100, 98, 86, 100, 98, 91, 100, 99],
+        [150, 150, 100, 100, 120, 120, 100, 80, 80, 80, 70],
+    )
 
-    chain = _best_vcp_chain(contractions, resolve_strategy6_config({}))
+    result = detect_vcp_rounds(rows, resolve_strategy6_config({}))
 
-    assert chain == []
+    assert result.confirmed is True
+    assert result.completed_rounds[0].peak_index == 3
+    assert all(
+        previous.recovery_peak_index == current.peak_index
+        for previous, current in zip(
+            result.completed_rounds,
+            result.completed_rounds[1:],
+        )
+    )
