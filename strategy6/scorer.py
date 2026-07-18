@@ -44,7 +44,18 @@ def score_strategy6(
         if pattern.pattern_type == "VCP" and "VCP_LOW_RISING_BONUS" in pattern.reasons
         else 0
     )
-    pattern_score = min(15, pattern_base + phase_bonus + vcp_low_trend_bonus)
+    vcp_contracting_highs_bonus = (
+        2
+        if (
+            pattern.pattern_type == "VCP"
+            and "VCP_HIGH_NOT_RISING_LOW_RISING_BONUS" in pattern.reasons
+        )
+        else 0
+    )
+    pattern_score = min(
+        15,
+        pattern_base + phase_bonus + vcp_low_trend_bonus + vcp_contracting_highs_bonus,
+    )
     support_score = min(
         15,
         round(max(0, support.support_cluster_score) / 20 * 10)
@@ -70,6 +81,8 @@ def score_strategy6(
     ]
     if vcp_low_trend_bonus:
         reasons.append("vcp_low_trend_bonus=2")
+    if vcp_contracting_highs_bonus:
+        reasons.append("vcp_contracting_highs_bonus=2")
     return Strategy6Score(
         strong_start_score=strong,
         pattern_score_component=pattern_score,

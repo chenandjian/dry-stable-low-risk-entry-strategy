@@ -47,6 +47,8 @@ def _detect_vcp(rows: list[dict], signal_price: float, config: dict) -> Strategy
     reasons = ["VCP_COMPLETE_ROUNDS", "VCP_RANGE_CONTRACTING", "VCP_VOLUME_CONTRACTING"]
     if _has_vcp_rising_lows_bonus(rounds):
         reasons.append("VCP_LOW_RISING_BONUS")
+    if _has_vcp_contracting_highs_bonus(rounds):
+        reasons.append("VCP_HIGH_NOT_RISING_LOW_RISING_BONUS")
     return Strategy6Pattern(
         pattern_type="VCP",
         pattern_score=min(20, 16 + len(rounds)),
@@ -73,6 +75,25 @@ def _has_vcp_rising_lows_bonus(rounds: list) -> bool:
     return (
         all(rise >= 0.0 for rise in rises)
         and sum(rises) / len(rises) + 1e-12 >= 0.01
+    )
+
+
+def _has_vcp_contracting_highs_bonus(rounds: list) -> bool:
+    """Return whether VCP highs do not rise while every low rises."""
+    if len(rounds) < 2:
+        return False
+    peaks = [float(round_.peak_close) for round_ in rounds]
+    lows = [float(round_.low_close) for round_ in rounds]
+    if any(value <= 0 for value in (*peaks, *lows)):
+        return False
+    return all(
+        current_peak <= previous_peak and current_low > previous_low
+        for previous_peak, current_peak, previous_low, current_low in zip(
+            peaks,
+            peaks[1:],
+            lows,
+            lows[1:],
+        )
     )
 
 

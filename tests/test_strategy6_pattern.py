@@ -46,7 +46,7 @@ def _phase(rows, start_index=0):
     )
 
 
-def _vcp_round(low_close):
+def _vcp_round(low_close, *, peak_close=110.0):
     return VcpRound(
         peak_index=0,
         low_index=1,
@@ -54,10 +54,10 @@ def _vcp_round(low_close):
         peak_date="2026-01-01",
         low_date="2026-01-02",
         recovery_peak_date="2026-01-03",
-        peak_close=110.0,
+        peak_close=peak_close,
         low_close=low_close,
         recovery_peak_close=108.0,
-        amplitude=(110.0 - low_close) / 110.0,
+        amplitude=(peak_close - low_close) / peak_close,
         rebound=108.0 / low_close - 1.0,
         decline_avg_volume=1_000_000,
         rebound_avg_volume=800_000,
@@ -87,6 +87,43 @@ def test_vcp_rising_lows_bonus_rejects_flat_or_less_than_one_percent_average():
 
 def test_vcp_rising_lows_bonus_requires_two_completed_rounds():
     assert pattern_mod._has_vcp_rising_lows_bonus([_vcp_round(100.0)]) is False
+
+
+def test_vcp_contracting_highs_bonus_accepts_flat_or_lower_highs_with_rising_lows():
+    rounds = [
+        _vcp_round(90.0, peak_close=110.0),
+        _vcp_round(91.0, peak_close=110.0),
+        _vcp_round(92.0, peak_close=108.0),
+    ]
+
+    assert pattern_mod._has_vcp_contracting_highs_bonus(rounds) is True
+
+
+def test_vcp_contracting_highs_bonus_rejects_any_higher_high():
+    rounds = [
+        _vcp_round(90.0, peak_close=110.0),
+        _vcp_round(91.0, peak_close=111.0),
+        _vcp_round(92.0, peak_close=108.0),
+    ]
+
+    assert pattern_mod._has_vcp_contracting_highs_bonus(rounds) is False
+
+
+def test_vcp_contracting_highs_bonus_requires_every_low_to_rise_strictly():
+    assert pattern_mod._has_vcp_contracting_highs_bonus([
+        _vcp_round(90.0, peak_close=110.0),
+        _vcp_round(90.0, peak_close=109.0),
+    ]) is False
+    assert pattern_mod._has_vcp_contracting_highs_bonus([
+        _vcp_round(90.0, peak_close=110.0),
+        _vcp_round(89.9, peak_close=109.0),
+    ]) is False
+
+
+def test_vcp_contracting_highs_bonus_requires_two_completed_rounds():
+    assert pattern_mod._has_vcp_contracting_highs_bonus([
+        _vcp_round(90.0, peak_close=110.0),
+    ]) is False
 
 
 def _score_pattern(pattern, *, phase_bonus=0):
@@ -126,6 +163,58 @@ def test_vcp_rising_lows_bonus_keeps_existing_pattern_component_cap():
     )
 
     assert rewarded.pattern_score_component == 15
+
+
+def test_main_chain_vcp_contracting_highs_evidence_adds_two_pattern_points():
+    baseline = _score_pattern(Strategy6Pattern(pattern_type="VCP", pattern_score=10))
+    rewarded = _score_pattern(Strategy6Pattern(
+        pattern_type="VCP",
+        pattern_score=10,
+        reasons=["VCP_HIGH_NOT_RISING_LOW_RISING_BONUS"],
+    ))
+
+    assert rewarded.pattern_score_component == baseline.pattern_score_component + 2
+    assert rewarded.total_score == baseline.total_score + 2
+    assert "vcp_contracting_highs_bonus=2" in rewarded.score_reasons
+
+
+def test_vcp_quality_bonuses_accumulate_but_keep_pattern_component_cap():
+    baseline = _score_pattern(Strategy6Pattern(pattern_type="VCP", pattern_score=10))
+    combined = _score_pattern(Strategy6Pattern(
+        pattern_type="VCP",
+        pattern_score=10,
+        reasons=[
+            "VCP_LOW_RISING_BONUS",
+            "VCP_HIGH_NOT_RISING_LOW_RISING_BONUS",
+        ],
+    ))
+    capped = _score_pattern(
+        Strategy6Pattern(
+            pattern_type="VCP",
+            pattern_score=20,
+            reasons=[
+                "VCP_LOW_RISING_BONUS",
+                "VCP_HIGH_NOT_RISING_LOW_RISING_BONUS",
+            ],
+        ),
+        phase_bonus=3,
+    )
+
+    assert combined.pattern_score_component == baseline.pattern_score_component + 4
+    assert combined.total_score == baseline.total_score + 4
+    assert capped.pattern_score_component == 15
+
+
+def test_contracting_highs_tag_does_not_reward_non_vcp_pattern():
+    baseline = _score_pattern(Strategy6Pattern(pattern_type="PLATFORM", pattern_score=10))
+    tagged = _score_pattern(Strategy6Pattern(
+        pattern_type="PLATFORM",
+        pattern_score=10,
+        reasons=["VCP_HIGH_NOT_RISING_LOW_RISING_BONUS"],
+    ))
+
+    assert tagged.pattern_score_component == baseline.pattern_score_component
+    assert "vcp_contracting_highs_bonus=2" not in tagged.score_reasons
 
 
 def test_detects_vcp_from_two_contracting_price_and_volume_segments():
