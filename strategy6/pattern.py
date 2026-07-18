@@ -44,6 +44,9 @@ def _detect_vcp(rows: list[dict], signal_price: float, config: dict) -> Strategy
     proximity = float(config["pattern_pivot_proximity_pct"])
     if pivot <= 0 or signal_price < pivot * (1 - proximity):
         return Strategy6Pattern()
+    reasons = ["VCP_COMPLETE_ROUNDS", "VCP_RANGE_CONTRACTING", "VCP_VOLUME_CONTRACTING"]
+    if _has_vcp_rising_lows_bonus(rounds):
+        reasons.append("VCP_LOW_RISING_BONUS")
     return Strategy6Pattern(
         pattern_type="VCP",
         pattern_score=min(20, 16 + len(rounds)),
@@ -55,7 +58,21 @@ def _detect_vcp(rows: list[dict], signal_price: float, config: dict) -> Strategy
         pattern_height=round(max(0.0, pivot - low), 4),
         depth_pct=round(last.amplitude, 6),
         contraction_count=len(rounds),
-        reasons=["VCP_COMPLETE_ROUNDS", "VCP_RANGE_CONTRACTING", "VCP_VOLUME_CONTRACTING"],
+        reasons=reasons,
+    )
+
+
+def _has_vcp_rising_lows_bonus(rounds: list) -> bool:
+    """Return whether confirmed VCP lows rise by at least 1% on average."""
+    if len(rounds) < 2:
+        return False
+    lows = [float(round_.low_close) for round_ in rounds]
+    if any(low <= 0 for low in lows):
+        return False
+    rises = [current / previous - 1.0 for previous, current in zip(lows, lows[1:])]
+    return (
+        all(rise >= 0.0 for rise in rises)
+        and sum(rises) / len(rises) + 1e-12 >= 0.01
     )
 
 
