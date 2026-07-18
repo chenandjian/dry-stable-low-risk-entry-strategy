@@ -168,6 +168,27 @@ def test_vcp_quality_uses_half_up_rounding():
     assert _round_half_up(7.5) == 8
 
 
+def test_vcp_quality_structure_bonuses_match_main_chain_rules():
+    from strategy6.vcp_quality import _structure_bonuses
+
+    assert _structure_bonuses(
+        [110.0, 110.0, 108.0],
+        [90.0, 90.9, 91.809],
+    ) == (2, 2)
+    assert _structure_bonuses(
+        [110.0, 109.0],
+        [90.0, 90.45],
+    ) == (0, 2)
+
+
+def test_vcp_quality_structure_bonuses_reject_higher_high_or_non_rising_low():
+    from strategy6.vcp_quality import _structure_bonuses
+
+    assert _structure_bonuses([110.0, 111.0], [90.0, 91.0]) == (2, 0)
+    assert _structure_bonuses([110.0, 109.0], [90.0, 90.0]) == (0, 0)
+    assert _structure_bonuses([110.0], [90.0]) == (0, 0)
+
+
 def test_vcp_quality_returns_unscored_without_two_complete_contractions():
     from strategy6.vcp_quality import evaluate_vcp_quality
 
@@ -207,11 +228,33 @@ def test_vcp_quality_calculates_all_components_without_mutating_inputs():
     assert result.time_score == 5
     assert result.pivot_score == 10
     assert result.breakout_score == 5
-    assert result.score == 94
+    assert result.score == 98
     assert result.grade == "TOP"
-    assert result.model_version == "VCP_QUALITY_V2"
+    assert result.model_version == "VCP_QUALITY_V3"
+    assert "VCP_QUALITY_LOW_RISING_BONUS" in result.reasons
+    assert "VCP_QUALITY_CONTRACTING_HIGHS_BONUS" in result.reasons
     assert rows == original_rows
     assert observation == original_observation
+
+
+def test_vcp_quality_structure_bonuses_keep_confirmed_pool_score_capped_at_100():
+    from strategy6.vcp_quality import evaluate_vcp_quality
+
+    rows = _rows()
+    contractions = [
+        _contraction(rows, 2, 7, amplitude=0.20, volume=2_000_000, peak_close=100, low_close=80, recovery_index=10, recovery_peak_close=98),
+        _contraction(rows, 10, 14, amplitude=0.06, volume=600_000, peak_close=98, low_close=82, recovery_index=17, recovery_peak_close=96),
+        _contraction(rows, 17, 20, amplitude=0.02, volume=180_000, peak_close=96, low_close=84, recovery_index=23, recovery_peak_close=94),
+        _contraction(rows, 23, 25, amplitude=0.01, volume=54_000, peak_close=94, low_close=86, recovery_index=28, recovery_peak_close=93, breakout_confirmed=True),
+    ]
+    rows[0]["close"] = 75.0
+
+    result = evaluate_vcp_quality(rows, _observation(rows, contractions))
+
+    assert result.score == 100
+    assert result.grade == "TOP"
+    assert "VCP_QUALITY_LOW_RISING_BONUS" in result.reasons
+    assert "VCP_QUALITY_CONTRACTING_HIGHS_BONUS" in result.reasons
 
 
 def test_vcp_quality_caps_one_day_micro_contraction_at_79():

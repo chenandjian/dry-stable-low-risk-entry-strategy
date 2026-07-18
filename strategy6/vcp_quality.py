@@ -6,7 +6,7 @@ import math
 from strategy6.models import Strategy6VcpObservation, Strategy6VcpQuality
 
 
-MODEL_VERSION = "VCP_QUALITY_V2"
+MODEL_VERSION = "VCP_QUALITY_V3"
 
 
 def evaluate_vcp_quality(
@@ -61,6 +61,7 @@ def evaluate_vcp_quality(
     amplitude_values = [float(value) for value in amplitudes]
     low_values = [float(value) for value in lows]
     pivot_values = [float(value) for value in pivots]
+    peak_values = [_positive_float(item.get("peak_close")) for item in contractions]
     range_ratios = [
         amplitude_values[index] / amplitude_values[index - 1]
         for index in range(1, len(amplitude_values))
@@ -117,7 +118,11 @@ def evaluate_vcp_quality(
     pivot_score = _score_pivot_gap(peak_gap)
     breakout_score = 5 if bool(contractions[-1].get("breakout_confirmed")) else 0
     contraction_score = _score_contraction_count(len(contractions))
-    total = (
+    low_rising_bonus, contracting_highs_bonus = _structure_bonuses(
+        [float(value) for value in peak_values if value is not None],
+        low_values,
+    )
+    total = min(100, (
         contraction_score
         + range_score
         + volume_score
@@ -126,7 +131,9 @@ def evaluate_vcp_quality(
         + time_score
         + pivot_score
         + breakout_score
-    )
+        + low_rising_bonus
+        + contracting_highs_bonus
+    ))
     if amplitude_values[-1] < 0.01 and intervals[-1] == 1:
         warnings.append("VCP_MICRO_CONTRACTION_NOISE")
         total = min(total, 79)
@@ -141,6 +148,10 @@ def evaluate_vcp_quality(
         pivot_score=pivot_score,
         breakout_score=breakout_score,
     )
+    if low_rising_bonus:
+        reasons.append("VCP_QUALITY_LOW_RISING_BONUS")
+    if contracting_highs_bonus:
+        reasons.append("VCP_QUALITY_CONTRACTING_HIGHS_BONUS")
     return Strategy6VcpQuality(
         scored=True,
         score=total,
@@ -165,6 +176,31 @@ def _positive_float(value) -> float | None:
     except (TypeError, ValueError):
         return None
     return number if math.isfinite(number) and number > 0 else None
+
+
+def _structure_bonuses(peaks: list[float], lows: list[float]) -> tuple[int, int]:
+    if len(peaks) < 2 or len(peaks) != len(lows):
+        return 0, 0
+    if any(not math.isfinite(value) or value <= 0 for value in (*peaks, *lows)):
+        return 0, 0
+    low_changes = [
+        current / previous - 1.0
+        for previous, current in zip(lows, lows[1:])
+    ]
+    low_rising_bonus = 2 if (
+        all(change >= 0.0 for change in low_changes)
+        and sum(low_changes) / len(low_changes) + 1e-12 >= 0.01
+    ) else 0
+    contracting_highs_bonus = 2 if all(
+        current_peak <= previous_peak and current_low > previous_low
+        for previous_peak, current_peak, previous_low, current_low in zip(
+            peaks,
+            peaks[1:],
+            lows,
+            lows[1:],
+        )
+    ) else 0
+    return low_rising_bonus, contracting_highs_bonus
 
 
 def _average_score(values: list[float], scorer) -> int:

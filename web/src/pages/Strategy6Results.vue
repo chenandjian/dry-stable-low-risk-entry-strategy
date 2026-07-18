@@ -715,7 +715,7 @@ export default {
       return `形成中轮次 ${item?.peak_date || '--'} → ${item?.low_date || '--'} · ${this.label('vcpFormingPhase', item?.phase)}`
     },
     isVcpQualityV2(candidate) {
-      return candidate?.vcp_quality_model_version === 'VCP_QUALITY_V2'
+      return ['VCP_QUALITY_V2', 'VCP_QUALITY_V3'].includes(candidate?.vcp_quality_model_version)
     },
     vcpExitReasonText(row) {
       const reasons = [

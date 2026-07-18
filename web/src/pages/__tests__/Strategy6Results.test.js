@@ -566,9 +566,13 @@ describe('Strategy6Results', () => {
       vcp_quality_volume_score: 17, vcp_quality_low_score: 13,
       vcp_quality_start_retention_score: 10, vcp_quality_time_score: 5,
       vcp_quality_pivot_score: 5, vcp_quality_breakout_score: 5,
-      vcp_quality_reasons: ['VCP_QUALITY_RANGE_TIGHT', 'VCP_QUALITY_VOLUME_DRY', 'VCP_QUALITY_START_GAIN_RETAINED'],
+      vcp_quality_reasons: [
+        'VCP_QUALITY_RANGE_TIGHT', 'VCP_QUALITY_VOLUME_DRY',
+        'VCP_QUALITY_START_GAIN_RETAINED', 'VCP_QUALITY_LOW_RISING_BONUS',
+        'VCP_QUALITY_CONTRACTING_HIGHS_BONUS',
+      ],
       vcp_quality_warnings: ['VCP_MICRO_CONTRACTION_NOISE'],
-      vcp_quality_model_version: 'VCP_QUALITY_V2',
+      vcp_quality_model_version: 'VCP_QUALITY_V3',
     }] })
 
     const wrapper = mount(Strategy6Results, {
@@ -588,10 +592,12 @@ describe('Strategy6Results', () => {
     expect(detail.text()).toContain('时间结构 5/5')
     expect(detail.text()).toContain('支点收紧 5/10')
     expect(detail.text()).toContain('突破质量 5/5')
-    expect(detail.text()).toContain('VCP_QUALITY_V2')
+    expect(detail.text()).toContain('VCP_QUALITY_V3')
     expect(wrapper.text()).toContain('VCP振幅收缩质量高')
     expect(wrapper.text()).toContain('VCP成交量收缩质量高')
     expect(wrapper.text()).toContain('VCP启动涨幅保持良好')
+    expect(wrapper.text()).toContain('VCP低点平均抬高奖励 +2')
+    expect(wrapper.text()).toContain('VCP高点收敛且低点抬高奖励 +2')
     expect(wrapper.text()).toContain('单日微小收缩，形态分已封顶')
   })
 
