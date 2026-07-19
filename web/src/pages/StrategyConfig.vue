@@ -670,6 +670,452 @@
       </div>
     </section>
 
+    <!-- 策略6：强势 VCP 尾部候选池 -->
+    <section class="section strategy6-section">
+      <h3 class="section-title strategy6-title">策略6 · 强势 VCP 尾部候选池</h3>
+      <p class="section-hint">
+        策略6独立寻找强势启动后的支撑横盘尾部，重点看价稳量干、支撑有效和 RR2 盈亏比。
+      </p>
+
+      <div class="toggle-grid" style="margin-bottom:16px">
+        <label class="toggle-item">
+          <span class="toggle-label">启用策略6</span>
+          <button class="toggle" :class="{ active: config.strategy6?.enabled !== false }"
+            @click="toggleStrategy6('enabled')">{{ config.strategy6?.enabled !== false ? '开' : '关' }}</button>
+        </label>
+        <label class="toggle-item">
+          <span class="toggle-label" title="识别 VCP、杯柄和平台形态">形态识别</span>
+          <button class="toggle" :class="{ active: config.strategy6?.pattern_filter_enabled === true }"
+            @click="toggleStrategy6('pattern_filter_enabled')">{{ config.strategy6?.pattern_filter_enabled === true ? '开' : '关' }}</button>
+        </label>
+        <label class="toggle-item">
+          <span class="toggle-label" title="开启后按过滤模式处理弱势市场和风险市场">市场过滤</span>
+          <button class="toggle" :class="{ active: config.strategy6?.enable_market_filter === true }"
+            @click="toggleStrategy6('enable_market_filter')">{{ config.strategy6?.enable_market_filter === true ? '开' : '关' }}</button>
+        </label>
+      </div>
+
+      <div class="param-grid">
+        <div class="param">
+          <label title="策略6需要 MA250 和长期新高确认">K线拉取天数</label>
+          <input type="number" v-model.number="config.strategy6.kline_days" @input="markDirty" min="260" max="3000" />
+          <span class="default">默认 1100</span>
+        </div>
+        <div class="param">
+          <label title="低于该交易日数时不参与策略6评估">最低交易天数</label>
+          <input type="number" v-model.number="config.strategy6.minimum_trading_days" @input="markDirty" min="260" max="3000" />
+          <span class="default">默认 500</span>
+        </div>
+        <div class="param">
+          <label title="60日均成交额过滤，单位亿元">60日均额 <span class="unit">亿</span></label>
+          <input type="number" v-model.number="config.strategy6.min_avg_amount_60d_yi" @input="markDirty" min="0" max="1000" step="1" />
+          <span class="default">默认 3</span>
+        </div>
+        <div class="param">
+          <label title="30日均成交额过滤，单位亿元">30日均额 <span class="unit">亿</span></label>
+          <input type="number" v-model.number="config.strategy6.min_avg_amount_30d_yi" @input="markDirty" min="0" max="1000" step="1" />
+          <span class="default">默认 5</span>
+        </div>
+        <div class="param">
+          <label title="10日均成交额过滤，单位亿元">10日均额 <span class="unit">亿</span></label>
+          <input type="number" v-model.number="config.strategy6.min_avg_amount_10d_yi" @input="markDirty" min="0" max="1000" step="1" />
+          <span class="default">默认 5</span>
+        </div>
+        <div class="param">
+          <label title="普通强势启动最低单日涨幅">普通启动涨幅</label>
+          <input type="number" v-model.number="config.strategy6.normal_start_return" @input="markDirty" min="0" max="1" step="0.01" />
+          <span class="default">默认 0.07</span>
+        </div>
+        <div class="param">
+          <label title="普通强势启动最低量比">普通启动量比</label>
+          <input type="number" v-model.number="config.strategy6.normal_start_volume_ratio" @input="markDirty" min="0" max="20" step="0.1" />
+          <span class="default">默认 2.0</span>
+        </div>
+        <div class="param">
+          <label title="普通强势启动最低单日成交额，单位亿元">普通启动成交额 <span class="unit">亿</span></label>
+          <input type="number" v-model.number="config.strategy6.normal_start_min_amount_yi" @input="markDirty" min="0" max="1000" step="0.5" />
+          <span class="default">默认 2</span>
+        </div>
+        <div class="param">
+          <label title="启动日成交额在该股此前60日中的最低分位">启动成交额自身分位</label>
+          <input type="number" v-model.number="config.strategy6.normal_start_self_amount_percentile" @input="markDirty" min="0" max="1" step="0.01" />
+          <span class="default">默认 0.90</span>
+        </div>
+        <div class="param">
+          <label title="近20日最高收盘接近120日高点的比例">接近120日高比例</label>
+          <input type="number" v-model.number="config.strategy6.near_120d_high_ratio" @input="markDirty" min="0" max="1" step="0.01" />
+          <span class="default">默认 0.98</span>
+        </div>
+        <div class="param">
+          <label title="严格过滤：弱势市场不允许重点/就绪；降级处理：降为观察；仅调整评分：只扣风险分">市场过滤模式</label>
+          <select data-test="strategy6-market-filter-mode" v-model="config.strategy6.market_filter_mode" @change="markDirty">
+            <option value="strict">严格过滤</option>
+            <option value="downgrade">降级处理</option>
+            <option value="score_only">仅调整评分</option>
+          </select>
+          <span class="default">默认：降级处理</span>
+        </div>
+        <div class="param">
+          <label title="个股20日涨幅相对沪深300的最低超额收益">最低RS20</label>
+          <input type="number" v-model.number="config.strategy6.min_relative_strength_20" @input="markDirty" min="-1" max="1" step="0.01" />
+          <span class="default">默认 0.10</span>
+        </div>
+        <div class="param">
+          <label title="启动事件向前搜索的最大交易日数">启动回看天数</label>
+          <input type="number" v-model.number="config.strategy6.start_lookback_days" @input="markDirty" min="20" max="250" />
+          <span class="default">默认 60</span>
+        </div>
+        <div class="param">
+          <label title="启动后不足该天数只进入‘强势启动已确认’观察状态">最小启动年龄</label>
+          <input data-test="strategy6-start-age-min" type="number" v-model.number="config.strategy6.start_age_min_days" @input="markDirty" min="1" max="20" />
+          <span class="default">默认 5</span>
+        </div>
+        <div class="param">
+          <label title="超过该启动年龄不再视为当前事件">最大启动年龄</label>
+          <input type="number" v-model.number="config.strategy6.start_age_max_days" @input="markDirty" min="5" max="250" />
+          <span class="default">默认 60</span>
+        </div>
+        <div class="param">
+          <label title="启动段之后、尾段之前的最少独立整理天数">最小整理天数</label>
+          <input type="number" v-model.number="config.strategy6.consolidation_min_days" @input="markDirty" min="1" max="40" />
+          <span class="default">默认 5</span>
+        </div>
+        <div class="param">
+          <label title="独立整理段允许的最大天数">最大整理天数</label>
+          <input type="number" v-model.number="config.strategy6.consolidation_max_days" @input="markDirty" min="5" max="120" />
+          <span class="default">默认 40</span>
+        </div>
+        <div class="param">
+          <label title="尾部量价评估窗口，不与前置20日基准重叠">尾段窗口</label>
+          <input type="number" v-model.number="config.strategy6.tail_window_days" @input="markDirty" min="3" max="10" />
+          <span class="default">默认 5</span>
+        </div>
+        <div class="param">
+          <label title="严格过滤直接排除未知形态；降级处理将候选降级；仅调整评分只影响形态分">形态过滤模式</label>
+          <select data-test="strategy6-pattern-mode" v-model="config.strategy6.pattern_filter_mode" @change="markDirty">
+            <option value="strict">严格过滤</option>
+            <option value="downgrade">降级处理</option>
+            <option value="score_only">仅调整评分</option>
+          </select>
+          <span class="default">默认：仅调整评分</span>
+        </div>
+        <div class="param">
+          <label title="信号价至少达到最后收缩上沿的该比例范围；高于突破枢轴的突破由生命周期规则判断">形态距突破枢轴最大下偏</label>
+          <input data-test="strategy6-pattern-pivot-proximity" type="number" v-model.number="config.strategy6.pattern_pivot_proximity_pct" @input="markDirty" min="0.01" max="0.20" step="0.01" />
+          <span class="default">默认 0.05</span>
+        </div>
+        <div class="param">
+          <label title="当前价高于突破枢轴超过该比例时标记为‘涨幅已过度延伸’并排除追高">突破过度延伸比例</label>
+          <input data-test="strategy6-breakout-extended-max" type="number" v-model.number="config.strategy6.breakout_extended_max_pct" @input="markDirty" min="0.01" max="0.30" step="0.01" />
+          <span class="default">默认 0.08</span>
+        </div>
+        <div class="param">
+          <label title="支撑候选价格聚为同一簇的最大价格比例">支撑簇价差</label>
+          <input type="number" v-model.number="config.strategy6.support_cluster_price_pct" @input="markDirty" min="0" max="0.2" step="0.001" />
+          <span class="default">默认 0.015</span>
+        </div>
+        <div class="param">
+          <label title="VCP后一段振幅相对前一段的最大比例">VCP振幅收缩比</label>
+          <input type="number" v-model.number="config.strategy6.vcp_contraction_range_ratio" @input="markDirty" min="0" max="1" step="0.01" />
+          <span class="default">默认 0.90</span>
+        </div>
+        <div class="param">
+          <label title="VCP后一段成交量相对前一段的最大比例">VCP量能收缩比</label>
+          <input type="number" v-model.number="config.strategy6.vcp_contraction_volume_ratio" @input="markDirty" min="0" max="1" step="0.01" />
+          <span class="default">默认 0.90</span>
+        </div>
+        <div class="param">
+          <label title="第一轮完整收缩允许的最大振幅，超过后不视为健康VCP第一轮">VCP第一轮最大振幅</label>
+          <input data-test="strategy6-vcp-first-max-range" type="number" v-model.number="config.strategy6.vcp_first_contraction_max_range" @input="markDirty" min="0.08" max="0.50" step="0.01" />
+          <span class="default">默认 0.32</span>
+        </div>
+        <div class="param">
+          <label title="低点后累计反弹至少达到该比例，才可能确认完整一轮">VCP有效反弹最小涨幅</label>
+          <input data-test="strategy6-vcp-rebound-min" type="number" v-model.number="config.strategy6.vcp_rebound_min_pct" @input="markDirty" min="0.01" max="0.20" step="0.01" />
+          <span class="default">默认 0.03</span>
+        </div>
+        <div class="param">
+          <label title="普通反弹峰值至少需要经过的可见交易日，强势直接突破不受此限制">VCP反弹确认交易日</label>
+          <input data-test="strategy6-vcp-rebound-confirm-days" type="number" v-model.number="config.strategy6.vcp_rebound_confirm_days" @input="markDirty" min="2" max="10" step="1" />
+          <span class="default">默认 2</span>
+        </div>
+        <div class="param">
+          <label title="后轮低点低于前轮低点且低于该比例时输出小幅下移风险提示">VCP低点下移提示比例</label>
+          <input data-test="strategy6-vcp-low-warning-ratio" type="number" v-model.number="config.strategy6.vcp_low_warning_ratio" @input="markDirty" min="0.97" max="1" step="0.01" />
+          <span class="default">默认 0.99</span>
+        </div>
+        <div class="param">
+          <label title="历史正式候选日到当前VCP第一轮起点的收盘跌幅超过该比例时，旧资格失效">历史候选至VCP起点最大跌幅</label>
+          <input data-test="strategy6-vcp-history-max-start-loss" type="number" v-model.number="config.strategy6.vcp_history_max_start_loss_pct" @input="markDirty" min="0.01" max="0.50" step="0.01" />
+          <span class="default">默认 0.15</span>
+        </div>
+        <div class="param">
+          <label title="历史正式候选日到当前VCP第一轮起点的滚动最高收盘最大回撤超过该比例时，旧资格失效">历史资格最大回撤</label>
+          <input data-test="strategy6-vcp-history-max-drawdown" type="number" v-model.number="config.strategy6.vcp_history_max_drawdown_pct" @input="markDirty" min="0.01" max="0.50" step="0.01" />
+          <span class="default">默认 0.20</span>
+        </div>
+        <div class="param">
+          <label title="VCP起点连续满足收盘低于MA20且MA20低于MA50达到该天数时，旧资格失效">历史资格空头失效天数</label>
+          <input data-test="strategy6-vcp-history-bearish-days" type="number" v-model.number="config.strategy6.vcp_history_bearish_trend_days" @input="markDirty" min="1" max="20" step="1" />
+          <span class="default">默认 5</span>
+        </div>
+        <div class="param">
+          <label title="杯柄形态允许的杯体最小深度">杯体最小深度</label>
+          <input type="number" v-model.number="config.strategy6.cup_depth_min" @input="markDirty" min="0" max="1" step="0.01" />
+          <span class="default">默认 0.12</span>
+        </div>
+        <div class="param">
+          <label title="杯柄形态允许的杯体最大深度">杯体最大深度</label>
+          <input type="number" v-model.number="config.strategy6.cup_depth_max" @input="markDirty" min="0" max="1" step="0.01" />
+          <span class="default">默认 0.35</span>
+        </div>
+        <div class="param">
+          <label title="平台形态允许的最大价格振幅">平台最大振幅</label>
+          <input type="number" v-model.number="config.strategy6.platform_max_range" @input="markDirty" min="0" max="1" step="0.01" />
+          <span class="default">默认 0.12</span>
+        </div>
+        <div class="param">
+          <label title="支撑簇合并时的ATR容差倍数">支撑簇 ATR 倍数</label>
+          <input type="number" v-model.number="config.strategy6.support_cluster_atr_multiplier" @input="markDirty" min="0" max="10" step="0.1" />
+          <span class="default">默认 0.5</span>
+        </div>
+        <div class="param">
+          <label title="支撑区最小宽度占当前价比例">支撑区价格宽度</label>
+          <input type="number" v-model.number="config.strategy6.support_zone_price_pct" @input="markDirty" min="0" max="0.2" step="0.001" />
+          <span class="default">默认 0.01</span>
+        </div>
+        <div class="param">
+          <label title="支撑区宽度的ATR倍数">支撑区 ATR 倍数</label>
+          <input type="number" v-model.number="config.strategy6.support_zone_atr_multiplier" @input="markDirty" min="0" max="10" step="0.1" />
+          <span class="default">默认 0.3</span>
+        </div>
+        <div class="param">
+          <label title="统计支撑测试次数的交易日窗口">支撑测试回看</label>
+          <input type="number" v-model.number="config.strategy6.support_test_lookback" @input="markDirty" min="5" max="40" />
+          <span class="default">默认 10</span>
+        </div>
+        <div class="param">
+          <label title="止损位低于关键支撑的最小比例缓冲">止损支撑缓冲</label>
+          <input type="number" v-model.number="config.strategy6.stop_key_support_pct" @input="markDirty" min="0" max="0.2" step="0.01" />
+          <span class="default">默认 0.03</span>
+        </div>
+        <div class="param">
+          <label title="止损缓冲取关键支撑比例和ATR缓冲的较大值">止损 ATR 倍数</label>
+          <input data-test="strategy6-stop-atr-multiplier" type="number" v-model.number="config.strategy6.stop_atr_multiplier" @input="markDirty" min="0" max="10" step="0.1" />
+          <span class="default">默认 0.8</span>
+        </div>
+        <div class="param">
+          <label title="客观第二目标相对现价的最大上限">客观目标2上限</label>
+          <input type="number" v-model.number="config.strategy6.target_2_cap_pct" @input="markDirty" min="0" max="2" step="0.01" />
+          <span class="default">默认 0.35</span>
+        </div>
+        <div class="param">
+          <label title="交易计划自信号日起可执行的交易日数">买入区有效天数</label>
+          <input type="number" v-model.number="config.strategy6.buy_zone_valid_days" @input="markDirty" min="1" max="10" />
+          <span class="default">默认 3</span>
+        </div>
+        <div class="param">
+          <label title="同一启动事件在候选池中允许观察的最大交易日数">最大观察天数</label>
+          <input data-test="strategy6-max-watch-days" type="number" v-model.number="config.strategy6.max_watch_days" @input="markDirty" min="1" max="60" />
+          <span class="default">默认 10</span>
+        </div>
+        <div class="param">
+          <label title="正常到期后进入冷却的交易日数">到期冷却天数</label>
+          <input type="number" v-model.number="config.strategy6.expired_cooldown_days" @input="markDirty" min="1" max="30" />
+          <span class="default">默认 5</span>
+        </div>
+        <div class="param">
+          <label title="形态失效后进入冷却的交易日数">失败冷却天数</label>
+          <input type="number" v-model.number="config.strategy6.failed_cooldown_days" @input="markDirty" min="1" max="60" />
+          <span class="default">默认 10</span>
+        </div>
+        <div class="param">
+          <label title="尾部5日收盘波动上限">尾部收盘波动</label>
+          <input type="number" v-model.number="config.strategy6.tail_close_range_5" @input="markDirty" min="0" max="1" step="0.01" />
+          <span class="default">默认 0.08</span>
+        </div>
+        <div class="param">
+          <label title="尾部量干门槛，V5/V20 不高于该值">尾部 V5/V20</label>
+          <input type="number" v-model.number="config.strategy6.tail_volume_ratio_5_20" @input="markDirty" min="0" max="2" step="0.01" />
+          <span class="default">默认 0.75</span>
+        </div>
+        <div class="param">
+          <label title="强量干门槛，用于就绪候选">强量干 V5/V20</label>
+          <input type="number" v-model.number="config.strategy6.tail_strong_volume_ratio_5_20" @input="markDirty" min="0" max="2" step="0.01" />
+          <span class="default">默认 0.60</span>
+        </div>
+        <div class="param">
+          <label title="放量下跌一票否决的跌幅">放量下跌跌幅</label>
+          <input type="number" v-model.number="config.strategy6.big_down_return" @input="markDirty" min="-1" max="0" step="0.01" />
+          <span class="default">默认 -0.07</span>
+        </div>
+        <div class="param">
+          <label title="观察候选最低 RR2">观察最低 RR2</label>
+          <input type="number" v-model.number="config.strategy6.rr2_min_watch" @input="markDirty" min="0" max="20" step="0.1" />
+          <span class="default">默认 1.5</span>
+        </div>
+        <div class="param">
+          <label title="重点候选最低 RR2">重点最低 RR2</label>
+          <input type="number" v-model.number="config.strategy6.rr2_min_key" @input="markDirty" min="0" max="20" step="0.1" />
+          <span class="default">默认 2.0</span>
+        </div>
+        <div class="param">
+          <label title="就绪候选最低 RR2">就绪最低 RR2</label>
+          <input type="number" v-model.number="config.strategy6.rr2_min_ready" @input="markDirty" min="0" max="20" step="0.1" />
+          <span class="default">默认 2.5</span>
+        </div>
+        <div class="param">
+          <label title="就绪候选最低总分">就绪最低分</label>
+          <input type="number" v-model.number="config.strategy6.ready_min_score" @input="markDirty" min="0" max="100" step="1" />
+          <span class="default">默认 85</span>
+        </div>
+        <div class="param">
+          <label title="重点候选最低总分">重点最低分</label>
+          <input type="number" v-model.number="config.strategy6.key_min_score" @input="markDirty" min="0" max="100" step="1" />
+          <span class="default">默认 75</span>
+        </div>
+        <div class="param">
+          <label title="观察候选最低总分">观察最低分</label>
+          <input type="number" v-model.number="config.strategy6.watch_min_score" @input="markDirty" min="0" max="100" step="1" />
+          <span class="default">默认 60</span>
+        </div>
+      </div>
+
+      <h4 class="subsection-title">稳定箱体尾部路径</h4>
+      <div class="toggle-row">
+        <div class="toggle-item">
+          <span>启用稳定箱体路径</span>
+          <button data-test="strategy6-box-tail-enabled" class="toggle" :class="{ active: config.strategy6.box_tail.enabled }"
+            @click="toggleStrategy6BoxTail('enabled')">{{ config.strategy6.box_tail.enabled ? '开' : '关' }}</button>
+        </div>
+        <div class="toggle-item">
+          <span>K线紧密排列确认</span>
+          <button data-test="strategy6-compact-enabled" class="toggle" :class="{ active: config.strategy6.box_tail.compact_kline.enabled }"
+            @click="toggleStrategy6CompactKline('enabled')">{{ config.strategy6.box_tail.compact_kline.enabled ? '开' : '关' }}</button>
+        </div>
+      </div>
+      <div class="param-grid">
+        <div class="param"><label>箱体最短天数</label><input data-test="strategy6-box-min-days" type="number" v-model.number="config.strategy6.box_tail.min_box_days" @input="markDirty" min="5" max="30" /><span class="default">默认 5</span></div>
+        <div class="param"><label>箱体最长天数</label><input data-test="strategy6-box-max-days" type="number" v-model.number="config.strategy6.box_tail.max_box_days" @input="markDirty" min="5" max="30" /><span class="default">默认 30</span></div>
+        <div class="param"><label>优质箱体宽度</label><input type="number" v-model.number="config.strategy6.box_tail.premium_box_width_max" @input="markDirty" min="0" max="1" step="0.01" /><span class="default">默认 0.12</span></div>
+        <div class="param"><label>普通箱体宽度</label><input data-test="strategy6-box-width-normal" type="number" v-model.number="config.strategy6.box_tail.normal_box_width_max" @input="markDirty" min="0" max="1" step="0.01" /><span class="default">默认 0.18</span></div>
+        <div class="param"><label>下沿测试向上容差</label><input type="number" v-model.number="config.strategy6.box_tail.low_test_tolerance_up" @input="markDirty" min="0" max="1" step="0.01" /><span class="default">默认 0.02</span></div>
+        <div class="param"><label>测试收盘向下容差</label><input type="number" v-model.number="config.strategy6.box_tail.low_test_close_tolerance_down" @input="markDirty" min="0" max="1" step="0.01" /><span class="default">默认 0.02</span></div>
+        <div class="param"><label>有效跌破容差</label><input type="number" v-model.number="config.strategy6.box_tail.broken_close_tolerance" @input="markDirty" min="0" max="1" step="0.01" /><span class="default">默认 0.03</span></div>
+        <div class="param"><label>最少下沿测试</label><input type="number" v-model.number="config.strategy6.box_tail.min_box_low_test_count" @input="markDirty" min="1" max="10" /><span class="default">默认 2</span></div>
+        <div class="param"><label>最低中枢变化</label><input type="number" v-model.number="config.strategy6.box_tail.min_center_shift" @input="markDirty" min="-1" max="1" step="0.01" /><span class="default">默认 -0.03</span></div>
+        <div class="param"><label>优质中枢变化</label><input type="number" v-model.number="config.strategy6.box_tail.premium_center_shift" @input="markDirty" min="-1" max="1" step="0.01" /><span class="default">默认 0</span></div>
+        <div class="param"><label>最大箱体量缩比</label><input type="number" v-model.number="config.strategy6.box_tail.max_volume_contraction_ratio" @input="markDirty" min="0" max="2" step="0.01" /><span class="default">默认 0.85</span></div>
+        <div class="param"><label>优质箱体量缩比</label><input type="number" v-model.number="config.strategy6.box_tail.premium_volume_contraction_ratio" @input="markDirty" min="0" max="2" step="0.01" /><span class="default">默认 0.70</span></div>
+        <div class="param"><label>当前收盘下沿容差</label><input type="number" v-model.number="config.strategy6.box_tail.current_close_low_tolerance" @input="markDirty" min="0" max="1" step="0.01" /><span class="default">默认 0.03</span></div>
+        <div class="param"><label>当前收盘上沿容差</label><input type="number" v-model.number="config.strategy6.box_tail.current_close_high_tolerance" @input="markDirty" min="0" max="1" step="0.01" /><span class="default">默认 0.03</span></div>
+        <div class="param"><label>箱体尾部最大量比</label><input type="number" v-model.number="config.strategy6.box_tail.tail_volume_ratio_max" @input="markDirty" min="0" max="2" step="0.01" /><span class="default">默认 0.75</span></div>
+        <div class="param"><label>优质尾部最大量比</label><input type="number" v-model.number="config.strategy6.box_tail.premium_tail_volume_ratio_max" @input="markDirty" min="0" max="2" step="0.01" /><span class="default">默认 0.60</span></div>
+        <div class="param"><label>支撑就绪位置</label><input type="number" v-model.number="config.strategy6.box_tail.support_ready_position_max" @input="markDirty" min="0" max="1" step="0.01" /><span class="default">默认 0.40</span></div>
+        <div class="param"><label>突破就绪位置</label><input type="number" v-model.number="config.strategy6.box_tail.breakout_ready_position_min" @input="markDirty" min="0" max="1" step="0.01" /><span class="default">默认 0.75</span></div>
+      </div>
+
+      <h4 class="subsection-title">K线紧密排列参数</h4>
+      <div class="param-grid">
+        <div class="param"><label>紧密排列窗口</label><input data-test="strategy6-compact-window" type="number" v-model.number="config.strategy6.box_tail.compact_kline.window_days" @input="markDirty" min="3" max="10" /><span class="default">默认 5</span></div>
+        <div class="param"><label>平均实体上限</label><input type="number" v-model.number="config.strategy6.box_tail.compact_kline.avg_body_ratio_max" @input="markDirty" min="0" max="1" step="0.001" /><span class="default">默认 0.025</span></div>
+        <div class="param"><label>优质平均实体</label><input type="number" v-model.number="config.strategy6.box_tail.compact_kline.premium_avg_body_ratio_max" @input="markDirty" min="0" max="1" step="0.001" /><span class="default">默认 0.018</span></div>
+        <div class="param"><label>最大实体上限</label><input type="number" v-model.number="config.strategy6.box_tail.compact_kline.max_body_ratio_max" @input="markDirty" min="0" max="1" step="0.001" /><span class="default">默认 0.04</span></div>
+        <div class="param"><label>收盘集中区间</label><input type="number" v-model.number="config.strategy6.box_tail.compact_kline.close_range_max" @input="markDirty" min="0" max="1" step="0.001" /><span class="default">默认 0.05</span></div>
+        <div class="param"><label>优质收盘区间</label><input type="number" v-model.number="config.strategy6.box_tail.compact_kline.premium_close_range_max" @input="markDirty" min="0" max="1" step="0.001" /><span class="default">默认 0.03</span></div>
+        <div class="param"><label>最小K线重叠比</label><input type="number" v-model.number="config.strategy6.box_tail.compact_kline.min_overlap_ratio" @input="markDirty" min="0" max="1" step="0.01" /><span class="default">默认 0.50</span></div>
+        <div class="param"><label>优质K线重叠比</label><input type="number" v-model.number="config.strategy6.box_tail.compact_kline.premium_overlap_ratio" @input="markDirty" min="0" max="1" step="0.01" /><span class="default">默认 0.65</span></div>
+        <div class="param"><label>最少重叠组数</label><input type="number" v-model.number="config.strategy6.box_tail.compact_kline.min_overlap_pair_count" @input="markDirty" min="1" max="9" /><span class="default">默认 3</span></div>
+        <div class="param"><label>最大跳空比例</label><input type="number" v-model.number="config.strategy6.box_tail.compact_kline.max_gap_ratio" @input="markDirty" min="0" max="1" step="0.01" /><span class="default">默认 0.03</span></div>
+        <div class="param"><label>ATR收缩比上限</label><input type="number" v-model.number="config.strategy6.box_tail.compact_kline.atr_contraction_ratio_max" @input="markDirty" min="0" max="2" step="0.01" /><span class="default">默认 0.80</span></div>
+        <div class="param"><label>优质ATR收缩比</label><input type="number" v-model.number="config.strategy6.box_tail.compact_kline.premium_atr_contraction_ratio_max" @input="markDirty" min="0" max="2" step="0.01" /><span class="default">默认 0.65</span></div>
+      </div>
+
+      <template v-if="config.strategy6.brooks_tail">
+        <h4 class="subsection-title">Brooks价格行为第三路径</h4>
+        <div class="toggle-row">
+          <div class="toggle-item">
+            <span>启用Brooks独立路径</span>
+            <button data-test="strategy6-brooks-enabled" class="toggle" :class="{ active: config.strategy6.brooks_tail.enabled }"
+              @click="toggleStrategy6Brooks(null, 'enabled')">{{ config.strategy6.brooks_tail.enabled ? '开' : '关' }}</button>
+          </div>
+          <div class="toggle-item">
+            <span>B级启动仅观察</span>
+            <button class="toggle" :class="{ active: config.strategy6.brooks_tail.context.allow_grade_b_watch_only }"
+              @click="toggleStrategy6Brooks('context', 'allow_grade_b_watch_only')">{{ config.strategy6.brooks_tail.context.allow_grade_b_watch_only ? '开' : '关' }}</button>
+          </div>
+        </div>
+
+        <h4 class="subsection-title">上涨背景</h4>
+        <div class="param-grid">
+          <div class="param"><label>MA20斜率窗口</label><input data-test="strategy6-brooks-context-window" type="number" v-model.number="config.strategy6.brooks_tail.context.ma20_slope_window_days" @input="markDirty" min="2" max="60" /><span class="default">默认 10</span></div>
+          <div class="param"><label>高低点序列窗口</label><input type="number" v-model.number="config.strategy6.brooks_tail.context.lower_high_low_window_days" @input="markDirty" min="5" max="60" /><span class="default">默认 10</span></div>
+          <div class="param"><label>最大下移序列数</label><input type="number" v-model.number="config.strategy6.brooks_tail.context.max_lower_high_low_sequence" @input="markDirty" min="0" max="10" /><span class="default">默认 2</span></div>
+          <div class="param"><label>跌破MA20 ATR容差</label><input type="number" v-model.number="config.strategy6.brooks_tail.context.close_below_ma20_atr_tolerance" @input="markDirty" min="0" max="3" step="0.1" /><span class="default">默认 0.5</span></div>
+        </div>
+
+        <h4 class="subsection-title">卖压衰竭</h4>
+        <div class="param-grid">
+          <div class="param"><label>卖压观察窗口</label><input data-test="strategy6-brooks-selling-window" type="number" v-model.number="config.strategy6.brooks_tail.selling_pressure.window_days" @input="markDirty" min="3" max="30" /><span class="default">默认 7</span></div>
+          <div class="param"><label>最多强空方K线</label><input type="number" v-model.number="config.strategy6.brooks_tail.selling_pressure.max_strong_bear_bar_count" @input="markDirty" min="0" max="30" /><span class="default">默认 1</span></div>
+          <div class="param"><label>最多空方跟进</label><input type="number" v-model.number="config.strategy6.brooks_tail.selling_pressure.max_bear_follow_through_count" @input="markDirty" min="0" max="30" /><span class="default">默认 1</span></div>
+          <div class="param"><label>最多连续阴线</label><input type="number" v-model.number="config.strategy6.brooks_tail.selling_pressure.max_consecutive_bear_bars" @input="markDirty" min="0" max="30" /><span class="default">默认 2</span></div>
+        </div>
+
+        <h4 class="subsection-title">价格稳定与量干</h4>
+        <div class="param-grid">
+          <div class="param"><label>稳定判断窗口</label><input data-test="strategy6-brooks-stability-window" type="number" v-model.number="config.strategy6.brooks_tail.price_stability.compact_window_days" @input="markDirty" min="3" max="10" /><span class="default">默认 5</span></div>
+          <div class="param"><label>收盘区间上限</label><input type="number" v-model.number="config.strategy6.brooks_tail.price_stability.close_range_max" @input="markDirty" min="0" max="2" step="0.01" /><span class="default">默认 0.08</span></div>
+          <div class="param"><label>优质收盘区间</label><input type="number" v-model.number="config.strategy6.brooks_tail.price_stability.premium_close_range_max" @input="markDirty" min="0" max="2" step="0.01" /><span class="default">默认 0.05</span></div>
+          <div class="param"><label>尾部量比上限</label><input type="number" v-model.number="config.strategy6.brooks_tail.volume_dry.tail_volume_ratio_max" @input="markDirty" min="0.01" max="2" step="0.01" /><span class="default">默认 0.75</span></div>
+          <div class="param"><label>优质量干比</label><input data-test="strategy6-brooks-volume-premium" type="number" v-model.number="config.strategy6.brooks_tail.volume_dry.premium_tail_volume_ratio_max" @input="markDirty" min="0.01" max="2" step="0.01" /><span class="default">默认 0.60</span></div>
+          <div class="param"><label>量能基准窗口</label><input type="number" v-model.number="config.strategy6.brooks_tail.volume_dry.baseline_window_days" @input="markDirty" min="10" max="60" /><span class="default">默认 20</span></div>
+        </div>
+
+        <h4 class="subsection-title">结构识别</h4>
+        <div class="toggle-row">
+          <div class="toggle-item"><span>二次入场识别</span><button class="toggle" :class="{ active: config.strategy6.brooks_tail.second_entry.enabled }" @click="toggleStrategy6Brooks('second_entry', 'enabled')">{{ config.strategy6.brooks_tail.second_entry.enabled ? '开' : '关' }}</button></div>
+          <div class="toggle-item"><span>假跌破识别</span><button class="toggle" :class="{ active: config.strategy6.brooks_tail.failed_breakout.enabled }" @click="toggleStrategy6Brooks('failed_breakout', 'enabled')">{{ config.strategy6.brooks_tail.failed_breakout.enabled ? '开' : '关' }}</button></div>
+          <div class="toggle-item"><span>紧密结构分类</span><button class="toggle" :class="{ active: config.strategy6.brooks_tail.compact_structure.enabled }" @click="toggleStrategy6Brooks('compact_structure', 'enabled')">{{ config.strategy6.brooks_tail.compact_structure.enabled ? '开' : '关' }}</button></div>
+        </div>
+        <div class="param-grid">
+          <div class="param"><label>二次低点最短间隔</label><input type="number" v-model.number="config.strategy6.brooks_tail.second_entry.min_separation_days" @input="markDirty" min="1" max="15" /><span class="default">默认 2</span></div>
+          <div class="param"><label>二次低点最长间隔</label><input type="number" v-model.number="config.strategy6.brooks_tail.second_entry.max_separation_days" @input="markDirty" min="1" max="30" /><span class="default">默认 15</span></div>
+          <div class="param"><label>假跌破收回天数</label><input type="number" v-model.number="config.strategy6.brooks_tail.failed_breakout.recovery_days" @input="markDirty" min="1" max="5" /><span class="default">默认 2</span></div>
+          <div class="param"><label>紧密区下界</label><input type="number" v-model.number="config.strategy6.brooks_tail.compact_structure.middle_zone_low" @input="markDirty" min="0" max="1" step="0.05" /><span class="default">默认 0.35</span></div>
+          <div class="param"><label>紧密区上界</label><input type="number" v-model.number="config.strategy6.brooks_tail.compact_structure.middle_zone_high" @input="markDirty" min="0" max="1" step="0.05" /><span class="default">默认 0.70</span></div>
+          <div class="param"><label>最多方向变化</label><input type="number" v-model.number="config.strategy6.brooks_tail.compact_structure.max_direction_changes" @input="markDirty" min="0" max="10" /><span class="default">默认 3</span></div>
+          <div class="param"><label>最多长影线K线</label><input type="number" v-model.number="config.strategy6.brooks_tail.compact_structure.max_long_shadow_bar_count" @input="markDirty" min="0" max="10" /><span class="default">默认 2</span></div>
+        </div>
+
+        <h4 class="subsection-title">交易触发</h4>
+        <div class="toggle-row">
+          <div class="toggle-item"><span>启用跨日触发确认</span><button class="toggle" :class="{ active: config.strategy6.brooks_tail.trade_trigger.enabled }" @click="toggleStrategy6Brooks('trade_trigger', 'enabled')">{{ config.strategy6.brooks_tail.trade_trigger.enabled ? '开' : '关' }}</button></div>
+        </div>
+        <div class="param-grid">
+          <div class="param"><label>触发有效交易日</label><input data-test="strategy6-brooks-trigger-days" type="number" v-model.number="config.strategy6.brooks_tail.trade_trigger.trigger_valid_days" @input="markDirty" min="1" max="10" /><span class="default">默认 3</span></div>
+          <div class="param"><label>最大触发距离 ATR</label><input type="number" v-model.number="config.strategy6.brooks_tail.trade_trigger.max_trigger_distance_atr" @input="markDirty" min="0" max="5" step="0.1" /><span class="default">默认 1.5</span></div>
+          <div class="param"><label>突破跟进天数</label><input type="number" v-model.number="config.strategy6.brooks_tail.trade_trigger.breakout_follow_through_days" @input="markDirty" min="1" max="5" /><span class="default">默认 2</span></div>
+        </div>
+
+        <h4 class="subsection-title">Brooks评分</h4>
+        <div class="param-grid">
+          <div class="param"><label>背景分</label><input type="number" v-model.number="config.strategy6.brooks_tail.scoring.context_points" @input="markDirty" min="0" max="20" /><span class="default">默认 4</span></div>
+          <div class="param"><label>卖压衰竭分</label><input type="number" v-model.number="config.strategy6.brooks_tail.scoring.selling_pressure_points" @input="markDirty" min="0" max="20" /><span class="default">默认 6</span></div>
+          <div class="param"><label>价格稳定分</label><input type="number" v-model.number="config.strategy6.brooks_tail.scoring.price_stability_points" @input="markDirty" min="0" max="20" /><span class="default">默认 4</span></div>
+          <div class="param"><label>量干分</label><input type="number" v-model.number="config.strategy6.brooks_tail.scoring.volume_dry_points" @input="markDirty" min="0" max="20" /><span class="default">默认 2</span></div>
+          <div class="param"><label>结构分</label><input type="number" v-model.number="config.strategy6.brooks_tail.scoring.setup_points" @input="markDirty" min="0" max="20" /><span class="default">默认 4</span></div>
+          <div class="param"><label>Brooks通过分</label><input data-test="strategy6-brooks-pass-score" type="number" v-model.number="config.strategy6.brooks_tail.scoring.pass_score_min" @input="markDirty" min="0" max="20" /><span class="default">默认 14</span></div>
+          <div class="param"><label>Brooks优质分</label><input data-test="strategy6-brooks-premium-score" type="number" v-model.number="config.strategy6.brooks_tail.scoring.premium_score_min" @input="markDirty" min="0" max="20" /><span class="default">默认 17</span></div>
+        </div>
+      </template>
+      <div v-else class="info-msg">Brooks配置由后端默认配置补全后显示。</div>
+
+      <div class="info-msg strategy6-info">
+        ⓘ 策略6保留真实市场过滤，并在结果页展示扫描时使用的指数快照；板块过滤已移除，不再参与降级或扣分。
+      </div>
+    </section>
+
     <!-- Actions -->
     <div class="actions-bar">
       <div v-if="saved" class="saved-msg">✓ 配置已保存</div>
@@ -852,6 +1298,126 @@ const defaultStrategy5Config = {
   volume_dry_direction_efficiency: 0.35,
 }
 
+const defaultStrategy6BoxTailConfig = {
+  enabled: true,
+  min_box_days: 5,
+  max_box_days: 30,
+  premium_box_width_max: 0.12,
+  normal_box_width_max: 0.18,
+  low_test_tolerance_up: 0.02,
+  low_test_close_tolerance_down: 0.02,
+  broken_close_tolerance: 0.03,
+  min_box_low_test_count: 2,
+  min_center_shift: -0.03,
+  premium_center_shift: 0.0,
+  max_volume_contraction_ratio: 0.85,
+  premium_volume_contraction_ratio: 0.70,
+  current_close_low_tolerance: 0.03,
+  current_close_high_tolerance: 0.03,
+  tail_volume_ratio_max: 0.75,
+  premium_tail_volume_ratio_max: 0.60,
+  support_ready_position_max: 0.40,
+  breakout_ready_position_min: 0.75,
+  compact_kline: {
+    enabled: true,
+    window_days: 5,
+    avg_body_ratio_max: 0.025,
+    premium_avg_body_ratio_max: 0.018,
+    max_body_ratio_max: 0.04,
+    close_range_max: 0.05,
+    premium_close_range_max: 0.03,
+    min_overlap_ratio: 0.50,
+    premium_overlap_ratio: 0.65,
+    min_overlap_pair_count: 3,
+    max_gap_ratio: 0.03,
+    atr_contraction_ratio_max: 0.80,
+    premium_atr_contraction_ratio_max: 0.65,
+  },
+}
+
+const defaultStrategy6Config = {
+  enabled: true,
+  kline_days: 1100,
+  minimum_trading_days: 500,
+  min_avg_amount_60d_yi: 3,
+  min_avg_amount_30d_yi: 5,
+  min_avg_amount_10d_yi: 5,
+  amount10_vs_30_min_ratio: 0.8,
+  enable_market_filter: true,
+  market_filter_mode: 'downgrade',
+  start_lookback_days: 60,
+  start_age_min_days: 5,
+  start_age_max_days: 60,
+  consolidation_min_days: 5,
+  consolidation_max_days: 40,
+  tail_window_days: 5,
+  pattern_filter_enabled: true,
+  pattern_filter_mode: 'score_only',
+  pattern_pivot_proximity_pct: 0.05,
+  breakout_extended_max_pct: 0.08,
+  vcp_contraction_range_ratio: 0.90,
+  vcp_contraction_volume_ratio: 0.90,
+  vcp_min_first_range: 0.08,
+  vcp_first_contraction_max_range: 0.32,
+  vcp_rebound_min_pct: 0.03,
+  vcp_rebound_confirm_days: 2,
+  vcp_low_warning_ratio: 0.99,
+  vcp_history_max_start_loss_pct: 0.15,
+  vcp_history_max_drawdown_pct: 0.20,
+  vcp_history_bearish_trend_days: 5,
+  cup_depth_min: 0.12,
+  cup_depth_max: 0.35,
+  platform_max_range: 0.12,
+  support_cluster_price_pct: 0.015,
+  support_cluster_atr_multiplier: 0.50,
+  support_zone_price_pct: 0.01,
+  support_zone_atr_multiplier: 0.30,
+  support_test_lookback: 10,
+  normal_start_return: 0.07,
+  normal_start_volume_ratio: 2.0,
+  normal_start_close_position: 0.65,
+  normal_start_min_amount_yi: 2,
+  normal_start_self_amount_percentile: 0.90,
+  limit_up_volume_ratio: 1.5,
+  low_volume_limit_up_min_ratio: 0.6,
+  near_120d_high_ratio: 0.98,
+  min_relative_strength_20: 0.10,
+  max_amp_5d_s: 0.25,
+  max_amp_10d_s: 0.45,
+  max_pullback_20d_s: -0.30,
+  max_amp_5d_a: 0.22,
+  max_amp_10d_a: 0.40,
+  max_pullback_20d_a: -0.26,
+  max_amp_5d_b: 0.18,
+  max_amp_10d_b: 0.35,
+  max_pullback_20d_b: -0.22,
+  absolute_max_amp_10d: 0.50,
+  absolute_max_pullback_20d: -0.35,
+  ma50_min_ratio: 0.92,
+  tail_close_range_5: 0.08,
+  tail_volume_ratio_5_20: 0.75,
+  tail_strong_volume_ratio_5_20: 0.60,
+  tail_min_return_5: -0.06,
+  tail_min_return_3: -0.04,
+  big_down_return: -0.07,
+  big_down_volume_ratio: 1.5,
+  rr2_min_watch: 1.5,
+  rr2_min_key: 2.0,
+  rr2_min_ready: 2.5,
+  target_2_cap_pct: 0.35,
+  stop_key_support_pct: 0.03,
+  stop_atr_multiplier: 0.8,
+  buy_zone_valid_days: 3,
+  max_watch_days: 10,
+  expired_cooldown_days: 5,
+  failed_cooldown_days: 10,
+  ready_min_score: 85,
+  key_min_score: 75,
+  watch_min_score: 60,
+  box_tail: defaultStrategy6BoxTailConfig,
+  brooks_tail: null,
+}
+
 const config = reactive({
   market: {},
   liquidity: {},
@@ -880,6 +1446,7 @@ const config = reactive({
   strategy3: { ...defaultStrategy3Config },
   strategy4: { ...defaultStrategy4Config },
   strategy5: { ...defaultStrategy5Config },
+  strategy6: sanitizeStrategy6Config({}),
 })
 
 const dirty = ref(false)
@@ -1028,9 +1595,36 @@ function ensureStrategy5Config() {
   config.strategy5 = sanitizeStrategy5Config(config.strategy5 || {})
 }
 
+function ensureStrategy6Config() {
+  config.strategy6 = sanitizeStrategy6Config(config.strategy6 || {})
+}
+
 function sanitizeStrategy5Config(value) {
   const { minimum_kline_days, ...rest } = value || {}
   return { ...defaultStrategy5Config, ...rest }
+}
+
+function sanitizeStrategy6Config(value) {
+  const known = Object.fromEntries(
+    Object.entries(value || {}).filter(([key]) => Object.prototype.hasOwnProperty.call(defaultStrategy6Config, key))
+  )
+  const boxTail = known.box_tail || {}
+  const brooksTail = known.brooks_tail && typeof known.brooks_tail === 'object'
+    ? JSON.parse(JSON.stringify(known.brooks_tail))
+    : null
+  return {
+    ...defaultStrategy6Config,
+    ...known,
+    box_tail: {
+      ...defaultStrategy6BoxTailConfig,
+      ...boxTail,
+      compact_kline: {
+        ...defaultStrategy6BoxTailConfig.compact_kline,
+        ...(boxTail.compact_kline || {}),
+      },
+    },
+    brooks_tail: brooksTail,
+  }
 }
 
 function mergeStrategy4Config(value) {
@@ -1129,6 +1723,33 @@ function toggleStrategy4TopicIndex(key) {
 function toggleStrategy5(key) {
   ensureStrategy5Config()
   config.strategy5[key] = !config.strategy5[key]
+  markDirty()
+}
+
+function toggleStrategy6(key) {
+  ensureStrategy6Config()
+  config.strategy6[key] = !config.strategy6[key]
+  markDirty()
+}
+
+function toggleStrategy6BoxTail(key) {
+  ensureStrategy6Config()
+  config.strategy6.box_tail[key] = !config.strategy6.box_tail[key]
+  markDirty()
+}
+
+function toggleStrategy6CompactKline(key) {
+  ensureStrategy6Config()
+  config.strategy6.box_tail.compact_kline[key] = !config.strategy6.box_tail.compact_kline[key]
+  markDirty()
+}
+
+function toggleStrategy6Brooks(section, key) {
+  ensureStrategy6Config()
+  const brooks = config.strategy6.brooks_tail
+  if (!brooks) return
+  const target = section ? brooks[section] : brooks
+  target[key] = !target[key]
   markDirty()
 }
 
@@ -1290,6 +1911,123 @@ function validate() {
   if (s5.trade_total_score_weight < 0 || s5.trade_total_score_weight > 2) errors.push('策略5: 总分权重需在 0-2')
   if (s5.trade_short_strength_weight < 0 || s5.trade_short_strength_weight > 5) errors.push('策略5: 短线强度权重需在 0-5')
 
+  // Strategy6 validation
+  ensureStrategy6Config()
+  const s6 = config.strategy6 || {}
+  if (s6.kline_days < 260 || s6.kline_days > 3000) errors.push('策略6: K线拉取天数需在 260-3000')
+  if (s6.minimum_trading_days < 260 || s6.minimum_trading_days > s6.kline_days) errors.push('策略6: 最低交易天数需在 260 到 K线拉取天数之间')
+  if (s6.min_avg_amount_60d_yi < 0 || s6.min_avg_amount_60d_yi > 1000) errors.push('策略6: 60日均额需在 0-1000 亿')
+  if (s6.min_avg_amount_30d_yi < 0 || s6.min_avg_amount_30d_yi > 1000) errors.push('策略6: 30日均额需在 0-1000 亿')
+  if (s6.min_avg_amount_10d_yi < 0 || s6.min_avg_amount_10d_yi > 1000) errors.push('策略6: 10日均额需在 0-1000 亿')
+  if (s6.normal_start_return < 0 || s6.normal_start_return > 1) errors.push('策略6: 普通启动涨幅需在 0-1')
+  if (s6.normal_start_volume_ratio < 0 || s6.normal_start_volume_ratio > 20) errors.push('策略6: 普通启动量比需在 0-20')
+  if (s6.normal_start_min_amount_yi < 0 || s6.normal_start_min_amount_yi > 1000) errors.push('策略6: 普通启动成交额需在 0-1000 亿')
+  if (s6.normal_start_self_amount_percentile < 0 || s6.normal_start_self_amount_percentile > 1) errors.push('策略6: 启动成交额自身分位需在 0-1')
+  if (s6.near_120d_high_ratio < 0 || s6.near_120d_high_ratio > 1) errors.push('策略6: 接近120日高比例需在 0-1')
+  if (!['strict', 'downgrade', 'score_only'].includes(s6.market_filter_mode)) errors.push('策略6: 市场过滤模式必须是严格过滤、降级处理或仅调整评分')
+  if (!['strict', 'downgrade', 'score_only'].includes(s6.pattern_filter_mode)) errors.push('策略6: 形态过滤模式必须是严格过滤、降级处理或仅调整评分')
+  if (s6.pattern_pivot_proximity_pct <= 0 || s6.pattern_pivot_proximity_pct > 0.20) errors.push('策略6: 形态距突破枢轴最大下偏需在 (0,0.20]')
+  if (s6.breakout_extended_max_pct <= 0 || s6.breakout_extended_max_pct > 0.30) errors.push('策略6: 突破过度延伸比例需在 (0,0.30]')
+  if (s6.start_age_min_days < 1 || s6.start_age_min_days > s6.start_age_max_days) errors.push('策略6: 最小启动年龄需在 1 到最大启动年龄之间')
+  if (s6.start_age_max_days > s6.start_lookback_days) errors.push('策略6: 最大启动年龄不能超过启动回看天数')
+  if (s6.consolidation_min_days < 1 || s6.consolidation_min_days > s6.consolidation_max_days) errors.push('策略6: 最小整理天数需不高于最大整理天数')
+  if (s6.vcp_contraction_range_ratio <= 0 || s6.vcp_contraction_range_ratio > 1) errors.push('策略6: VCP振幅收缩比需在 (0,1]')
+  if (s6.vcp_contraction_volume_ratio <= 0 || s6.vcp_contraction_volume_ratio > 1) errors.push('策略6: VCP量能收缩比需在 (0,1]')
+  if (s6.vcp_first_contraction_max_range < s6.vcp_min_first_range || s6.vcp_first_contraction_max_range > 0.50) errors.push('策略6: VCP第一轮最大振幅需不低于最小振幅且不超过0.50')
+  if (s6.vcp_rebound_min_pct <= 0 || s6.vcp_rebound_min_pct > 0.20) errors.push('策略6: VCP有效反弹最小涨幅需在 (0,0.20]')
+  if (!Number.isInteger(s6.vcp_rebound_confirm_days) || s6.vcp_rebound_confirm_days < 2 || s6.vcp_rebound_confirm_days > 10) errors.push('策略6: VCP反弹确认交易日需为2-10的整数')
+  if (s6.vcp_low_warning_ratio < 0.97 || s6.vcp_low_warning_ratio > 1) errors.push('策略6: VCP低点下移提示比例需在 0.97-1')
+  if (s6.vcp_history_max_start_loss_pct <= 0 || s6.vcp_history_max_start_loss_pct > 0.50) errors.push('策略6: 历史候选至VCP起点最大跌幅需在 (0,0.50]')
+  if (s6.vcp_history_max_drawdown_pct <= 0 || s6.vcp_history_max_drawdown_pct > 0.50) errors.push('策略6: 历史资格最大回撤需在 (0,0.50]')
+  if (!Number.isInteger(s6.vcp_history_bearish_trend_days) || s6.vcp_history_bearish_trend_days < 1 || s6.vcp_history_bearish_trend_days > 20) errors.push('策略6: 历史资格空头失效天数需为1-20的整数')
+  if (s6.cup_depth_min < 0 || s6.cup_depth_min > s6.cup_depth_max || s6.cup_depth_max > 1) errors.push('策略6: 杯体深度需满足 0 <= 最小值 <= 最大值 <= 1')
+  if (s6.support_test_lookback < 5 || s6.support_test_lookback > 40) errors.push('策略6: 支撑测试回看需在 5-40')
+  if (s6.min_relative_strength_20 < -1 || s6.min_relative_strength_20 > 1) errors.push('策略6: 最低RS20需在 -1 到 1')
+  if (s6.tail_close_range_5 < 0 || s6.tail_close_range_5 > 1) errors.push('策略6: 尾部收盘波动需在 0-1')
+  if (s6.tail_volume_ratio_5_20 <= 0 || s6.tail_volume_ratio_5_20 > 2) errors.push('策略6: 尾部 V5/V20 需在 (0,2]')
+  if (s6.tail_strong_volume_ratio_5_20 <= 0 || s6.tail_strong_volume_ratio_5_20 > s6.tail_volume_ratio_5_20) errors.push('策略6: 强量干 V5/V20 需大于0且不高于尾部门槛')
+  if (s6.big_down_return < -1 || s6.big_down_return > 0) errors.push('策略6: 放量下跌跌幅需在 -1 到 0')
+  if (s6.rr2_min_watch < 0 || s6.rr2_min_watch > s6.rr2_min_key) errors.push('策略6: 观察最低 RR2 需不高于重点最低 RR2')
+  if (s6.rr2_min_key < s6.rr2_min_watch || s6.rr2_min_key > s6.rr2_min_ready) errors.push('策略6: 重点最低 RR2 需在观察和就绪之间')
+  if (s6.rr2_min_ready < s6.rr2_min_key || s6.rr2_min_ready > 20) errors.push('策略6: 就绪最低 RR2 需不低于重点且不超过20')
+  if (s6.watch_min_score < 0 || s6.watch_min_score > s6.key_min_score) errors.push('策略6: 观察最低分需在 0 到重点最低分之间')
+  if (s6.key_min_score < s6.watch_min_score || s6.key_min_score > s6.ready_min_score) errors.push('策略6: 重点最低分需在观察和就绪之间')
+  if (s6.ready_min_score < s6.key_min_score || s6.ready_min_score > 100) errors.push('策略6: 就绪最低分需不低于重点且不超过100')
+  if (s6.max_watch_days < 1 || s6.max_watch_days > 60) errors.push('策略6: 最大观察天数需在 1-60')
+  const box = s6.box_tail || {}
+  const compact = box.compact_kline || {}
+  if (box.min_box_days < 5 || box.min_box_days > box.max_box_days) errors.push('策略6箱体: 最短天数需在 5 到最长天数之间')
+  if (box.max_box_days > 30) errors.push('策略6箱体: 最长天数不能超过 30')
+  if (box.premium_box_width_max < 0 || box.premium_box_width_max > box.normal_box_width_max) errors.push('策略6箱体: 优质宽度不能高于普通宽度')
+  if (box.normal_box_width_max <= 0 || box.normal_box_width_max > 1) errors.push('策略6箱体: 普通宽度需在 (0,1]')
+  if (box.min_box_low_test_count < 1 || box.min_box_low_test_count > 10) errors.push('策略6箱体: 最少下沿测试需在 1-10')
+  if (box.premium_volume_contraction_ratio > box.max_volume_contraction_ratio) errors.push('策略6箱体: 优质量缩比不能高于普通量缩比')
+  if (box.premium_tail_volume_ratio_max > box.tail_volume_ratio_max) errors.push('策略6箱体: 优质尾部量比不能高于普通量比')
+  if (box.support_ready_position_max >= box.breakout_ready_position_min) errors.push('策略6箱体: 支撑位置阈值必须低于突破位置阈值')
+  if (compact.window_days < 3 || compact.window_days > 10) errors.push('策略6紧密K线: 窗口需在 3-10')
+  if (compact.min_overlap_pair_count < 1 || compact.min_overlap_pair_count >= compact.window_days) errors.push('策略6紧密K线: 最少重叠组数必须小于窗口天数')
+  if (compact.premium_avg_body_ratio_max > compact.avg_body_ratio_max) errors.push('策略6紧密K线: 优质平均实体阈值不能高于普通阈值')
+  if (compact.premium_close_range_max > compact.close_range_max) errors.push('策略6紧密K线: 优质收盘区间不能高于普通区间')
+  if (compact.premium_overlap_ratio < compact.min_overlap_ratio) errors.push('策略6紧密K线: 优质重叠比例不能低于普通比例')
+  if (compact.premium_atr_contraction_ratio_max > compact.atr_contraction_ratio_max) errors.push('策略6紧密K线: 优质ATR收缩比不能高于普通比例')
+
+  const brooks = s6.brooks_tail
+  if (!brooks || typeof brooks !== 'object') {
+    errors.push('策略6 Brooks: 后端未返回完整配置，请刷新页面后重试')
+  } else {
+    const context = brooks.context || {}
+    const selling = brooks.selling_pressure || {}
+    const stability = brooks.price_stability || {}
+    const volume = brooks.volume_dry || {}
+    const second = brooks.second_entry || {}
+    const failed = brooks.failed_breakout || {}
+    const compactBrooks = brooks.compact_structure || {}
+    const trigger = brooks.trade_trigger || {}
+    const scoring = brooks.scoring || {}
+    const integerInRange = (value, min, max) => Number.isInteger(value) && value >= min && value <= max
+    const numberInRange = (value, min, max, lowerExclusive = false) => (
+      typeof value === 'number' && Number.isFinite(value)
+      && (lowerExclusive ? value > min : value >= min) && value <= max
+    )
+    if (brooks.mode !== 'independent_path') errors.push('策略6 Brooks: 运行模式必须为独立路径')
+    if (!Array.isArray(context.allowed_start_grades) || !context.allowed_start_grades.length || context.allowed_start_grades.some(v => !['S', 'A'].includes(v))) errors.push('策略6 Brooks: 允许启动等级只能包含 S 或 A')
+    if (!integerInRange(context.ma20_slope_window_days, 2, 60)) errors.push('策略6 Brooks上涨背景: MA20斜率窗口需在 2-60 的整数')
+    if (!integerInRange(context.lower_high_low_window_days, 5, 60)) errors.push('策略6 Brooks上涨背景: 高低点序列窗口需在 5-60 的整数')
+    if (!integerInRange(context.max_lower_high_low_sequence, 0, 10)) errors.push('策略6 Brooks上涨背景: 最大下移序列数需在 0-10 的整数')
+    if (!numberInRange(context.close_below_ma20_atr_tolerance, 0, 3)) errors.push('策略6 Brooks上涨背景: 跌破MA20 ATR容差需在 0-3')
+    if (!integerInRange(selling.window_days, 3, 30)) errors.push('策略6 Brooks卖压: 观察窗口需在 3-30 的整数')
+    for (const [value, name] of [[selling.max_strong_bear_bar_count, '强空方K线数'], [selling.max_bear_follow_through_count, '空方跟进数'], [selling.max_consecutive_bear_bars, '连续阴线数']]) {
+      if (!integerInRange(value, 0, Number.isInteger(selling.window_days) ? selling.window_days : 30)) errors.push(`策略6 Brooks卖压: 最大${name}不能超过观察窗口且必须为非负整数`)
+    }
+    if (!integerInRange(stability.compact_window_days, 3, 10)) errors.push('策略6 Brooks价格稳定: 窗口需在 3-10 的整数')
+    if (!numberInRange(stability.close_range_max, 0, 2)) errors.push('策略6 Brooks价格稳定: 收盘区间上限需在 0-2')
+    if (!numberInRange(stability.premium_close_range_max, 0, 2)) errors.push('策略6 Brooks价格稳定: 优质收盘区间需在 0-2')
+    if (stability.premium_close_range_max > stability.close_range_max) errors.push('策略6 Brooks价格稳定: 优质收盘区间不能高于普通区间')
+    if (stability.premium_atr_contraction_max > stability.atr_contraction_max) errors.push('策略6 Brooks价格稳定: 优质ATR收缩比不能高于普通比例')
+    if (!integerInRange(volume.tail_window_days, 3, 10)) errors.push('策略6 Brooks量干: 尾部窗口需在 3-10 的整数')
+    if (!integerInRange(volume.baseline_window_days, 10, 60)) errors.push('策略6 Brooks量干: 基准窗口需在 10-60 的整数')
+    if (!numberInRange(volume.tail_volume_ratio_max, 0, 2, true)) errors.push('策略6 Brooks量干: 普通量干比需在 (0,2]')
+    if (!numberInRange(volume.premium_tail_volume_ratio_max, 0, 2, true)) errors.push('策略6 Brooks量干: 优质量干比需在 (0,2]')
+    else if (volume.premium_tail_volume_ratio_max > volume.tail_volume_ratio_max) errors.push('策略6 Brooks优质量干比不能高于普通量干比')
+    if (!integerInRange(second.min_separation_days, 1, 15)) errors.push('策略6 Brooks二次入场: 最短低点间隔需在 1-15 的整数')
+    if (!integerInRange(second.max_separation_days, 2, 30)) errors.push('策略6 Brooks二次入场: 最长低点间隔需在 2-30 的整数')
+    if (Number.isFinite(second.min_separation_days) && Number.isFinite(second.max_separation_days) && second.min_separation_days > second.max_separation_days) errors.push('策略6 Brooks二次入场: 最短低点间隔不能高于最长间隔')
+    if (!integerInRange(failed.recovery_days, 1, 5)) errors.push('策略6 Brooks假跌破: 收回天数需在 1-5 的整数')
+    if (!numberInRange(compactBrooks.middle_zone_low, 0, 1)) errors.push('策略6 Brooks紧密结构: 紧密区下界需在 0-1')
+    if (!numberInRange(compactBrooks.middle_zone_high, 0, 1)) errors.push('策略6 Brooks紧密结构: 紧密区上界需在 0-1')
+    if (Number.isFinite(compactBrooks.middle_zone_low) && Number.isFinite(compactBrooks.middle_zone_high) && compactBrooks.middle_zone_low > compactBrooks.middle_zone_high) errors.push('策略6 Brooks紧密结构: 紧密区下界不能高于上界')
+    if (!integerInRange(compactBrooks.max_direction_changes, 0, 10)) errors.push('策略6 Brooks紧密结构: 方向变化次数需在 0-10 的整数')
+    if (!integerInRange(compactBrooks.max_long_shadow_bar_count, 0, 10)) errors.push('策略6 Brooks紧密结构: 长影线K线数需在 0-10 的整数')
+    if (!integerInRange(trigger.trigger_valid_days, 1, 10)) errors.push('策略6 Brooks交易触发: 有效交易日需在 1-10 的整数')
+    if (!numberInRange(trigger.max_trigger_distance_atr, 0, 5)) errors.push('策略6 Brooks交易触发: 最大距离需在 0-5 ATR')
+    if (!integerInRange(trigger.breakout_follow_through_days, 1, 5)) errors.push('策略6 Brooks交易触发: 突破跟进天数需在 1-5 的整数')
+    const scoreParts = ['context_points', 'selling_pressure_points', 'price_stability_points', 'volume_dry_points', 'setup_points']
+    if (scoreParts.some(key => !integerInRange(scoring[key], 0, 20))) errors.push('策略6 Brooks评分: 各分项需在 0-20 的整数')
+    if (scoreParts.reduce((sum, key) => sum + Number(scoring[key] || 0), 0) !== 20) errors.push('策略6 Brooks评分: 五项分数合计必须为20')
+    if (!integerInRange(scoring.pass_score_min, 0, 20) || !integerInRange(scoring.premium_score_min, 0, 20)) errors.push('策略6 Brooks评分: 通过分和优质分需在 0-20 的整数')
+    if (scoring.pass_score_min > scoring.premium_score_min) errors.push('策略6 Brooks通过分不能高于优质分')
+  }
+
   return errors
 }
 
@@ -1336,6 +2074,7 @@ async function saveConfig() {
       strategy3: { ...config.strategy3 },
       strategy4: { ...config.strategy4 },
       strategy5: sanitizeStrategy5Config(config.strategy5),
+      strategy6: sanitizeStrategy6Config(config.strategy6),
     }
     const res = await updateConfig(payload)
     if (res.status === 'ok') {
@@ -1361,6 +2100,7 @@ async function resetAll() {
       ensureStrategy3Config()
       ensureStrategy4Config()
       ensureStrategy5Config()
+      ensureStrategy6Config()
       sanitizeDailySources()
     }
     dirty.value = false
@@ -1380,6 +2120,7 @@ onMounted(async () => {
       ensureStrategy3Config()
       ensureStrategy4Config()
       ensureStrategy5Config()
+      ensureStrategy6Config()
       sanitizeDailySources()
     }
   } catch (e) {

@@ -285,6 +285,52 @@ export function useApi() {
     return res.json()
   }
 
+  // Strategy6 API
+  async function startStrategy6Scan() {
+    const res = await fetch(`${API_BASE}/strategy6/scans`, { method: 'POST' })
+    const body = await res.json().catch(() => ({}))
+    return { ...body, ok: res.ok, statusCode: res.status }
+  }
+
+  async function getStrategy6ScanStatus() {
+    const res = await fetch(`${API_BASE}/strategy6/scans/status`)
+    return res.json().catch(() => ({ running: false, stats: {} }))
+  }
+
+  async function getStrategy6Tasks() {
+    const res = await fetch(`${API_BASE}/strategy6/tasks`)
+    return res.json().catch(() => ({ tasks: [] }))
+  }
+
+  async function getStrategy6Candidates(taskId) {
+    const res = await fetch(`${API_BASE}/strategy6/tasks/${encodeURIComponent(taskId)}/candidates`)
+    return res.json().catch(() => ({ candidates: [] }))
+  }
+
+  async function getStrategy6MarketSnapshot(taskId) {
+    const res = await fetch(`${API_BASE}/strategy6/tasks/${encodeURIComponent(taskId)}/market-snapshot`)
+    if (!res.ok) throw new Error(`strategy6 market snapshot failed: ${res.status}`)
+    return res.json().catch(() => ({ snapshot: null }))
+  }
+
+  async function getStrategy6Lifecycle(taskId) {
+    const res = await fetch(`${API_BASE}/strategy6/tasks/${encodeURIComponent(taskId)}/lifecycle`)
+    if (!res.ok) throw new Error(`strategy6 lifecycle failed: ${res.status}`)
+    return res.json().catch(() => ({ lifecycle: [] }))
+  }
+
+  async function getStrategy6Candidate(taskId, code) {
+    const res = await fetch(`${API_BASE}/strategy6/tasks/${encodeURIComponent(taskId)}/candidates/${encodeURIComponent(code)}`)
+    if (!res.ok) return null
+    return res.json()
+  }
+
+  async function downloadStrategy6Report(taskId) {
+    const res = await fetch(`${API_BASE}/strategy6/tasks/${encodeURIComponent(taskId)}/report.xlsx`)
+    if (!res.ok) throw new Error('strategy6 report export failed')
+    return res.blob()
+  }
+
   // Strategy2 Backtest API
   async function startStrategy2Backtest(payload) {
     const res = await fetch(`${API_BASE}/strategy2/backtests`, {
@@ -416,6 +462,8 @@ export function useApi() {
     getStrategy4TrackingEvents,
     startStrategy5Scan, getStrategy5ScanStatus, getStrategy5Tasks,
     getStrategy5Candidates, getStrategy5Candidate,
+    startStrategy6Scan, getStrategy6ScanStatus, getStrategy6Tasks,
+    getStrategy6Candidates, getStrategy6MarketSnapshot, getStrategy6Lifecycle, getStrategy6Candidate, downloadStrategy6Report,
     startStrategy2Backtest, getStrategy2BacktestStatus,
     getStrategy2BacktestTasks, getStrategy2BacktestTask,
     getStrategy2BacktestOpportunities, getStrategy2BacktestInsufficientStocks,

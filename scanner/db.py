@@ -138,10 +138,618 @@ def init_db(path: str = "data/cuphandle.db"):
         _ensure_strategy3_candidates_table(conn)
         _ensure_strategy4_tables(conn)
         _ensure_strategy5_candidates_table(conn)
+        _ensure_strategy6_candidates_table(conn)
+        _ensure_strategy6_market_snapshots_table(conn)
+        _ensure_strategy6_lifecycle_table(conn)
+        _ensure_strategy6_task_lifecycle_table(conn)
+        _ensure_strategy6_backtest_tables(conn)
+        _ensure_strategy6_optimization_tables(conn)
         _ensure_strategy2_backtest_tables(conn)
         _ensure_strategy3_backtest_tables(conn)
         _ensure_strategy1_backtest_tables(conn)
         conn.commit()
+
+
+def _ensure_strategy6_backtest_tables(conn: sqlite3.Connection):
+    """Create traceable Strategy6 research tables without changing production tables."""
+    conn.executescript('''
+        CREATE TABLE IF NOT EXISTS strategy6_backtest_runs (
+            run_id TEXT PRIMARY KEY,
+            experiment_id TEXT NOT NULL,
+            strategy_version TEXT NOT NULL,
+            strategy_git_commit TEXT,
+            strategy_config_hash TEXT NOT NULL,
+            backtest_config_hash TEXT NOT NULL,
+            data_version TEXT NOT NULL,
+            confidence_label TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'PENDING',
+            split_json TEXT NOT NULL DEFAULT '{}',
+            error_message TEXT,
+            created_at TEXT DEFAULT (datetime('now')),
+            completed_at TEXT
+        );
+        CREATE TABLE IF NOT EXISTS strategy6_backtest_parameter_sets (
+            run_id TEXT NOT NULL,
+            parameter_set_id TEXT NOT NULL,
+            config_hash TEXT NOT NULL,
+            parameter_json TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'PENDING',
+            reject_reason TEXT,
+            created_at TEXT DEFAULT (datetime('now')),
+            PRIMARY KEY (run_id, parameter_set_id)
+        );
+        CREATE TABLE IF NOT EXISTS strategy6_backtest_signals (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            run_id TEXT NOT NULL,
+            parameter_set_id TEXT NOT NULL,
+            code TEXT NOT NULL,
+            name TEXT,
+            evaluation_date TEXT NOT NULL,
+            setup_id TEXT NOT NULL,
+            tail_path TEXT NOT NULL,
+            candidate_type TEXT NOT NULL,
+            snapshot_json TEXT NOT NULL,
+            created_at TEXT DEFAULT (datetime('now')),
+            UNIQUE (run_id, parameter_set_id, code, evaluation_date)
+        );
+        CREATE TABLE IF NOT EXISTS strategy6_backtest_orders (
+            order_id TEXT PRIMARY KEY,
+            run_id TEXT NOT NULL,
+            parameter_set_id TEXT NOT NULL,
+            setup_id TEXT NOT NULL,
+            code TEXT NOT NULL,
+            signal_date TEXT NOT NULL,
+            status TEXT NOT NULL,
+            detail_json TEXT NOT NULL DEFAULT '{}'
+        );
+        CREATE TABLE IF NOT EXISTS strategy6_backtest_trades (
+            trade_id TEXT PRIMARY KEY,
+            run_id TEXT NOT NULL,
+            parameter_set_id TEXT NOT NULL,
+            setup_id TEXT NOT NULL,
+            code TEXT NOT NULL,
+            signal_date TEXT NOT NULL,
+            entry_date TEXT,
+            exit_date TEXT,
+            net_return REAL DEFAULT 0,
+            r_multiple REAL DEFAULT 0,
+            detail_json TEXT NOT NULL DEFAULT '{}'
+        );
+        CREATE TABLE IF NOT EXISTS strategy6_backtest_metrics (
+            run_id TEXT NOT NULL,
+            parameter_set_id TEXT NOT NULL,
+            phase TEXT NOT NULL,
+            scope TEXT NOT NULL,
+            metric_json TEXT NOT NULL,
+            PRIMARY KEY (run_id, parameter_set_id, phase, scope)
+        );
+        CREATE TABLE IF NOT EXISTS strategy6_backtest_walk_forward (
+            run_id TEXT NOT NULL,
+            window_id TEXT NOT NULL,
+            train_start TEXT NOT NULL,
+            train_end TEXT NOT NULL,
+            validation_start TEXT NOT NULL,
+            validation_end TEXT NOT NULL,
+            selected_parameter_set_id TEXT,
+            result_json TEXT NOT NULL DEFAULT '{}',
+            PRIMARY KEY (run_id, window_id)
+        );
+        CREATE TABLE IF NOT EXISTS strategy6_backtest_stock_progress (
+            run_id TEXT NOT NULL,
+            parameter_set_id TEXT NOT NULL,
+            code TEXT NOT NULL,
+            name TEXT,
+            status TEXT NOT NULL DEFAULT 'PENDING',
+            signals_count INTEGER DEFAULT 0,
+            orders_count INTEGER DEFAULT 0,
+            trades_count INTEGER DEFAULT 0,
+            error_message TEXT,
+            updated_at TEXT DEFAULT (datetime('now')),
+            PRIMARY KEY (run_id, parameter_set_id, code)
+        );
+        CREATE INDEX IF NOT EXISTS idx_s6_bt_signal_run_date
+            ON strategy6_backtest_signals(run_id, parameter_set_id, evaluation_date);
+        CREATE INDEX IF NOT EXISTS idx_s6_bt_signal_setup
+            ON strategy6_backtest_signals(run_id, parameter_set_id, setup_id);
+        CREATE INDEX IF NOT EXISTS idx_s6_bt_trade_run
+            ON strategy6_backtest_trades(run_id, parameter_set_id, entry_date);
+    ''')
+
+
+def _ensure_strategy6_optimization_tables(conn: sqlite3.Connection):
+    """Create resumable comprehensive-optimization metadata tables."""
+    conn.executescript('''
+        CREATE TABLE IF NOT EXISTS strategy6_optimization_campaigns (
+            campaign_id TEXT PRIMARY KEY,
+            status TEXT NOT NULL DEFAULT 'PENDING',
+            strategy_git_commit TEXT,
+            data_version TEXT NOT NULL,
+            base_config_hash TEXT NOT NULL,
+            manifest_json TEXT NOT NULL DEFAULT '{}',
+            error_message TEXT,
+            created_at TEXT DEFAULT (datetime('now')),
+            updated_at TEXT DEFAULT (datetime('now')),
+            completed_at TEXT
+        );
+        CREATE TABLE IF NOT EXISTS strategy6_optimization_stages (
+            campaign_id TEXT NOT NULL,
+            stage_id TEXT NOT NULL,
+            stage_order INTEGER NOT NULL,
+            status TEXT NOT NULL DEFAULT 'PENDING',
+            parent_parameter_set_id TEXT NOT NULL,
+            selected_parameter_set_id TEXT,
+            decision TEXT,
+            detail_json TEXT NOT NULL DEFAULT '{}',
+            error_message TEXT,
+            created_at TEXT DEFAULT (datetime('now')),
+            updated_at TEXT DEFAULT (datetime('now')),
+            completed_at TEXT,
+            PRIMARY KEY (campaign_id, stage_id)
+        );
+        CREATE TABLE IF NOT EXISTS strategy6_optimization_trials (
+            campaign_id TEXT NOT NULL,
+            stage_id TEXT NOT NULL,
+            trial_id TEXT NOT NULL,
+            parameter_set_id TEXT NOT NULL,
+            parent_parameter_set_id TEXT NOT NULL,
+            trial_kind TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'PENDING',
+            coarse_run_id TEXT,
+            full_run_id TEXT,
+            parameter_json TEXT NOT NULL DEFAULT '{}',
+            selection_metric_json TEXT NOT NULL DEFAULT '{}',
+            reject_reason TEXT,
+            error_message TEXT,
+            created_at TEXT DEFAULT (datetime('now')),
+            updated_at TEXT DEFAULT (datetime('now')),
+            completed_at TEXT,
+            PRIMARY KEY (campaign_id, stage_id, trial_id),
+            UNIQUE (campaign_id, stage_id, parameter_set_id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_s6_opt_stage_status
+            ON strategy6_optimization_stages(campaign_id, stage_order, status);
+        CREATE INDEX IF NOT EXISTS idx_s6_opt_trial_status
+            ON strategy6_optimization_trials(campaign_id, stage_id, status);
+    ''')
+
+
+def save_strategy6_optimization_campaign(item: dict) -> None:
+    conn = get_conn()
+    conn.execute(
+        '''INSERT INTO strategy6_optimization_campaigns
+           (campaign_id, status, strategy_git_commit, data_version,
+            base_config_hash, manifest_json, error_message, completed_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+           ON CONFLICT(campaign_id) DO UPDATE SET
+             status=excluded.status,
+             manifest_json=excluded.manifest_json,
+             error_message=excluded.error_message,
+             completed_at=excluded.completed_at,
+             updated_at=datetime('now')''',
+        (
+            item["campaign_id"], item.get("status", "PENDING"),
+            item.get("strategy_git_commit", ""), item["data_version"],
+            item["base_config_hash"],
+            json.dumps(item.get("manifest") or {}, ensure_ascii=False, sort_keys=True),
+            item.get("error_message"), item.get("completed_at"),
+        ),
+    )
+    conn.commit()
+
+
+def get_strategy6_optimization_campaign(campaign_id: str) -> dict | None:
+    row = get_conn().execute(
+        '''SELECT campaign_id, status, strategy_git_commit, data_version,
+                  base_config_hash, manifest_json, error_message, created_at,
+                  updated_at, completed_at
+           FROM strategy6_optimization_campaigns WHERE campaign_id=?''',
+        (campaign_id,),
+    ).fetchone()
+    if not row:
+        return None
+    keys = (
+        "campaign_id", "status", "strategy_git_commit", "data_version",
+        "base_config_hash", "manifest", "error_message", "created_at",
+        "updated_at", "completed_at",
+    )
+    result = dict(zip(keys, row))
+    result["manifest"] = json.loads(result["manifest"] or "{}")
+    return result
+
+
+def save_strategy6_optimization_stage(item: dict) -> None:
+    conn = get_conn()
+    conn.execute(
+        '''INSERT INTO strategy6_optimization_stages
+           (campaign_id, stage_id, stage_order, status,
+            parent_parameter_set_id, selected_parameter_set_id, decision,
+            detail_json, error_message, completed_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+           ON CONFLICT(campaign_id, stage_id) DO UPDATE SET
+             status=excluded.status,
+             parent_parameter_set_id=excluded.parent_parameter_set_id,
+             selected_parameter_set_id=excluded.selected_parameter_set_id,
+             decision=excluded.decision,
+             detail_json=excluded.detail_json,
+             error_message=excluded.error_message,
+             completed_at=excluded.completed_at,
+             updated_at=datetime('now')''',
+        (
+            item["campaign_id"], item["stage_id"], int(item["stage_order"]),
+            item.get("status", "PENDING"), item["parent_parameter_set_id"],
+            item.get("selected_parameter_set_id"), item.get("decision"),
+            json.dumps(item.get("detail") or {}, ensure_ascii=False, sort_keys=True),
+            item.get("error_message"), item.get("completed_at"),
+        ),
+    )
+    conn.commit()
+
+
+def get_strategy6_optimization_stages(campaign_id: str) -> list[dict]:
+    rows = get_conn().execute(
+        '''SELECT campaign_id, stage_id, stage_order, status,
+                  parent_parameter_set_id, selected_parameter_set_id, decision,
+                  detail_json, error_message, created_at, updated_at, completed_at
+           FROM strategy6_optimization_stages WHERE campaign_id=?
+           ORDER BY stage_order, stage_id''',
+        (campaign_id,),
+    ).fetchall()
+    keys = (
+        "campaign_id", "stage_id", "stage_order", "status",
+        "parent_parameter_set_id", "selected_parameter_set_id", "decision",
+        "detail", "error_message", "created_at", "updated_at", "completed_at",
+    )
+    result = []
+    for row in rows:
+        item = dict(zip(keys, row))
+        item["detail"] = json.loads(item["detail"] or "{}")
+        result.append(item)
+    return result
+
+
+def save_strategy6_optimization_trial(item: dict) -> None:
+    conn = get_conn()
+    conn.execute(
+        '''INSERT INTO strategy6_optimization_trials
+           (campaign_id, stage_id, trial_id, parameter_set_id,
+            parent_parameter_set_id, trial_kind, status, coarse_run_id,
+            full_run_id, parameter_json, selection_metric_json,
+            reject_reason, error_message, completed_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+           ON CONFLICT(campaign_id, stage_id, trial_id) DO UPDATE SET
+             status=excluded.status,
+             coarse_run_id=COALESCE(excluded.coarse_run_id, coarse_run_id),
+             full_run_id=COALESCE(excluded.full_run_id, full_run_id),
+             selection_metric_json=excluded.selection_metric_json,
+             reject_reason=excluded.reject_reason,
+             error_message=excluded.error_message,
+             completed_at=excluded.completed_at,
+             updated_at=datetime('now')''',
+        (
+            item["campaign_id"], item["stage_id"], item["trial_id"],
+            item["parameter_set_id"], item["parent_parameter_set_id"],
+            item["trial_kind"], item.get("status", "PENDING"),
+            item.get("coarse_run_id"), item.get("full_run_id"),
+            json.dumps(item.get("parameters") or {}, ensure_ascii=False, sort_keys=True),
+            json.dumps(item.get("selection_metrics") or {}, ensure_ascii=False, sort_keys=True),
+            item.get("reject_reason"), item.get("error_message"), item.get("completed_at"),
+        ),
+    )
+    conn.commit()
+
+
+def get_strategy6_optimization_trials(campaign_id: str, stage_id: str | None = None) -> list[dict]:
+    query = '''SELECT campaign_id, stage_id, trial_id, parameter_set_id,
+                      parent_parameter_set_id, trial_kind, status,
+                      coarse_run_id, full_run_id, parameter_json,
+                      selection_metric_json, reject_reason, error_message,
+                      created_at, updated_at, completed_at
+               FROM strategy6_optimization_trials WHERE campaign_id=?'''
+    params: list = [campaign_id]
+    if stage_id is not None:
+        query += " AND stage_id=?"
+        params.append(stage_id)
+    query += " ORDER BY stage_id, created_at, trial_id"
+    rows = get_conn().execute(query, params).fetchall()
+    keys = (
+        "campaign_id", "stage_id", "trial_id", "parameter_set_id",
+        "parent_parameter_set_id", "trial_kind", "status", "coarse_run_id",
+        "full_run_id", "parameters", "selection_metrics", "reject_reason",
+        "error_message", "created_at", "updated_at", "completed_at",
+    )
+    result = []
+    for row in rows:
+        item = dict(zip(keys, row))
+        item["parameters"] = json.loads(item["parameters"] or "{}")
+        item["selection_metrics"] = json.loads(item["selection_metrics"] or "{}")
+        result.append(item)
+    return result
+
+
+def get_selectable_strategy6_optimization_trials(campaign_id: str, stage_id: str) -> list[dict]:
+    result = []
+    for item in get_strategy6_optimization_trials(campaign_id, stage_id):
+        if item["status"] not in {"COMPLETED", "COMPLETED_WITH_SKIPS"}:
+            continue
+        run_id = item.get("full_run_id") or item.get("coarse_run_id")
+        if not run_id:
+            continue
+        failed = get_conn().execute(
+            '''SELECT 1 FROM strategy6_backtest_stock_progress
+               WHERE run_id=? AND parameter_set_id=? AND status LIKE 'FAILED%' LIMIT 1''',
+            (run_id, item["parameter_set_id"]),
+        ).fetchone()
+        if not failed:
+            result.append(item)
+    return result
+
+
+def save_strategy6_backtest_run(item: dict) -> None:
+    conn = get_conn()
+    conn.execute(
+        '''INSERT INTO strategy6_backtest_runs
+           (run_id, experiment_id, strategy_version, strategy_git_commit,
+            strategy_config_hash, backtest_config_hash, data_version,
+            confidence_label, status, split_json, error_message, completed_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+           ON CONFLICT(run_id) DO UPDATE SET
+             status=excluded.status, error_message=excluded.error_message,
+             completed_at=excluded.completed_at''',
+        (
+            item["run_id"], item["experiment_id"], item["strategy_version"],
+            item.get("strategy_git_commit", ""), item["strategy_config_hash"],
+            item["backtest_config_hash"], item["data_version"],
+            item.get("confidence_label", "RESEARCH_ONLY_CURRENT_UNIVERSE"),
+            item.get("status", "PENDING"),
+            json.dumps(item.get("split_json") or {}, ensure_ascii=False, sort_keys=True),
+            item.get("error_message"), item.get("completed_at"),
+        ),
+    )
+    conn.commit()
+
+
+def get_strategy6_backtest_run(run_id: str) -> dict | None:
+    row = get_conn().execute(
+        '''SELECT run_id, experiment_id, strategy_version, strategy_git_commit,
+                  strategy_config_hash, backtest_config_hash, data_version,
+                  confidence_label, status, split_json, error_message,
+                  created_at, completed_at
+           FROM strategy6_backtest_runs WHERE run_id=?''',
+        (run_id,),
+    ).fetchone()
+    if not row:
+        return None
+    keys = (
+        "run_id", "experiment_id", "strategy_version", "strategy_git_commit",
+        "strategy_config_hash", "backtest_config_hash", "data_version",
+        "confidence_label", "status", "split_json", "error_message",
+        "created_at", "completed_at",
+    )
+    item = dict(zip(keys, row))
+    item["split_json"] = json.loads(item["split_json"] or "{}")
+    return item
+
+
+def save_strategy6_backtest_parameter_set(run_id: str, item: dict) -> None:
+    conn = get_conn()
+    conn.execute(
+        '''INSERT INTO strategy6_backtest_parameter_sets
+           (run_id, parameter_set_id, config_hash, parameter_json, status, reject_reason)
+           VALUES (?, ?, ?, ?, ?, ?)
+           ON CONFLICT(run_id, parameter_set_id) DO UPDATE SET
+             status=excluded.status, reject_reason=excluded.reject_reason''',
+        (
+            run_id, item["parameter_set_id"], item["config_hash"],
+            json.dumps(item.get("parameters") or {}, ensure_ascii=False, sort_keys=True),
+            item.get("status", "PENDING"), item.get("reject_reason"),
+        ),
+    )
+    conn.commit()
+
+
+def replace_strategy6_backtest_signals(
+    run_id: str,
+    parameter_set_id: str,
+    code: str,
+    signals: list[dict],
+) -> None:
+    conn = get_conn()
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        conn.execute(
+            "DELETE FROM strategy6_backtest_signals WHERE run_id=? AND parameter_set_id=? AND code=?",
+            (run_id, parameter_set_id, code),
+        )
+        conn.executemany(
+            '''INSERT INTO strategy6_backtest_signals
+               (run_id, parameter_set_id, code, name, evaluation_date,
+                setup_id, tail_path, candidate_type, snapshot_json)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+            [
+                (
+                    run_id, parameter_set_id, code, item.get("name", ""),
+                    item["evaluation_date"], item["setup_id"], item["tail_path"],
+                    item["candidate_type"],
+                    json.dumps(item.get("snapshot") or {}, ensure_ascii=False, sort_keys=True),
+                )
+                for item in signals
+            ],
+        )
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+
+
+def get_strategy6_backtest_signals(run_id: str, parameter_set_id: str) -> list[dict]:
+    rows = get_conn().execute(
+        '''SELECT code, name, evaluation_date, setup_id, tail_path,
+                  candidate_type, snapshot_json
+           FROM strategy6_backtest_signals
+           WHERE run_id=? AND parameter_set_id=?
+           ORDER BY evaluation_date, code''',
+        (run_id, parameter_set_id),
+    ).fetchall()
+    result = []
+    for row in rows:
+        result.append({
+            "code": row[0], "name": row[1], "evaluation_date": row[2],
+            "setup_id": row[3], "tail_path": row[4], "candidate_type": row[5],
+            "snapshot": json.loads(row[6] or "{}"),
+        })
+    return result
+
+
+def replace_strategy6_backtest_orders(
+    run_id: str,
+    parameter_set_id: str,
+    code: str,
+    orders: list[dict],
+) -> None:
+    conn = get_conn()
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        conn.execute(
+            "DELETE FROM strategy6_backtest_orders WHERE run_id=? AND parameter_set_id=? AND code=?",
+            (run_id, parameter_set_id, code),
+        )
+        conn.executemany(
+            '''INSERT INTO strategy6_backtest_orders
+               (order_id, run_id, parameter_set_id, setup_id, code,
+                signal_date, status, detail_json)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)''',
+            [
+                (
+                    f"{run_id}:{parameter_set_id}:{item['order_id']}",
+                    run_id, parameter_set_id, item["setup_id"], code,
+                    item["signal_date"], item["status"],
+                    json.dumps(item, ensure_ascii=False, sort_keys=True),
+                )
+                for item in orders
+            ],
+        )
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+
+
+def replace_strategy6_backtest_trades(
+    run_id: str,
+    parameter_set_id: str,
+    code: str,
+    trades: list[dict],
+) -> None:
+    conn = get_conn()
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        conn.execute(
+            "DELETE FROM strategy6_backtest_trades WHERE run_id=? AND parameter_set_id=? AND code=?",
+            (run_id, parameter_set_id, code),
+        )
+        conn.executemany(
+            '''INSERT INTO strategy6_backtest_trades
+               (trade_id, run_id, parameter_set_id, setup_id, code,
+                signal_date, entry_date, exit_date, net_return, r_multiple, detail_json)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+            [
+                (
+                    f"{run_id}:{parameter_set_id}:{item['trade_id']}",
+                    run_id, parameter_set_id, item["setup_id"], code,
+                    item["signal_date"], item.get("entry_date", ""), item.get("exit_date", ""),
+                    item.get("net_return", 0), item.get("r_multiple", 0),
+                    json.dumps(item, ensure_ascii=False, sort_keys=True),
+                )
+                for item in trades
+            ],
+        )
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+
+
+def save_strategy6_backtest_stock_progress(
+    run_id: str,
+    parameter_set_id: str,
+    code: str,
+    *,
+    name: str = "",
+    status: str,
+    signals_count: int = 0,
+    orders_count: int = 0,
+    trades_count: int = 0,
+    error_message: str = "",
+) -> None:
+    conn = get_conn()
+    conn.execute(
+        '''INSERT INTO strategy6_backtest_stock_progress
+           (run_id, parameter_set_id, code, name, status, signals_count,
+            orders_count, trades_count, error_message, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+           ON CONFLICT(run_id, parameter_set_id, code) DO UPDATE SET
+             name=excluded.name, status=excluded.status,
+             signals_count=excluded.signals_count,
+             orders_count=excluded.orders_count,
+             trades_count=excluded.trades_count,
+             error_message=excluded.error_message,
+             updated_at=datetime('now')''',
+        (
+            run_id, parameter_set_id, code, name, status,
+            signals_count, orders_count, trades_count, error_message,
+        ),
+    )
+    conn.commit()
+
+
+def get_completed_strategy6_backtest_codes(run_id: str, parameter_set_id: str) -> set[str]:
+    rows = get_conn().execute(
+        '''SELECT code FROM strategy6_backtest_stock_progress
+           WHERE run_id=? AND parameter_set_id=?
+             AND (status='COMPLETED' OR status LIKE 'SKIPPED_%') ''',
+        (run_id, parameter_set_id),
+    ).fetchall()
+    return {row[0] for row in rows}
+
+
+def save_strategy6_backtest_metric(
+    run_id: str,
+    parameter_set_id: str,
+    phase: str,
+    scope: str,
+    metrics: dict,
+) -> None:
+    conn = get_conn()
+    conn.execute(
+        '''INSERT INTO strategy6_backtest_metrics
+           (run_id, parameter_set_id, phase, scope, metric_json)
+           VALUES (?, ?, ?, ?, ?)
+           ON CONFLICT(run_id, parameter_set_id, phase, scope) DO UPDATE SET
+             metric_json=excluded.metric_json''',
+        (
+            run_id, parameter_set_id, phase, scope,
+            json.dumps(metrics or {}, ensure_ascii=False, sort_keys=True),
+        ),
+    )
+    conn.commit()
+
+
+def get_strategy6_backtest_metrics(run_id: str, *, allow_oos: bool = False) -> list[dict]:
+    rows = get_conn().execute(
+        '''SELECT parameter_set_id, phase, scope, metric_json
+           FROM strategy6_backtest_metrics WHERE run_id=?
+           ORDER BY parameter_set_id, phase, scope''',
+        (run_id,),
+    ).fetchall()
+    if not allow_oos and any(str(row[1]).upper().startswith("OOS") for row in rows):
+        raise PermissionError("OOS metrics are locked")
+    return [
+        {
+            "parameter_set_id": row[0], "phase": row[1], "scope": row[2],
+            "metrics": json.loads(row[3] or "{}"),
+        }
+        for row in rows
+    ]
 
 
 def _ensure_candidate_columns(conn: sqlite3.Connection):
@@ -368,6 +976,50 @@ def save_market_index_ohlc(
         """INSERT INTO market_index_ohlc
            (symbol, date, open, high, low, close, volume, turnover, source, fetched_at)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        [
+            (
+                symbol,
+                d["date"],
+                d.get("open"),
+                d.get("high"),
+                d.get("low"),
+                d.get("close"),
+                d.get("volume"),
+                d.get("turnover", 0.0),
+                source,
+                fetched_at,
+            )
+            for d in data
+        ],
+    )
+    conn.commit()
+
+
+def upsert_market_index_ohlc(
+    symbol: str,
+    data: list[dict],
+    *,
+    source: str = "sina",
+    fetched_at: str | None = None,
+):
+    """Merge index OHLC rows without deleting older cached history."""
+    if not data:
+        return
+    conn = get_conn()
+    fetched_at = fetched_at or datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    conn.executemany(
+        """INSERT INTO market_index_ohlc
+           (symbol, date, open, high, low, close, volume, turnover, source, fetched_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+           ON CONFLICT(symbol, date) DO UPDATE SET
+             open=excluded.open,
+             high=excluded.high,
+             low=excluded.low,
+             close=excluded.close,
+             volume=excluded.volume,
+             turnover=excluded.turnover,
+             source=excluded.source,
+             fetched_at=excluded.fetched_at""",
         [
             (
                 symbol,
@@ -1892,6 +2544,457 @@ def _ensure_strategy5_candidates_table(conn: sqlite3.Connection):
     )
 
 
+def _ensure_strategy6_candidates_table(conn: sqlite3.Connection):
+    """Create strategy6_candidates table if not exists."""
+    conn.execute('''
+        CREATE TABLE IF NOT EXISTS strategy6_candidates (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            task_id TEXT NOT NULL,
+            code TEXT NOT NULL,
+            name TEXT NOT NULL,
+            sector_name TEXT,
+            evaluation_date TEXT NOT NULL,
+            candidate_type TEXT NOT NULL,
+            pre_market_candidate_type TEXT,
+            classification TEXT NOT NULL,
+            lifecycle_status TEXT,
+            first_pool_date TEXT,
+            pool_age_trading_days INTEGER DEFAULT 0,
+            first_seen_date TEXT,
+            last_seen_date TEXT,
+            days_in_pool INTEGER DEFAULT 0,
+            exit_date TEXT,
+            exit_reason TEXT,
+            cooldown_until_date TEXT,
+            reentry_count INTEGER DEFAULT 0,
+            strategy_version TEXT,
+            config_hash TEXT,
+            price_basis TEXT,
+            current_price_adj REAL,
+            current_price_raw REAL,
+            current_price REAL DEFAULT 0,
+            close REAL DEFAULT 0,
+            daily_return REAL DEFAULT 0,
+            current_close_position REAL DEFAULT 0,
+            trading_days INTEGER DEFAULT 0,
+            ma5 REAL,
+            ma10 REAL,
+            ma20 REAL,
+            ma50 REAL,
+            ma120 REAL,
+            ma250 REAL,
+            atr14 REAL,
+            return_5 REAL,
+            return_10 REAL,
+            return_20 REAL,
+            relative_strength_20 REAL DEFAULT 0,
+            relative_strength_20_observed INTEGER DEFAULT 0,
+            amount_avg_10 REAL,
+            amount_avg_30 REAL,
+            amount_avg_60 REAL,
+            v3 REAL,
+            v5 REAL,
+            v10 REAL,
+            v20 REAL,
+            volume_ratio_5_20 REAL,
+            current_volume_ratio_20 REAL,
+            highest_close_20 REAL,
+            highest_close_120 REAL,
+            pullback_from_20d_high REAL,
+            range_5 REAL,
+            range_10 REAL,
+            close_range_5 REAL,
+            start_date TEXT,
+            start_type TEXT,
+            start_grade TEXT,
+            start_day_return REAL,
+            start_day_volume_ratio REAL,
+            start_day_amount REAL,
+            start_day_close_position REAL,
+            start_day_self_amount_percentile REAL DEFAULT 0,
+            start_low REAL,
+            is_limit_up INTEGER DEFAULT 0,
+            is_one_word_limit_up INTEGER DEFAULT 0,
+            limit_up_pct REAL,
+            days_since_start INTEGER DEFAULT 0,
+            high_trigger TEXT,
+            phase_status TEXT,
+            consolidation_start_date TEXT,
+            tail_start_date TEXT,
+            signal_date TEXT,
+            start_age_days INTEGER DEFAULT 0,
+            consolidation_days INTEGER DEFAULT 0,
+            tail_days INTEGER DEFAULT 0,
+            pattern_type TEXT,
+            pattern_score INTEGER DEFAULT 0,
+            pattern_start_date TEXT,
+            pattern_end_date TEXT,
+            pivot_source TEXT,
+            pattern_low REAL,
+            pattern_height REAL,
+            pattern_depth_pct REAL,
+            contraction_count INTEGER DEFAULT 0,
+            key_support_price REAL,
+            tactical_support_price REAL,
+            prior_key_support_price REAL,
+            support_zone_low REAL,
+            support_zone_high REAL,
+            defense_support_price REAL,
+            main_support_ma TEXT,
+            support_status TEXT,
+            support_test_count INTEGER DEFAULT 0,
+            pivot_price REAL,
+            box_height REAL,
+            support_score INTEGER DEFAULT 0,
+            support_cluster_sources TEXT,
+            support_cluster_score INTEGER DEFAULT 0,
+            suggested_buy_price REAL,
+            buy_zone_low REAL,
+            buy_zone_high REAL,
+            stop_loss_price REAL,
+            target_price_1 REAL,
+            target_price_2 REAL,
+            target_price_3 REAL,
+            objective_target_1 REAL,
+            objective_target_2 REAL,
+            execution_target_1_5r REAL,
+            execution_target_2r REAL,
+            execution_target_2_5r REAL,
+            execution_target_3_5r REAL,
+            risk_amount REAL,
+            reward_amount_1 REAL,
+            reward_amount_2 REAL,
+            reward_amount_3 REAL,
+            risk_reward_ratio_1 REAL,
+            risk_reward_ratio_2 REAL,
+            risk_reward_ratio_3 REAL,
+            objective_rr_1 REAL,
+            objective_rr_2 REAL,
+            valid_from_date TEXT,
+            valid_until_date TEXT,
+            buy_zone_valid_days INTEGER DEFAULT 0,
+            suggested_limit_price REAL,
+            execution_notes TEXT,
+            strong_start_score INTEGER DEFAULT 0,
+            dry_stable_score INTEGER DEFAULT 0,
+            risk_reward_score INTEGER DEFAULT 0,
+            risk_control_score INTEGER DEFAULT 0,
+            total_score REAL DEFAULT 0,
+            pattern_score_component INTEGER DEFAULT 0,
+            tail_score INTEGER DEFAULT 0,
+            objective_rr_score INTEGER DEFAULT 0,
+            relative_strength_risk_score INTEGER DEFAULT 0,
+            tail_avg_volume REAL,
+            pre_tail_avg_volume_20 REAL,
+            tail_volume_ratio REAL,
+            volume_slope_10 REAL,
+            market_status TEXT,
+            enable_market_filter INTEGER DEFAULT 0,
+            market_filter_mode TEXT,
+            risk_tags TEXT,
+            warn_tags TEXT,
+            reject_reasons TEXT,
+            score_reasons TEXT,
+            suggestion TEXT,
+            data_source TEXT,
+            kline_latest_date TEXT,
+            kline_fetched_at TEXT,
+            quote_status TEXT,
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+            FOREIGN KEY (task_id) REFERENCES scan_tasks(id),
+            UNIQUE(task_id, code)
+        )
+    ''')
+    for column, col_type in {
+        "sector_name": "TEXT",
+        "pre_market_candidate_type": "TEXT",
+        "lifecycle_status": "TEXT",
+        "first_pool_date": "TEXT",
+        "pool_age_trading_days": "INTEGER DEFAULT 0",
+        "first_seen_date": "TEXT",
+        "last_seen_date": "TEXT",
+        "days_in_pool": "INTEGER DEFAULT 0",
+        "exit_date": "TEXT",
+        "exit_reason": "TEXT",
+        "cooldown_until_date": "TEXT",
+        "reentry_count": "INTEGER DEFAULT 0",
+        "strategy_version": "TEXT",
+        "config_hash": "TEXT",
+        "price_basis": "TEXT",
+        "current_price_adj": "REAL",
+        "current_price_raw": "REAL",
+        "current_price": "REAL DEFAULT 0",
+        "current_close_position": "REAL DEFAULT 0",
+        "atr14": "REAL",
+        "relative_strength_20": "REAL DEFAULT 0",
+        "current_volume_ratio_20": "REAL",
+        "relative_strength_20_observed": "INTEGER DEFAULT 0",
+        "start_low": "REAL",
+        "start_day_self_amount_percentile": "REAL DEFAULT 0",
+        "days_since_start": "INTEGER DEFAULT 0",
+        "phase_status": "TEXT",
+        "consolidation_start_date": "TEXT",
+        "tail_start_date": "TEXT",
+        "signal_date": "TEXT",
+        "start_age_days": "INTEGER DEFAULT 0",
+        "consolidation_days": "INTEGER DEFAULT 0",
+        "tail_days": "INTEGER DEFAULT 0",
+        "pattern_type": "TEXT",
+        "pattern_score": "INTEGER DEFAULT 0",
+        "pattern_start_date": "TEXT",
+        "pattern_end_date": "TEXT",
+        "pivot_source": "TEXT",
+        "pattern_low": "REAL",
+        "pattern_height": "REAL",
+        "pattern_depth_pct": "REAL",
+        "contraction_count": "INTEGER DEFAULT 0",
+        "tactical_support_price": "REAL",
+        "prior_key_support_price": "REAL",
+        "support_cluster_sources": "TEXT",
+        "support_cluster_score": "INTEGER DEFAULT 0",
+        "objective_target_1": "REAL",
+        "objective_target_2": "REAL",
+        "execution_target_1_5r": "REAL",
+        "execution_target_2r": "REAL",
+        "execution_target_2_5r": "REAL",
+        "execution_target_3_5r": "REAL",
+        "objective_rr_1": "REAL",
+        "objective_rr_2": "REAL",
+        "valid_from_date": "TEXT",
+        "valid_until_date": "TEXT",
+        "buy_zone_valid_days": "INTEGER DEFAULT 0",
+        "suggested_limit_price": "REAL",
+        "execution_notes": "TEXT",
+        "pattern_score_component": "INTEGER DEFAULT 0",
+        "tail_score": "INTEGER DEFAULT 0",
+        "objective_rr_score": "INTEGER DEFAULT 0",
+        "relative_strength_risk_score": "INTEGER DEFAULT 0",
+        "tail_avg_volume": "REAL",
+        "pre_tail_avg_volume_20": "REAL",
+        "tail_volume_ratio": "REAL",
+        "volume_slope_10": "REAL",
+        "risk_tags": "TEXT",
+        "warn_tags": "TEXT",
+        "reject_reasons": "TEXT",
+        "score_reasons": "TEXT",
+        "suggestion": "TEXT",
+        "data_source": "TEXT",
+        "kline_latest_date": "TEXT",
+        "kline_fetched_at": "TEXT",
+        "quote_status": "TEXT",
+        "original_tail_pass": "INTEGER DEFAULT 0",
+        "original_tail_score": "INTEGER DEFAULT 0",
+        "box_tail_enabled": "INTEGER DEFAULT 0",
+        "box_tail_pass": "INTEGER DEFAULT 0",
+        "box_tail_score": "INTEGER DEFAULT 0",
+        "box_status": "TEXT",
+        "tail_pass": "INTEGER DEFAULT 0",
+        "tail_path": "TEXT",
+        "box_start_date": "TEXT",
+        "box_end_date": "TEXT",
+        "box_days": "INTEGER DEFAULT 0",
+        "box_high": "REAL",
+        "box_low": "REAL",
+        "box_width": "REAL",
+        "box_position": "REAL",
+        "box_position_raw": "REAL",
+        "box_low_test_count": "INTEGER DEFAULT 0",
+        "box_high_test_count": "INTEGER DEFAULT 0",
+        "box_first_half_volume": "REAL",
+        "box_second_half_volume": "REAL",
+        "box_volume_contraction_ratio": "REAL",
+        "first_half_median_close": "REAL",
+        "second_half_median_close": "REAL",
+        "box_center_shift": "REAL",
+        "box_break_reason": "TEXT",
+        "box_selection_reason": "TEXT",
+        "compact_kline_enabled": "INTEGER DEFAULT 0",
+        "compact_kline_pass": "INTEGER DEFAULT 0",
+        "compact_kline_score": "INTEGER DEFAULT 0",
+        "box_quality_score": "INTEGER DEFAULT 0",
+        "box_quality_tag": "TEXT",
+        "avg_body_ratio_5": "REAL",
+        "max_body_ratio_5": "REAL",
+        "compact_close_range_5": "REAL",
+        "kline_overlap_pair_count": "INTEGER DEFAULT 0",
+        "avg_kline_overlap_ratio": "REAL",
+        "gap_count_5": "INTEGER DEFAULT 0",
+        "max_gap_ratio_5": "REAL",
+        "atr5": "REAL",
+        "atr20": "REAL",
+        "atr_contraction_ratio": "REAL",
+        "compact_kline_reasons": "TEXT",
+        "compact_kline_risk_tags": "TEXT",
+        "brooks_tail_enabled": "INTEGER DEFAULT 0",
+        "brooks_tail_pass": "INTEGER DEFAULT 0",
+        "brooks_tail_score": "INTEGER DEFAULT 0",
+        "brooks_tail_premium": "INTEGER DEFAULT 0",
+        "brooks_status": "TEXT",
+        "brooks_trade_ready": "INTEGER DEFAULT 0",
+        "brooks_trade_trigger_type": "TEXT",
+        "brooks_trigger_price": "REAL",
+        "brooks_trigger_valid_until": "TEXT",
+        "tail_paths": "TEXT",
+        "tail_path_summary": "TEXT",
+        "tail_primary_path": "TEXT",
+        "passed_path_count": "INTEGER DEFAULT 0",
+        "multi_path_confirmed": "INTEGER DEFAULT 0",
+        "brooks_result_json": "TEXT",
+        "start_event_quality_score": "INTEGER DEFAULT 0",
+        "start_follow_through_return_5": "REAL DEFAULT 0",
+        "start_gain_retention_ratio": "REAL DEFAULT 0",
+        "start_max_close_drawdown_5": "REAL DEFAULT 0",
+        "start_failure_reasons": "TEXT",
+        "tail_segmentation_status": "TEXT",
+        "tail_segmentation_score": "INTEGER DEFAULT 0",
+        "tail_range_contraction_ratio": "REAL DEFAULT 0",
+        "tail_atr_contraction_ratio": "REAL DEFAULT 0",
+        "tail_body_contraction_ratio": "REAL DEFAULT 0",
+        "setup_quality_score": "INTEGER DEFAULT 0",
+        "setup_gain_retention_ratio": "REAL DEFAULT 0",
+        "distribution_day_count": "INTEGER DEFAULT 0",
+        "up_down_volume_ratio": "REAL DEFAULT 0",
+        "volatility_contraction_ratio": "REAL DEFAULT 0",
+        "failed_breakout_count": "INTEGER DEFAULT 0",
+        "relative_strength_trend": "TEXT",
+        "setup_quality_reasons": "TEXT",
+        "setup_quality_risk_tags": "TEXT",
+        "support_reaction_score": "INTEGER DEFAULT 0",
+        "support_reaction_reasons": "TEXT",
+        "support_reaction_risk_tags": "TEXT",
+        "path_evidence_score": "INTEGER DEFAULT 0",
+        "entry_archetype": "TEXT",
+        "score_model_version": "TEXT",
+        "vcp_observation_eligible": "INTEGER DEFAULT 0",
+        "vcp_lifecycle_status": "TEXT DEFAULT 'VCP_NONE'",
+        "vcp_origin_start_date": "TEXT",
+        "vcp_pattern_start_date": "TEXT",
+        "vcp_pattern_end_date": "TEXT",
+        "vcp_contraction_count": "INTEGER DEFAULT 0",
+        "vcp_contractions": "TEXT",
+        "vcp_forming_round": "TEXT",
+        "vcp_pivot_price": "REAL DEFAULT 0",
+        "vcp_structure_low": "REAL DEFAULT 0",
+        "vcp_distance_to_pivot_pct": "REAL DEFAULT 0",
+        "vcp_breakout_date": "TEXT",
+        "vcp_days_since_breakout": "INTEGER DEFAULT 0",
+        "vcp_observation_reasons": "TEXT",
+        "vcp_observation_risk_tags": "TEXT",
+        "vcp_invalidation_reason": "TEXT",
+        "vcp_exit_audit": "INTEGER DEFAULT 0",
+        "vcp_history_qualified": "INTEGER DEFAULT 0",
+        "vcp_history_candidate_date": "TEXT",
+        "vcp_history_candidate_type": "TEXT",
+        "vcp_history_candidate_score": "INTEGER DEFAULT 0",
+        "vcp_history_source": "TEXT",
+        "vcp_history_origin_start_date": "TEXT",
+        "vcp_quality_score": "INTEGER",
+        "vcp_quality_grade": "TEXT",
+        "vcp_quality_contraction_score": "INTEGER",
+        "vcp_quality_range_score": "INTEGER",
+        "vcp_quality_volume_score": "INTEGER",
+        "vcp_quality_low_score": "INTEGER",
+        "vcp_quality_start_retention_score": "INTEGER",
+        "vcp_quality_time_score": "INTEGER",
+        "vcp_quality_pivot_score": "INTEGER",
+        "vcp_quality_breakout_score": "INTEGER",
+        "vcp_quality_reasons": "TEXT",
+        "vcp_quality_warnings": "TEXT",
+        "vcp_quality_model_version": "TEXT",
+    }.items():
+        _ensure_column(conn, "strategy6_candidates", column, col_type)
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_strategy6_candidates_task_score "
+        "ON strategy6_candidates(task_id, total_score DESC)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_strategy6_candidates_type_score "
+        "ON strategy6_candidates(task_id, candidate_type, total_score DESC)"
+    )
+
+
+def _ensure_strategy6_market_snapshots_table(conn: sqlite3.Connection):
+    """Create Strategy6 task-level market snapshot table if not exists."""
+    conn.execute('''
+        CREATE TABLE IF NOT EXISTS strategy6_market_snapshots (
+            task_id TEXT NOT NULL,
+            symbol TEXT NOT NULL,
+            name TEXT,
+            latest_date TEXT,
+            latest_close REAL DEFAULT 0,
+            ma20 REAL DEFAULT 0,
+            ma50 REAL DEFAULT 0,
+            return_20 REAL DEFAULT 0,
+            above_ma20 INTEGER DEFAULT 0,
+            ma20_above_ma50 INTEGER DEFAULT 0,
+            volume_down_risk INTEGER DEFAULT 0,
+            weak INTEGER DEFAULT 0,
+            rows_count INTEGER DEFAULT 0,
+            source TEXT,
+            data_status TEXT DEFAULT 'MISSING',
+            market_status TEXT,
+            market_reasons TEXT,
+            market_return_20 REAL DEFAULT 0,
+            fetched_at TEXT,
+            PRIMARY KEY (task_id, symbol),
+            FOREIGN KEY (task_id) REFERENCES scan_tasks(id)
+        )
+    ''')
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_strategy6_market_snapshots_task "
+        "ON strategy6_market_snapshots(task_id)"
+    )
+    _ensure_column(conn, "strategy6_market_snapshots", "data_status", "TEXT DEFAULT 'MISSING'")
+
+
+def _ensure_strategy6_lifecycle_table(conn: sqlite3.Connection):
+    conn.execute('''
+        CREATE TABLE IF NOT EXISTS strategy6_candidate_lifecycle (
+            code TEXT PRIMARY KEY,
+            lifecycle_status TEXT NOT NULL,
+            first_seen_date TEXT,
+            last_seen_date TEXT,
+            days_in_pool INTEGER DEFAULT 0,
+            exit_date TEXT,
+            exit_reason TEXT,
+            cooldown_until_date TEXT,
+            reentry_count INTEGER DEFAULT 0,
+            last_event_key TEXT,
+            updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+        )
+    ''')
+
+
+def _ensure_strategy6_task_lifecycle_table(conn: sqlite3.Connection):
+    conn.execute('''
+        CREATE TABLE IF NOT EXISTS strategy6_task_lifecycle (
+            task_id TEXT NOT NULL,
+            code TEXT NOT NULL,
+            name TEXT,
+            evaluation_date TEXT,
+            candidate_type TEXT,
+            lifecycle_status TEXT,
+            first_seen_date TEXT,
+            last_seen_date TEXT,
+            days_in_pool INTEGER DEFAULT 0,
+            exit_date TEXT,
+            exit_reason TEXT,
+            cooldown_until_date TEXT,
+            reentry_count INTEGER DEFAULT 0,
+            blocked INTEGER DEFAULT 0,
+            reject_reasons TEXT,
+            updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+            PRIMARY KEY (task_id, code),
+            FOREIGN KEY (task_id) REFERENCES scan_tasks(id)
+        )
+    ''')
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_strategy6_task_lifecycle_task "
+        "ON strategy6_task_lifecycle(task_id, blocked, lifecycle_status)"
+    )
+
+
 def _ensure_column(conn: sqlite3.Connection, table: str, column: str, col_type: str):
     """Compatible add-column-if-not-exists helper."""
     existing = [d[1] for d in conn.execute(f"PRAGMA table_info({table})").fetchall()]
@@ -2637,6 +3740,951 @@ def get_strategy5_candidate(code: str, task_id: str = None) -> dict | None:
     return _deserialize_strategy5_row(dict(zip(cols, row)))
 
 
+def upsert_strategy6_candidate(
+    task_id: str,
+    d: dict,
+    *,
+    _conn: sqlite3.Connection | None = None,
+    _commit: bool = True,
+):
+    """Insert or update one Strategy6 candidate."""
+    conn = _conn or get_conn()
+    observation_only = bool(
+        d.get("candidate_type") == "REJECTED"
+        and d.get("classification") == "observation"
+    )
+    first_pool_date = "" if observation_only else str(
+        d.get("first_seen_date") or d.get("first_pool_date") or d.get("evaluation_date") or ""
+    )
+    pool_age = int(d.get("days_in_pool", d.get("pool_age_trading_days", 0)) or 0)
+    lifecycle_status = d.get("lifecycle_status", "")
+    columns = [
+        "task_id", "code", "name", "sector_name", "evaluation_date",
+        "candidate_type", "pre_market_candidate_type", "classification", "lifecycle_status", "first_pool_date", "pool_age_trading_days",
+        "current_price", "close", "daily_return", "current_close_position", "trading_days",
+        "ma5", "ma10", "ma20", "ma50", "ma120", "ma250",
+        "return_5", "return_10", "return_20",
+        "relative_strength_20", "relative_strength_20_observed",
+        "amount_avg_10", "amount_avg_30", "amount_avg_60",
+        "v3", "v5", "v10", "v20", "volume_ratio_5_20",
+        "current_volume_ratio_20",
+        "highest_close_20", "highest_close_120", "pullback_from_20d_high",
+        "range_5", "range_10", "close_range_5",
+        "start_date", "start_type", "start_grade", "start_day_return",
+        "start_day_volume_ratio", "start_day_amount", "start_day_close_position", "start_low",
+        "is_limit_up", "is_one_word_limit_up", "limit_up_pct", "days_since_start", "high_trigger",
+        "key_support_price", "prior_key_support_price", "support_zone_low", "support_zone_high",
+        "defense_support_price", "main_support_ma", "support_status",
+        "support_test_count", "pivot_price", "box_height", "support_score",
+        "suggested_buy_price", "buy_zone_low", "buy_zone_high", "stop_loss_price",
+        "target_price_1", "target_price_2", "target_price_3",
+        "risk_amount", "reward_amount_1", "reward_amount_2", "reward_amount_3",
+        "risk_reward_ratio_1", "risk_reward_ratio_2", "risk_reward_ratio_3",
+        "strong_start_score", "dry_stable_score", "risk_reward_score",
+        "risk_control_score", "total_score",
+        "market_status", "enable_market_filter", "market_filter_mode",
+        "risk_tags", "warn_tags", "reject_reasons", "score_reasons", "suggestion",
+        "data_source", "kline_latest_date", "kline_fetched_at", "quote_status",
+    ]
+    values = [
+        task_id,
+        d.get("code", ""),
+        d.get("name", ""),
+        d.get("sector_name", ""),
+        d.get("evaluation_date", ""),
+        d.get("candidate_type", "REJECTED"),
+        d.get("pre_market_candidate_type", ""),
+        d.get("classification", "rejected"),
+        lifecycle_status,
+        first_pool_date,
+        pool_age,
+        d.get("current_price", d.get("close", 0.0)),
+        d.get("close", d.get("current_price", 0.0)),
+        d.get("daily_return", 0.0),
+        d.get("current_close_position", 0.0),
+        d.get("trading_days", 0),
+        d.get("ma5"),
+        d.get("ma10"),
+        d.get("ma20"),
+        d.get("ma50"),
+        d.get("ma120"),
+        d.get("ma250"),
+        d.get("return_5"),
+        d.get("return_10"),
+        d.get("return_20"),
+        d.get("relative_strength_20", 0.0),
+        1 if d.get("relative_strength_20_observed") else 0,
+        d.get("amount_avg_10"),
+        d.get("amount_avg_30"),
+        d.get("amount_avg_60"),
+        d.get("v3"),
+        d.get("v5"),
+        d.get("v10"),
+        d.get("v20"),
+        d.get("volume_ratio_5_20"),
+        d.get("current_volume_ratio_20"),
+        d.get("highest_close_20"),
+        d.get("highest_close_120"),
+        d.get("pullback_from_20d_high"),
+        d.get("range_5"),
+        d.get("range_10"),
+        d.get("close_range_5"),
+        d.get("start_date", ""),
+        d.get("start_type", ""),
+        d.get("start_grade", ""),
+        d.get("start_day_return"),
+        d.get("start_day_volume_ratio"),
+        d.get("start_day_amount"),
+        d.get("start_day_close_position"),
+        d.get("start_low"),
+        1 if d.get("is_limit_up") else 0,
+        1 if d.get("is_one_word_limit_up") else 0,
+        d.get("limit_up_pct"),
+        d.get("days_since_start", 0),
+        d.get("high_trigger", ""),
+        d.get("key_support_price"),
+        d.get("prior_key_support_price"),
+        d.get("support_zone_low"),
+        d.get("support_zone_high"),
+        d.get("defense_support_price"),
+        d.get("main_support_ma", ""),
+        d.get("support_status", ""),
+        d.get("support_test_count", 0),
+        d.get("pivot_price"),
+        d.get("box_height"),
+        d.get("support_score", 0),
+        d.get("suggested_buy_price"),
+        d.get("buy_zone_low"),
+        d.get("buy_zone_high"),
+        d.get("stop_loss_price"),
+        d.get("target_price_1"),
+        d.get("target_price_2"),
+        d.get("target_price_3"),
+        d.get("risk_amount"),
+        d.get("reward_amount_1"),
+        d.get("reward_amount_2"),
+        d.get("reward_amount_3"),
+        d.get("risk_reward_ratio_1"),
+        d.get("risk_reward_ratio_2"),
+        d.get("risk_reward_ratio_3"),
+        d.get("strong_start_score", 0),
+        d.get("dry_stable_score", 0),
+        d.get("risk_reward_score", 0),
+        d.get("risk_control_score", 0),
+        d.get("total_score", 0.0),
+        d.get("market_status", "UNKNOWN"),
+        1 if d.get("enable_market_filter") else 0,
+        d.get("market_filter_mode", "downgrade"),
+        _json_any(d.get("risk_tags", [])),
+        _json_any(d.get("warn_tags", [])),
+        _json_any(d.get("reject_reasons", [])),
+        _json_any(d.get("score_reasons", [])),
+        d.get("suggestion", ""),
+        d.get("data_source", ""),
+        d.get("kline_latest_date", ""),
+        d.get("kline_fetched_at", ""),
+        d.get("quote_status", ""),
+    ]
+    extra_columns = [
+        "first_seen_date", "last_seen_date", "days_in_pool", "exit_date", "exit_reason", "cooldown_until_date", "reentry_count",
+        "strategy_version", "config_hash", "price_basis", "current_price_adj", "current_price_raw",
+        "atr14", "start_day_self_amount_percentile",
+        "phase_status", "consolidation_start_date", "tail_start_date", "signal_date",
+        "start_age_days", "consolidation_days", "tail_days",
+        "pattern_type", "pattern_score", "pattern_start_date", "pattern_end_date",
+        "pivot_source", "pattern_low", "pattern_height", "pattern_depth_pct", "contraction_count",
+        "tactical_support_price", "support_cluster_sources", "support_cluster_score",
+        "objective_target_1", "objective_target_2",
+        "execution_target_1_5r", "execution_target_2r", "execution_target_2_5r", "execution_target_3_5r",
+        "objective_rr_1", "objective_rr_2", "valid_from_date", "valid_until_date",
+        "buy_zone_valid_days", "suggested_limit_price", "execution_notes",
+        "pattern_score_component", "tail_score", "objective_rr_score", "relative_strength_risk_score",
+        "tail_avg_volume", "pre_tail_avg_volume_20", "tail_volume_ratio", "volume_slope_10",
+        "original_tail_pass", "original_tail_score", "box_tail_enabled", "box_tail_pass",
+        "box_tail_score", "box_status", "tail_pass", "tail_path",
+        "box_start_date", "box_end_date", "box_days", "box_high", "box_low", "box_width",
+        "box_position", "box_position_raw", "box_low_test_count", "box_high_test_count",
+        "box_first_half_volume", "box_second_half_volume", "box_volume_contraction_ratio",
+        "first_half_median_close", "second_half_median_close", "box_center_shift",
+        "box_break_reason", "box_selection_reason", "compact_kline_enabled",
+        "compact_kline_pass", "compact_kline_score", "box_quality_score", "box_quality_tag",
+        "avg_body_ratio_5", "max_body_ratio_5", "compact_close_range_5",
+        "kline_overlap_pair_count", "avg_kline_overlap_ratio", "gap_count_5",
+        "max_gap_ratio_5", "atr5", "atr20", "atr_contraction_ratio",
+        "compact_kline_reasons", "compact_kline_risk_tags",
+        "brooks_tail_enabled", "brooks_tail_pass", "brooks_tail_score",
+        "brooks_tail_premium", "brooks_status", "brooks_trade_ready",
+        "brooks_trade_trigger_type", "brooks_trigger_price", "brooks_trigger_valid_until", "tail_paths",
+        "tail_path_summary", "tail_primary_path", "passed_path_count",
+        "multi_path_confirmed", "brooks_result_json",
+        "start_event_quality_score", "start_follow_through_return_5",
+        "start_gain_retention_ratio", "start_max_close_drawdown_5", "start_failure_reasons",
+        "tail_segmentation_status", "tail_segmentation_score",
+        "tail_range_contraction_ratio", "tail_atr_contraction_ratio", "tail_body_contraction_ratio",
+        "setup_quality_score", "setup_gain_retention_ratio", "distribution_day_count",
+        "up_down_volume_ratio", "volatility_contraction_ratio", "failed_breakout_count",
+        "relative_strength_trend", "setup_quality_reasons", "setup_quality_risk_tags",
+        "support_reaction_score", "support_reaction_reasons", "support_reaction_risk_tags",
+        "path_evidence_score", "entry_archetype", "score_model_version",
+        "vcp_observation_eligible", "vcp_lifecycle_status",
+        "vcp_origin_start_date", "vcp_pattern_start_date", "vcp_pattern_end_date",
+        "vcp_contraction_count", "vcp_contractions", "vcp_forming_round", "vcp_pivot_price",
+        "vcp_structure_low", "vcp_distance_to_pivot_pct", "vcp_breakout_date",
+        "vcp_days_since_breakout", "vcp_observation_reasons",
+        "vcp_observation_risk_tags", "vcp_invalidation_reason", "vcp_exit_audit",
+        "vcp_history_qualified", "vcp_history_candidate_date",
+        "vcp_history_candidate_type", "vcp_history_candidate_score",
+        "vcp_history_source", "vcp_history_origin_start_date",
+        "vcp_quality_score", "vcp_quality_grade",
+        "vcp_quality_contraction_score", "vcp_quality_range_score",
+        "vcp_quality_volume_score", "vcp_quality_low_score",
+        "vcp_quality_start_retention_score", "vcp_quality_time_score",
+        "vcp_quality_pivot_score", "vcp_quality_breakout_score",
+        "vcp_quality_reasons", "vcp_quality_warnings",
+        "vcp_quality_model_version",
+    ]
+    extra_values = [
+        "" if observation_only else d.get("first_seen_date", first_pool_date),
+        "" if observation_only else d.get("last_seen_date", d.get("evaluation_date", "")),
+        d.get("days_in_pool", pool_age),
+        d.get("exit_date", ""),
+        d.get("exit_reason", ""),
+        d.get("cooldown_until_date", ""),
+        d.get("reentry_count", 0),
+        d.get("strategy_version", ""),
+        d.get("config_hash", ""),
+        d.get("price_basis", "FORWARD_ADJUSTED"),
+        d.get("current_price_adj", d.get("current_price")),
+        None,
+        d.get("atr14"),
+        d.get("start_day_self_amount_percentile", 0),
+        d.get("phase_status", ""),
+        d.get("consolidation_start_date", ""),
+        d.get("tail_start_date", ""),
+        d.get("signal_date", d.get("evaluation_date", "")),
+        d.get("start_age_days", 0),
+        d.get("consolidation_days", 0),
+        d.get("tail_days", 0),
+        d.get("pattern_type", "UNKNOWN"),
+        d.get("pattern_score", 0),
+        d.get("pattern_start_date", ""),
+        d.get("pattern_end_date", ""),
+        d.get("pivot_source", ""),
+        d.get("pattern_low"),
+        d.get("pattern_height"),
+        d.get("pattern_depth_pct"),
+        d.get("contraction_count", 0),
+        d.get("tactical_support_price"),
+        _json_any(d.get("support_cluster_sources", [])),
+        d.get("support_cluster_score", 0),
+        d.get("objective_target_1"),
+        d.get("objective_target_2"),
+        d.get("execution_target_1_5r"),
+        d.get("execution_target_2r"),
+        d.get("execution_target_2_5r"),
+        d.get("execution_target_3_5r"),
+        d.get("objective_rr_1"),
+        d.get("objective_rr_2"),
+        d.get("valid_from_date", ""),
+        d.get("valid_until_date", ""),
+        d.get("buy_zone_valid_days", 0),
+        d.get("suggested_limit_price"),
+        _json_any(d.get("execution_notes", [])),
+        d.get("pattern_score_component", 0),
+        d.get("tail_score", 0),
+        d.get("objective_rr_score", 0),
+        d.get("relative_strength_risk_score", 0),
+        d.get("tail_avg_volume"),
+        d.get("pre_tail_avg_volume_20"),
+        d.get("tail_volume_ratio"),
+        d.get("volume_slope_10"),
+        1 if d.get("original_tail_pass") else 0,
+        d.get("original_tail_score", 0),
+        1 if d.get("box_tail_enabled") else 0,
+        1 if d.get("box_tail_pass") else 0,
+        d.get("box_tail_score", 0),
+        d.get("box_status", "NO_BOX"),
+        1 if d.get("tail_pass") else 0,
+        d.get("tail_path", "NONE"),
+        d.get("box_start_date", ""),
+        d.get("box_end_date", ""),
+        d.get("box_days", 0),
+        d.get("box_high"),
+        d.get("box_low"),
+        d.get("box_width"),
+        d.get("box_position"),
+        d.get("box_position_raw"),
+        d.get("box_low_test_count", 0),
+        d.get("box_high_test_count", 0),
+        d.get("box_first_half_volume"),
+        d.get("box_second_half_volume"),
+        d.get("box_volume_contraction_ratio"),
+        d.get("first_half_median_close"),
+        d.get("second_half_median_close"),
+        d.get("box_center_shift"),
+        d.get("box_break_reason", ""),
+        d.get("box_selection_reason", ""),
+        1 if d.get("compact_kline_enabled") else 0,
+        1 if d.get("compact_kline_pass") else 0,
+        d.get("compact_kline_score", 0),
+        d.get("box_quality_score", 0),
+        d.get("box_quality_tag", "NONE"),
+        d.get("avg_body_ratio_5"),
+        d.get("max_body_ratio_5"),
+        d.get("compact_close_range_5"),
+        d.get("kline_overlap_pair_count", 0),
+        d.get("avg_kline_overlap_ratio"),
+        d.get("gap_count_5", 0),
+        d.get("max_gap_ratio_5"),
+        d.get("atr5"),
+        d.get("atr20"),
+        d.get("atr_contraction_ratio"),
+        _json_any(d.get("compact_kline_reasons", [])),
+        _json_any(d.get("compact_kline_risk_tags", [])),
+        1 if d.get("brooks_tail_enabled") else 0,
+        1 if d.get("brooks_tail_pass") else 0,
+        d.get("brooks_tail_score", 0),
+        1 if d.get("brooks_tail_premium") else 0,
+        d.get("brooks_status", "BROOKS_DISABLED"),
+        1 if d.get("brooks_trade_ready") else 0,
+        d.get("brooks_trade_trigger_type", ""),
+        d.get("brooks_trigger_price"),
+        d.get("brooks_trigger_valid_until", ""),
+        _json_any(d.get("tail_paths", [])),
+        d.get("tail_path_summary", "NONE"),
+        d.get("tail_primary_path", "NONE"),
+        d.get("passed_path_count", 0),
+        1 if d.get("multi_path_confirmed") else 0,
+        json.dumps(
+            d.get("brooks_result") or {},
+            ensure_ascii=False,
+            sort_keys=True,
+            default=_json_default,
+        ),
+        d.get("start_event_quality_score", 0),
+        d.get("start_follow_through_return_5", 0.0),
+        d.get("start_gain_retention_ratio", 0.0),
+        d.get("start_max_close_drawdown_5", 0.0),
+        _json_any(d.get("start_failure_reasons", [])),
+        d.get("tail_segmentation_status", "FIXED_WINDOW"),
+        d.get("tail_segmentation_score", 0),
+        d.get("tail_range_contraction_ratio", 0.0),
+        d.get("tail_atr_contraction_ratio", 0.0),
+        d.get("tail_body_contraction_ratio", 0.0),
+        d.get("setup_quality_score", 0),
+        d.get("setup_gain_retention_ratio", 0.0),
+        d.get("distribution_day_count", 0),
+        d.get("up_down_volume_ratio", 0.0),
+        d.get("volatility_contraction_ratio", 0.0),
+        d.get("failed_breakout_count", 0),
+        d.get("relative_strength_trend", "UNKNOWN"),
+        _json_any(d.get("setup_quality_reasons", [])),
+        _json_any(d.get("setup_quality_risk_tags", [])),
+        d.get("support_reaction_score", 0),
+        _json_any(d.get("support_reaction_reasons", [])),
+        _json_any(d.get("support_reaction_risk_tags", [])),
+        d.get("path_evidence_score", 0),
+        d.get("entry_archetype", "NONE"),
+        d.get("score_model_version", "S6_QUALITY_V2"),
+        1 if d.get("vcp_observation_eligible") else 0,
+        d.get("vcp_lifecycle_status", "VCP_NONE"),
+        d.get("vcp_origin_start_date", ""),
+        d.get("vcp_pattern_start_date", ""),
+        d.get("vcp_pattern_end_date", ""),
+        d.get("vcp_contraction_count", 0),
+        _json_any(d.get("vcp_contractions", [])),
+        _json_any(d.get("vcp_forming_round", {})),
+        d.get("vcp_pivot_price", 0.0),
+        d.get("vcp_structure_low", 0.0),
+        d.get("vcp_distance_to_pivot_pct", 0.0),
+        d.get("vcp_breakout_date", ""),
+        d.get("vcp_days_since_breakout", 0),
+        _json_any(d.get("vcp_observation_reasons", [])),
+        _json_any(d.get("vcp_observation_risk_tags", [])),
+        d.get("vcp_invalidation_reason", ""),
+        1 if d.get("vcp_exit_audit") else 0,
+        1 if d.get("vcp_history_qualified") else 0,
+        d.get("vcp_history_candidate_date", ""),
+        d.get("vcp_history_candidate_type", ""),
+        d.get("vcp_history_candidate_score", 0),
+        d.get("vcp_history_source", ""),
+        d.get("vcp_history_origin_start_date", ""),
+        d.get("vcp_quality_score"),
+        d.get("vcp_quality_grade"),
+        d.get("vcp_quality_contraction_score"),
+        d.get("vcp_quality_range_score"),
+        d.get("vcp_quality_volume_score"),
+        d.get("vcp_quality_low_score"),
+        d.get("vcp_quality_start_retention_score"),
+        d.get("vcp_quality_time_score"),
+        d.get("vcp_quality_pivot_score"),
+        d.get("vcp_quality_breakout_score"),
+        _json_any(d.get("vcp_quality_reasons", [])),
+        _json_any(d.get("vcp_quality_warnings", [])),
+        d.get("vcp_quality_model_version"),
+    ]
+    columns.extend(extra_columns)
+    values.extend(extra_values)
+    updates = ", ".join(f"{c}=excluded.{c}" for c in columns if c not in ("task_id", "code"))
+    conn.execute(
+        f"""INSERT INTO strategy6_candidates ({', '.join(columns)}) VALUES ({', '.join('?' for _ in columns)})
+            ON CONFLICT(task_id, code) DO UPDATE SET {updates}, updated_at=datetime('now')""",
+        values,
+    )
+    if _commit:
+        conn.commit()
+
+
+def _weekday_distance(start_date: str, end_date: str) -> int:
+    from datetime import date, timedelta
+
+    try:
+        start = date.fromisoformat(str(start_date)[:10])
+        end = date.fromisoformat(str(end_date)[:10])
+    except ValueError:
+        return 0
+    if end <= start:
+        return 0
+    days = 0
+    current = start + timedelta(days=1)
+    while current <= end:
+        if current.weekday() < 5:
+            days += 1
+        current += timedelta(days=1)
+    return days
+
+
+def get_strategy6_candidates(task_id: str = None) -> list[dict]:
+    """Get Strategy6 candidates, optionally for a task."""
+    conn = get_conn()
+    if task_id:
+        rows = conn.execute(
+            "SELECT * FROM strategy6_candidates WHERE task_id=? "
+            "ORDER BY CASE candidate_type WHEN 'READY_CANDIDATE' THEN 0 WHEN 'KEY_CANDIDATE' THEN 1 "
+            "WHEN 'WATCH_CANDIDATE' THEN 2 ELSE 3 END, total_score DESC, code ASC",
+            (task_id,),
+        ).fetchall()
+    else:
+        row = conn.execute(
+            "SELECT id FROM scan_tasks WHERE status='completed' "
+            "AND strategy_type='STRATEGY_6_STRONG_VCP_TAIL' "
+            "ORDER BY started_at DESC LIMIT 1"
+        ).fetchone()
+        if not row:
+            return []
+        rows = conn.execute(
+            "SELECT * FROM strategy6_candidates WHERE task_id=? "
+            "ORDER BY total_score DESC, code ASC",
+            (row[0],),
+        ).fetchall()
+    cols = [d[1] for d in conn.execute("PRAGMA table_info(strategy6_candidates)").fetchall()]
+    return [_deserialize_strategy6_row(dict(zip(cols, row))) for row in rows]
+
+
+def get_strategy6_candidate(code: str, task_id: str = None) -> dict | None:
+    conn = get_conn()
+    if task_id:
+        row = conn.execute(
+            "SELECT * FROM strategy6_candidates WHERE code=? AND task_id=? ORDER BY id DESC LIMIT 1",
+            (code, task_id),
+        ).fetchone()
+    else:
+        row = conn.execute(
+            "SELECT * FROM strategy6_candidates WHERE code=? ORDER BY id DESC LIMIT 1",
+            (code,),
+        ).fetchone()
+    if not row:
+        return None
+    cols = [d[1] for d in conn.execute("PRAGMA table_info(strategy6_candidates)").fetchall()]
+    return _deserialize_strategy6_row(dict(zip(cols, row)))
+
+
+def get_latest_strategy6_vcp_states(exclude_task_id: str | None = None) -> dict[str, dict]:
+    """Return each stock's latest VCP state from completed scans only."""
+    conn = get_conn()
+    params: tuple = ()
+    where = (
+        "WHERE LOWER(COALESCE(t.status, ''))='completed' "
+        "AND ((c.vcp_observation_eligible=1 AND c.vcp_history_qualified=1) "
+        "OR c.vcp_exit_audit=1)"
+    )
+    if exclude_task_id:
+        where += " AND c.task_id<>?"
+        params = (exclude_task_id,)
+    rows = conn.execute(
+        f"SELECT c.* FROM strategy6_candidates c "
+        f"JOIN scan_tasks t ON t.id=c.task_id {where} ORDER BY c.id DESC",
+        params,
+    ).fetchall()
+    cols = [d[1] for d in conn.execute("PRAGMA table_info(strategy6_candidates)").fetchall()]
+    latest: dict[str, dict] = {}
+    for raw in rows:
+        row = _deserialize_strategy6_row(dict(zip(cols, raw)))
+        latest.setdefault(str(row.get("code") or ""), row)
+    return latest
+
+
+def save_strategy6_market_snapshot(task_id: str, snapshot: dict):
+    """Persist task-level Strategy6 market index snapshot for frontend audit."""
+    conn = get_conn()
+    _ensure_strategy6_market_snapshots_table(conn)
+    now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    market_status = str(snapshot.get("market_status") or "UNKNOWN")
+    market_reasons = _json_any(snapshot.get("market_reasons", []))
+    market_return_20 = float(snapshot.get("market_return_20") or 0.0)
+    rows = snapshot.get("indexes") or []
+    with conn:
+        conn.execute("DELETE FROM strategy6_market_snapshots WHERE task_id=?", (task_id,))
+        for row in rows:
+            symbol = str(row.get("symbol") or "")
+            if not symbol:
+                continue
+            conn.execute(
+                """INSERT INTO strategy6_market_snapshots (
+                       task_id, symbol, name, latest_date, latest_close, ma20, ma50, return_20,
+                       above_ma20, ma20_above_ma50, volume_down_risk, weak, rows_count, source, data_status,
+                       market_status, market_reasons, market_return_20, fetched_at
+                   ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    task_id,
+                    symbol,
+                    row.get("name", ""),
+                    row.get("latest_date", ""),
+                    float(row.get("latest_close") or 0.0),
+                    float(row.get("ma20") or 0.0),
+                    float(row.get("ma50") or 0.0),
+                    float(row.get("return_20") or 0.0),
+                    1 if row.get("above_ma20") else 0,
+                    1 if row.get("ma20_above_ma50") else 0,
+                    1 if row.get("volume_down_risk") else 0,
+                    1 if row.get("weak") else 0,
+                    int(row.get("rows_count") or 0),
+                    row.get("source", ""),
+                    row.get("data_status", "MISSING"),
+                    market_status,
+                    market_reasons,
+                    market_return_20,
+                    row.get("fetched_at") or now,
+                ),
+            )
+
+
+def get_strategy6_market_snapshot(task_id: str) -> dict:
+    """Return persisted Strategy6 market snapshot for a task."""
+    conn = get_conn()
+    _ensure_strategy6_market_snapshots_table(conn)
+    rows = conn.execute(
+        """SELECT task_id, symbol, name, latest_date, latest_close, ma20, ma50, return_20,
+                  above_ma20, ma20_above_ma50, volume_down_risk, weak, rows_count, source, data_status,
+                  market_status, market_reasons, market_return_20, fetched_at
+           FROM strategy6_market_snapshots
+           WHERE task_id=?
+           ORDER BY CASE symbol
+               WHEN 'sh000001' THEN 0
+               WHEN 'sz399001' THEN 1
+               WHEN 'sz399006' THEN 2
+               WHEN 'hs300' THEN 3
+               ELSE 9
+           END, symbol ASC""",
+        (task_id,),
+    ).fetchall()
+    if not rows:
+        return {
+            "task_id": task_id,
+            "market_status": "UNKNOWN",
+            "market_reasons": [],
+            "market_return_20": 0.0,
+            "indexes": [],
+        }
+    cols = [
+        "task_id", "symbol", "name", "latest_date", "latest_close", "ma20", "ma50", "return_20",
+        "above_ma20", "ma20_above_ma50", "volume_down_risk", "weak", "rows_count", "source", "data_status",
+        "market_status", "market_reasons", "market_return_20", "fetched_at",
+    ]
+    items = [dict(zip(cols, row)) for row in rows]
+    first = items[0]
+    indexes = []
+    for item in items:
+        indexes.append({
+            "symbol": item["symbol"],
+            "name": item.get("name") or item["symbol"],
+            "latest_date": item.get("latest_date") or "",
+            "latest_close": item.get("latest_close") or 0.0,
+            "ma20": item.get("ma20") or 0.0,
+            "ma50": item.get("ma50") or 0.0,
+            "return_20": item.get("return_20") or 0.0,
+            "above_ma20": bool(item.get("above_ma20")),
+            "ma20_above_ma50": bool(item.get("ma20_above_ma50")),
+            "volume_down_risk": bool(item.get("volume_down_risk")),
+            "weak": bool(item.get("weak")),
+            "rows_count": item.get("rows_count") or 0,
+            "source": item.get("source") or "",
+            "data_status": item.get("data_status") or "MISSING",
+            "fetched_at": item.get("fetched_at") or "",
+        })
+    reasons = []
+    raw_reasons = first.get("market_reasons")
+    if isinstance(raw_reasons, str) and raw_reasons:
+        try:
+            parsed = json.loads(raw_reasons)
+            reasons = parsed if isinstance(parsed, list) else []
+        except (json.JSONDecodeError, TypeError):
+            reasons = []
+    return {
+        "task_id": task_id,
+        "market_status": first.get("market_status") or "UNKNOWN",
+        "market_reasons": reasons,
+        "market_return_20": first.get("market_return_20") or 0.0,
+        "indexes": indexes,
+    }
+
+
+def get_strategy6_lifecycle(code: str) -> dict | None:
+    conn = get_conn()
+    _ensure_strategy6_lifecycle_table(conn)
+    return _get_strategy6_lifecycle_from_conn(conn, code)
+
+
+def save_strategy6_task_lifecycle(
+    task_id: str,
+    *,
+    code: str,
+    name: str,
+    evaluation_date: str,
+    candidate_type: str,
+    lifecycle: dict,
+    reject_reasons: list[str],
+    _conn: sqlite3.Connection | None = None,
+    _commit: bool = True,
+) -> None:
+    conn = _conn or get_conn()
+    if _commit:
+        _ensure_strategy6_task_lifecycle_table(conn)
+    conn.execute(
+        """INSERT INTO strategy6_task_lifecycle (
+               task_id, code, name, evaluation_date, candidate_type, lifecycle_status,
+               first_seen_date, last_seen_date, days_in_pool, exit_date, exit_reason,
+               cooldown_until_date, reentry_count, blocked, reject_reasons, updated_at
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+           ON CONFLICT(task_id, code) DO UPDATE SET
+               name=excluded.name,
+               evaluation_date=excluded.evaluation_date,
+               candidate_type=excluded.candidate_type,
+               lifecycle_status=excluded.lifecycle_status,
+               first_seen_date=excluded.first_seen_date,
+               last_seen_date=excluded.last_seen_date,
+               days_in_pool=excluded.days_in_pool,
+               exit_date=excluded.exit_date,
+               exit_reason=excluded.exit_reason,
+               cooldown_until_date=excluded.cooldown_until_date,
+               reentry_count=excluded.reentry_count,
+               blocked=excluded.blocked,
+               reject_reasons=excluded.reject_reasons,
+               updated_at=datetime('now')""",
+        (
+            task_id, code, name, evaluation_date, candidate_type,
+            lifecycle.get("lifecycle_status", ""), lifecycle.get("first_seen_date", ""),
+            lifecycle.get("last_seen_date", ""), int(lifecycle.get("days_in_pool") or 0),
+            lifecycle.get("exit_date", ""), lifecycle.get("exit_reason", ""),
+            lifecycle.get("cooldown_until_date", ""), int(lifecycle.get("reentry_count") or 0),
+            1 if lifecycle.get("blocked") else 0, _json_any(reject_reasons),
+        ),
+    )
+    if _commit:
+        conn.commit()
+
+
+def get_strategy6_task_lifecycle(task_id: str) -> list[dict]:
+    conn = get_conn()
+    _ensure_strategy6_task_lifecycle_table(conn)
+    rows = conn.execute(
+        """SELECT task_id, code, name, evaluation_date, candidate_type, lifecycle_status,
+                  first_seen_date, last_seen_date, days_in_pool, exit_date, exit_reason,
+                  cooldown_until_date, reentry_count, blocked, reject_reasons
+           FROM strategy6_task_lifecycle WHERE task_id=?
+           ORDER BY blocked DESC, lifecycle_status, code""",
+        (task_id,),
+    ).fetchall()
+    columns = [
+        "task_id", "code", "name", "evaluation_date", "candidate_type", "lifecycle_status",
+        "first_seen_date", "last_seen_date", "days_in_pool", "exit_date", "exit_reason",
+        "cooldown_until_date", "reentry_count", "blocked", "reject_reasons",
+    ]
+    result = []
+    for row in rows:
+        item = dict(zip(columns, row))
+        item["blocked"] = bool(item.get("blocked"))
+        try:
+            decoded = json.loads(item.get("reject_reasons") or "[]")
+            item["reject_reasons"] = decoded if isinstance(decoded, list) else []
+        except (json.JSONDecodeError, TypeError):
+            item["reject_reasons"] = []
+        result.append(item)
+    return result
+
+
+def _get_strategy6_lifecycle_from_conn(conn: sqlite3.Connection, code: str) -> dict | None:
+    row = conn.execute(
+        """SELECT code, lifecycle_status, first_seen_date, last_seen_date, days_in_pool,
+                  exit_date, exit_reason, cooldown_until_date, reentry_count, last_event_key
+           FROM strategy6_candidate_lifecycle WHERE code=?""",
+        (code,),
+    ).fetchone()
+    if not row:
+        return None
+    columns = [
+        "code", "lifecycle_status", "first_seen_date", "last_seen_date", "days_in_pool",
+        "exit_date", "exit_reason", "cooldown_until_date", "reentry_count", "last_event_key",
+    ]
+    return dict(zip(columns, row))
+
+
+def update_strategy6_lifecycle(
+    *,
+    code: str,
+    evaluation_date: str,
+    candidate_type: str,
+    lifecycle_status: str,
+    event_key: str,
+    reject_reasons: list[str],
+    max_watch_days: int,
+    expired_cooldown_days: int,
+    failed_cooldown_days: int,
+    _conn: sqlite3.Connection | None = None,
+    _commit: bool = True,
+) -> dict:
+    conn = _conn or get_conn()
+    if _commit:
+        _ensure_strategy6_lifecycle_table(conn)
+        conn.commit()
+        conn.execute("BEGIN IMMEDIATE")
+    try:
+        previous = _get_strategy6_lifecycle_from_conn(conn, code)
+        is_candidate = candidate_type != "REJECTED"
+        state = {
+            "code": code,
+            "lifecycle_status": lifecycle_status,
+            "first_seen_date": evaluation_date if is_candidate else "",
+            "last_seen_date": evaluation_date,
+            "days_in_pool": 0,
+            "exit_date": "",
+            "exit_reason": "",
+            "cooldown_until_date": "",
+            "reentry_count": 0,
+            "last_event_key": event_key,
+            "blocked": not is_candidate,
+        }
+
+        if previous:
+            state.update(previous)
+            state["last_seen_date"] = evaluation_date
+            state["blocked"] = False
+            if not is_candidate:
+                if lifecycle_status == "EXTENDED" or "BREAKOUT_EXTENDED" in reject_reasons:
+                    state.update({
+                        "lifecycle_status": "EXTENDED",
+                        "exit_date": evaluation_date,
+                        "exit_reason": "BREAKOUT_EXTENDED",
+                        "cooldown_until_date": "",
+                        "blocked": True,
+                    })
+                else:
+                    natural_expiry = lifecycle_status == "EXPIRED" or any(
+                        reason in {"START_TOO_OLD", "CONSOLIDATION_TOO_LONG"}
+                        for reason in reject_reasons
+                    )
+                    state.update({
+                        "lifecycle_status": "EXPIRED" if natural_expiry else "FAILED",
+                        "exit_date": evaluation_date,
+                        "exit_reason": (reject_reasons or ["STRATEGY_REJECTED"])[0],
+                        "cooldown_until_date": _add_weekdays_iso(
+                            evaluation_date,
+                            expired_cooldown_days if natural_expiry else failed_cooldown_days,
+                        ),
+                        "blocked": True,
+                    })
+            elif previous["lifecycle_status"] in {"FAILED", "EXPIRED", "COOLDOWN"}:
+                cooldown = str(previous.get("cooldown_until_date") or "")
+                same_event = event_key == str(previous.get("last_event_key") or "")
+                support_recovered = (
+                    previous["lifecycle_status"] in {"FAILED", "COOLDOWN"}
+                    and previous.get("exit_reason") != "MAX_WATCH_DAYS_REACHED"
+                    and lifecycle_status in {"READY", "BUY_ZONE", "BREAKOUT_CONFIRMED"}
+                )
+                if (cooldown and evaluation_date <= cooldown) or (same_event and not support_recovered):
+                    state.update({
+                        "lifecycle_status": "COOLDOWN",
+                        "blocked": True,
+                    })
+                else:
+                    state.update({
+                        "lifecycle_status": lifecycle_status,
+                        "first_seen_date": evaluation_date,
+                        "last_seen_date": evaluation_date,
+                        "days_in_pool": 0,
+                        "exit_date": "",
+                        "exit_reason": "",
+                        "cooldown_until_date": "",
+                        "reentry_count": int(previous.get("reentry_count") or 0) + 1,
+                        "last_event_key": event_key,
+                        "blocked": False,
+                    })
+            else:
+                first_seen = str(previous.get("first_seen_date") or evaluation_date)
+                days_in_pool = _weekday_distance(first_seen, evaluation_date)
+                state.update({
+                    "lifecycle_status": lifecycle_status,
+                    "first_seen_date": first_seen,
+                    "days_in_pool": days_in_pool,
+                    "last_event_key": event_key,
+                })
+                if days_in_pool >= max_watch_days:
+                    state.update({
+                        "lifecycle_status": "EXPIRED",
+                        "exit_date": evaluation_date,
+                        "exit_reason": "MAX_WATCH_DAYS_REACHED",
+                        "cooldown_until_date": _add_weekdays_iso(evaluation_date, expired_cooldown_days),
+                        "blocked": True,
+                    })
+
+        if not previous and not is_candidate:
+            if _commit:
+                conn.rollback()
+            return state
+
+        conn.execute(
+            """INSERT INTO strategy6_candidate_lifecycle (
+                   code, lifecycle_status, first_seen_date, last_seen_date, days_in_pool,
+                   exit_date, exit_reason, cooldown_until_date, reentry_count, last_event_key, updated_at
+               ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+               ON CONFLICT(code) DO UPDATE SET
+                   lifecycle_status=excluded.lifecycle_status,
+                   first_seen_date=excluded.first_seen_date,
+                   last_seen_date=excluded.last_seen_date,
+                   days_in_pool=excluded.days_in_pool,
+                   exit_date=excluded.exit_date,
+                   exit_reason=excluded.exit_reason,
+                   cooldown_until_date=excluded.cooldown_until_date,
+                   reentry_count=excluded.reentry_count,
+                   last_event_key=excluded.last_event_key,
+                   updated_at=datetime('now')""",
+            (
+                state["code"], state["lifecycle_status"], state["first_seen_date"],
+                state["last_seen_date"], state["days_in_pool"], state["exit_date"],
+                state["exit_reason"], state["cooldown_until_date"], state["reentry_count"],
+                state["last_event_key"],
+            ),
+        )
+        if _commit:
+            conn.commit()
+        return state
+    except Exception:
+        if _commit:
+            conn.rollback()
+        raise
+
+
+def persist_strategy6_evaluation(
+    task_id: str,
+    *,
+    code: str,
+    name: str,
+    evaluation_date: str,
+    candidate_type: str,
+    lifecycle_status: str,
+    event_key: str,
+    reject_reasons: list[str],
+    max_watch_days: int,
+    expired_cooldown_days: int,
+    failed_cooldown_days: int,
+    candidate: dict | None,
+    observation_candidate: dict | None = None,
+) -> tuple[dict, dict | None]:
+    """Atomically persist Strategy6 lifecycle, task audit and active candidate."""
+    conn = get_conn()
+    conn.commit()
+    conn.execute("BEGIN IMMEDIATE")
+    try:
+        lifecycle = update_strategy6_lifecycle(
+            code=code,
+            evaluation_date=evaluation_date,
+            candidate_type=candidate_type,
+            lifecycle_status=lifecycle_status,
+            event_key=event_key,
+            reject_reasons=reject_reasons,
+            max_watch_days=max_watch_days,
+            expired_cooldown_days=expired_cooldown_days,
+            failed_cooldown_days=failed_cooldown_days,
+            _conn=conn,
+            _commit=False,
+        )
+        if lifecycle.get("first_seen_date"):
+            save_strategy6_task_lifecycle(
+                task_id,
+                code=code,
+                name=name,
+                evaluation_date=evaluation_date,
+                candidate_type=candidate_type,
+                lifecycle=lifecycle,
+                reject_reasons=reject_reasons,
+                _conn=conn,
+                _commit=False,
+            )
+
+        discovery = None
+        if candidate is not None and not lifecycle["blocked"]:
+            discovery = dict(candidate)
+            discovery.update({
+                "lifecycle_status": lifecycle["lifecycle_status"],
+                "first_seen_date": lifecycle["first_seen_date"],
+                "last_seen_date": lifecycle["last_seen_date"],
+                "days_in_pool": lifecycle["days_in_pool"],
+                "exit_date": lifecycle["exit_date"],
+                "exit_reason": lifecycle["exit_reason"],
+                "cooldown_until_date": lifecycle["cooldown_until_date"],
+                "reentry_count": lifecycle["reentry_count"],
+                "first_pool_date": lifecycle["first_seen_date"],
+                "pool_age_trading_days": lifecycle["days_in_pool"],
+            })
+            upsert_strategy6_candidate(
+                task_id,
+                discovery,
+                _conn=conn,
+                _commit=False,
+            )
+        elif observation_candidate is not None:
+            observation = dict(observation_candidate)
+            if candidate is not None and lifecycle.get("blocked"):
+                observation["vcp_observation_risk_tags"] = list(dict.fromkeys([
+                    *observation.get("vcp_observation_risk_tags", []),
+                    "TRADING_LIFECYCLE_BLOCKED",
+                ]))
+            upsert_strategy6_candidate(
+                task_id,
+                observation,
+                _conn=conn,
+                _commit=False,
+            )
+        conn.commit()
+        return lifecycle, discovery
+    except Exception:
+        conn.rollback()
+        raise
+
+
+def _add_weekdays_iso(value: str, days: int) -> str:
+    try:
+        current = datetime.date.fromisoformat(str(value)[:10])
+    except ValueError:
+        return ""
+    added = 0
+    while added < days:
+        current += datetime.timedelta(days=1)
+        if current.weekday() < 5:
+            added += 1
+    return current.isoformat()
+
+
 def save_strategy4_topic_index_ohlc(
     *,
     topic_id: str,
@@ -2893,6 +4941,40 @@ def get_strategy4_topic_members(topic_id: str, *, evaluation_date: str | None = 
     if not row:
         return []
     return _strategy4_members_for_snapshot(topic_id, row[0], row[1])
+
+
+def get_strategy4_topics_for_member(code: str, *, evaluation_date: str | None = None) -> list[dict]:
+    """Return Strategy4 topics whose latest eligible member snapshot contains code."""
+    conn = get_conn()
+    clauses = ["code=?"]
+    params: list = [code]
+    if evaluation_date:
+        clauses.append("membership_snapshot_date<=?")
+        params.append(evaluation_date[:10])
+    rows = conn.execute(
+        f"""SELECT topic_id, topic_name, topic_type, source, membership_snapshot_date, membership_mode
+            FROM strategy4_topic_members
+            WHERE {' AND '.join(clauses)}
+            ORDER BY CASE WHEN membership_mode='current_members_proxy' THEN 1 ELSE 0 END,
+                     membership_snapshot_date DESC, id DESC""",
+        params,
+    ).fetchall()
+    seen: set[str] = set()
+    topics: list[dict] = []
+    for row in rows:
+        topic_id = row[0]
+        if topic_id in seen:
+            continue
+        seen.add(topic_id)
+        topics.append({
+            "topic_id": topic_id,
+            "topic_name": row[1],
+            "topic_type": row[2],
+            "source": row[3],
+            "membership_snapshot_date": row[4],
+            "membership_mode": row[5],
+        })
+    return topics
 
 
 def _strategy4_members_for_snapshot(topic_id: str, snapshot_date: str, source: str) -> list[dict]:
@@ -3307,6 +5389,151 @@ def _deserialize_strategy5_row(row: dict) -> dict:
             row[field] = []
     if "dry_support_valid" in row:
         row["dry_support_valid"] = bool(row.get("dry_support_valid"))
+    return row
+
+
+def _strategy6_safe_bool(value) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return value != 0
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "y", "on"}
+    return False
+
+
+def _strategy6_safe_int(value) -> int:
+    try:
+        return int(value or 0)
+    except (TypeError, ValueError, OverflowError):
+        return 0
+
+
+def _deserialize_strategy6_row(row: dict) -> dict:
+    for field in (
+        "enable_sector_filter",
+        "sector_filter_mode",
+        "sector_strength_status",
+        "relative_strength_10_sector",
+        "sector_member_new_high_count",
+    ):
+        row.pop(field, None)
+    for field in (
+        "risk_tags", "warn_tags", "reject_reasons", "score_reasons",
+        "support_cluster_sources", "execution_notes",
+        "compact_kline_reasons", "compact_kline_risk_tags",
+        "start_failure_reasons", "setup_quality_reasons", "setup_quality_risk_tags",
+        "support_reaction_reasons", "support_reaction_risk_tags",
+        "vcp_contractions", "vcp_observation_reasons", "vcp_observation_risk_tags",
+        "vcp_quality_reasons", "vcp_quality_warnings",
+    ):
+        value = row.get(field)
+        if isinstance(value, str) and value:
+            try:
+                row[field] = json.loads(value)
+            except (json.JSONDecodeError, TypeError):
+                row[field] = []
+        elif not value:
+            row[field] = []
+    raw_forming_round = row.get("vcp_forming_round")
+    if isinstance(raw_forming_round, str) and raw_forming_round:
+        try:
+            decoded_forming_round = json.loads(raw_forming_round)
+            row["vcp_forming_round"] = (
+                decoded_forming_round if isinstance(decoded_forming_round, dict) else {}
+            )
+        except (json.JSONDecodeError, TypeError):
+            row["vcp_forming_round"] = {}
+    elif not isinstance(raw_forming_round, dict):
+        row["vcp_forming_round"] = {}
+    for field in (
+        "is_limit_up", "is_one_word_limit_up", "enable_market_filter",
+        "relative_strength_20_observed", "original_tail_pass", "box_tail_enabled",
+        "box_tail_pass", "tail_pass", "compact_kline_enabled", "compact_kline_pass",
+        "brooks_tail_enabled", "brooks_tail_pass", "brooks_tail_premium",
+        "brooks_trade_ready", "multi_path_confirmed",
+        "vcp_observation_eligible", "vcp_exit_audit", "vcp_history_qualified",
+    ):
+        if field in row:
+            row[field] = _strategy6_safe_bool(row.get(field))
+    for field in ("original_tail_score", "box_tail_score", "brooks_tail_score"):
+        if field in row:
+            row[field] = _strategy6_safe_int(row.get(field))
+    raw_tail_paths = row.get("tail_paths")
+    if isinstance(raw_tail_paths, str) and raw_tail_paths:
+        try:
+            tail_paths = json.loads(raw_tail_paths)
+        except (json.JSONDecodeError, TypeError):
+            tail_paths = []
+    elif isinstance(raw_tail_paths, list):
+        tail_paths = raw_tail_paths
+    else:
+        tail_paths = []
+    if not isinstance(tail_paths, list):
+        tail_paths = []
+    tail_paths = [str(path) for path in tail_paths if path]
+    legacy_paths = not tail_paths
+    if legacy_paths:
+        if row.get("original_tail_pass"):
+            tail_paths.append("ORIGINAL")
+        if row.get("box_tail_pass"):
+            tail_paths.append("BOX")
+        if row.get("brooks_tail_pass"):
+            tail_paths.append("BROOKS")
+    row["tail_paths"] = tail_paths
+
+    brooks_json = row.pop("brooks_result_json", None)
+    if isinstance(brooks_json, str) and brooks_json:
+        try:
+            brooks_result = json.loads(brooks_json)
+        except (json.JSONDecodeError, TypeError):
+            brooks_result = {}
+    elif isinstance(brooks_json, dict):
+        brooks_result = brooks_json
+    else:
+        brooks_result = {}
+    row["brooks_result"] = brooks_result if isinstance(brooks_result, dict) else {}
+
+    if not row.get("brooks_status"):
+        row["brooks_status"] = "BROOKS_DISABLED"
+    row["brooks_trade_trigger_type"] = row.get("brooks_trade_trigger_type") or ""
+    row["brooks_trigger_price"] = row.get("brooks_trigger_price")
+    row["brooks_trigger_valid_until"] = row.get("brooks_trigger_valid_until") or ""
+    if not row.get("tail_path_summary"):
+        row["tail_path_summary"] = (
+            "MULTI" if len(tail_paths) > 1 else tail_paths[0] if tail_paths else "NONE"
+        )
+    if not row.get("tail_primary_path"):
+        score_by_path = {
+            "ORIGINAL": row.get("original_tail_score", 0),
+            "BOX": row.get("box_tail_score", 0),
+            "BROOKS": row.get("brooks_tail_score", 0),
+        }
+        priority = {"ORIGINAL": 0, "BOX": 1, "BROOKS": 2}
+        row["tail_primary_path"] = max(
+            tail_paths,
+            key=lambda path: (score_by_path.get(path, 0), priority.get(path, -1)),
+            default="NONE",
+        )
+    if legacy_paths:
+        row["passed_path_count"] = len(tail_paths)
+        row["multi_path_confirmed"] = len(tail_paths) > 1
+    row["tail_segmentation_status"] = row.get("tail_segmentation_status") or "FIXED_WINDOW"
+    row["relative_strength_trend"] = row.get("relative_strength_trend") or "UNKNOWN"
+    row["entry_archetype"] = row.get("entry_archetype") or "NONE"
+    # A missing version identifies a pre-V2 row.  Keep it empty so clients do
+    # not present migration defaults such as zero scores as measured V2 data.
+    row["score_model_version"] = row.get("score_model_version") or ""
+    row["vcp_lifecycle_status"] = row.get("vcp_lifecycle_status") or "VCP_NONE"
+    for field in (
+        "vcp_origin_start_date", "vcp_pattern_start_date", "vcp_pattern_end_date",
+        "vcp_breakout_date", "vcp_invalidation_reason",
+    ):
+        row[field] = row.get(field) or ""
+    for field in ("vcp_contraction_count", "vcp_days_since_breakout"):
+        row[field] = _strategy6_safe_int(row.get(field))
+    for field in ("vcp_pivot_price", "vcp_structure_low", "vcp_distance_to_pivot_pct"):
+        row[field] = float(row.get(field) or 0.0)
     return row
 
 

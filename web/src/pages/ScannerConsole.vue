@@ -73,6 +73,7 @@
         @start-strategy3="handleStartStrategy3Scan"
         @start-strategy4="handleStartStrategy4Scan"
         @start-strategy5="handleStartStrategy5Scan"
+        @start-strategy6="handleStartStrategy6Scan"
       />
     </div>
 
@@ -119,6 +120,7 @@ const {
   startStrategy3Scan,
   startStrategy4Scan,
   startStrategy5Scan,
+  startStrategy6Scan,
   getScanStatus,
   getCandidates,
   getTaskStocks,
@@ -129,6 +131,7 @@ const {
   getStrategy3Candidates,
   getStrategy4Candidates,
   getStrategy5Candidates,
+  getStrategy6Candidates,
 } = useApi()
 
 // Stage 3: 两种互斥模式
@@ -434,6 +437,36 @@ async function handleStartStrategy5Scan() {
   }
 }
 
+async function handleStartStrategy6Scan() {
+  if (routeTaskId.value) { await router.replace({ path: '/', query: {} }) }
+  scanError.value = ''
+  try {
+    const res = await startStrategy6Scan()
+    if (!res.ok || res.error) {
+      if (res.statusCode === 409) {
+        scanError.value = `策略6扫描冲突：${res.message || res.runningTaskId || '--'}`
+      } else {
+        scanError.value = res.message || res.error || '策略6启动扫描失败'
+      }
+      return
+    }
+    scanProgress.taskId = res.taskId
+    scanProgress.total = 0
+    scanProgress.stockPoolSource = ''
+    failures.value = []
+    logLines.value = []
+    lastLogScanned = 0
+    scanning.value = true
+    activeStrategyType.value = 'STRATEGY_6_STRONG_VCP_TAIL'
+    addLog('info', `策略6扫描启动 · taskId ${res.taskId}`)
+    if (pollTimer) clearInterval(pollTimer)
+    pollTimer = setInterval(pollStatus, 1000)
+  } catch (e) {
+    scanError.value = '无法连接到后端服务'
+    console.error('Strategy6 start scan failed:', e)
+  }
+}
+
 function applyStats(status, { applyTaskId = true } = {}) {
   const stats = status.stats || {}
   if (applyTaskId && status.task_id) {
@@ -467,6 +500,7 @@ async function fetchMappedResults(taskId, strategyType) {
   const isS3 = strategyType === 'STRATEGY_3_STRONG_PULLBACK_SECOND_BREAKOUT'
   const isS4 = strategyType === 'STRATEGY_4_HOT_LEADER_SECOND_WAVE'
   const isS5 = strategyType === 'STRATEGY_5_SHORT_SPRINT_SUPPORT'
+  const isS6 = strategyType === 'STRATEGY_6_STRONG_VCP_TAIL'
   if (isS2) {
     const res = await getStrategy2Candidates(taskId)
     return (res.candidates || []).map(c => ({
@@ -498,6 +532,16 @@ async function fetchMappedResults(taskId, strategyType) {
       rating: c.candidate_type || '', status: c.candidate_type || '',
       detail: `${c.support_status || '--'} · ${c.main_support_ma || '--'} · ${c.strength_trigger || '--'} / ${c.high_trigger || '--'}`,
     }))
+  }
+  if (isS6) {
+    const res = await getStrategy6Candidates(taskId)
+    return (res.candidates || [])
+      .filter(c => c.candidate_type !== 'REJECTED')
+      .map(c => ({
+      code: c.code, name: c.name, score: c.total_score || 0,
+      rating: c.candidate_type || '', status: c.candidate_type || '',
+      detail: `${c.start_type || '--'} / ${c.start_grade || '--'} · ${c.support_status || '--'} · RR2 ${Number(c.risk_reward_ratio_2 || 0).toFixed(1)}`,
+      }))
   }
   const params = taskId ? { task_id: taskId } : {}
   const data = await getCandidates(params)
@@ -666,14 +710,15 @@ async function pollStatus() {
       const isS3 = activeStrategyType.value === 'STRATEGY_3_STRONG_PULLBACK_SECOND_BREAKOUT'
       const isS4 = activeStrategyType.value === 'STRATEGY_4_HOT_LEADER_SECOND_WAVE'
       const isS5 = activeStrategyType.value === 'STRATEGY_5_SHORT_SPRINT_SUPPORT'
+      const isS6 = activeStrategyType.value === 'STRATEGY_6_STRONG_VCP_TAIL'
       status.stats.discoveries.forEach(d => {
         if (!discoveries.value.find(e => e.code === d.code)) {
           const item = {
             code: d.code,
             name: d.name,
-            score: (isS4 || isS5) ? (d.strategy4_score || d.total_score || 0) : ((isS2 || isS3) ? (d.total_score || 0) : (d.score || 0)),
+            score: (isS4 || isS5 || isS6) ? (d.strategy4_score || d.total_score || 0) : ((isS2 || isS3) ? (d.total_score || 0) : (d.score || 0)),
             rating: '',
-            status: isS5 ? (d.candidate_type || '') : (isS4 ? (d.status || '') : ((isS2 || isS3) ? (d.level || '') : statusFor(d))),
+            status: (isS5 || isS6) ? (d.candidate_type || '') : (isS4 ? (d.status || '') : ((isS2 || isS3) ? (d.level || '') : statusFor(d))),
             detail: isS2
               ? `量干${d.volume_dry_score || 0} 价稳${d.price_stable_score || 0} 风险${((d.risk_ratio || 0) * 100).toFixed(1)}%`
               : isS3
@@ -682,6 +727,8 @@ async function pollStatus() {
                   ? `${d.topic_name || '--'} · 龙头${d.leader_strength_score || 0} · RR${Number(d.reward_risk_ratio || 0).toFixed(1)}`
                   : isS5
                     ? `${d.support_status || '--'} · ${d.main_support_ma || '--'} · ${d.strength_trigger || '--'} / ${d.high_trigger || '--'}`
+                    : isS6
+                      ? `${d.start_type || '--'} / ${d.start_grade || '--'} · ${d.support_status || '--'} · RR2 ${Number(d.risk_reward_ratio_2 || 0).toFixed(1)}`
                     : formatDetail(d),
           }
           item.rating = item.score >= 80 ? 'strong' : item.score >= 70 ? 'medium' : 'weak'

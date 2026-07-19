@@ -1,0 +1,4 @@
+﻿run_id,code,name,evaluation_date,setup_id,candidate_type,brooks_tail_score,brooks_status,brooks_trade_ready,brooks_setup_types,tail_paths,total_score,buy_zone_low,buy_zone_high,stop_loss_price,objective_target_2
+s6bt-548ed32c5f4659e2423a,000426,兴业银锡,2024-05-06,s6setup-d2447255d82b4e7de908,WATCH_CANDIDATE,18,BROOKS_FAILED_BREAKOUT_READY,True,"[""FAILED_BEAR_BREAKOUT""]","[""BOX"", ""BROOKS""]",74,12.71,13.16,12.34,15.96
+s6bt-548ed32c5f4659e2423a,300394,天孚通信,2024-11-04,s6setup-a0e81f7cbc75b159986b,WATCH_CANDIDATE,18,FAILED_BEAR_BREAKOUT,False,"[""MICRO_DOUBLE_BOTTOM"", ""FAILED_BEAR_BREAKOUT""]","[""BOX"", ""BROOKS""]",74,56.05,59.23,53.4,79.96
+s6bt-548ed32c5f4659e2423a,688787,海天瑞声,2024-12-30,s6setup-7432ad1cb6aa3d94c1cc,WATCH_CANDIDATE,16,BROOKS_FAILED_BREAKOUT_READY,True,"[""MICRO_DOUBLE_BOTTOM"", ""FAILED_BEAR_BREAKOUT""]","[""BOX"", ""BROOKS""]",74,106.09,114.18,99.35,149.53

@@ -18,12 +18,22 @@ Bug 修复优先使用 TDD：先写能稳定复现问题的失败测试，再做
 
 ## Project
 
-CupHandleScan 是 Python 3.10+ 的 A 股扫描系统，当前 worktree 包含两套独立策略：
+CupHandleScan 是 Python 3.10+ 的 A 股扫描系统，当前项目包含六套相互隔离的策略：
 
 - 策略1：杯柄/VCP 扫描，统一入口 `scanner/strategy_engine.py::CupHandleStrategyEngine.evaluate_at()`。
 - 策略2：极致量干价稳扫描，统一入口 `strategy2/engine.py::ExtremeDryStableStrategyEngine.evaluate_at()`。
+- 策略3：强回调二次突破，代码位于 `strategy3/`。
+- 策略4：热点龙头二波，代码位于 `strategy4/`。
+- 策略5：短线冲刺支撑，代码位于 `strategy5/`。
+- 策略6：强势启动后的 VCP/杯柄/平台尾段，统一入口 `strategy6/engine.py::StrongVcpTailEngine.evaluate_at()`。
 
 策略2不得导入策略1的形态检测、评分、分析或决策模块。允许复用共享数据层、流动性过滤、SQLite 基础能力和 `scanner/daily_data_service.py`。
+
+策略6必须保持启动、整理、尾段不重叠，使用客观目标计算盈亏比，并将执行R目标单独输出。策略6不得恢复板块过滤，`sector_name` 仅展示。当前策略6价格全部为前复权口径，禁止把 `current_price_raw` 伪填为前复权价格。
+
+策略6尾部采用双路径：原 `strategy6/dry_tail.py::evaluate_dry_tail()` 必须保持业务逻辑和阈值不变；新增稳定箱体路径位于 `strategy6/box_tail.py`。最终通过使用 OR，`BOTH` 才对两个已通过路径取较高分；`ORIGINAL` 和 `NONE` 必须保留原尾部分，失败箱体不得抬高旧结果。紧密K线评分仅用于箱体窗口择优和质量标签，不得累加到最终 `tail_score`。
+
+策略6历史研究位于 `strategy6/backtest/`，只能通过冻结 `StrongVcpTailEngine.evaluate_at()` 按历史日期重建信号。个股和交易统一使用本地前复权日线；四个真实宽基指数必须覆盖研究区间，缺少沪深300时回测必须返回 `BLOCKED_INDEX_HISTORY`。P0-P3不得读取OOS收益、不得写生产配置，当前股票池结果必须标记 `RESEARCH_ONLY_CURRENT_UNIVERSE`。
 
 ## Commands
 
@@ -108,6 +118,21 @@ python -m pytest tests/test_tushare_hist.py -v
 - Phase 1 回测可信度修复不得顺手改变策略2评分、趋势、否决、风险规则和信号语义。
 
 ## Database Rules
+
+## Strategy6 回测规则
+
+- 策略6历史研究只允许按日期截断调用 `StrongVcpTailEngine.evaluate_at()`，不得复制策略逻辑。
+- 个股在市场交易日没有当日K线时不得沿用上一根K线重复生成信号；成交阶段记录 `UNKNOWN_NO_BAR`。
+- 策略6回测订单和交易的数据库存储键必须包含run与参数集，业务ID保留在明细JSON中。
+- E0/E1及参数试验允许历史不足股票记为 `COMPLETED_WITH_SKIPS`，但任何FAILED均不得进入参数选择。
+- 压力测试必须真实重放冻结信号；`entry_delay_days` 与 `fill_rate_multiplier` 必须由成交引擎执行。
+- 2026年起OOS保持锁定，P0-P3优化器和报告不得读取其收益。
+- 当前真实结论是 `KEEP_DEFAULT / REJECT_BOX_EXPANSION`，不得自动写生产配置。
+- 箱体结论只否定默认BOX扩张，不代表其他策略6参数已经完成调优。全面调优必须按 `liquidity_rs -> strong_start -> pattern -> support_risk -> dry_tail -> box_compact -> score_trade_plan` 七阶段串行冻结。
+- 粗筛只允许使用2023-2024训练期和真实交易日步长5；入围参数必须逐日重跑2023-2025。2025只做确认，不得根据验证结果生成或替换参数组合；2026起OOS继续锁定。
+- 每阶段训练选择清单必须先持久化再做完整重跑；中断恢复必须复用原清单，禁止借验证结果重新选参。只有 `COMPLETED` / `COMPLETED_WITH_SKIPS` 且零 `FAILED%` 股票的试验可进入选择。
+- 全面调优命令为 `python -m strategy6.backtest.cli comprehensive-plan|comprehensive-run|comprehensive-status|comprehensive-report`。campaign、阶段、试验、父参数集和run必须可追溯。
+- 执行参数只能在信号参数冻结后对同一批冻结信号重放。费用不得低于BASE，T+1、涨跌停、缺失K线和止损优先语义不可调。全面调优只输出建议，人工批准前不得改 `config.yaml`。
 
 - SQLite 使用线程级连接和 WAL。
 - `PRAGMA table_info` 取列名必须用 `d[1]`。

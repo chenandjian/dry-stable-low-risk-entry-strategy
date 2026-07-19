@@ -1,0 +1,41 @@
+{
+  "end": "2024-12-31",
+  "evaluation_step": 5,
+  "mode": "COARSE_TRAIN",
+  "parameter_set_id": "s6ps-1eed9eeef41d8217",
+  "paths": {
+    "markdown": "D:\\game\\claude\\dry-stable-low-risk-entry-strategy\\.claude\\worktrees\\strategy6-strong-vcp-tail\\docs\\reviews\\strategy6-main-chain-quality\\B3-coarse\\s6bt-46913bb97feee28bc538-report.md",
+    "orders_csv": "D:\\game\\claude\\dry-stable-low-risk-entry-strategy\\.claude\\worktrees\\strategy6-strong-vcp-tail\\docs\\reviews\\strategy6-main-chain-quality\\B3-coarse\\s6bt-46913bb97feee28bc538-orders.csv",
+    "signals_csv": "D:\\game\\claude\\dry-stable-low-risk-entry-strategy\\.claude\\worktrees\\strategy6-strong-vcp-tail\\docs\\reviews\\strategy6-main-chain-quality\\B3-coarse\\s6bt-46913bb97feee28bc538-daily-candidates.csv",
+    "summary_json": "D:\\game\\claude\\dry-stable-low-risk-entry-strategy\\.claude\\worktrees\\strategy6-strong-vcp-tail\\docs\\reviews\\strategy6-main-chain-quality\\B3-coarse\\s6bt-46913bb97feee28bc538-summary.json",
+    "trades_csv": "D:\\game\\claude\\dry-stable-low-risk-entry-strategy\\.claude\\worktrees\\strategy6-strong-vcp-tail\\docs\\reviews\\strategy6-main-chain-quality\\B3-coarse\\s6bt-46913bb97feee28bc538-trades.csv",
+    "trials_csv": "D:\\game\\claude\\dry-stable-low-risk-entry-strategy\\.claude\\worktrees\\strategy6-strong-vcp-tail\\docs\\reviews\\strategy6-main-chain-quality\\B3-coarse\\s6bt-46913bb97feee28bc538-parameter-trials.csv"
+  },
+  "run": {
+    "backtest_config_hash": "cd5f59bee62a61954d95287d06f893cb6c34b59e0448c39ca0e4d4ce1f97ddc6",
+    "confidence_label": "RESEARCH_ONLY_CURRENT_UNIVERSE",
+    "data_version": "2d8578f495060818905986887d57b1e884ed4246aa2039f3ba8ef51549960178",
+    "end_date": "2024-12-31",
+    "evaluation_date_count": 97,
+    "evaluation_step": 5,
+    "experiment_id": "QUALITY_MAIN_CHAIN_B3_COARSE_TRAIN",
+    "final_eligible": false,
+    "identity_hash": "46913bb97feee28bc53888acc46dab64e71a5bccb35c455bf9841aa0d92a5474",
+    "parent_parameter_set_id": "",
+    "progress_counts": {
+      "COMPLETED": 3933,
+      "SKIPPED_INSUFFICIENT_HISTORY": 1595
+    },
+    "random_seed": 20260711,
+    "run_id": "s6bt-46913bb97feee28bc538",
+    "run_mode": "COARSE_TRAIN",
+    "stage_id": "B3",
+    "start_date": "2023-01-01",
+    "status": "COMPLETED_WITH_SKIPS",
+    "strategy_config_hash": "0cfb871eaafa1a46b0a8460f4087ad631bff98a7c8e95b1ed04c8d7d4616e617",
+    "strategy_git_commit": "8b76e79ac1165d5594bacc3119c0ec311e58568b",
+    "strategy_version": "4.2.0"
+  },
+  "stage_id": "B3",
+  "start": "2023-01-01"
+}

@@ -6,7 +6,7 @@ import sys
 import threading
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 
 logging.basicConfig(
     level=logging.INFO,
@@ -26,6 +26,17 @@ from strategy4.scanner import STRATEGY4_TYPE, scan_strategy4_all
 from strategy4.config import resolve_strategy4_config
 from strategy5.scanner import STRATEGY5_TYPE, scan_strategy5_all
 from strategy5.validation import resolve_strategy5_config
+from strategy6 import STRATEGY6_TYPE
+from strategy6.report import (
+    build_strategy6_report_xlsx,
+    is_strategy6_exit_audit_record,
+    is_strategy6_observation_record,
+    is_strategy6_trading_candidate,
+    is_strategy6_vcp_eligible,
+    is_strategy6_visible_record,
+)
+from strategy6.scanner import scan_strategy6_all
+from strategy6.validation import resolve_strategy6_config
 from scanner.strategy_engine import (
     CupHandleStrategyEngine,
     resolve_strategy_windows,
@@ -154,6 +165,49 @@ async def lifespan(app: FastAPI):
                 finally:
                     _clear_running()
             t = threading.Thread(target=resume_s5, daemon=True)
+        elif s_type == STRATEGY6_TYPE:
+            def resume_s6():
+                try:
+                    pending = db.get_pending_stocks(interrupted["id"])
+                    def on_progress(stage, current, total, detail, discovery=None):
+                        stats = _running.get("stats", {})
+                        if stage == "discovery" and discovery:
+                            found = stats.get("candidates_found", 0) + 1
+                            discoveries = list(stats.get("discoveries") or [])
+                            discoveries.insert(0, _strategy6_discovery_from_candidate(discovery))
+                            _running["stats"] = {**stats, "discoveries": discoveries[:20], "candidates_found": found}
+                        else:
+                            code = detail.split()[0] if detail else ""
+                            _running["stats"] = {
+                                **stats,
+                                "scanned": current,
+                                "processed": current,
+                                "total_stocks": total,
+                                "current_code": code,
+                                "current_name": detail[len(code):].strip() if len(detail) > len(code) else detail,
+                            }
+                    result = scan_strategy6_all(config, progress_callback=on_progress, task_id=interrupted["id"], stocks=pending)
+                    _running["stats"] = result["stats"]
+                    s = result["stats"]
+                    db.finish_scan_task(
+                        interrupted["id"],
+                        finished_at=datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                        candidates_count=s.get("candidates_found", 0),
+                        elapsed_seconds=s.get("elapsed_seconds", 0),
+                        scanned=s.get("scanned", 0),
+                        skipped=s.get("skipped", 0),
+                    )
+                    db.refresh_scan_task_counts(interrupted["id"])
+                except Exception as e:
+                    import traceback
+                    logger.error(f"Strategy6 resume failed: {e}\n{traceback.format_exc()}")
+                    _running["stats"] = {"error": str(e)}
+                    conn = db.get_conn()
+                    conn.execute("UPDATE scan_tasks SET status='failed', error=? WHERE id=?", (str(e), interrupted["id"]))
+                    conn.commit()
+                finally:
+                    _clear_running()
+            t = threading.Thread(target=resume_s6, daemon=True)
         elif s_type == "STRATEGY_2_EXTREME_DRY_STABLE":
             # BUG-S2-001: 策略2恢复
             def resume_s2():
@@ -524,6 +578,25 @@ def _strategy5_discovery_from_candidate(candidate: dict) -> dict:
         "close": candidate.get("close", 0),
         "strength_trigger": candidate.get("strength_trigger", ""),
         "high_trigger": candidate.get("high_trigger", ""),
+        "risk_tags": candidate.get("risk_tags", []),
+        "warn_tags": candidate.get("warn_tags", []),
+    }
+
+
+def _strategy6_discovery_from_candidate(candidate: dict) -> dict:
+    return {
+        "code": candidate.get("code", ""),
+        "name": candidate.get("name", ""),
+        "evaluation_date": candidate.get("evaluation_date", ""),
+        "total_score": candidate.get("total_score") or 0,
+        "candidate_type": candidate.get("candidate_type", ""),
+        "classification": candidate.get("classification", ""),
+        "lifecycle_status": candidate.get("lifecycle_status", ""),
+        "start_type": candidate.get("start_type", ""),
+        "start_grade": candidate.get("start_grade", ""),
+        "support_status": candidate.get("support_status", ""),
+        "key_support_price": candidate.get("key_support_price", 0),
+        "risk_reward_ratio_2": candidate.get("risk_reward_ratio_2", 0),
         "risk_tags": candidate.get("risk_tags", []),
         "warn_tags": candidate.get("warn_tags", []),
     }
@@ -1746,7 +1819,12 @@ def _candidate_to_pattern_result(c: dict) -> CupHandleResult:
 async def get_config():
     """Return current configuration (excluding sensitive fields)."""
     config = load_config()
-    return {"config": config}
+    return {
+        "config": {
+            **config,
+            "strategy6": resolve_strategy6_config(config),
+        }
+    }
 
 
 def _validate_scheduler_config(config: dict):
@@ -1831,6 +1909,16 @@ async def update_config(data: dict):
         except ValueError as e:
             return JSONResponse(
                 {"status": "error", "message": f"Invalid strategy4 config: {e}"},
+                status_code=400,
+            )
+    if "strategy6" in config:
+        try:
+            # Replace with the validated allow-listed snapshot so removed
+            # sector-filter keys from old clients cannot be persisted again.
+            config["strategy6"] = resolve_strategy6_config(config)
+        except ValueError as e:
+            return JSONResponse(
+                {"status": "error", "message": f"Invalid strategy6 config: {e}"},
                 status_code=400,
             )
 
@@ -2252,6 +2340,188 @@ async def strategy5_candidate_detail(task_id: str, code: str):
     if not candidate:
         return JSONResponse({"error": "NOT_FOUND", "taskId": task_id, "code": code}, status_code=404)
     return {"taskId": task_id, "candidate": candidate}
+
+
+# ====== Strategy6 API ======
+
+@app.post("/api/strategy6/scans")
+async def start_strategy6_scan():
+    """启动策略6强势 VCP 尾部候选扫描。"""
+    config = _ensure_db_initialized_from_config()
+    strategy6_cfg = config.get("strategy6", {})
+    if not strategy6_cfg.get("enabled", True):
+        return JSONResponse(
+            {"error": "STRATEGY6_DISABLED", "message": "策略6未启用"},
+            status_code=400,
+        )
+    try:
+        resolve_strategy6_config(config)
+    except ValueError as exc:
+        return JSONResponse(
+            {"error": "INVALID_CONFIG", "message": f"策略6配置无效: {exc}"},
+            status_code=400,
+        )
+
+    conflict = _scan_conflict_response()
+    if conflict:
+        return conflict
+
+    started = _now()
+    started_at = started.strftime("%Y-%m-%d %H:%M:%S")
+    task_id = f"s6-{started.strftime('%Y%m%d-%H%M%S')}"
+    db.create_scan_task(task_id, started_at, total_stocks=0, retry_mode="full", strategy_type=STRATEGY6_TYPE)
+    _set_running(task_id, "full", strategy_type=STRATEGY6_TYPE)
+    _running["started_at"] = started_at
+    _running["stats"] = {"total_stocks": 0, "current_code": "--", "current_name": "策略6扫描准备中…"}
+
+    def run():
+        try:
+            def on_progress(stage, current, total, detail, discovery=None):
+                stats = _running.get("stats", {})
+                if stage == "discovery" and discovery:
+                    discoveries = list(stats.get("discoveries") or [])
+                    discoveries.insert(0, _strategy6_discovery_from_candidate(discovery))
+                    _running["stats"] = {
+                        **stats,
+                        "discoveries": discoveries[:20],
+                        "candidates_found": stats.get("candidates_found", 0) + 1,
+                    }
+                else:
+                    code = detail.split()[0] if detail else ""
+                    s = stats.copy()
+                    s.update({
+                        "scanned": current,
+                        "processed": current,
+                        "total_stocks": total,
+                        "current_code": code or "--",
+                        "current_name": detail[len(code):].strip() if code and len(detail) > len(code) else detail,
+                    })
+                    s.setdefault("candidates_found", 0)
+                    s.setdefault("skipped", 0)
+                    s.setdefault("failed", 0)
+                    _running["stats"] = s
+                db.update_scan_progress(
+                    task_id,
+                    scanned=_running["stats"].get("scanned", 0),
+                    skipped=_running["stats"].get("skipped", 0),
+                    candidates_count=_running["stats"].get("candidates_found", 0),
+                )
+
+            result = scan_strategy6_all(config, task_id=task_id, progress_callback=on_progress)
+            stats = result.get("stats", {})
+            _running["stats"] = {**_running.get("stats", {}), **stats}
+            db.finish_scan_task(
+                task_id,
+                finished_at=_now().strftime("%Y-%m-%d %H:%M:%S"),
+                candidates_count=stats.get("candidates_found", 0),
+                elapsed_seconds=stats.get("elapsed_seconds", 0),
+                scanned=stats.get("scanned", 0),
+                skipped=stats.get("skipped", 0),
+            )
+            db.refresh_scan_task_counts(task_id)
+        except Exception as exc:
+            logger.exception("Strategy6 scan failed")
+            _running["stats"] = {"error": str(exc)}
+            conn = db.get_conn()
+            conn.execute(
+                "UPDATE scan_tasks SET status='failed', finished_at=?, error=? WHERE id=?",
+                (_now().strftime("%Y-%m-%d %H:%M:%S"), str(exc), task_id),
+            )
+            conn.commit()
+        finally:
+            _clear_running()
+
+    threading.Thread(target=run, daemon=True).start()
+    return {"ok": True, "taskId": task_id, "task_id": task_id, "status": "started", "strategyType": STRATEGY6_TYPE}
+
+
+@app.get("/api/strategy6/scans/status")
+async def strategy6_scan_status():
+    if _running["running"] and _running.get("strategy_type") == STRATEGY6_TYPE:
+        summary = db.refresh_scan_task_counts(_running["task_id"]) if _running.get("task_id") else {}
+        return {
+            "running": True,
+            "taskId": _running.get("task_id"),
+            "strategyType": STRATEGY6_TYPE,
+            "stats": {**_running.get("stats", {}), **summary},
+        }
+    conn = db.get_conn()
+    row = conn.execute(
+        "SELECT id FROM scan_tasks WHERE status='running' AND strategy_type=? ORDER BY started_at DESC LIMIT 1",
+        (STRATEGY6_TYPE,),
+    ).fetchone()
+    return {"running": bool(row), "taskId": row[0] if row else None, "strategyType": STRATEGY6_TYPE, "stats": {}}
+
+
+@app.get("/api/strategy6/tasks")
+async def strategy6_tasks():
+    config = load_config()
+    db.init_db(config.get("data", {}).get("database_path", "data/cuphandle.db"))
+    return {"tasks": db.get_scan_tasks(strategy_type=STRATEGY6_TYPE)}
+
+
+@app.get("/api/strategy6/tasks/{task_id}/candidates")
+async def strategy6_candidates(task_id: str):
+    _, err = _require_task_strategy(task_id, STRATEGY6_TYPE)
+    if err:
+        return err
+    stored = db.get_strategy6_candidates(task_id)
+    candidates = [item for item in stored if is_strategy6_visible_record(item)]
+    trading_total = sum(1 for item in candidates if is_strategy6_trading_candidate(item))
+    observation_total = sum(1 for item in candidates if is_strategy6_observation_record(item))
+    vcp_eligible_total = sum(1 for item in candidates if is_strategy6_vcp_eligible(item))
+    exit_audit_total = sum(1 for item in candidates if is_strategy6_exit_audit_record(item))
+    return {
+        "taskId": task_id,
+        "candidates": candidates,
+        "total": trading_total,
+        "recordTotal": len(candidates),
+        "observationTotal": observation_total,
+        "vcpEligibleTotal": vcp_eligible_total,
+        "exitAuditTotal": exit_audit_total,
+    }
+
+
+@app.get("/api/strategy6/tasks/{task_id}/candidates/{code}")
+async def strategy6_candidate_detail(task_id: str, code: str):
+    _, err = _require_task_strategy(task_id, STRATEGY6_TYPE)
+    if err:
+        return err
+    candidate = db.get_strategy6_candidate(code, task_id=task_id)
+    if not candidate or not is_strategy6_visible_record(candidate):
+        return JSONResponse({"error": "NOT_FOUND", "taskId": task_id, "code": code}, status_code=404)
+    return {"taskId": task_id, "candidate": candidate}
+
+
+@app.get("/api/strategy6/tasks/{task_id}/market-snapshot")
+async def strategy6_market_snapshot(task_id: str):
+    _, err = _require_task_strategy(task_id, STRATEGY6_TYPE)
+    if err:
+        return err
+    return {"taskId": task_id, "snapshot": db.get_strategy6_market_snapshot(task_id)}
+
+
+@app.get("/api/strategy6/tasks/{task_id}/lifecycle")
+async def strategy6_lifecycle_audit(task_id: str):
+    _, err = _require_task_strategy(task_id, STRATEGY6_TYPE)
+    if err:
+        return err
+    rows = db.get_strategy6_task_lifecycle(task_id)
+    return {"taskId": task_id, "lifecycle": rows, "total": len(rows)}
+
+
+@app.get("/api/strategy6/tasks/{task_id}/report.xlsx")
+async def strategy6_excel_report(task_id: str):
+    _, err = _require_task_strategy(task_id, STRATEGY6_TYPE)
+    if err:
+        return err
+    candidates = db.get_strategy6_candidates(task_id)
+    content = build_strategy6_report_xlsx(candidates, db.get_strategy6_task_lifecycle(task_id))
+    return Response(
+        content=content,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="strategy6-report-{task_id}.xlsx"'},
+    )
 
 
 # ====== Strategy2 API ======

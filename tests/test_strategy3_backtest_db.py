@@ -183,6 +183,26 @@ def test_market_index_ohlc_cache_roundtrip(tmp_path):
     assert coverage["source"] == "sina"
 
 
+def test_market_index_ohlc_incremental_upsert_preserves_older_history(tmp_path):
+    _init_tmp_db(tmp_path)
+    db.save_market_index_ohlc(
+        "sh000300",
+        [{"date": "2025-01-01", "open": 100, "high": 101, "low": 99, "close": 100, "volume": 10}],
+        source="sina",
+    )
+
+    db.upsert_market_index_ohlc(
+        "sh000300",
+        [{"date": "2026-01-01", "open": 110, "high": 111, "low": 109, "close": 110, "volume": 20}],
+        source="sina",
+    )
+
+    coverage = db.get_market_index_coverage("sh000300")
+    assert coverage["rows"] == 2
+    assert coverage["min_date"] == "2025-01-01"
+    assert coverage["max_date"] == "2026-01-01"
+
+
 def test_replace_strategy3_stock_backtest_result_is_atomic_and_idempotent(tmp_path):
     _init_tmp_db(tmp_path)
     task_id = "s3bt-test"
