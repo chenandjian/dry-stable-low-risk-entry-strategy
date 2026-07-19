@@ -198,8 +198,13 @@ def fetch_with_retry(
                 continue
 
             merged = _merge_data(effective_cached, effective_data, max_rows=kline_days)
-            db.save_ohlc(code, merged)
             fetched_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            db.replace_ohlc_with_metadata(
+                code,
+                merged,
+                source=ds_name,
+                fetched_at=fetched_at,
+            )
             quote_status = _classify_quote_status_after_fetch(merged, freshness_context)
 
             recent = data[-1]
@@ -235,13 +240,19 @@ def fetch_with_retry(
         stale_latest_date = stale_data[-1].get("date")
         effective_cached = trim_ohlc_to_target(cached or [], stale_latest_date)
         merged = _merge_data(effective_cached, stale_data, max_rows=kline_days)
-        db.save_ohlc(code, merged)
+        fetched_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        db.replace_ohlc_with_metadata(
+            code,
+            merged,
+            source=stale_source,
+            fetched_at=fetched_at,
+        )
         result = FetchResult(
             data=merged,
             primary_source=chain[0],
             fallback_source=stale_source if stale_source != chain[0] else chain[0],
             source_errors=source_errors,
-            kline_fetched_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            kline_fetched_at=fetched_at,
             kline_target_trade_date=target_date,
             quote_status="suspended",
         )

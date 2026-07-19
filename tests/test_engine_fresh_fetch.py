@@ -622,6 +622,8 @@ def test_engine_fetch_after_close_skips_sina_missing_target_and_uses_fallback(mo
     assert calls == ["sina", "tencent"]
     assert result.data[-1]["date"] == "2026-06-16"
     assert result.fallback_source == "tencent"
+    assert db.get_ohlc_metadata("000831")["source"] == "tencent"
+    assert db.get_ohlc_metadata("000831")["price_basis"] == "FORWARD_ADJUSTED"
 
 
 def test_engine_fetch_after_close_does_not_mark_suspended_when_other_sources_are_busy(monkeypatch, tmp_path):

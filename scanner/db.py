@@ -51,6 +51,17 @@ def init_db(path: str = "data/cuphandle.db"):
             CREATE INDEX IF NOT EXISTS idx_ohlc_code ON daily_ohlc(code);
             CREATE INDEX IF NOT EXISTS idx_ohlc_date ON daily_ohlc(date);
 
+            CREATE TABLE IF NOT EXISTS daily_ohlc_metadata (
+                code          TEXT PRIMARY KEY,
+                source        TEXT NOT NULL,
+                price_basis   TEXT NOT NULL,
+                row_count     INTEGER NOT NULL,
+                first_date    TEXT,
+                latest_date   TEXT,
+                fetched_at    TEXT,
+                repair_run_id TEXT
+            );
+
             CREATE TABLE IF NOT EXISTS market_index_ohlc (
                 symbol     TEXT NOT NULL,
                 date       TEXT NOT NULL,
@@ -993,6 +1004,93 @@ def save_market_index_ohlc(
         ],
     )
     conn.commit()
+
+
+def replace_ohlc_with_metadata(
+    code: str,
+    data: list[dict],
+    *,
+    source: str,
+    price_basis: str = "FORWARD_ADJUSTED",
+    fetched_at: str | None = None,
+    repair_run_id: str | None = None,
+):
+    """Atomically replace one stock's full OHLC series and provenance metadata."""
+    if not data:
+        raise ValueError("replacement OHLC data must not be empty")
+    rows = sorted(data, key=lambda row: row["date"])
+    fetched_at = fetched_at or datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    conn = get_conn()
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        conn.execute("DELETE FROM daily_ohlc WHERE code = ?", (code,))
+        conn.executemany(
+            """INSERT INTO daily_ohlc (code, date, open, high, low, close, volume, turnover)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+            [
+                (
+                    code,
+                    row["date"],
+                    row.get("open"),
+                    row.get("high"),
+                    row.get("low"),
+                    row.get("close"),
+                    row.get("volume"),
+                    row.get("turnover"),
+                )
+                for row in rows
+            ],
+        )
+        conn.execute(
+            """INSERT INTO daily_ohlc_metadata
+               (code, source, price_basis, row_count, first_date, latest_date, fetched_at, repair_run_id)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+               ON CONFLICT(code) DO UPDATE SET
+                 source=excluded.source,
+                 price_basis=excluded.price_basis,
+                 row_count=excluded.row_count,
+                 first_date=excluded.first_date,
+                 latest_date=excluded.latest_date,
+                 fetched_at=excluded.fetched_at,
+                 repair_run_id=excluded.repair_run_id""",
+            (
+                code,
+                source,
+                price_basis,
+                len(rows),
+                rows[0]["date"],
+                rows[-1]["date"],
+                fetched_at,
+                repair_run_id,
+            ),
+        )
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+
+
+def get_ohlc_metadata(code: str) -> dict | None:
+    conn = get_conn()
+    row = conn.execute(
+        """SELECT code, source, price_basis, row_count, first_date, latest_date,
+                  fetched_at, repair_run_id
+           FROM daily_ohlc_metadata WHERE code=?""",
+        (code,),
+    ).fetchone()
+    if row is None:
+        return None
+    columns = (
+        "code",
+        "source",
+        "price_basis",
+        "row_count",
+        "first_date",
+        "latest_date",
+        "fetched_at",
+        "repair_run_id",
+    )
+    return dict(zip(columns, row))
 
 
 def upsert_market_index_ohlc(
