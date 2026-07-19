@@ -186,6 +186,8 @@ def test_fetch_after_close_skips_source_missing_target_and_uses_fallback(monkeyp
     assert result.data[-1]["date"] == "2026-06-16"
     assert result.fallback_source == "tencent"
     assert result.quote_status == "not_requested"
+    assert db.get_ohlc_metadata("000831")["source"] == "tencent"
+    assert db.get_ohlc_metadata("000831")["price_basis"] == "FORWARD_ADJUSTED"
 
 
 def test_fetch_after_close_does_not_return_stale_intraday_cached_target_when_all_sources_miss(monkeypatch, tmp_path):

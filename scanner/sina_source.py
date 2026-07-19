@@ -1,93 +1,98 @@
-# scanner/sina_source.py
-import requests
 import logging
-import time
-import json
+import math
+from datetime import date, datetime
 
 logger = logging.getLogger(__name__)
 
 
 def fetch_sina_daily(code: str, days: int = 250) -> list[dict] | None:
-    """从新浪获取单只股票的日线数据。
-
-    Args:
-        code: 股票代码，如 '600036' 或 '000001'
-        days: 获取最近 N 个交易日数据
-
-    Returns:
-        list[dict]: [{date, open, high, low, close, volume, turnover}, ...]
-        按日期升序排列。失败返回 None。
-    """
-    # 判断交易所前缀
-    if code.startswith("6"):
-        symbol = f"sh{code}"
-    else:
-        symbol = f"sz{code}"
-
-    url = "https://quotes.sina.cn/cn/api/jsonp_v2.php/data/CN_MarketDataService.getKLineData"
-    params = {
-        "symbol": symbol,
-        "scale": "240",  # 日线
-        "datalen": str(days),
-    }
-
-    max_retries = 2
-    last_error = None
-    for attempt in range(max_retries + 1):
-        try:
-            resp = requests.get(url, params=params, timeout=5, headers={
-                "Referer": "https://finance.sina.com.cn",
-            })
-            resp.raise_for_status()
-            text = resp.text
-
-            # Parse JSONP: data([...]);
-            if text.startswith("data(") and text.endswith(");"):
-                text = text[5:-2]
-            elif "(" in text:
-                # Handle other JSONP variations
-                start = text.index("(") + 1
-                end = text.rindex(")")
-                text = text[start:end]
-
-            raw_data = json.loads(text)
-
-            if not raw_data or not isinstance(raw_data, list):
-                logger.warning(f"Sina returned empty/invalid data for {code}")
-                return None
-
-            result = []
-            for item in raw_data:
-                close_price = float(item["close"])
-                volume = float(item["volume"])
-                result.append({
-                    "date": item["day"],
-                    "open": float(item["open"]),
-                    "high": float(item["high"]),
-                    "low": float(item["low"]),
-                    "close": close_price,
-                    "volume": volume,
-                    "turnover": volume * close_price,
-                })
-            return result
-
-        except (requests.Timeout, requests.ConnectionError) as e:
-            last_error = e
-            if attempt < max_retries:
-                delay = 2 ** attempt  # 1s, 2s
-                logger.debug(f"Sina retry {attempt + 1}/{max_retries} for {code} after {delay}s")
-                time.sleep(delay)
-            else:
-                logger.warning(f"Sina fetch failed for {code} after {max_retries} retries: {e}")
-                return None
-        except requests.HTTPError as e:
-            if _is_rate_limited(e):
-                raise RuntimeError(str(e)) from e
-            logger.warning(f"Sina fetch/parse error for {code}: {e}")
+    """Fetch forward-adjusted A-share daily bars from Sina through AkShare."""
+    try:
+        ak = _load_akshare()
+        frame = ak.stock_zh_a_daily(
+            symbol=_to_sina_symbol(code),
+            start_date="19900101",
+            end_date=date.today().strftime("%Y%m%d"),
+            adjust="qfq",
+        )
+        if frame is None or frame.empty:
+            logger.warning("AkShare Sina returned empty data for %s", code)
             return None
-        except (ValueError, KeyError, TypeError, json.JSONDecodeError) as e:
-            logger.warning(f"Sina fetch/parse error for {code}: {e}")
+
+        required = {"date", "open", "high", "low", "close", "volume"}
+        if not required.issubset(set(frame.columns)):
+            logger.warning("AkShare Sina returned missing columns for %s", code)
             return None
+
+        rows_by_date: dict[str, dict] = {}
+        for item in frame.to_dict("records"):
+            row = _normalize_row(item)
+            if row is not None:
+                rows_by_date[row["date"]] = row
+        rows = sorted(rows_by_date.values(), key=lambda row: row["date"])
+        if not rows:
+            return None
+        return rows[-int(days):] if days else rows
+    except Exception as exc:
+        if _is_rate_limited(exc):
+            raise RuntimeError(str(exc)) from exc
+        logger.warning("AkShare Sina fetch/parse error for %s: %s", code, exc)
+        return None
+
+
+def _load_akshare():
+    import akshare as ak
+
+    return ak
+
+
+def _to_sina_symbol(code: str) -> str:
+    normalized = str(code).strip().lower()
+    if normalized.startswith(("sh", "sz", "bj")):
+        return normalized
+    if "." in normalized:
+        normalized = normalized.split(".", 1)[0]
+    if normalized.startswith("6"):
+        return f"sh{normalized}"
+    if normalized.startswith(("4", "8")):
+        return f"bj{normalized}"
+    return f"sz{normalized}"
+
+
+def _normalize_row(item: dict) -> dict | None:
+    try:
+        raw_date = item["date"]
+        if isinstance(raw_date, datetime):
+            trade_date = raw_date.date().isoformat()
+        elif isinstance(raw_date, date):
+            trade_date = raw_date.isoformat()
+        else:
+            trade_date = str(raw_date)[:10]
+        open_ = float(item["open"])
+        high = float(item["high"])
+        low = float(item["low"])
+        close = float(item["close"])
+        volume = float(item["volume"])
+        amount = item.get("amount")
+        turnover = float(amount) if amount is not None else volume * close
+        values = (open_, high, low, close, volume, turnover)
+        if not trade_date or not all(math.isfinite(value) for value in values):
+            return None
+        if min(open_, high, low, close) <= 0 or volume < 0 or turnover < 0:
+            return None
+        if high < max(open_, close, low) or low > min(open_, close, high):
+            return None
+        return {
+            "date": trade_date,
+            "open": open_,
+            "high": high,
+            "low": low,
+            "close": close,
+            "volume": volume,
+            "turnover": turnover,
+        }
+    except (KeyError, TypeError, ValueError):
+        return None
 
 
 def _is_rate_limited(exc: Exception) -> bool:

@@ -182,13 +182,15 @@ def test_source_errors_persisted_for_all_status_branches(monkeypatch, tmp_path):
         fetch_call[0] += 1
         call_num = fetch_call[0]
         if call_num == 1:
-            # StockA: successful fetch but with prior source errors
+            # StockA: Baidu busy, Sina produced the successful response.
             return engine_mod.FetchResult(
                 data=_rrows(260, close=20.0),
                 primary_source="baidu",
                 fallback_source="sina",
-                primary_attempts=1,
-                source_errors={"sina": "busy"},
+                primary_attempts=0,
+                fallback_attempts=1,
+                primary_error="data source busy",
+                source_errors={"baidu": "busy"},
             )
         elif call_num == 2:
             # StockB: insufficient listing days
@@ -264,7 +266,11 @@ def test_source_errors_persisted_for_all_status_branches(monkeypatch, tmp_path):
     assert by_code["000001"]["status"] == "scanned"
     assert by_code["000001"]["source_errors"] is not None
     parsed_a = json.loads(by_code["000001"]["source_errors"])
-    assert parsed_a == {"sina": "busy"}
+    assert parsed_a == {"baidu": "busy"}
+    assert by_code["000001"]["primary_source"] == "baidu"
+    assert by_code["000001"]["fallback_source"] == "sina"
+    assert by_code["000001"]["primary_attempts"] == 0
+    assert by_code["000001"]["fallback_attempts"] == 1
 
     # StockB: skipped (insufficient listing days, but source_errors saved)
     assert by_code["000002"]["status"] == "skipped"

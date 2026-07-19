@@ -247,6 +247,18 @@ def scan_all(
                         progress_callback("scanning", start_offset + failed_count[0] + skip_count[0] + scanned_count[0], start_offset + len(stocks), f"{code} {stock.get('name', '')}")
                     continue
 
+                db.update_task_stock(
+                    task_id,
+                    code,
+                    primary_source=fetch_result.primary_source,
+                    fallback_source=fetch_result.fallback_source,
+                    primary_attempts=fetch_result.primary_attempts,
+                    fallback_attempts=fetch_result.fallback_attempts,
+                    primary_error=fetch_result.primary_error,
+                    fallback_error=fetch_result.fallback_error,
+                    source_errors=_encode_source_errors(fetch_result.source_errors),
+                )
+
                 latest_trade_date = data[-1].get("date") if data else None
                 kline_fetched_at = fetch_result.kline_fetched_at or _now()
                 kline_target_trade_date = (
@@ -745,8 +757,13 @@ def _fetch_with_retry(
                 continue
 
             merged = _merge_data(effective_cached, effective_data, max_rows=kline_days)
-            db.save_ohlc(code, merged)
             fetched_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            db.replace_ohlc_with_metadata(
+                code,
+                merged,
+                source=ds_name,
+                fetched_at=fetched_at,
+            )
             quote_status = "not_requested"
             if (
                 freshness_context is not None
@@ -789,13 +806,19 @@ def _fetch_with_retry(
         stale_latest_date = stale_data[-1].get("date")
         effective_cached = trim_ohlc_to_target(cached or [], stale_latest_date)
         merged = _merge_data(effective_cached, stale_data, max_rows=kline_days)
-        db.save_ohlc(code, merged)
+        fetched_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        db.replace_ohlc_with_metadata(
+            code,
+            merged,
+            source=stale_source,
+            fetched_at=fetched_at,
+        )
         result = FetchResult(
             data=merged,
             primary_source=chain[0],
             fallback_source=stale_source if stale_source != chain[0] else chain[0],
             source_errors=source_errors,
-            kline_fetched_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            kline_fetched_at=fetched_at,
             kline_target_trade_date=target_date,
             quote_status="suspended",
         )

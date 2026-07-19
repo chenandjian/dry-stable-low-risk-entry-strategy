@@ -126,7 +126,8 @@ npm --prefix web run preview
 - **形态评分维度：** 杯体结构 35 + 柄部结构 25 + 成交量结构 20 + 前置趋势 10 + 突破确认 10 = 100 分。
 - **A股配色：** 红涨绿跌。金色仅用于 ≥80 分 A 级信号。
 - **SQLite 持久化：** 数据存储于 `data/cuphandle.db`（stock_pool, daily_ohlc, scan_tasks, candidates）。线程级连接 + WAL 模式。
-- **新浪 API：** `quotes.sina.cn/cn/api/jsonp_v2.php/data/CN_MarketDataService.getKLineData` — 返回 JSONP 需手动解析。腾讯源失败返回 None，回退逻辑统一在引擎层处理。
+- **新浪个股日线：** `scanner/sina_source.py` 通过 AkShare `stock_zh_a_daily(adjust="qfq")` 获取新浪前复权日线；禁止回退到旧的新浪未复权 JSONP K线。腾讯源失败返回 None，回退逻辑统一在引擎层处理。
+- **个股日线修复：** `scripts/repair_sina_adjustment.py` 使用3个工作线程、数据源互斥和 `tencent -> sina(AkShare) -> baidu` 顺序整段修复可推断的旧新浪数据；新数据必须完整覆盖现有窗口且最新日期不倒退。`daily_ohlc_metadata` 记录修复后的来源和 `FORWARD_ADJUSTED` 口径。
 - **VCP 补位：** `pattern_detector.py` 不检测 VCP；VCP 逻辑在 `analyzer/pattern_score.py`。`engine.py` 可在杯柄未命中但 VCP 评分足够时生成候选。
 - **统一策略入口：** `CupHandleStrategyEngine.evaluate_at()` 是所有业务入口的唯一策略判断点。扫描（`scan_all` / `re_evaluate_task`）、CLI（`cmd_analyze`）、候选详情（`/api/candidate/{code}`）、批量回测（`run_backtest`）、单股回测均通过该入口。`evaluation.passed` 是唯一候选资格结论，调用方不得重复实现评分门槛、形态类型、决策状态或突破排除规则。
 - **窗口职责分离：** `liquidity.min_listing_days` 仅控制数据拉取天数与上市天数检查；`data.scan_window_days`（默认 250）仅控制扫描策略计算窗口；`data.backtest_window_days`（默认 250）仅控制回测策略计算窗口。三个字段由 `resolve_strategy_windows(config)` 统一解析与校验：缺失时固定默认 250，必须为 `int >= 30`，`scan_window_days <= min_listing_days`，拒绝 0/浮点/字符串/布尔。
