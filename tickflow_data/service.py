@@ -60,6 +60,7 @@ class TickFlowDailyUpdateService:
         mode: str = "update",
         run_id: str | None = None,
         on_success=None,
+        on_result=None,
     ) -> BatchUpdateResult:
         if mode not in {"update", "backfill"}:
             raise ValueError(f"unsupported TickFlow update mode: {mode}")
@@ -92,6 +93,8 @@ class TickFlowDailyUpdateService:
             except ValueError as exc:
                 result.status = "failed"
                 result.error = str(exc)
+                if on_result is not None:
+                    on_result(result)
                 continue
             result.symbol = symbol
             metadata = db.get_ohlc_metadata(code)
@@ -111,6 +114,7 @@ class TickFlowDailyUpdateService:
                 dry_run=dry_run,
                 run_id=run_id,
                 on_success=on_success,
+                on_result=on_result,
             )
             refresh_symbols = self._process_incremental_group(
                 client,
@@ -119,6 +123,7 @@ class TickFlowDailyUpdateService:
                 dry_run=dry_run,
                 run_id=run_id,
                 on_success=on_success,
+                on_result=on_result,
             )
             if refresh_symbols:
                 for symbol in refresh_symbols:
@@ -132,6 +137,7 @@ class TickFlowDailyUpdateService:
                     dry_run=dry_run,
                     run_id=run_id,
                     on_success=on_success,
+                    on_result=on_result,
                 )
 
         batch.results = [results_by_code[str(stock.get("code", "")).strip()] for stock in stocks]
@@ -139,7 +145,15 @@ class TickFlowDailyUpdateService:
         batch.elapsed_seconds = round(time.perf_counter() - started, 3)
         return batch
 
-    def _fetch(self, client, symbols: list[str], *, count: int, results_by_code):
+    def _fetch(
+        self,
+        client,
+        symbols: list[str],
+        *,
+        count: int,
+        results_by_code,
+        on_result,
+    ):
         if not symbols:
             return None
         try:
@@ -149,6 +163,8 @@ class TickFlowDailyUpdateService:
                 result = results_by_code[self._code_for_symbol(symbol)]
                 result.status = "failed"
                 result.error = f"TickFlow batch request failed: {exc}"
+                if on_result is not None:
+                    on_result(result)
             return None
 
     def _process_full_group(
@@ -160,6 +176,7 @@ class TickFlowDailyUpdateService:
         dry_run: bool,
         run_id: str,
         on_success,
+        on_result,
     ) -> None:
         for chunk in _chunks(symbols, self.request_chunk_size):
             self._process_full_chunk(
@@ -169,6 +186,7 @@ class TickFlowDailyUpdateService:
                 dry_run=dry_run,
                 run_id=run_id,
                 on_success=on_success,
+                on_result=on_result,
             )
 
     def _process_full_chunk(
@@ -180,12 +198,14 @@ class TickFlowDailyUpdateService:
         dry_run: bool,
         run_id: str,
         on_success,
+        on_result,
     ) -> None:
         fetched = self._fetch(
             client,
             symbols,
             count=self.history_days,
             results_by_code=results_by_code,
+            on_result=on_result,
         )
         if fetched is None:
             return
@@ -196,6 +216,8 @@ class TickFlowDailyUpdateService:
             if symbol in missing or symbol not in fetched.frames:
                 result.status = "failed"
                 result.error = "TickFlow batch response omitted this symbol"
+                if on_result is not None:
+                    on_result(result)
                 continue
             try:
                 rows = normalize_frame(fetched.frames[symbol])[-self.history_days :]
@@ -220,9 +242,13 @@ class TickFlowDailyUpdateService:
             except Exception as exc:
                 result.status = "failed"
                 result.error = str(exc)
+                if on_result is not None:
+                    on_result(result)
             else:
                 if on_success is not None:
                     on_success(result)
+                if on_result is not None:
+                    on_result(result)
 
     def _process_incremental_group(
         self,
@@ -233,6 +259,7 @@ class TickFlowDailyUpdateService:
         dry_run: bool,
         run_id: str,
         on_success,
+        on_result,
     ) -> list[str]:
         full_refresh: list[str] = []
         for chunk in _chunks(symbols, self.request_chunk_size):
@@ -244,6 +271,7 @@ class TickFlowDailyUpdateService:
                     dry_run=dry_run,
                     run_id=run_id,
                     on_success=on_success,
+                    on_result=on_result,
                 )
             )
         return full_refresh
@@ -257,12 +285,14 @@ class TickFlowDailyUpdateService:
         dry_run: bool,
         run_id: str,
         on_success,
+        on_result,
     ) -> list[str]:
         fetched = self._fetch(
             client,
             symbols,
             count=self.overlap_days,
             results_by_code=results_by_code,
+            on_result=on_result,
         )
         if fetched is None:
             return []
@@ -274,6 +304,8 @@ class TickFlowDailyUpdateService:
             if symbol in missing or symbol not in fetched.frames:
                 result.status = "failed"
                 result.error = "TickFlow batch response omitted this symbol"
+                if on_result is not None:
+                    on_result(result)
                 continue
             try:
                 fresh = normalize_frame(fetched.frames[symbol])
@@ -293,9 +325,13 @@ class TickFlowDailyUpdateService:
             except Exception as exc:
                 result.status = "failed"
                 result.error = str(exc)
+                if on_result is not None:
+                    on_result(result)
             else:
                 if on_success is not None:
                     on_success(result)
+                if on_result is not None:
+                    on_result(result)
         return full_refresh
 
     @staticmethod

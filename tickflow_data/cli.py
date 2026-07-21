@@ -41,7 +41,7 @@ def parse_args(argv=None):
     return args
 
 
-def _atomic_write_json(path: Path, payload: dict) -> None:
+def atomic_write_json(path: Path, payload: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_suffix(path.suffix + ".tmp")
     temporary.write_text(
@@ -51,9 +51,11 @@ def _atomic_write_json(path: Path, payload: dict) -> None:
     temporary.replace(path)
 
 
-def _backup_database(database: Path) -> Path:
+def backup_database(database: Path, backup_dir: Path | None = None) -> Path:
     timestamp = dt.datetime.now().strftime("%Y%m%d-%H%M%S-%f")
-    backup = database.with_name(f"{database.stem}.pre-tickflow-{timestamp}.db")
+    target_dir = backup_dir or database.parent
+    target_dir.mkdir(parents=True, exist_ok=True)
+    backup = target_dir / f"{database.stem}.pre-tickflow-{timestamp}.db"
     source_conn = sqlite3.connect(str(database))
     target_conn = sqlite3.connect(str(backup))
     try:
@@ -105,7 +107,7 @@ def _select_stocks(args, completed_codes: set[str]) -> list[dict]:
     return [stock for stock in stocks if str(stock["code"]) not in completed_codes]
 
 
-def _write_report(path: Path, result: BatchUpdateResult, backup: Path | None) -> None:
+def write_report(path: Path, result: BatchUpdateResult, backup: Path | None) -> None:
     success = [item for item in result.results if item.status in {"success", "validated"}]
     failed = [item for item in result.results if item.status == "failed"]
     full = [item for item in result.results if item.request_mode.startswith("full")]
@@ -154,7 +156,7 @@ def run_command(args, *, client_factory=TickFlowBatchClient) -> BatchUpdateResul
     completed = {str(code) for code in progress["completed_codes"]}
     stocks = _select_stocks(args, completed)
 
-    backup = _backup_database(database) if args.execute else None
+    backup = backup_database(database) if args.execute else None
     client = client_factory(batch_size=args.batch_size, max_workers=args.max_workers)
     service = TickFlowDailyUpdateService(
         client,
@@ -166,7 +168,7 @@ def run_command(args, *, client_factory=TickFlowBatchClient) -> BatchUpdateResul
         if args.execute:
             completed.add(item.code)
             progress["completed_codes"] = sorted(completed)
-            _atomic_write_json(progress_path, progress)
+            atomic_write_json(progress_path, progress)
 
     result = service.run(
         stocks,
@@ -177,14 +179,14 @@ def run_command(args, *, client_factory=TickFlowBatchClient) -> BatchUpdateResul
     )
     progress["completed_codes"] = sorted(completed)
     progress["runs"].append(result.to_dict())
-    _atomic_write_json(progress_path, progress)
+    atomic_write_json(progress_path, progress)
 
     report_path = (
         Path(args.report)
         if args.report
         else database.parent / "tickflow" / "reports" / f"{result.run_id}.md"
     )
-    _write_report(report_path, result, backup)
+    write_report(report_path, result, backup)
     return result
 
 
