@@ -158,8 +158,16 @@ def classify_candidate(
         and dry_tail.tail_volume_ratio <= config["tail_strong_volume_ratio_5_20"]
         and support.support_status in {"PATTERN_SUPPORT", "MA20_SUPPORT", "KEY_SUPPORT_VALID"}
         and start.start_grade != "B"
-        and _quality_threshold_met(score.setup_quality_score, config["setup_quality_min_ready"])
-        and _quality_threshold_met(score.support_reaction_score, config["support_reaction_min_ready"])
+        and _quality_threshold_met(
+            score.setup_quality_score,
+            config["setup_quality_min_ready"],
+            score.score_model_version,
+        )
+        and _quality_threshold_met(
+            score.support_reaction_score,
+            config["support_reaction_min_ready"],
+            score.score_model_version,
+        )
         and not major_risk
         and not environment_blocks_ready
         and not tactical_blocks_ready
@@ -171,14 +179,22 @@ def classify_candidate(
         and support.support_status in {"PATTERN_SUPPORT", "MA20_SUPPORT", "KEY_SUPPORT_VALID"}
         and score.tail_score >= 15
         and start.start_grade != "B"
-        and _quality_threshold_met(score.setup_quality_score, config["setup_quality_min_key"])
-        and _quality_threshold_met(score.support_reaction_score, config["support_reaction_min_key"])
+        and _quality_threshold_met(
+            score.setup_quality_score,
+            config["setup_quality_min_key"],
+            score.score_model_version,
+        )
+        and _quality_threshold_met(
+            score.support_reaction_score,
+            config["support_reaction_min_key"],
+            score.score_model_version,
+        )
         and not major_risk
         and not environment_blocks_ready
         and not tactical_blocks_ready
     ):
         return "KEY_CANDIDATE", "highlight", lifecycle, "重点观察：等待支撑低吸或突破确认"
-    if score.total_score >= config["watch_min_score"] or trade_plan.objective_rr_2 >= config["rr2_min_watch"]:
+    if score.total_score >= config["watch_min_score"]:
         return "WATCH_CANDIDATE", "observe", lifecycle, "观察：形态部分满足，等待进一步确认"
     return "REJECTED", "rejected", lifecycle, "排除：评分不足"
 
@@ -251,10 +267,12 @@ def _single_auxiliary_path(
     return count == 1
 
 
-def _quality_threshold_met(value: int, threshold: float) -> bool:
-    # Zero is the compatibility value used by direct legacy callers and old
-    # task snapshots. Engine V2 evaluations always calculate these fields.
-    return value == 0 or value >= threshold
+def _quality_threshold_met(value: int, threshold: float, score_model_version: str) -> bool:
+    # Empty model versions represent legacy direct callers that never
+    # calculated quality fields. V2 evaluations treat a real zero as zero.
+    if score_model_version != "S6_QUALITY_V2":
+        return True
+    return value >= threshold
 
 
 def _lifecycle_status(

@@ -275,7 +275,7 @@ class Strategy6Score:
     setup_quality_score: int = 0
     support_reaction_score: int = 0
     path_evidence_score: int = 0
-    score_model_version: str = "S6_QUALITY_V2"
+    score_model_version: str = ""
 
 
 @dataclass

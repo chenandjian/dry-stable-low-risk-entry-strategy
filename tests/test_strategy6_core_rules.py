@@ -2,7 +2,11 @@ from datetime import date, timedelta
 from dataclasses import replace
 
 from strategy6.engine import StrongVcpTailEngine
-from strategy6.filters import classify_candidate, classify_candidate_before_market_downgrade
+from strategy6.filters import (
+    _quality_threshold_met,
+    classify_candidate,
+    classify_candidate_before_market_downgrade,
+)
 from strategy6.indicators import calculate_indicators
 from strategy6.market import build_market_snapshot
 from strategy6.models import (
@@ -431,6 +435,51 @@ def test_rr2_below_minimum_rejects_candidate():
     assert result.passed is False
     assert result.candidate_type == "REJECTED"
     assert "RR2_LT_4_0" in result.reject_reasons
+
+
+def test_current_quality_model_does_not_treat_real_zero_as_missing():
+    assert _quality_threshold_met(0, 14, "S6_QUALITY_V2") is False
+    assert _quality_threshold_met(13, 14, "S6_QUALITY_V2") is False
+    assert _quality_threshold_met(14, 14, "S6_QUALITY_V2") is True
+
+
+def test_legacy_empty_quality_model_keeps_missing_zero_compatibility():
+    assert _quality_threshold_met(0, 14, "") is True
+
+
+def test_mature_candidate_below_watch_score_is_rejected_even_when_rr_passes():
+    engine = StrongVcpTailEngine({
+        "strategy6": {"enable_market_filter": False},
+    })
+    result = engine.evaluate_at(
+        build_strategy6_candidate_data(),
+        code="000001",
+        name="平安银行",
+    )
+
+    candidate_type, classification, _, suggestion = classify_candidate(
+        result.indicators,
+        result.start,
+        result.phase,
+        result.pattern,
+        result.support,
+        replace(result.dry_tail, dry_tail_pass=True),
+        replace(
+            result.trade_plan,
+            objective_rr_2=max(3.0, engine.config["rr2_min_watch"]),
+        ),
+        replace(
+            result.score,
+            total_score=engine.config["watch_min_score"] - 1,
+        ),
+        [],
+        engine.config,
+    )
+
+    assert result.phase.status != "START_TOO_RECENT"
+    assert candidate_type == "REJECTED"
+    assert classification == "rejected"
+    assert "评分不足" in suggestion
 
 
 def test_big_down_volume_is_hard_rejected():
