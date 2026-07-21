@@ -196,3 +196,38 @@ def test_full_refresh_never_shortens_or_regresses_existing_history(tmp_path):
     assert result.results[0].status == "failed"
     assert "shortened" in result.results[0].error
     assert db.get_ohlc("600519") == old
+
+
+def test_full_market_backfill_requests_stocks_in_bounded_chunks(tmp_path):
+    _setup_db(tmp_path)
+    stocks = [
+        {"code": "600519", "market": "SH"},
+        {"code": "601318", "market": "SH"},
+        {"code": "000001", "market": "SZ"},
+        {"code": "002396", "market": "SZ"},
+        {"code": "300750", "market": "SZ"},
+    ]
+    client = _Client(
+        [
+            BatchFetchResult(
+                frames={stock["code"] + "." + stock["market"]: _frame(_rows(1, 3)) for stock in stocks[:2]}
+            ),
+            BatchFetchResult(
+                frames={stock["code"] + "." + stock["market"]: _frame(_rows(1, 3)) for stock in stocks[2:4]}
+            ),
+            BatchFetchResult(
+                frames={stocks[4]["code"] + ".SZ": _frame(_rows(1, 3))}
+            ),
+        ]
+    )
+    service = TickFlowDailyUpdateService(
+        client,
+        history_days=1100,
+        request_chunk_size=2,
+    )
+
+    result = service.run(stocks, dry_run=False, mode="backfill")
+
+    assert [len(symbols) for symbols, _ in client.calls] == [2, 2, 1]
+    assert [item.code for item in result.results] == [stock["code"] for stock in stocks]
+    assert all(item.status == "success" for item in result.results)

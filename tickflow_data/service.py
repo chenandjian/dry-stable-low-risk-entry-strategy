@@ -31,6 +31,11 @@ def _merge_rows(existing: list[dict], fresh: list[dict], max_rows: int) -> list[
     return rows[-max_rows:]
 
 
+def _chunks(values: list[str], size: int):
+    for offset in range(0, len(values), size):
+        yield values[offset : offset + size]
+
+
 class TickFlowDailyUpdateService:
     def __init__(
         self,
@@ -38,12 +43,14 @@ class TickFlowDailyUpdateService:
         *,
         history_days: int = 1100,
         overlap_days: int = 10,
+        request_chunk_size: int = 100,
     ):
-        if history_days <= 0 or overlap_days <= 0:
-            raise ValueError("history_days and overlap_days must be positive")
+        if history_days <= 0 or overlap_days <= 0 or request_chunk_size <= 0:
+            raise ValueError("history_days, overlap_days, and request_chunk_size must be positive")
         self.client = client
         self.history_days = history_days
         self.overlap_days = overlap_days
+        self.request_chunk_size = request_chunk_size
 
     def run(
         self,
@@ -154,6 +161,26 @@ class TickFlowDailyUpdateService:
         run_id: str,
         on_success,
     ) -> None:
+        for chunk in _chunks(symbols, self.request_chunk_size):
+            self._process_full_chunk(
+                client,
+                chunk,
+                results_by_code,
+                dry_run=dry_run,
+                run_id=run_id,
+                on_success=on_success,
+            )
+
+    def _process_full_chunk(
+        self,
+        client,
+        symbols: list[str],
+        results_by_code: dict[str, StockUpdateResult],
+        *,
+        dry_run: bool,
+        run_id: str,
+        on_success,
+    ) -> None:
         fetched = self._fetch(
             client,
             symbols,
@@ -198,6 +225,30 @@ class TickFlowDailyUpdateService:
                     on_success(result)
 
     def _process_incremental_group(
+        self,
+        client,
+        symbols: list[str],
+        results_by_code: dict[str, StockUpdateResult],
+        *,
+        dry_run: bool,
+        run_id: str,
+        on_success,
+    ) -> list[str]:
+        full_refresh: list[str] = []
+        for chunk in _chunks(symbols, self.request_chunk_size):
+            full_refresh.extend(
+                self._process_incremental_chunk(
+                    client,
+                    chunk,
+                    results_by_code,
+                    dry_run=dry_run,
+                    run_id=run_id,
+                    on_success=on_success,
+                )
+            )
+        return full_refresh
+
+    def _process_incremental_chunk(
         self,
         client,
         symbols: list[str],
