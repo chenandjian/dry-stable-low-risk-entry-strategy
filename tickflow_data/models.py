@@ -34,13 +34,29 @@ class BatchUpdateResult:
     run_id: str
     mode: str
     dry_run: bool
+    started_at: str = ""
+    finished_at: str = ""
+    elapsed_seconds: float = 0.0
     results: list[StockUpdateResult] = field(default_factory=list)
 
     def to_dict(self) -> dict:
+        succeeded = sum(
+            result.status in {"success", "validated"} for result in self.results
+        )
         return {
             "run_id": self.run_id,
             "mode": self.mode,
             "dry_run": self.dry_run,
+            "started_at": self.started_at,
+            "finished_at": self.finished_at,
+            "elapsed_seconds": self.elapsed_seconds,
+            "summary": {
+                "requested": len(self.results),
+                "succeeded": succeeded,
+                "failed": sum(result.status == "failed" for result in self.results),
+                "full_refresh": sum(
+                    result.request_mode.startswith("full") for result in self.results
+                ),
+            },
             "results": [result.to_dict() for result in self.results],
         }
-

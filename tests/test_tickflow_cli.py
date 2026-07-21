@@ -99,6 +99,13 @@ def test_execute_creates_backup_progress_and_report(tmp_path):
     payload = json.loads(progress.read_text(encoding="utf-8"))
     assert payload["completed_codes"] == ["000001", "600519"]
     assert payload["adjustment"] == "forward_additive"
+    assert payload["runs"][-1]["summary"] == {
+        "requested": 2,
+        "succeeded": 2,
+        "failed": 0,
+        "full_refresh": 2,
+    }
+    assert payload["runs"][-1]["elapsed_seconds"] >= 0
     assert "TickFlow批量日线运行报告" in report.read_text(encoding="utf-8")
     assert db.get_ohlc_metadata("600519")["source"] == "tickflow"
 
@@ -179,3 +186,37 @@ def test_cli_rejects_progress_file_from_incompatible_run(tmp_path):
         assert "does not match" in str(exc)
     else:
         raise AssertionError("incompatible progress file should be rejected")
+
+
+def test_default_progress_file_starts_a_new_daily_run_each_time(tmp_path):
+    database = tmp_path / "cuphandle.db"
+    _seed_database(database)
+    argv = [
+        "backfill",
+        "--execute",
+        "--database",
+        str(database),
+        "--codes",
+        "600519",
+    ]
+
+    first_calls = []
+    run_command(
+        parse_args(argv),
+        client_factory=_factory(
+            [BatchFetchResult(frames={"600519.SH": _frame("600519")})],
+            first_calls,
+        ),
+    )
+    second_calls = []
+    run_command(
+        parse_args(argv),
+        client_factory=_factory(
+            [BatchFetchResult(frames={"600519.SH": _frame("600519")})],
+            second_calls,
+        ),
+    )
+
+    assert first_calls == [(["600519.SH"], 1100)]
+    assert second_calls == [(["600519.SH"], 1100)]
+    assert len(list((tmp_path / "tickflow").glob("progress-backfill-*.json"))) == 2

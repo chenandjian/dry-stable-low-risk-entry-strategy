@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import time
 import uuid
 
 from scanner import db
@@ -55,9 +56,18 @@ class TickFlowDailyUpdateService:
     ) -> BatchUpdateResult:
         if mode not in {"update", "backfill"}:
             raise ValueError(f"unsupported TickFlow update mode: {mode}")
+        started = time.perf_counter()
+        started_at = dt.datetime.now().isoformat(timespec="seconds")
         run_id = run_id or f"tickflow-{dt.datetime.now():%Y%m%d-%H%M%S}-{uuid.uuid4().hex[:6]}"
-        batch = BatchUpdateResult(run_id=run_id, mode=mode, dry_run=dry_run)
+        batch = BatchUpdateResult(
+            run_id=run_id,
+            mode=mode,
+            dry_run=dry_run,
+            started_at=started_at,
+        )
         if not stocks:
+            batch.finished_at = dt.datetime.now().isoformat(timespec="seconds")
+            batch.elapsed_seconds = round(time.perf_counter() - started, 3)
             return batch
 
         results_by_code: dict[str, StockUpdateResult] = {}
@@ -118,6 +128,8 @@ class TickFlowDailyUpdateService:
                 )
 
         batch.results = [results_by_code[str(stock.get("code", "")).strip()] for stock in stocks]
+        batch.finished_at = dt.datetime.now().isoformat(timespec="seconds")
+        batch.elapsed_seconds = round(time.perf_counter() - started, 3)
         return batch
 
     def _fetch(self, client, symbols: list[str], *, count: int, results_by_code):

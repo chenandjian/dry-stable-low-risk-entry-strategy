@@ -4,6 +4,7 @@ import argparse
 import datetime as dt
 import json
 import sqlite3
+import uuid
 from pathlib import Path
 
 from scanner import db
@@ -75,9 +76,13 @@ def _signature(args, database: Path) -> dict:
     }
 
 
-def _load_progress(path: Path, signature: dict) -> dict:
+def _new_run_id() -> str:
+    return f"tickflow-{dt.datetime.now():%Y%m%d-%H%M%S}-{uuid.uuid4().hex[:6]}"
+
+
+def _load_progress(path: Path, signature: dict, run_id: str) -> dict:
     if not path.exists():
-        return {**signature, "completed_codes": [], "runs": []}
+        return {**signature, "run_id": run_id, "completed_codes": [], "runs": []}
     payload = json.loads(path.read_text(encoding="utf-8"))
     if any(payload.get(key) != value for key, value in signature.items()):
         raise ValueError(f"progress file does not match this run: {path}")
@@ -111,6 +116,9 @@ def _write_report(path: Path, result: BatchUpdateResult, backup: Path | None) ->
         f"- 模式：`{result.mode}`",
         f"- 执行方式：`{'dry-run' if result.dry_run else 'execute'}`",
         f"- 复权口径：`{ADJUSTMENT}`",
+        f"- 开始时间：`{result.started_at}`",
+        f"- 结束时间：`{result.finished_at}`",
+        f"- 批量耗时：`{result.elapsed_seconds:.3f}`秒",
         f"- 成功/验证：{len(success)}",
         f"- 失败：{len(failed)}",
         f"- 完整重拉：{len(full)}",
@@ -133,11 +141,16 @@ def run_command(args, *, client_factory=TickFlowBatchClient) -> BatchUpdateResul
     database = Path(args.database).resolve()
     db.init_db(str(database))
 
-    progress_path = Path(
-        args.progress_file or f"data/tickflow/progress-{args.mode}.json"
+    proposed_run_id = _new_run_id()
+    progress_path = (
+        Path(args.progress_file)
+        if args.progress_file
+        else database.parent
+        / "tickflow"
+        / f"progress-{args.mode}-{proposed_run_id}.json"
     )
     signature = _signature(args, database)
-    progress = _load_progress(progress_path, signature)
+    progress = _load_progress(progress_path, signature, proposed_run_id)
     completed = {str(code) for code in progress["completed_codes"]}
     stocks = _select_stocks(args, completed)
 
@@ -159,14 +172,17 @@ def run_command(args, *, client_factory=TickFlowBatchClient) -> BatchUpdateResul
         stocks,
         dry_run=args.dry_run,
         mode=args.mode,
+        run_id=progress["run_id"],
         on_success=record_success,
     )
     progress["completed_codes"] = sorted(completed)
     progress["runs"].append(result.to_dict())
     _atomic_write_json(progress_path, progress)
 
-    report_path = Path(
-        args.report or f"data/tickflow/reports/{result.run_id}.md"
+    report_path = (
+        Path(args.report)
+        if args.report
+        else database.parent / "tickflow" / "reports" / f"{result.run_id}.md"
     )
     _write_report(report_path, result, backup)
     return result
