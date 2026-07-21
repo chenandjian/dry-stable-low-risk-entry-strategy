@@ -1,0 +1,94 @@
+import pandas as pd
+import pytest
+
+from tickflow_data.client import TickFlowBatchClient, TickFlowClientError
+
+
+class _Klines:
+    def __init__(self, responses):
+        self.responses = list(responses)
+        self.calls = []
+
+    def batch(self, symbols, **kwargs):
+        self.calls.append((symbols, kwargs))
+        response = self.responses.pop(0)
+        if isinstance(response, Exception):
+            raise response
+        return response
+
+
+class _Sdk:
+    def __init__(self, responses):
+        self.klines = _Klines(responses)
+        self.closed = False
+
+    def close(self):
+        self.closed = True
+
+
+def test_batch_client_locks_daily_forward_additive_parameters():
+    frame = pd.DataFrame([{"trade_date": "2026-07-20"}])
+    sdk = _Sdk([{"600519.SH": frame, "000001.SZ": frame}])
+
+    with TickFlowBatchClient(sdk=sdk) as client:
+        result = client.fetch(["600519.SH", "000001.SZ"], count=800)
+
+    assert sdk.klines.calls == [
+        (
+            ["600519.SH", "000001.SZ"],
+            {
+                "period": "1d",
+                "count": 800,
+                "adjust": "forward_additive",
+                "as_dataframe": True,
+                "show_progress": False,
+                "max_workers": 5,
+                "batch_size": 100,
+            },
+        )
+    ]
+    assert set(result.frames) == {"600519.SH", "000001.SZ"}
+    assert result.missing_symbols == []
+    assert sdk.closed is False
+
+
+def test_batch_client_reports_missing_symbols_without_losing_successes():
+    frame = pd.DataFrame([{"trade_date": "2026-07-20"}])
+    sdk = _Sdk([{"600519.SH": frame}])
+
+    result = TickFlowBatchClient(sdk=sdk).fetch(
+        ["600519.SH", "000001.SZ"], count=10
+    )
+
+    assert result.frames == {"600519.SH": frame}
+    assert result.missing_symbols == ["000001.SZ"]
+
+
+def test_batch_client_retries_complete_batch_once():
+    frame = pd.DataFrame([{"trade_date": "2026-07-20"}])
+    sdk = _Sdk([TimeoutError("temporary"), {"600519.SH": frame}])
+
+    result = TickFlowBatchClient(sdk=sdk, batch_retries=1).fetch(
+        ["600519.SH"], count=10
+    )
+
+    assert set(result.frames) == {"600519.SH"}
+    assert len(sdk.klines.calls) == 2
+
+
+def test_batch_client_raises_clear_error_after_retries():
+    sdk = _Sdk([TimeoutError("first"), TimeoutError("second")])
+
+    with pytest.raises(TickFlowClientError, match="batch request failed"):
+        TickFlowBatchClient(sdk=sdk, batch_retries=1).fetch(
+            ["600519.SH"], count=10
+        )
+
+
+def test_batch_client_rejects_invalid_request():
+    sdk = _Sdk([{}])
+
+    with pytest.raises(ValueError):
+        TickFlowBatchClient(sdk=sdk).fetch([], count=10)
+    with pytest.raises(ValueError):
+        TickFlowBatchClient(sdk=sdk).fetch(["600519.SH"], count=0)
