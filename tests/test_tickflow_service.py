@@ -1,0 +1,198 @@
+import pandas as pd
+
+from scanner import db
+from tickflow_data.models import BatchFetchResult
+from tickflow_data.service import TickFlowDailyUpdateService
+
+
+def _rows(start_day=1, count=3, *, close_offset=0.0):
+    rows = []
+    for day in range(start_day, start_day + count):
+        close = 10.0 + day / 10 + close_offset
+        rows.append(
+            {
+                "date": f"2026-07-{day:02d}",
+                "open": close - 0.1,
+                "high": close + 0.2,
+                "low": close - 0.2,
+                "close": close,
+                "volume": 100_000.0 + day,
+                "turnover": 1_000_000.0 + day,
+            }
+        )
+    return rows
+
+
+def _frame(rows):
+    return pd.DataFrame(
+        [
+            {
+                "trade_date": row["date"],
+                "open": row["open"],
+                "high": row["high"],
+                "low": row["low"],
+                "close": row["close"],
+                "volume": row["volume"] / 100,
+                "amount": row["turnover"],
+            }
+            for row in rows
+        ]
+    )
+
+
+class _Client:
+    def __init__(self, responses):
+        self.responses = list(responses)
+        self.calls = []
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, traceback):
+        return None
+
+    def fetch(self, symbols, *, count):
+        self.calls.append((list(symbols), count))
+        return self.responses.pop(0)
+
+
+def _setup_db(tmp_path):
+    db.init_db(str(tmp_path / "cuphandle.db"))
+
+
+def _save_existing(code, rows, *, source):
+    db.replace_ohlc_with_metadata(
+        code,
+        rows,
+        source=source,
+        repair_run_id="before",
+    )
+
+
+def test_full_backfill_replaces_non_tickflow_history(tmp_path):
+    _setup_db(tmp_path)
+    _save_existing("600519", _rows(1, 2), source="tencent")
+    fresh = _rows(1, 4, close_offset=1.0)
+    client = _Client(
+        [BatchFetchResult(frames={"600519.SH": _frame(fresh)})]
+    )
+    service = TickFlowDailyUpdateService(client, history_days=1100, overlap_days=10)
+
+    result = service.run([{"code": "600519", "market": "SH"}], dry_run=False)
+
+    assert client.calls == [(["600519.SH"], 1100)]
+    assert result.results[0].status == "success"
+    assert result.results[0].request_mode == "full"
+    assert db.get_ohlc("600519") == fresh
+    metadata = db.get_ohlc_metadata("600519")
+    assert metadata["source"] == "tickflow"
+    assert metadata["price_basis"] == "FORWARD_ADJUSTED"
+    assert metadata["repair_run_id"] == result.run_id
+
+
+def test_incremental_update_merges_overlap_and_preserves_history(tmp_path):
+    _setup_db(tmp_path)
+    existing = _rows(1, 4)
+    _save_existing("600519", existing, source="tickflow")
+    overlap = [existing[-1], *_rows(5, 2)]
+    client = _Client(
+        [BatchFetchResult(frames={"600519.SH": _frame(overlap)})]
+    )
+    service = TickFlowDailyUpdateService(client, history_days=1100, overlap_days=10)
+
+    result = service.run([{"code": "600519", "market": "SH"}], dry_run=False)
+
+    assert client.calls == [(["600519.SH"], 10)]
+    assert result.results[0].request_mode == "incremental"
+    assert db.get_ohlc("600519") == [*existing, *_rows(5, 2)]
+
+
+def test_adjustment_change_upgrades_incremental_stock_to_full_refresh(tmp_path):
+    _setup_db(tmp_path)
+    existing = _rows(1, 4)
+    _save_existing("600519", existing, source="tickflow")
+    changed_overlap = _rows(4, 2, close_offset=1.0)
+    full = _rows(1, 6, close_offset=1.0)
+    client = _Client(
+        [
+            BatchFetchResult(frames={"600519.SH": _frame(changed_overlap)}),
+            BatchFetchResult(frames={"600519.SH": _frame(full)}),
+        ]
+    )
+    service = TickFlowDailyUpdateService(client, history_days=1100, overlap_days=10)
+
+    result = service.run([{"code": "600519", "market": "SH"}], dry_run=False)
+
+    assert client.calls == [(["600519.SH"], 10), (["600519.SH"], 1100)]
+    assert result.results[0].request_mode == "full_adjustment_refresh"
+    assert db.get_ohlc("600519") == full
+
+
+def test_missing_or_invalid_stock_does_not_modify_existing_data(tmp_path):
+    _setup_db(tmp_path)
+    old_a = _rows(1, 2)
+    old_b = _rows(1, 2)
+    _save_existing("600519", old_a, source="tencent")
+    _save_existing("000001", old_b, source="tencent")
+    invalid = _frame(_rows(1, 2))
+    invalid.loc[0, "high"] = 1.0
+    client = _Client(
+        [
+            BatchFetchResult(
+                frames={"600519.SH": invalid},
+                missing_symbols=["000001.SZ"],
+            )
+        ]
+    )
+    service = TickFlowDailyUpdateService(client)
+
+    result = service.run(
+        [
+            {"code": "600519", "market": "SH"},
+            {"code": "000001", "market": "SZ"},
+        ],
+        dry_run=False,
+    )
+
+    assert [item.status for item in result.results] == ["failed", "failed"]
+    assert db.get_ohlc("600519") == old_a
+    assert db.get_ohlc("000001") == old_b
+    assert db.get_ohlc_metadata("600519")["source"] == "tencent"
+    assert db.get_ohlc_metadata("000001")["source"] == "tencent"
+
+
+def test_dry_run_validates_without_writing_database(tmp_path):
+    _setup_db(tmp_path)
+    old = _rows(1, 2)
+    _save_existing("600519", old, source="tencent")
+    client = _Client(
+        [BatchFetchResult(frames={"600519.SH": _frame(_rows(1, 4))})]
+    )
+    service = TickFlowDailyUpdateService(client)
+
+    result = service.run([{"code": "600519", "market": "SH"}], dry_run=True)
+
+    assert result.results[0].status == "validated"
+    assert db.get_ohlc("600519") == old
+    assert db.get_ohlc_metadata("600519")["source"] == "tencent"
+
+
+def test_full_refresh_never_shortens_or_regresses_existing_history(tmp_path):
+    _setup_db(tmp_path)
+    old = _rows(1, 4)
+    _save_existing("600519", old, source="tickflow")
+    shorter = _rows(1, 2)
+    client = _Client(
+        [BatchFetchResult(frames={"600519.SH": _frame(shorter)})]
+    )
+    service = TickFlowDailyUpdateService(client)
+
+    result = service.run(
+        [{"code": "600519", "market": "SH"}],
+        dry_run=False,
+        mode="backfill",
+    )
+
+    assert result.results[0].status == "failed"
+    assert "shortened" in result.results[0].error
+    assert db.get_ohlc("600519") == old
