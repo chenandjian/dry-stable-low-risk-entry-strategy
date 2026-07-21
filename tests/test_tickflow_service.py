@@ -255,7 +255,21 @@ def test_full_market_backfill_requests_stocks_in_bounded_chunks(tmp_path):
         {"code": "002396", "market": "SZ"},
         {"code": "300750", "market": "SZ"},
     ]
-    client = _Client(
+    class _PersistenceCheckingClient(_Client):
+        def __init__(self, responses):
+            super().__init__(responses)
+            self.persisted_before_calls = []
+
+        def fetch(self, symbols, *, count):
+            self.persisted_before_calls.append(
+                {
+                    code: bool(db.get_ohlc(code))
+                    for code in ("600519", "601318", "000001", "002396")
+                }
+            )
+            return super().fetch(symbols, count=count)
+
+    client = _PersistenceCheckingClient(
         [
             BatchFetchResult(
                 frames={stock["code"] + "." + stock["market"]: _frame(_rows(1, 3)) for stock in stocks[:2]}
@@ -277,5 +291,10 @@ def test_full_market_backfill_requests_stocks_in_bounded_chunks(tmp_path):
     result = service.run(stocks, dry_run=False, mode="backfill")
 
     assert [len(symbols) for symbols, _ in client.calls] == [2, 2, 1]
+    assert client.persisted_before_calls == [
+        {"600519": False, "601318": False, "000001": False, "002396": False},
+        {"600519": True, "601318": True, "000001": False, "002396": False},
+        {"600519": True, "601318": True, "000001": True, "002396": True},
+    ]
     assert [item.code for item in result.results] == [stock["code"] for stock in stocks]
     assert all(item.status == "success" for item in result.results)
