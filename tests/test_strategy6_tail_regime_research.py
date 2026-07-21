@@ -8,6 +8,7 @@ from strategy6.backtest.tail_regime_research import (
     _research_gate,
     classify_tail_regime_group,
     replay_tail_regime_labels,
+    run_tail_regime_research,
 )
 
 
@@ -144,3 +145,56 @@ def test_research_gate_uses_regime_only_trades_not_fixed_tail_performance():
 
     assert gate["status"] == "PASS"
     assert gate["regime_only_closed_trades"] == 30
+
+
+def test_research_rejects_non_formal_decision_profile():
+    class ResearchProfileEngine(_RecordingEngine):
+        config = {"decision_profile": "research_quality_v2"}
+
+    with pytest.raises(ValueError, match="formal_original"):
+        run_tail_regime_research(
+            parameter_set_id="s6ps-test",
+            data_by_code={"BOTH": {"name": "样本", "rows": _rows("2025-01-02")}},
+            evaluation_dates=["2025-01-02"],
+            market_data_by_symbol={"sh000001": _rows("2025-01-02", "2025-01-03")},
+            backtest_config={},
+            engine_factory=lambda: ResearchProfileEngine([]),
+            minimum_history=1,
+        )
+
+
+def test_wait_breakout_snapshot_is_not_sent_to_execution(monkeypatch):
+    class WaitingEngine:
+        config = {"decision_profile": "formal_original"}
+
+        def evaluate_at(self, rows, **kwargs):
+            return SimpleNamespace(to_candidate_dict=lambda: {
+                "code": "000001",
+                "name": "等待突破",
+                "evaluation_date": rows[-1]["date"],
+                "candidate_type": "WATCH_CANDIDATE",
+                "entry_archetype": "WAIT_BREAKOUT",
+                "original_tail_pass": True,
+                "tail_paths": ["ORIGINAL"],
+                "tail_regime_status": "NO_REGIME_CHANGE",
+            })
+
+    def fail_execution(*args, **kwargs):
+        raise AssertionError("WAIT_BREAKOUT must not enter execution")
+
+    monkeypatch.setattr(
+        "strategy6.backtest.tail_regime_research.simulate_frozen_trade",
+        fail_execution,
+    )
+    result = run_tail_regime_research(
+        parameter_set_id="s6ps-test",
+        data_by_code={"000001": {"name": "等待突破", "rows": _rows("2025-01-02")}},
+        evaluation_dates=["2025-01-02"],
+        market_data_by_symbol={"sh000001": _rows("2025-01-02", "2025-01-03")},
+        backtest_config={},
+        engine_factory=WaitingEngine,
+        minimum_history=1,
+    )
+
+    assert result["signals"] == []
+    assert result["orders"] == []

@@ -8,7 +8,7 @@ from strategy6.backtest.data import market_calendar_from_indexes, slice_visible_
 from strategy6.backtest.execution import simulate_frozen_trade
 from strategy6.backtest.metrics import calculate_trade_metrics, group_trade_metrics
 from strategy6.backtest.models import BacktestSignal
-from strategy6.backtest.snapshot import build_setup_id
+from strategy6.backtest.snapshot import build_setup_id, is_trade_ready_snapshot
 from strategy6.box_tail import combine_tail_paths
 from strategy6.filters import classify_candidate
 from strategy6.scorer import score_strategy6
@@ -90,6 +90,8 @@ def run_tail_regime_research(
         daily_labels.append(label)
         evaluation = item["evaluation"]
         engine = item["engine"]
+        if engine.config.get("decision_profile") != "formal_original":
+            raise ValueError("tail regime research requires decision_profile=formal_original")
         snapshot = item["snapshot"]
         group = label["group"]
         signal_snapshot = None
@@ -101,6 +103,8 @@ def run_tail_regime_research(
             signal_snapshot = _build_regime_only_hypothesis(evaluation, engine.config)
             signal_path = "REGIME"
         if not signal_snapshot:
+            continue
+        if not is_trade_ready_snapshot(signal_snapshot):
             continue
 
         setup_id = build_setup_id(signal_snapshot)
