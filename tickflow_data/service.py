@@ -51,6 +51,7 @@ class TickFlowDailyUpdateService:
         dry_run: bool,
         mode: str = "update",
         run_id: str | None = None,
+        on_success=None,
     ) -> BatchUpdateResult:
         if mode not in {"update", "backfill"}:
             raise ValueError(f"unsupported TickFlow update mode: {mode}")
@@ -92,6 +93,7 @@ class TickFlowDailyUpdateService:
                 results_by_code,
                 dry_run=dry_run,
                 run_id=run_id,
+                on_success=on_success,
             )
             refresh_symbols = self._process_incremental_group(
                 client,
@@ -99,6 +101,7 @@ class TickFlowDailyUpdateService:
                 results_by_code,
                 dry_run=dry_run,
                 run_id=run_id,
+                on_success=on_success,
             )
             if refresh_symbols:
                 for symbol in refresh_symbols:
@@ -111,6 +114,7 @@ class TickFlowDailyUpdateService:
                     results_by_code,
                     dry_run=dry_run,
                     run_id=run_id,
+                    on_success=on_success,
                 )
 
         batch.results = [results_by_code[str(stock.get("code", "")).strip()] for stock in stocks]
@@ -136,6 +140,7 @@ class TickFlowDailyUpdateService:
         *,
         dry_run: bool,
         run_id: str,
+        on_success,
     ) -> None:
         fetched = self._fetch(
             client,
@@ -167,10 +172,18 @@ class TickFlowDailyUpdateService:
                             "full history latest date regressed from "
                             f"{existing[-1]['date']} to {rows[-1]['date']}"
                         )
-                self._finish_stock(result, rows, dry_run=dry_run, run_id=run_id)
+                self._finish_stock(
+                    result,
+                    rows,
+                    dry_run=dry_run,
+                    run_id=run_id,
+                )
             except Exception as exc:
                 result.status = "failed"
                 result.error = str(exc)
+            else:
+                if on_success is not None:
+                    on_success(result)
 
     def _process_incremental_group(
         self,
@@ -180,6 +193,7 @@ class TickFlowDailyUpdateService:
         *,
         dry_run: bool,
         run_id: str,
+        on_success,
     ) -> list[str]:
         fetched = self._fetch(
             client,
@@ -207,10 +221,18 @@ class TickFlowDailyUpdateService:
                     full_refresh.append(symbol)
                     continue
                 merged = _merge_rows(existing, fresh, self.history_days)
-                self._finish_stock(result, merged, dry_run=dry_run, run_id=run_id)
+                self._finish_stock(
+                    result,
+                    merged,
+                    dry_run=dry_run,
+                    run_id=run_id,
+                )
             except Exception as exc:
                 result.status = "failed"
                 result.error = str(exc)
+            else:
+                if on_success is not None:
+                    on_success(result)
         return full_refresh
 
     @staticmethod
