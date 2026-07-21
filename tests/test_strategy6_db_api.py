@@ -74,6 +74,20 @@ def _candidate():
         "tail_avg_volume": 500000,
         "pre_tail_avg_volume_20": 1000000,
         "tail_volume_ratio": 0.5,
+        "tail_regime_enabled": True,
+        "tail_regime_status": "CONFIRMED",
+        "tail_regime_start_date": "2026-07-03",
+        "tail_regime_days": 7,
+        "tail_regime_delta_bic": 18.75,
+        "tail_regime_volume_ratio": 0.52,
+        "tail_regime_range_ratio": 0.61,
+        "tail_regime_body_ratio": 0.58,
+        "tail_regime_abs_return_ratio": 0.63,
+        "tail_regime_close_dispersion": 0.012,
+        "tail_regime_low_slope_atr": 0.04,
+        "tail_regime_model_version": "TAIL_REGIME_CP_V1",
+        "tail_regime_reasons": ["ROBUST_BIC_CHANGE_POINT"],
+        "tail_regime_risks": [],
         "original_tail_pass": False,
         "original_tail_score": 12,
         "box_tail_enabled": True,
@@ -193,6 +207,13 @@ def test_strategy6_candidate_table_is_independent(tmp_path):
     assert detail["price_basis"] == "FORWARD_ADJUSTED"
     assert detail["current_price_adj"] == 12.34
     assert detail["current_price_raw"] is None
+    assert detail["tail_regime_enabled"] is True
+    assert detail["tail_regime_status"] == "CONFIRMED"
+    assert detail["tail_regime_start_date"] == "2026-07-03"
+    assert detail["tail_regime_days"] == 7
+    assert detail["tail_regime_delta_bic"] == 18.75
+    assert detail["tail_regime_reasons"] == ["ROBUST_BIC_CHANGE_POINT"]
+    assert detail["tail_regime_risks"] == []
     assert detail["start_day_self_amount_percentile"] == 0.95
     assert detail["original_tail_pass"] is False
     assert detail["box_tail_enabled"] is True
@@ -257,6 +278,12 @@ def test_strategy6_candidate_schema_contains_all_box_tail_output_fields(tmp_path
         "kline_overlap_pair_count", "avg_kline_overlap_ratio", "gap_count_5",
         "max_gap_ratio_5", "atr5", "atr20", "atr_contraction_ratio",
         "compact_kline_reasons", "compact_kline_risk_tags",
+        "tail_regime_enabled", "tail_regime_status", "tail_regime_start_date",
+        "tail_regime_days", "tail_regime_delta_bic", "tail_regime_volume_ratio",
+        "tail_regime_range_ratio", "tail_regime_body_ratio",
+        "tail_regime_abs_return_ratio", "tail_regime_close_dispersion",
+        "tail_regime_low_slope_atr", "tail_regime_model_version",
+        "tail_regime_reasons", "tail_regime_risks",
         "brooks_tail_enabled", "brooks_tail_pass", "brooks_tail_score",
         "brooks_tail_premium", "brooks_status", "brooks_trade_ready",
         "brooks_trade_trigger_type", "brooks_trigger_price", "brooks_trigger_valid_until", "tail_paths",
