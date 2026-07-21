@@ -140,7 +140,9 @@ def test_engine_outputs_full_candidate_trade_plan():
     assert candidate["sector_name"] == "银行"
     assert candidate["original_tail_pass"] == result.dry_tail.dry_tail_pass
     assert candidate["original_tail_score"] == result.dry_tail.dry_stable_score
-    assert candidate["box_tail_enabled"] is True
+    assert candidate["decision_profile"] == "formal_original"
+    assert candidate["box_tail_enabled"] is False
+    assert candidate["brooks_tail_enabled"] is False
     assert candidate["tail_pass"] == bool(candidate["tail_paths"])
     assert candidate["tail_path"] in {"ORIGINAL", "BOX", "BOTH", "NONE"}
     assert candidate["start_event_quality_score"] >= 0
@@ -157,7 +159,28 @@ def test_engine_outputs_full_candidate_trade_plan():
         "SUPPORT_PULLBACK", "PIVOT_BREAKOUT", "FAILED_BREAKOUT_RECLAIM",
         "WAIT_BREAKOUT", "NONE",
     }
-    assert candidate["score_model_version"] == "S6_QUALITY_V2"
+    assert candidate["tail_segmentation_status"] == "FIXED_WINDOW"
+    assert candidate["score_model_version"] == "S6_FORMAL_ORIGINAL_V1"
+
+
+def test_formal_engine_does_not_execute_auxiliary_tail_paths(monkeypatch):
+    import strategy6.engine as engine_mod
+
+    def fail_if_called(*args, **kwargs):
+        raise AssertionError("formal profile must not execute research-only tail paths")
+
+    monkeypatch.setattr(engine_mod, "evaluate_box_tail", fail_if_called)
+    monkeypatch.setattr(engine_mod, "analyze_brooks_tail", fail_if_called)
+
+    candidate = StrongVcpTailEngine({}).evaluate_at(
+        build_strategy6_candidate_data(),
+        code="000001",
+    ).to_candidate_dict()
+
+    assert candidate["tail_paths"] == (
+        ["ORIGINAL"] if candidate["original_tail_pass"] else []
+    )
+    assert candidate["tail_primary_path"] in {"ORIGINAL", "NONE"}
 
 
 def test_engine_candidate_dict_exposes_safe_vcp_observation_defaults():
@@ -293,7 +316,9 @@ def test_vcp_observation_does_not_bypass_strategy6_data_and_liquidity_floor(monk
 
 
 def test_engine_outputs_brooks_and_authoritative_three_path_fields():
-    result = StrongVcpTailEngine({}).evaluate_at(
+    result = StrongVcpTailEngine({
+        "strategy6": {"decision_profile": "research_quality_v2"},
+    }).evaluate_at(
         build_strategy6_candidate_data(),
         code="000001",
         name="平安银行",
@@ -313,7 +338,9 @@ def test_engine_outputs_brooks_and_authoritative_three_path_fields():
 def test_engine_candidate_dict_exposes_authoritative_brooks_trigger_price():
     from strategy6.brooks.models import BrooksTradeTriggerResult
 
-    result = StrongVcpTailEngine({}).evaluate_at(
+    result = StrongVcpTailEngine({
+        "strategy6": {"decision_profile": "research_quality_v2"},
+    }).evaluate_at(
         build_strategy6_candidate_data(),
         code="000001",
         name="平安银行",
@@ -333,7 +360,10 @@ def test_engine_candidate_dict_exposes_authoritative_brooks_trigger_price():
 
 def test_engine_brooks_disabled_preserves_legacy_two_path_summary():
     result = StrongVcpTailEngine({
-        "strategy6": {"brooks_tail": {"enabled": False}},
+        "strategy6": {
+            "decision_profile": "research_quality_v2",
+            "brooks_tail": {"enabled": False},
+        },
     }).evaluate_at(build_strategy6_candidate_data(), code="000001")
     candidate = result.to_candidate_dict()
 
@@ -402,7 +432,12 @@ def test_engine_brooks_only_waiting_candidate_dict_has_no_ready_or_buy_semantics
         lambda *args, **kwargs: Strategy6Score(total_score=95, tail_score=18),
     )
 
-    result = StrongVcpTailEngine({"strategy6": {"enable_market_filter": False}}).evaluate_at(
+    result = StrongVcpTailEngine({
+        "strategy6": {
+            "decision_profile": "research_quality_v2",
+            "enable_market_filter": False,
+        },
+    }).evaluate_at(
         build_strategy6_candidate_data(),
         code="000001",
         name="平安银行",

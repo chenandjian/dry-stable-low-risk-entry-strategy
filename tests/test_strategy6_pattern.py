@@ -162,7 +162,7 @@ def test_vcp_rising_lows_bonus_keeps_existing_pattern_component_cap():
         phase_bonus=3,
     )
 
-    assert rewarded.pattern_score_component == 15
+    assert rewarded.pattern_score_component == 20
 
 
 def test_main_chain_vcp_contracting_highs_evidence_adds_two_pattern_points():
@@ -202,7 +202,7 @@ def test_vcp_quality_bonuses_accumulate_but_keep_pattern_component_cap():
 
     assert combined.pattern_score_component == baseline.pattern_score_component + 4
     assert combined.total_score == baseline.total_score + 4
-    assert capped.pattern_score_component == 15
+    assert capped.pattern_score_component == 20
 
 
 def test_contracting_highs_tag_does_not_reward_non_vcp_pattern():

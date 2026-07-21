@@ -30,6 +30,7 @@ def test_strategy6_report_xlsx_handles_empty_candidates():
     assert "enable_market_filter" in shared
     assert "relative_strength_10_sector" not in shared
     assert "strategy_version" in shared
+    assert "decision_profile" in shared
     assert "pattern_type" in shared
     assert "objective_target_2" in shared
     assert "execution_target_2r" in shared

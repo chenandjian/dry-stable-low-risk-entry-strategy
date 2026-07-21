@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from strategy6.models import Strategy6Phase, Strategy6Start
+from strategy6.validation import is_strategy6_research_profile
 
 
 def segment_phases(rows: list[dict], start: Strategy6Start, config: dict) -> Strategy6Phase:
@@ -67,14 +68,18 @@ def segment_phases(rows: list[dict], start: Strategy6Start, config: dict) -> Str
 def _select_tail_start(rows: list[dict], start_index: int, config: dict) -> tuple[int, dict]:
     fallback_days = int(config["tail_window_days"])
     fallback_start = min(len(rows) - 1, max(start_index + 2, len(rows) - fallback_days))
+    dynamic_enabled = bool(
+        is_strategy6_research_profile(config)
+        and config.get("dynamic_tail_enabled", True)
+    )
     fallback = {
-        "status": "FALLBACK_FIXED" if config.get("dynamic_tail_enabled", True) else "FIXED_WINDOW",
+        "status": "FALLBACK_FIXED" if dynamic_enabled else "FIXED_WINDOW",
         "score": 0,
         "range_ratio": 0.0,
         "atr_ratio": 0.0,
         "body_ratio": 0.0,
     }
-    if not config.get("dynamic_tail_enabled", True):
+    if not dynamic_enabled:
         return fallback_start, fallback
 
     baseline_days = int(config["dynamic_tail_baseline_days"])

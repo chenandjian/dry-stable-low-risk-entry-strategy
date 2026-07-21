@@ -233,6 +233,8 @@
         <div v-if="selected.vcp_observation_eligible"><span>VCP关键位</span><strong>支点 {{ fmt(selected.vcp_pivot_price) }} · 结构低点 {{ fmt(selected.vcp_structure_low) }} · 距支点 {{ pct(selected.vcp_distance_to_pivot_pct) }}</strong></div>
         <div v-if="selected.vcp_observation_eligible"><span>VCP突破</span><strong>{{ selected.vcp_breakout_date || '--' }} · 突破后 {{ selected.vcp_days_since_breakout ?? 0 }} 个交易日</strong></div>
         <div><span>分类</span><strong>{{ candidateTypeText(selected) }} / {{ isExecutionWaiting(selected) ? '观察' : label('classification', selected.classification) }}</strong></div>
+        <div data-test="detail-decision-profile"><span>决策规则</span><strong>{{ decisionProfileText(selected) }} · {{ selected.score_model_version || '--' }}</strong></div>
+        <div v-if="selected.decision_profile === 'formal_original'"><span>研究模块</span><strong>稳定箱体 / Brooks / 质量V2 未参与正式选股</strong></div>
         <div v-if="marketDowngradeText(selected)" data-test="detail-market-downgrade"><span>市场降级前等级</span><strong>{{ marketDowngradeText(selected) }}</strong></div>
         <div><span>生命周期</span><strong>{{ lifecycleText(selected) }}</strong></div>
         <div><span>强势启动</span><strong>{{ label('startType', selected.start_type) }} / {{ label('startGrade', selected.start_grade) }} / {{ pct(selected.start_day_return) }} · 启动后{{ selected.days_since_start ?? 0 }}日</strong></div>
@@ -571,6 +573,12 @@ export default {
     isQualityV2(candidate) {
       return candidate?.score_model_version === 'S6_QUALITY_V2'
     },
+    decisionProfileText(candidate) {
+      const profile = candidate?.decision_profile
+      if (profile === 'formal_original') return '正式原始链'
+      if (profile === 'research_quality_v2') return '研究质量 V2'
+      return '历史规则未标记'
+    },
     qualityValue(candidate, field) {
       if (!this.isQualityV2(candidate)) return '--'
       return candidate?.[field] ?? '--'
@@ -738,6 +746,7 @@ export default {
           { header: '首次入池', value: c => c.first_pool_date || '' },
           { header: '池龄交易日', value: c => c.pool_age_trading_days ?? '' },
           { header: '策略版本', value: c => c.strategy_version || '' },
+          { header: '决策规则', value: c => this.decisionProfileText(c) },
           { header: '评分模型版本', value: c => c.score_model_version || '' },
           { header: '入场类型', value: c => this.entryArchetypeText(c) === '--' ? '' : this.entryArchetypeText(c) },
           { header: '入场类型原始值', value: c => this.isQualityV2(c) ? (c.entry_archetype || '') : '' },

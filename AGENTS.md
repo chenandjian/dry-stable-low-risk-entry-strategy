@@ -31,7 +31,9 @@ CupHandleScan 是 Python 3.10+ 的 A 股扫描系统，当前项目包含六套�
 
 策略6必须保持启动、整理、尾段不重叠，使用客观目标计算盈亏比，并将执行R目标单独输出。策略6不得恢复板块过滤，`sector_name` 仅展示。当前策略6价格全部为前复权口径，禁止把 `current_price_raw` 伪填为前复权价格。
 
-策略6尾部采用双路径：原 `strategy6/dry_tail.py::evaluate_dry_tail()` 必须保持业务逻辑和阈值不变；新增稳定箱体路径位于 `strategy6/box_tail.py`。最终通过使用 OR，`BOTH` 才对两个已通过路径取较高分；`ORIGINAL` 和 `NONE` 必须保留原尾部分，失败箱体不得抬高旧结果。紧密K线评分仅用于箱体窗口择优和质量标签，不得累加到最终 `tail_score`。
+策略6默认决策画像为 `formal_original`：固定尾段窗口，只有 `strategy6/dry_tail.py::evaluate_dry_tail()` 的 ORIGINAL 路径参与正式评分、过滤与候选分层。`dynamic_tail`、稳定箱体、Brooks 和 `S6_QUALITY_V2` 仅允许在显式 `research_quality_v2` 研究画像中执行，不得绕过 ORIGINAL 风险进入正式候选。旧输出字段继续保留，正式画像填充禁用中性值；生命周期必须按 `decision_profile` 隔离。
+
+稳定箱体研究路径位于 `strategy6/box_tail.py`。研究画像中最终通过使用 OR，`BOTH` 才对两个已通过路径取较高分；`ORIGINAL` 和 `NONE` 必须保留原尾部分，失败箱体不得抬高旧结果。紧密K线评分仅用于箱体窗口择优和质量标签，不得累加到最终 `tail_score`。
 
 策略6历史研究位于 `strategy6/backtest/`，只能通过冻结 `StrongVcpTailEngine.evaluate_at()` 按历史日期重建信号。个股和交易统一使用本地前复权日线；四个真实宽基指数必须覆盖研究区间，缺少沪深300时回测必须返回 `BLOCKED_INDEX_HISTORY`。P0-P3不得读取OOS收益、不得写生产配置，当前股票池结果必须标记 `RESEARCH_ONLY_CURRENT_UNIVERSE`。
 

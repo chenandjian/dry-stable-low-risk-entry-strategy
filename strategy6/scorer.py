@@ -15,6 +15,7 @@ from strategy6.models import (
     Strategy6Support,
     Strategy6TradePlan,
 )
+from strategy6.validation import is_strategy6_research_profile
 
 
 def score_strategy6(
@@ -30,6 +31,129 @@ def score_strategy6(
     box_tail: Strategy6BoxTail | None = None,
     brooks_tail: BrooksTailResult | None = None,
     setup_quality: Strategy6SetupQuality | None = None,
+) -> Strategy6Score:
+    if not is_strategy6_research_profile(config):
+        return _score_formal_original(
+            ind,
+            start,
+            pattern,
+            support,
+            dry_tail,
+            trade_plan,
+            config,
+            setup_quality=setup_quality,
+        )
+    return _score_quality_v2(
+        ind,
+        start,
+        phase,
+        pattern,
+        support,
+        dry_tail,
+        trade_plan,
+        box_tail=box_tail,
+        brooks_tail=brooks_tail,
+        setup_quality=setup_quality,
+    )
+
+
+def _score_formal_original(
+    ind: Strategy6Indicators,
+    start: Strategy6Start,
+    pattern: Strategy6Pattern,
+    support: Strategy6Support,
+    dry_tail: Strategy6DryTail,
+    trade_plan: Strategy6TradePlan,
+    config: dict,
+    *,
+    setup_quality: Strategy6SetupQuality | None,
+) -> Strategy6Score:
+    quality = setup_quality or Strategy6SetupQuality()
+    strong = _strong_start_score(start)
+    pattern_score = 0
+    vcp_low_trend_bonus = 0
+    vcp_contracting_highs_bonus = 0
+    if config["pattern_filter_enabled"]:
+        vcp_low_trend_bonus = (
+            2
+            if pattern.pattern_type == "VCP" and "VCP_LOW_RISING_BONUS" in pattern.reasons
+            else 0
+        )
+        vcp_contracting_highs_bonus = (
+            2
+            if (
+                pattern.pattern_type == "VCP"
+                and "VCP_HIGH_NOT_RISING_LOW_RISING_BONUS" in pattern.reasons
+            )
+            else 0
+        )
+        pattern_score = min(
+            20,
+            max(0, pattern.pattern_score)
+            + vcp_low_trend_bonus
+            + vcp_contracting_highs_bonus,
+        )
+    support_score = min(20, max(0, support.support_cluster_score))
+    tail_score = (
+        min(20, max(0, dry_tail.dry_stable_score))
+        if dry_tail.dry_tail_pass
+        else 0
+    )
+    objective_rr_score = _rr_score(trade_plan.objective_rr_2)
+    relative_strength_risk_score = _relative_strength_risk_score(ind)
+    total = min(
+        100,
+        strong
+        + pattern_score
+        + support_score
+        + tail_score
+        + objective_rr_score
+        + relative_strength_risk_score,
+    )
+    reasons = [
+        f"strong={strong}",
+        f"pattern={pattern_score}",
+        f"support={support_score}",
+        f"tail={tail_score}",
+        f"objective_rr={objective_rr_score}",
+        f"rs_risk={relative_strength_risk_score}",
+        f"setup_quality_diagnostic={max(0, int(quality.score))}",
+    ]
+    if vcp_low_trend_bonus:
+        reasons.append("vcp_low_trend_bonus=2")
+    if vcp_contracting_highs_bonus:
+        reasons.append("vcp_contracting_highs_bonus=2")
+    return Strategy6Score(
+        strong_start_score=strong,
+        pattern_score_component=pattern_score,
+        support_score=support_score,
+        tail_score=tail_score,
+        dry_stable_score=min(20, max(0, dry_tail.dry_stable_score)),
+        objective_rr_score=objective_rr_score,
+        risk_reward_score=objective_rr_score,
+        relative_strength_risk_score=relative_strength_risk_score,
+        risk_control_score=relative_strength_risk_score,
+        setup_quality_score=max(0, int(quality.score)),
+        support_reaction_score=support.support_reaction_score,
+        path_evidence_score=tail_score,
+        score_model_version="S6_FORMAL_ORIGINAL_V1",
+        total_score=total,
+        score_reasons=reasons,
+    )
+
+
+def _score_quality_v2(
+    ind: Strategy6Indicators,
+    start: Strategy6Start,
+    phase: Strategy6Phase,
+    pattern: Strategy6Pattern,
+    support: Strategy6Support,
+    dry_tail: Strategy6DryTail,
+    trade_plan: Strategy6TradePlan,
+    *,
+    box_tail: Strategy6BoxTail | None,
+    brooks_tail: BrooksTailResult | None,
+    setup_quality: Strategy6SetupQuality | None,
 ) -> Strategy6Score:
     quality = setup_quality or Strategy6SetupQuality()
     legacy_strong = _strong_start_score(start)

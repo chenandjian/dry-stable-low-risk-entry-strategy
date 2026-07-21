@@ -49,6 +49,7 @@ describe('Strategy6Results', () => {
           classification: 'ready',
           lifecycle_status: 'BUY_ZONE',
           total_score: 91,
+          decision_profile: 'research_quality_v2',
           score_model_version: 'S6_QUALITY_V2',
           entry_archetype: 'SUPPORT_PULLBACK',
           start_event_quality_score: 17,
@@ -353,6 +354,8 @@ describe('Strategy6Results', () => {
     expect(wrapper.text()).toContain('支撑反应 8')
     expect(wrapper.text()).toContain('启动质量 17')
     expect(wrapper.text()).toContain('路径证据 13')
+    expect(wrapper.text()).toContain('研究质量 V2')
+    expect(wrapper.vm.decisionProfileText({ decision_profile: 'formal_original' })).toBe('正式原始链')
     expect(wrapper.text()).toContain('动态收缩尾段')
     expect(wrapper.text()).toContain('未形成尾段（V5/V20 0.660）')
     expect(wrapper.vm.tailVolumeDisplay({
@@ -829,7 +832,7 @@ describe('Strategy6Results', () => {
     expect(csv).toContain('启动日低点,启动后天数')
     expect(csv).toContain('关键支撑,前置支撑')
     expect(csv).toContain('阶段状态,阶段状态原始值,形态类型,形态类型原始值')
-    expect(csv).toContain('评分模型版本,入场类型,入场类型原始值,启动事件质量分,整理质量分,支撑反应分,路径证据分')
+    expect(csv).toContain('决策规则,评分模型版本,入场类型,入场类型原始值,启动事件质量分,整理质量分,支撑反应分,路径证据分')
     expect(csv).toContain('尾段划分,尾段划分原始值,尾段划分分数')
     expect(csv).toContain('S6_QUALITY_V2,支撑低吸,SUPPORT_PULLBACK,17,21,8,13')
     expect(csv).toContain('客观目标1,客观目标2,客观RR1,客观RR2')

@@ -266,6 +266,7 @@ def scan_strategy6_all(
                     failed_cooldown_days=int(cfg["failed_cooldown_days"]),
                     candidate=candidate,
                     observation_candidate=observation,
+                    decision_profile=cfg["decision_profile"],
                 )
                 if lifecycle["blocked"] and evaluation.passed:
                     _finish_stock(

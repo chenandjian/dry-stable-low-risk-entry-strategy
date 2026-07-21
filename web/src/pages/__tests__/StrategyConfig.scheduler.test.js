@@ -263,6 +263,8 @@ describe('StrategyConfig scheduler controls', () => {
     expect(wrapper.text()).toContain('最低RS20')
     expect(wrapper.text()).toContain('市场过滤模式')
     expect(wrapper.find('[data-test="strategy6-market-filter-mode"]').element.value).toBe('downgrade')
+    expect(wrapper.find('[data-test="strategy6-decision-profile"]').text()).toContain('正式原始链')
+    expect(wrapper.find('[data-test="strategy6-decision-profile"]').text()).toContain('仅用于研究')
     expect(wrapper.find('[data-test="strategy6-sector-filter-mode"]').exists()).toBe(false)
     expect(wrapper.text()).not.toContain('板块新高成员数')
     expect(wrapper.text()).not.toContain('板块过滤模式')
@@ -301,6 +303,7 @@ describe('StrategyConfig scheduler controls', () => {
 
     const payload = api.updateConfig.mock.calls[0][0]
     expect(payload.strategy6.market_filter_mode).toBe('strict')
+    expect(payload.strategy6.decision_profile).toBe('formal_original')
     expect(payload.strategy6).not.toHaveProperty('enable_sector_filter')
     expect(payload.strategy6).not.toHaveProperty('sector_filter_mode')
     expect(payload.strategy6).not.toHaveProperty('sector_min_member_new_high_count')

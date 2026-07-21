@@ -5,6 +5,7 @@ from strategy6.dry_tail import evaluate_dry_tail
 from strategy6.entry import identify_entry_archetype
 from strategy6.box_tail import combine_tail_paths, evaluate_box_tail, evaluate_compact_kline
 from strategy6.brooks.tail import analyze_brooks_tail
+from strategy6.brooks.models import BrooksTailResult
 from strategy6.brooks.trigger import evaluate_brooks_trade_trigger
 from strategy6.filters import (
     classify_candidate,
@@ -13,7 +14,7 @@ from strategy6.filters import (
 )
 from strategy6.indicators import _atr, calculate_indicators
 from strategy6.market import compute_relative_strength_20, evaluate_market_context, has_relative_strength_20_market
-from strategy6.models import Strategy6Evaluation
+from strategy6.models import Strategy6BoxTail, Strategy6Evaluation
 from strategy6.phase import segment_phases
 from strategy6.pattern import detect_pattern
 from strategy6.pressure import apply_pressure_tags
@@ -22,7 +23,11 @@ from strategy6.setup_quality import evaluate_setup_quality
 from strategy6.strong_start import evaluate_strong_start
 from strategy6.support import evaluate_support
 from strategy6.trade_plan import calculate_trade_plan
-from strategy6.validation import resolve_strategy6_config, strategy6_config_hash
+from strategy6.validation import (
+    is_strategy6_research_profile,
+    resolve_strategy6_config,
+    strategy6_config_hash,
+)
 from strategy6.version import STRATEGY6_VERSION
 from strategy6.vcp_observer import apply_vcp_base_filters, evaluate_vcp_observation
 
@@ -81,47 +86,52 @@ class StrongVcpTailEngine:
             market_data_by_symbol,
         )
         dry_tail = evaluate_dry_tail(rows, indicators, phase, self.config)
-        box_tail = evaluate_box_tail(
-            rows,
-            phase,
-            support,
-            dry_tail,
-            has_volume_selloff=indicators.has_big_down_volume,
-            config=self.config["box_tail"],
-        )
-        brooks_compact = box_tail.compact_kline
-        if not brooks_compact.enabled:
-            compact_config = dict(self.config["box_tail"]["compact_kline"])
-            compact_config["enabled"] = True
-            brooks_compact = evaluate_compact_kline(
+        research_profile = is_strategy6_research_profile(self.config)
+        if research_profile:
+            box_tail = evaluate_box_tail(
                 rows,
-                atr5=_atr(rows, 5),
-                atr20=_atr(rows, 20),
-                tail_volume_ratio=dry_tail.tail_volume_ratio,
-                premium_tail_volume_ratio_max=self.config["brooks_tail"]["volume_dry"]["premium_tail_volume_ratio_max"],
                 has_volume_selloff=indicators.has_big_down_volume,
-                config=compact_config,
+                phase=phase,
+                support=support,
+                original_tail=dry_tail,
+                config=self.config["box_tail"],
             )
-        brooks_tail = analyze_brooks_tail(
-            rows,
-            indicators,
-            start,
-            phase,
-            support,
-            dry_tail,
-            brooks_compact,
-            config=self.config["brooks_tail"],
-        )
-        brooks_tail.trade_trigger = evaluate_brooks_trade_trigger(
-            rows,
-            brooks_tail,
-            support,
-            start_grade=start.start_grade,
-            atr14=indicators.atr14,
-            config=self.config["brooks_tail"],
-        )
-        if brooks_tail.trade_trigger.ready:
-            brooks_tail.status = brooks_tail.trade_trigger.trigger_type
+            brooks_compact = box_tail.compact_kline
+            if not brooks_compact.enabled:
+                compact_config = dict(self.config["box_tail"]["compact_kline"])
+                compact_config["enabled"] = True
+                brooks_compact = evaluate_compact_kline(
+                    rows,
+                    atr5=_atr(rows, 5),
+                    atr20=_atr(rows, 20),
+                    tail_volume_ratio=dry_tail.tail_volume_ratio,
+                    premium_tail_volume_ratio_max=self.config["brooks_tail"]["volume_dry"]["premium_tail_volume_ratio_max"],
+                    has_volume_selloff=indicators.has_big_down_volume,
+                    config=compact_config,
+                )
+            brooks_tail = analyze_brooks_tail(
+                rows,
+                indicators,
+                start,
+                phase,
+                support,
+                dry_tail,
+                brooks_compact,
+                config=self.config["brooks_tail"],
+            )
+            brooks_tail.trade_trigger = evaluate_brooks_trade_trigger(
+                rows,
+                brooks_tail,
+                support,
+                start_grade=start.start_grade,
+                atr14=indicators.atr14,
+                config=self.config["brooks_tail"],
+            )
+            if brooks_tail.trade_trigger.ready:
+                brooks_tail.status = brooks_tail.trade_trigger.trigger_type
+        else:
+            box_tail = Strategy6BoxTail(status="DISABLED_FORMAL_PROFILE")
+            brooks_tail = BrooksTailResult.disabled()
         tail_paths = combine_tail_paths(dry_tail, box_tail, brooks_tail)
         apply_pressure_tags(rows, indicators)
         entry_archetype = identify_entry_archetype(
@@ -217,6 +227,7 @@ class StrongVcpTailEngine:
             vcp_observation=vcp_observation,
             strategy_version=STRATEGY6_VERSION,
             config_hash=strategy6_config_hash(self.config),
+            decision_profile=self.config["decision_profile"],
             pre_market_candidate_type=pre_market_candidate_type,
             candidate_type=candidate_type,
             classification=classification,

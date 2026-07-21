@@ -676,6 +676,10 @@
       <p class="section-hint">
         策略6独立寻找强势启动后的支撑横盘尾部，重点看价稳量干、支撑有效和 RR2 盈亏比。
       </p>
+      <div data-test="strategy6-decision-profile" class="info-msg strategy6-info">
+        当前决策规则：<strong>{{ config.strategy6?.decision_profile === 'research_quality_v2' ? '研究质量 V2' : '正式原始链' }}</strong>。
+        稳定箱体、动态尾段、Brooks 与质量 V2 参数仅用于研究配置，正式原始链不读取这些参数作选股决策。
+      </div>
 
       <div class="toggle-grid" style="margin-bottom:16px">
         <label class="toggle-item">
@@ -1337,6 +1341,7 @@ const defaultStrategy6BoxTailConfig = {
 
 const defaultStrategy6Config = {
   enabled: true,
+  decision_profile: 'formal_original',
   kline_days: 1100,
   minimum_trading_days: 500,
   min_avg_amount_60d_yi: 3,

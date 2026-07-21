@@ -47,6 +47,7 @@ def _candidate():
         "start_day_self_amount_percentile": 0.95,
         "strategy_version": "4.0.0",
         "config_hash": "abc123",
+        "decision_profile": "research_quality_v2",
         "phase_status": "PHASE_VALID",
         "consolidation_start_date": "2026-06-20",
         "tail_start_date": "2026-07-03",
@@ -183,6 +184,7 @@ def test_strategy6_candidate_table_is_independent(tmp_path):
     assert rows[0]["warn_tags"] == ["PRESSURE_NEAR_HIGH"]
     assert detail["risk_reward_ratio_2"] == 2.5
     assert detail["strategy_version"] == "4.0.0"
+    assert detail["decision_profile"] == "research_quality_v2"
     assert detail["pre_market_candidate_type"] == "KEY_CANDIDATE"
     assert detail["pattern_type"] == "VCP"
     assert detail["support_cluster_sources"] == ["MA10", "PATTERN_LOW"]
@@ -241,6 +243,7 @@ def test_strategy6_candidate_schema_contains_all_box_tail_output_fields(tmp_path
         row[1] for row in db.get_conn().execute("PRAGMA table_info(strategy6_candidates)").fetchall()
     }
     required = {
+        "decision_profile",
         "original_tail_pass", "original_tail_score", "box_tail_enabled",
         "box_tail_pass", "box_tail_score", "box_status", "tail_pass", "tail_path",
         "box_start_date", "box_end_date", "box_days", "box_high", "box_low",

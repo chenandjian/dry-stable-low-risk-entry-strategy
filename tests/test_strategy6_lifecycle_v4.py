@@ -4,7 +4,13 @@ from types import SimpleNamespace
 from strategy6.scanner import _strategy6_event_key
 
 
-def _update(code, evaluation_date, candidate_type="KEY_CANDIDATE", event_key="start-a|pattern-a"):
+def _update(
+    code,
+    evaluation_date,
+    candidate_type="KEY_CANDIDATE",
+    event_key="start-a|pattern-a",
+    decision_profile="formal_original",
+):
     return db.update_strategy6_lifecycle(
         code=code,
         evaluation_date=evaluation_date,
@@ -15,7 +21,28 @@ def _update(code, evaluation_date, candidate_type="KEY_CANDIDATE", event_key="st
         max_watch_days=10,
         expired_cooldown_days=5,
         failed_cooldown_days=10,
+        decision_profile=decision_profile,
     )
+
+
+def test_lifecycle_resets_when_decision_profile_changes(tmp_path):
+    db.init_db(str(tmp_path / "profile-reset.db"))
+    _update(
+        "000001",
+        "2026-07-01",
+        decision_profile="research_quality_v2",
+    )
+
+    formal = _update(
+        "000001",
+        "2026-07-15",
+        decision_profile="formal_original",
+    )
+
+    assert formal["decision_profile"] == "formal_original"
+    assert formal["first_seen_date"] == "2026-07-15"
+    assert formal["days_in_pool"] == 0
+    assert formal["blocked"] is False
 
 
 def test_candidate_expires_after_ten_trading_days_and_enters_cooldown(tmp_path):

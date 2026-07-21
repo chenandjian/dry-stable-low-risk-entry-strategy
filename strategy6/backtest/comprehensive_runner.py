@@ -485,7 +485,9 @@ def run_comprehensive_cli(args, coverage) -> int:
 
     with open(args.config, "r", encoding="utf-8") as handle:
         root_config = yaml.safe_load(handle) or {}
-    base_config = resolve_strategy6_config({"strategy6": copy.deepcopy(root_config.get("strategy6") or {})})
+    research_config = copy.deepcopy(root_config.get("strategy6") or {})
+    research_config["decision_profile"] = "research_quality_v2"
+    base_config = resolve_strategy6_config({"strategy6": research_config})
     data_version = build_database_fingerprint(db.get_conn())
     if args.command == "comprehensive-plan":
         result = initialize_campaign(

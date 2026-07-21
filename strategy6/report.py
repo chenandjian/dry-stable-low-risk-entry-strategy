@@ -22,6 +22,7 @@ STRATEGY6_REPORT_COLUMNS = [
     ("reentry_count", "reentry_count"),
     ("strategy_version", "strategy_version"),
     ("config_hash", "config_hash"),
+    ("decision_profile", "decision_profile"),
     ("price_basis", "price_basis"),
     ("current_price_adj", "current_price_adj"),
     ("current_price_raw", "current_price_raw"),

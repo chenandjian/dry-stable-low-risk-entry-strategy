@@ -2667,6 +2667,7 @@ def _ensure_strategy6_candidates_table(conn: sqlite3.Connection):
             reentry_count INTEGER DEFAULT 0,
             strategy_version TEXT,
             config_hash TEXT,
+            decision_profile TEXT DEFAULT 'legacy_unspecified',
             price_basis TEXT,
             current_price_adj REAL,
             current_price_raw REAL,
@@ -2819,6 +2820,7 @@ def _ensure_strategy6_candidates_table(conn: sqlite3.Connection):
         "reentry_count": "INTEGER DEFAULT 0",
         "strategy_version": "TEXT",
         "config_hash": "TEXT",
+        "decision_profile": "TEXT DEFAULT 'legacy_unspecified'",
         "price_basis": "TEXT",
         "current_price_adj": "REAL",
         "current_price_raw": "REAL",
@@ -3059,9 +3061,16 @@ def _ensure_strategy6_lifecycle_table(conn: sqlite3.Connection):
             cooldown_until_date TEXT,
             reentry_count INTEGER DEFAULT 0,
             last_event_key TEXT,
+            decision_profile TEXT DEFAULT 'legacy_unspecified',
             updated_at TEXT NOT NULL DEFAULT (datetime('now'))
         )
     ''')
+    _ensure_column(
+        conn,
+        "strategy6_candidate_lifecycle",
+        "decision_profile",
+        "TEXT DEFAULT 'legacy_unspecified'",
+    )
 
 
 def _ensure_strategy6_task_lifecycle_table(conn: sqlite3.Connection):
@@ -3082,6 +3091,7 @@ def _ensure_strategy6_task_lifecycle_table(conn: sqlite3.Connection):
             reentry_count INTEGER DEFAULT 0,
             blocked INTEGER DEFAULT 0,
             reject_reasons TEXT,
+            decision_profile TEXT DEFAULT 'legacy_unspecified',
             updated_at TEXT NOT NULL DEFAULT (datetime('now')),
             PRIMARY KEY (task_id, code),
             FOREIGN KEY (task_id) REFERENCES scan_tasks(id)
@@ -3090,6 +3100,12 @@ def _ensure_strategy6_task_lifecycle_table(conn: sqlite3.Connection):
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_strategy6_task_lifecycle_task "
         "ON strategy6_task_lifecycle(task_id, blocked, lifecycle_status)"
+    )
+    _ensure_column(
+        conn,
+        "strategy6_task_lifecycle",
+        "decision_profile",
+        "TEXT DEFAULT 'legacy_unspecified'",
     )
 
 
@@ -3985,7 +4001,7 @@ def upsert_strategy6_candidate(
     ]
     extra_columns = [
         "first_seen_date", "last_seen_date", "days_in_pool", "exit_date", "exit_reason", "cooldown_until_date", "reentry_count",
-        "strategy_version", "config_hash", "price_basis", "current_price_adj", "current_price_raw",
+        "strategy_version", "config_hash", "decision_profile", "price_basis", "current_price_adj", "current_price_raw",
         "atr14", "start_day_self_amount_percentile",
         "phase_status", "consolidation_start_date", "tail_start_date", "signal_date",
         "start_age_days", "consolidation_days", "tail_days",
@@ -4051,6 +4067,7 @@ def upsert_strategy6_candidate(
         d.get("reentry_count", 0),
         d.get("strategy_version", ""),
         d.get("config_hash", ""),
+        d.get("decision_profile", "legacy_unspecified"),
         d.get("price_basis", "FORWARD_ADJUSTED"),
         d.get("current_price_adj", d.get("current_price")),
         None,
@@ -4462,8 +4479,9 @@ def save_strategy6_task_lifecycle(
         """INSERT INTO strategy6_task_lifecycle (
                task_id, code, name, evaluation_date, candidate_type, lifecycle_status,
                first_seen_date, last_seen_date, days_in_pool, exit_date, exit_reason,
-               cooldown_until_date, reentry_count, blocked, reject_reasons, updated_at
-           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+               cooldown_until_date, reentry_count, blocked, reject_reasons,
+               decision_profile, updated_at
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
            ON CONFLICT(task_id, code) DO UPDATE SET
                name=excluded.name,
                evaluation_date=excluded.evaluation_date,
@@ -4478,6 +4496,7 @@ def save_strategy6_task_lifecycle(
                reentry_count=excluded.reentry_count,
                blocked=excluded.blocked,
                reject_reasons=excluded.reject_reasons,
+               decision_profile=excluded.decision_profile,
                updated_at=datetime('now')""",
         (
             task_id, code, name, evaluation_date, candidate_type,
@@ -4486,6 +4505,7 @@ def save_strategy6_task_lifecycle(
             lifecycle.get("exit_date", ""), lifecycle.get("exit_reason", ""),
             lifecycle.get("cooldown_until_date", ""), int(lifecycle.get("reentry_count") or 0),
             1 if lifecycle.get("blocked") else 0, _json_any(reject_reasons),
+            lifecycle.get("decision_profile", "legacy_unspecified"),
         ),
     )
     if _commit:
@@ -4498,7 +4518,8 @@ def get_strategy6_task_lifecycle(task_id: str) -> list[dict]:
     rows = conn.execute(
         """SELECT task_id, code, name, evaluation_date, candidate_type, lifecycle_status,
                   first_seen_date, last_seen_date, days_in_pool, exit_date, exit_reason,
-                  cooldown_until_date, reentry_count, blocked, reject_reasons
+                  cooldown_until_date, reentry_count, blocked, reject_reasons,
+                  decision_profile
            FROM strategy6_task_lifecycle WHERE task_id=?
            ORDER BY blocked DESC, lifecycle_status, code""",
         (task_id,),
@@ -4507,6 +4528,7 @@ def get_strategy6_task_lifecycle(task_id: str) -> list[dict]:
         "task_id", "code", "name", "evaluation_date", "candidate_type", "lifecycle_status",
         "first_seen_date", "last_seen_date", "days_in_pool", "exit_date", "exit_reason",
         "cooldown_until_date", "reentry_count", "blocked", "reject_reasons",
+        "decision_profile",
     ]
     result = []
     for row in rows:
@@ -4524,7 +4546,8 @@ def get_strategy6_task_lifecycle(task_id: str) -> list[dict]:
 def _get_strategy6_lifecycle_from_conn(conn: sqlite3.Connection, code: str) -> dict | None:
     row = conn.execute(
         """SELECT code, lifecycle_status, first_seen_date, last_seen_date, days_in_pool,
-                  exit_date, exit_reason, cooldown_until_date, reentry_count, last_event_key
+                  exit_date, exit_reason, cooldown_until_date, reentry_count,
+                  last_event_key, decision_profile
            FROM strategy6_candidate_lifecycle WHERE code=?""",
         (code,),
     ).fetchone()
@@ -4532,7 +4555,8 @@ def _get_strategy6_lifecycle_from_conn(conn: sqlite3.Connection, code: str) -> d
         return None
     columns = [
         "code", "lifecycle_status", "first_seen_date", "last_seen_date", "days_in_pool",
-        "exit_date", "exit_reason", "cooldown_until_date", "reentry_count", "last_event_key",
+        "exit_date", "exit_reason", "cooldown_until_date", "reentry_count",
+        "last_event_key", "decision_profile",
     ]
     return dict(zip(columns, row))
 
@@ -4548,6 +4572,7 @@ def update_strategy6_lifecycle(
     max_watch_days: int,
     expired_cooldown_days: int,
     failed_cooldown_days: int,
+    decision_profile: str = "formal_original",
     _conn: sqlite3.Connection | None = None,
     _commit: bool = True,
 ) -> dict:
@@ -4558,6 +4583,8 @@ def update_strategy6_lifecycle(
         conn.execute("BEGIN IMMEDIATE")
     try:
         previous = _get_strategy6_lifecycle_from_conn(conn, code)
+        if previous and str(previous.get("decision_profile") or "legacy_unspecified") != decision_profile:
+            previous = None
         is_candidate = candidate_type != "REJECTED"
         state = {
             "code": code,
@@ -4570,6 +4597,7 @@ def update_strategy6_lifecycle(
             "cooldown_until_date": "",
             "reentry_count": 0,
             "last_event_key": event_key,
+            "decision_profile": decision_profile,
             "blocked": not is_candidate,
         }
 
@@ -4653,8 +4681,9 @@ def update_strategy6_lifecycle(
         conn.execute(
             """INSERT INTO strategy6_candidate_lifecycle (
                    code, lifecycle_status, first_seen_date, last_seen_date, days_in_pool,
-                   exit_date, exit_reason, cooldown_until_date, reentry_count, last_event_key, updated_at
-               ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+                   exit_date, exit_reason, cooldown_until_date, reentry_count,
+                   last_event_key, decision_profile, updated_at
+               ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
                ON CONFLICT(code) DO UPDATE SET
                    lifecycle_status=excluded.lifecycle_status,
                    first_seen_date=excluded.first_seen_date,
@@ -4665,12 +4694,13 @@ def update_strategy6_lifecycle(
                    cooldown_until_date=excluded.cooldown_until_date,
                    reentry_count=excluded.reentry_count,
                    last_event_key=excluded.last_event_key,
+                   decision_profile=excluded.decision_profile,
                    updated_at=datetime('now')""",
             (
                 state["code"], state["lifecycle_status"], state["first_seen_date"],
                 state["last_seen_date"], state["days_in_pool"], state["exit_date"],
                 state["exit_reason"], state["cooldown_until_date"], state["reentry_count"],
-                state["last_event_key"],
+                state["last_event_key"], state["decision_profile"],
             ),
         )
         if _commit:
@@ -4697,6 +4727,7 @@ def persist_strategy6_evaluation(
     failed_cooldown_days: int,
     candidate: dict | None,
     observation_candidate: dict | None = None,
+    decision_profile: str = "formal_original",
 ) -> tuple[dict, dict | None]:
     """Atomically persist Strategy6 lifecycle, task audit and active candidate."""
     conn = get_conn()
@@ -4713,6 +4744,7 @@ def persist_strategy6_evaluation(
             max_watch_days=max_watch_days,
             expired_cooldown_days=expired_cooldown_days,
             failed_cooldown_days=failed_cooldown_days,
+            decision_profile=decision_profile,
             _conn=conn,
             _commit=False,
         )

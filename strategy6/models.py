@@ -343,6 +343,7 @@ class Strategy6Evaluation:
     vcp_observation: Strategy6VcpObservation = field(default_factory=Strategy6VcpObservation)
     strategy_version: str = ""
     config_hash: str = ""
+    decision_profile: str = "formal_original"
     pre_market_candidate_type: str = ""
     candidate_type: str = "REJECTED"
     classification: str = "rejected"
@@ -373,6 +374,7 @@ class Strategy6Evaluation:
         return {
             "strategy_version": self.strategy_version,
             "config_hash": self.config_hash,
+            "decision_profile": self.decision_profile,
             "price_basis": "FORWARD_ADJUSTED",
             "current_price_adj": ind.current_price,
             "current_price_raw": None,

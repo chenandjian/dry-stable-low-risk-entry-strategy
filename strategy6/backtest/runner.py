@@ -86,10 +86,23 @@ _BROOKS_STRUCTURAL_RELAXED_VALUES = {
 }
 
 
+def _research_strategy_config(base: dict) -> dict:
+    config = copy.deepcopy(base)
+    config["decision_profile"] = "research_quality_v2"
+    return config
+
+
+def _formal_strategy_config(base: dict) -> dict:
+    config = copy.deepcopy(base)
+    config["decision_profile"] = "formal_original"
+    return config
+
+
 def build_brooks_trial_configs(base: dict, *, max_trials: int) -> list[dict]:
     """Build interpretable baseline, one-at-a-time and joint relaxations."""
     if max_trials < 1:
         return []
+    base = _research_strategy_config(base)
     configs = [copy.deepcopy(base)]
     for key, value in _BROOKS_RELAXED_VALUES.items():
         trial = copy.deepcopy(base)
@@ -152,7 +165,7 @@ def run_cli_research(args, coverage) -> int:
     root_config = _load_yaml(args.config)
     backtest_config = resolve_backtest_config({})
     if args.command == "baseline":
-        strategy_config = copy.deepcopy(root_config.get("strategy6") or {})
+        strategy_config = _formal_strategy_config(root_config.get("strategy6") or {})
         strategy_config.setdefault("box_tail", {})["enabled"] = False
         result = run_local_parameter_set(
             experiment_id="E0_ORIGINAL_BASELINE",
@@ -164,7 +177,7 @@ def run_cli_research(args, coverage) -> int:
         write_backtest_report(result, args.output)
         return 0
     if args.command == "experiments":
-        baseline_config = copy.deepcopy(root_config.get("strategy6") or {})
+        baseline_config = _formal_strategy_config(root_config.get("strategy6") or {})
         baseline_config.setdefault("box_tail", {})["enabled"] = False
         baseline = run_local_parameter_set(
             experiment_id="E0_ORIGINAL_BASELINE", strategy_config=baseline_config,
@@ -172,7 +185,7 @@ def run_cli_research(args, coverage) -> int:
         )
         dual = run_local_parameter_set(
             experiment_id="E1_DUAL_DEFAULT",
-            strategy_config=copy.deepcopy(root_config.get("strategy6") or {}),
+            strategy_config=_research_strategy_config(root_config.get("strategy6") or {}),
             backtest_config=backtest_config, coverage=coverage, args=args,
         )
         dual["experiments"] = _derive_experiment_metrics(dual["trades"])
@@ -180,7 +193,7 @@ def run_cli_research(args, coverage) -> int:
         write_backtest_report(dual, args.output)
         return 0
     if args.command == "optimize":
-        base = copy.deepcopy(root_config.get("strategy6") or {})
+        base = _research_strategy_config(root_config.get("strategy6") or {})
         configs = sample_parameter_sets(
             base, OPTIMIZATION_SPACE,
             max_trials=max(1, int(args.max_trials)), random_seed=20260711,
@@ -230,7 +243,7 @@ def run_cli_research(args, coverage) -> int:
             write_backtest_report(final_result, args.output)
         return 0
     if args.command == "brooks-validate":
-        base = copy.deepcopy(root_config.get("strategy6") or {})
+        base = _research_strategy_config(root_config.get("strategy6") or {})
         configs = build_brooks_trial_configs(base, max_trials=15)
         trial_index = int(args.trial_index)
         if not 1 <= trial_index <= len(configs):
@@ -255,7 +268,7 @@ def run_cli_research(args, coverage) -> int:
         # caller controls anchor spacing; each anchor includes the following
         # three trading days so short-lived Brooks triggers remain observable.
         args.run_mode = "BROOKS_COARSE"
-        base = copy.deepcopy(root_config.get("strategy6") or {})
+        base = _research_strategy_config(root_config.get("strategy6") or {})
         configs = build_brooks_trial_configs(base, max_trials=max(1, int(args.max_trials)))
         trials = []
         results = []

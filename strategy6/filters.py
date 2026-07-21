@@ -17,6 +17,7 @@ from strategy6.models import (
 )
 from strategy6.brooks.models import BrooksTailResult
 from strategy6.strong_start import PASSING_START_TYPES
+from strategy6.validation import is_strategy6_research_profile
 
 
 def hard_filter_reasons(
@@ -84,12 +85,20 @@ def hard_filter_reasons(
         "BIG_DOWN_VOLUME", "TAIL_NEW_LOW", "TAIL_LOW_DECLINING",
         "TAIL_RETURN_5_TOO_WEAK", "TAIL_SINGLE_DROP_TOO_WEAK",
     }
+    research_profile = is_strategy6_research_profile(config)
     reasons.extend(reason for reason in dry_tail.rejects if reason in structural_tail_rejects)
-    if (box_tail is None or not box_tail.passed) and (brooks_tail is None or not brooks_tail.passed):
+    if not research_profile or (
+        (box_tail is None or not box_tail.passed)
+        and (brooks_tail is None or not brooks_tail.passed)
+    ):
         reasons.extend(dry_tail.rejects)
-    if quality.distribution_day_count >= 3 and "DISTRIBUTION_PRESSURE_HIGH" in quality.risk_tags:
+    if (
+        research_profile
+        and quality.distribution_day_count >= 3
+        and "DISTRIBUTION_PRESSURE_HIGH" in quality.risk_tags
+    ):
         reasons.append("DISTRIBUTION_PRESSURE_HIGH")
-    if "SUPPORT_VOLUME_BREAK_UNRECOVERED" in support.support_reaction_risk_tags:
+    if research_profile and "SUPPORT_VOLUME_BREAK_UNRECOVERED" in support.support_reaction_risk_tags:
         reasons.append("SUPPORT_VOLUME_BREAK_UNRECOVERED")
     if trade_plan.objective_rr_2 < config["rr2_min_watch"]:
         threshold = str(config["rr2_min_watch"]).replace(".", "_")
@@ -112,6 +121,7 @@ def classify_candidate(
     box_tail: Strategy6BoxTail | None = None,
     brooks_tail: BrooksTailResult | None = None,
 ) -> tuple[str, str, str, str]:
+    research_profile = is_strategy6_research_profile(config)
     lifecycle = _lifecycle_status(
         ind, phase, support, dry_tail, trade_plan, reject_reasons, config,
         box_tail=box_tail,
@@ -124,7 +134,7 @@ def classify_candidate(
     tactical_blocks_ready = _tactical_blocks_ready(ind, start, support)
     if phase.status == "START_TOO_RECENT":
         return "WATCH_CANDIDATE", "observe", "START_CONFIRMED", "观察：强势启动已确认，等待独立整理阶段"
-    if _brooks_only_waiting_for_trigger(dry_tail, box_tail, brooks_tail):
+    if research_profile and _brooks_only_waiting_for_trigger(dry_tail, box_tail, brooks_tail):
         return (
             "WATCH_CANDIDATE",
             "observe",
@@ -138,7 +148,7 @@ def classify_candidate(
             "SETUP_FORMING",
             "观察：结构有效，等待突破平台上沿后确认",
         )
-    if _single_auxiliary_path(dry_tail, box_tail, brooks_tail):
+    if research_profile and _single_auxiliary_path(dry_tail, box_tail, brooks_tail):
         return (
             "WATCH_CANDIDATE",
             "observe",
@@ -158,6 +168,7 @@ def classify_candidate(
         and dry_tail.tail_volume_ratio <= config["tail_strong_volume_ratio_5_20"]
         and support.support_status in {"PATTERN_SUPPORT", "MA20_SUPPORT", "KEY_SUPPORT_VALID"}
         and start.start_grade != "B"
+        and (research_profile or dry_tail.dry_tail_pass)
         and _quality_threshold_met(
             score.setup_quality_score,
             config["setup_quality_min_ready"],
@@ -177,7 +188,11 @@ def classify_candidate(
         score.total_score >= config["key_min_score"]
         and trade_plan.objective_rr_2 >= config["rr2_min_key"]
         and support.support_status in {"PATTERN_SUPPORT", "MA20_SUPPORT", "KEY_SUPPORT_VALID"}
-        and score.tail_score >= 15
+        and (
+            score.tail_score >= 15
+            if research_profile
+            else dry_tail.dry_tail_pass and dry_tail.dry_stable_score >= 15
+        )
         and start.start_grade != "B"
         and _quality_threshold_met(
             score.setup_quality_score,
@@ -299,7 +314,13 @@ def _lifecycle_status(
         return "BREAKOUT_CONFIRMED"
     if trade_plan.suggested_buy_price and support.support_zone_low <= ind.current_price <= support.support_zone_high:
         return "BUY_ZONE"
-    if dry_tail.dry_tail_pass or (box_tail is not None and box_tail.passed) or (brooks_tail is not None and brooks_tail.passed):
+    if dry_tail.dry_tail_pass or (
+        is_strategy6_research_profile(config)
+        and (
+            (box_tail is not None and box_tail.passed)
+            or (brooks_tail is not None and brooks_tail.passed)
+        )
+    ):
         return "READY"
     return "SETUP_FORMING"
 

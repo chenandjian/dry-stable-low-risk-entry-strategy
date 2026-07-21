@@ -153,9 +153,145 @@ def _passing_context():
     return ind, start, phase, pattern, support, original, box, trade
 
 
+def _research_config():
+    return resolve_strategy6_config({
+        "strategy6": {"decision_profile": "research_quality_v2"},
+    })
+
+
+def test_formal_scoring_uses_original_tail_without_box_dependency():
+    ind, start, phase, pattern, support, original, box, trade = _passing_context()
+    original = replace(original, dry_tail_pass=True, dry_stable_score=16, rejects=[])
+    cfg = resolve_strategy6_config({})
+
+    without_box = score_strategy6(
+        ind, start, phase, pattern, support, original, trade, cfg,
+        box_tail=replace(box, passed=False, score=0),
+    )
+    with_box = score_strategy6(
+        ind, start, phase, pattern, support, original, trade, cfg,
+        box_tail=box,
+    )
+
+    assert without_box.score_model_version == "S6_FORMAL_ORIGINAL_V1"
+    assert without_box.tail_score == 16
+    assert with_box.tail_score == without_box.tail_score
+    assert with_box.total_score == without_box.total_score
+
+
+def test_formal_scoring_does_not_award_pattern_points_when_filter_is_disabled():
+    ind, start, phase, pattern, support, original, box, trade = _passing_context()
+    cfg = resolve_strategy6_config({
+        "strategy6": {"pattern_filter_enabled": False},
+    })
+
+    score = score_strategy6(
+        ind, start, phase, pattern, support, original, trade, cfg,
+        box_tail=box,
+    )
+
+    assert score.pattern_score_component == 0
+
+
+def test_formal_key_candidate_uses_original_tail_score_and_ignores_quality_gate():
+    ind, start, phase, pattern, support, original, box, trade = _passing_context()
+    original = replace(original, dry_tail_pass=True, dry_stable_score=16, rejects=[])
+    cfg = resolve_strategy6_config({})
+    score = Strategy6Score(
+        total_score=80,
+        tail_score=16,
+        setup_quality_score=0,
+        support_reaction_score=0,
+        score_model_version="S6_FORMAL_ORIGINAL_V1",
+    )
+
+    candidate_type, *_ = classify_candidate(
+        ind,
+        start,
+        phase,
+        pattern,
+        support,
+        original,
+        trade,
+        score,
+        [],
+        cfg,
+        box_tail=replace(box, passed=False, score=0),
+    )
+
+    assert candidate_type == "KEY_CANDIDATE"
+
+
+def test_research_scoring_retains_quality_v2_model_and_combined_path_evidence():
+    ind, start, phase, pattern, support, original, box, trade = _passing_context()
+    cfg = _research_config()
+
+    score = score_strategy6(
+        ind,
+        start,
+        phase,
+        pattern,
+        support,
+        original,
+        trade,
+        cfg,
+        box_tail=box,
+        setup_quality=Strategy6SetupQuality(score=20),
+    )
+
+    assert score.score_model_version == "S6_QUALITY_V2"
+    assert score.tail_score == combine_tail_paths(original, box).score
+
+
+def test_formal_filters_do_not_allow_box_to_bypass_original_tail_rejects():
+    ind, start, phase, pattern, support, original, box, trade = _passing_context()
+    original = replace(original, rejects=["TAIL_VOLUME_NOT_DRY"])
+
+    reasons = hard_filter_reasons(
+        [{"close": 10.0}, {"close": 10.0}],
+        ind,
+        start,
+        phase,
+        pattern,
+        support,
+        original,
+        trade,
+        resolve_strategy6_config({}),
+        box_tail=box,
+    )
+
+    assert "TAIL_VOLUME_NOT_DRY" in reasons
+
+
+def test_formal_key_threshold_cannot_be_satisfied_by_auxiliary_tail_score():
+    ind, start, phase, pattern, support, original, box, trade = _passing_context()
+    ind = replace(ind, current_price=11.0)
+    original = replace(original, dry_tail_pass=True, dry_stable_score=8, rejects=[])
+
+    candidate_type, *_ = classify_candidate(
+        ind,
+        start,
+        phase,
+        pattern,
+        support,
+        original,
+        trade,
+        Strategy6Score(
+            total_score=95,
+            tail_score=18,
+            score_model_version="S6_FORMAL_ORIGINAL_V1",
+        ),
+        [],
+        resolve_strategy6_config({}),
+        box_tail=box,
+    )
+
+    assert candidate_type == "WATCH_CANDIDATE"
+
+
 def test_box_path_cannot_bypass_original_structural_tail_rejects():
     ind, start, phase, pattern, support, original, box, trade = _passing_context()
-    cfg = resolve_strategy6_config({})
+    cfg = _research_config()
     reasons = hard_filter_reasons(
         [{"close": 10.0}, {"close": 10.0}],
         ind,
@@ -190,7 +326,7 @@ def test_auxiliary_paths_cannot_bypass_severe_distribution_quality_risk():
     reasons = hard_filter_reasons(
         [{"close": 10.0}, {"close": 10.0}],
         ind, start, phase, pattern, support, original, trade,
-        resolve_strategy6_config({}),
+        _research_config(),
         box_tail=box,
         setup_quality=Strategy6SetupQuality(
             score=5,
@@ -204,7 +340,7 @@ def test_auxiliary_paths_cannot_bypass_severe_distribution_quality_risk():
 
 def test_box_only_path_is_watch_only_even_with_high_score():
     ind, start, phase, pattern, support, original, box, trade = _passing_context()
-    cfg = resolve_strategy6_config({})
+    cfg = _research_config()
     score = score_strategy6(
         ind, start, phase, pattern, support, original, trade, cfg,
         box_tail=box,
@@ -231,7 +367,7 @@ def test_box_only_path_is_watch_only_even_with_high_score():
 
 def test_brooks_only_waiting_trigger_cannot_emit_ready_or_buy_zone_semantics():
     ind, start, phase, pattern, support, original, box, trade = _passing_context()
-    cfg = resolve_strategy6_config({})
+    cfg = _research_config()
     brooks = BrooksTailResult(
         enabled=True,
         passed=True,
@@ -280,7 +416,7 @@ def test_brooks_only_ready_trigger_remains_watch_without_core_confirmation():
         trade,
         Strategy6Score(total_score=95, tail_score=18),
         [],
-        resolve_strategy6_config({}),
+        _research_config(),
         box_tail=replace(box, passed=False),
         brooks_tail=brooks,
     )
@@ -309,7 +445,7 @@ def test_original_or_box_path_is_not_downgraded_by_unready_brooks_path():
         trade,
         Strategy6Score(total_score=95, tail_score=18),
         [],
-        resolve_strategy6_config({}),
+        _research_config(),
         box_tail=box,
         brooks_tail=brooks,
     )
