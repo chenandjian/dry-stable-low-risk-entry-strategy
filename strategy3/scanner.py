@@ -18,6 +18,7 @@ from scanner.daily_data_service import (
     resolve_effective_worker_count,
 )
 from scanner.data_source import DataSourceManager
+from scanner.data_acquisition import load_market_index_daily, prepare_scan_daily_data
 from scanner.index_source import fetch_market_index_daily
 from scanner.liquidity_filter import passes_liquidity_filter
 from strategy3.engine import StrongPullbackSecondBreakoutEngine
@@ -35,6 +36,7 @@ def scan_strategy3_all(
     stocks: list[dict] | None = None,
     worker_count: int = 4,
     retry_policy: str = "normal",
+    fetch_daily_fn=None,
 ) -> dict:
     """执行策略3全市场扫描。"""
     from scanner.stock_pool import get_a_stock_pool
@@ -48,8 +50,15 @@ def scan_strategy3_all(
         stocks = get_a_stock_pool(config)
         db.save_task_stocks(task_id, stocks)
 
+    prepared_session = prepare_scan_daily_data(config, stocks)
+    if fetch_daily_fn is None and prepared_session is not None:
+        fetch_daily_fn = prepared_session.fetch
+
     liquidity_cfg = config.get("liquidity", {})
-    daily_sources = config.get("data", {}).get("daily_sources") or DEFAULT_DAILY_SOURCES
+    daily_sources = (
+        ["tickflow"] if prepared_session is not None
+        else config.get("data", {}).get("daily_sources") or DEFAULT_DAILY_SOURCES
+    )
     kline_days = liquidity_cfg.get("min_listing_days", 350)
     configured_workers = config.get("data", {}).get("worker_count")
     worker_count = resolve_effective_worker_count(
@@ -136,7 +145,8 @@ def scan_strategy3_all(
                     started_at=_now(),
                 )
                 attempts = 3 if retry_policy == "failed_only" else 2
-                fetch_result = fetch_with_retry(
+                fetcher = fetch_daily_fn or fetch_with_retry
+                fetch_result = fetcher(
                     code, daily_sources[0],
                     retry_attempts=attempts,
                     fallback_attempts=attempts,
@@ -535,7 +545,9 @@ def _load_market_data(config: dict) -> tuple[list[dict], str | None]:
     market_cfg = config.get("market_environment", {}) or {}
     symbol = market_cfg.get("index_symbol")
     try:
-        market_data = fetch_market_index_daily(symbol) or []
+        market_data = load_market_index_daily(
+            config, symbol, legacy_fetch_fn=fetch_market_index_daily
+        ) or []
     except Exception as exc:
         logger.warning("Strategy3 market index fetch failed: %s", exc)
         return [], "NO_MARKET_DATA_RELATIVE_STRENGTH_FALLBACK"
@@ -556,7 +568,9 @@ def _load_market_data_by_symbol(config: dict) -> tuple[dict[str, list[dict]], di
     fallback_reasons: dict[str, str] = {}
     for symbol in symbols:
         try:
-            market_data = fetch_market_index_daily(symbol) or []
+            market_data = load_market_index_daily(
+                config, symbol, legacy_fetch_fn=fetch_market_index_daily
+            ) or []
         except Exception as exc:
             logger.warning("Strategy3 market index fetch failed for %s: %s", symbol, exc)
             market_data = []

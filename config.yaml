@@ -9,10 +9,11 @@ data:
   cache_enabled: true
   cache_dir: ./cache/daily
   database_path: ./data/cuphandle.db
+  acquisition_mode: tickflow
   daily_sources:
-  - baidu
-  - sina
   - tencent
+  - sina
+  - baidu
   start_date: '2025-01-01'
   end_date: null
   use_fq: true
@@ -100,7 +101,7 @@ scheduler:
   webhook_url: null
   serial_dual_scan:
     enabled: true
-    cron: 30 15 * * 1-5
+    cron: 30 16 * * 1-5
     strategy1_failed_retry_rounds: 3
 strategy2:
   enabled: true
@@ -304,6 +305,15 @@ strategy6:
   consolidation_min_days: 5
   consolidation_max_days: 40
   tail_window_days: 5
+  dynamic_tail_enabled: true
+  dynamic_tail_min_days: 3
+  dynamic_tail_max_days: 10
+  dynamic_tail_baseline_days: 20
+  dynamic_tail_min_score: 3
+  dynamic_tail_range_ratio_max: 0.75
+  dynamic_tail_atr_ratio_max: 0.8
+  dynamic_tail_volume_ratio_max: 0.8
+  dynamic_tail_body_ratio_max: 0.8
   pattern_filter_enabled: true
   pattern_filter_mode: score_only
   pattern_pivot_proximity_pct: 0.05
@@ -315,8 +325,12 @@ strategy6:
   vcp_rebound_min_pct: 0.03
   vcp_rebound_confirm_days: 2
   vcp_low_warning_ratio: 0.99
+  vcp_observer_enabled: true
+  vcp_observer_lookback_days: 60
+  vcp_observer_breakout_retention_days: 10
+  vcp_observer_extension_pct: 0.08
   vcp_history_max_start_loss_pct: 0.15
-  vcp_history_max_drawdown_pct: 0.20
+  vcp_history_max_drawdown_pct: 0.2
   vcp_history_bearish_trend_days: 5
   cup_depth_min: 0.12
   cup_depth_max: 0.35
@@ -326,9 +340,9 @@ strategy6:
   support_zone_price_pct: 0.01
   support_zone_atr_multiplier: 0.3
   support_test_lookback: 10
-  min_relative_strength_20: 0.10
+  min_relative_strength_20: 0.1
   normal_start_return: 0.07
-  normal_start_volume_ratio: 2.0
+  normal_start_volume_ratio: 2
   normal_start_close_position: 0.65
   normal_start_min_amount_yi: 2
   normal_start_self_amount_percentile: 0.9
@@ -337,25 +351,25 @@ strategy6:
   near_120d_high_ratio: 0.98
   max_amp_5d_s: 0.25
   max_amp_10d_s: 0.45
-  max_pullback_20d_s: -0.30
+  max_pullback_20d_s: -0.3
   max_amp_5d_a: 0.22
-  max_amp_10d_a: 0.40
+  max_amp_10d_a: 0.4
   max_pullback_20d_a: -0.26
   max_amp_5d_b: 0.18
   max_amp_10d_b: 0.35
   max_pullback_20d_b: -0.22
-  absolute_max_amp_10d: 0.50
+  absolute_max_amp_10d: 0.5
   absolute_max_pullback_20d: -0.35
   ma50_min_ratio: 0.92
   tail_close_range_5: 0.08
   tail_volume_ratio_5_20: 0.75
-  tail_strong_volume_ratio_5_20: 0.60
+  tail_strong_volume_ratio_5_20: 0.6
   tail_min_return_5: -0.06
   tail_min_return_3: -0.04
   big_down_return: -0.07
   big_down_volume_ratio: 1.5
   rr2_min_watch: 1.5
-  rr2_min_key: 2.0
+  rr2_min_key: 2
   rr2_min_ready: 2.5
   target_2_cap_pct: 0.35
   stop_key_support_pct: 0.03
@@ -367,6 +381,10 @@ strategy6:
   ready_min_score: 85
   key_min_score: 75
   watch_min_score: 60
+  setup_quality_min_key: 14
+  setup_quality_min_ready: 18
+  support_reaction_min_key: 3
+  support_reaction_min_ready: 5
   box_tail:
     enabled: true
     min_box_days: 5
@@ -378,14 +396,14 @@ strategy6:
     broken_close_tolerance: 0.03
     min_box_low_test_count: 2
     min_center_shift: -0.03
-    premium_center_shift: 0.0
+    premium_center_shift: 0
     max_volume_contraction_ratio: 0.85
-    premium_volume_contraction_ratio: 0.70
+    premium_volume_contraction_ratio: 0.7
     current_close_low_tolerance: 0.03
     current_close_high_tolerance: 0.03
     tail_volume_ratio_max: 0.75
-    premium_tail_volume_ratio_max: 0.60
-    support_ready_position_max: 0.40
+    premium_tail_volume_ratio_max: 0.6
+    support_ready_position_max: 0.4
     breakout_ready_position_min: 0.75
     compact_kline:
       enabled: true
@@ -395,21 +413,21 @@ strategy6:
       max_body_ratio_max: 0.04
       close_range_max: 0.05
       premium_close_range_max: 0.03
-      min_overlap_ratio: 0.50
+      min_overlap_ratio: 0.5
       premium_overlap_ratio: 0.65
       min_overlap_pair_count: 3
       max_gap_ratio: 0.03
-      atr_contraction_ratio_max: 0.80
+      atr_contraction_ratio_max: 0.8
       premium_atr_contraction_ratio_max: 0.65
   brooks_tail:
     enabled: true
     mode: independent_path
     context:
       allowed_start_grades:
-        - S
-        - A
+      - S
+      - A
       allow_grade_b_watch_only: true
-      close_below_ma20_atr_tolerance: 0.50
+      close_below_ma20_atr_tolerance: 0.5
       require_ma20_above_ma50: false
       require_ma20_slope_positive: true
       ma20_slope_window_days: 10
@@ -428,7 +446,7 @@ strategy6:
       compact_window_days: 5
       close_range_max: 0.08
       premium_close_range_max: 0.05
-      atr_contraction_max: 0.80
+      atr_contraction_max: 0.8
       premium_atr_contraction_max: 0.65
       avg_body_ratio_max: 0.025
       max_body_ratio_max: 0.04
@@ -438,11 +456,11 @@ strategy6:
       tail_window_days: 5
       baseline_window_days: 20
       tail_volume_ratio_max: 0.75
-      premium_tail_volume_ratio_max: 0.60
+      premium_tail_volume_ratio_max: 0.6
       require_volume_slope_negative: false
       reject_high_volume_decline: true
     support:
-      support_distance_atr: 0.80
+      support_distance_atr: 0.8
       support_distance_pct: 0.03
       effective_break_pct: 0.03
       consecutive_close_break_days: 2
@@ -456,19 +474,19 @@ strategy6:
     failed_breakout:
       enabled: true
       recovery_days: 2
-      max_break_distance_atr: 0.80
+      max_break_distance_atr: 0.8
       require_reclaim_support: true
     compact_structure:
       enabled: true
       middle_zone_low: 0.35
-      middle_zone_high: 0.70
+      middle_zone_high: 0.7
       max_direction_changes: 3
       max_long_shadow_bar_count: 2
       long_shadow_ratio_min: 0.45
     trade_trigger:
       enabled: true
       trigger_valid_days: 3
-      max_trigger_distance_atr: 1.50
+      max_trigger_distance_atr: 1.5
       breakout_follow_through_days: 2
     scoring:
       context_points: 4

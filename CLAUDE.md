@@ -99,7 +99,8 @@ npm --prefix web run preview
 - **候选去重：** 同一任务内候选按 `(task_id, code)` 唯一；内存层用 code 字典去重，数据库层用唯一索引/upsert，前端按 code 归并。
 - **全局扫描互斥：** server API 启动扫描前同时检查 `_running` 和 DB 中 `status='running'` 的任务；CLI/scheduler 路径未完整纳入这套互斥语义。
 - **失败重拉：** `/api/scan/tasks/{task_id}/retry-failed` 只处理原任务 `failed` 股票，使用 `retry_policy='failed_only'` 重跑完整个股扫描逻辑。
-- **行情拉取回退：** 主数据源 → 备用数据源；任一 fresh 源成功后才与缓存合并并保存。双源都失败时不能用旧缓存产出扫描结果。AKShare 仅用于获取股票池，不用于 OHLC 数据。
+- **行情模式：** `data.acquisition_mode=tickflow` 为正式批量模式；`legacy_multi_source` 是人工备用模式，顺序为 `tencent -> sina(AkShare) -> baidu`。禁止运行时自动跨模式回退。
+- **TickFlow口径：** 股票固定 `forward_additive`，四个宽基指数固定不复权。扫描前批量更新不新鲜股票，同日后续策略复用本地结果；失败股票进入失败列表，不使用不新鲜缓存。
 - **单只失败不中断：** 全市场扫描中，单只股票异常（超时/解析错误/停牌）记录日志后跳过，不中断整体任务。
 - **数据源锁必须释放：** `try...finally` 确保异常路径也释放锁。
 - **配置文件驱动：** 主要扫描阈值（杯体深度、柄部回撤、流动性等）在 `config.yaml` 中可调；部分策略阈值仍硬编码，新增配置项前先确认代码已接入。
@@ -171,7 +172,8 @@ npm --prefix web run preview
 | `analyzer/invalid_rules.py`          | `find_invalid_conditions(...)` → `list[str]`                                                                                                                                  |
 | `scanner/index_source.py`            | `fetch_market_index_daily(code)` → `list[dict]` (复用新浪源)                                                                                                                  |
 | `server.py`                          | FastAPI API + 扫描任务编排 — CORS/lifespan、恢复中断任务、失败重拉、配置读写、策略2 API                                                                                       |
-| `scanner/daily_data_service.py`      | 共享四数据源拉取服务 — `fetch_with_retry()` / `FetchResult` / 锁/重试/缓存合并                                                                                                |
+| `scanner/data_acquisition.py`        | 行情模式解析、TickFlow扫描前批量准备、禁止跨模式回退、指数缓存读取                                                                                                             |
+| `scanner/daily_data_service.py`      | 传统三源拉取服务 — `fetch_with_retry()` / `FetchResult` / 锁/重试/缓存合并                                                                                                    |
 | `strategy2/models.py`                | 策略2数据模型 — `Strategy2Indicators` / `Score` / `Risk` / `Evaluation`                                                                                                       |
 | `strategy2/indicators.py`            | 策略2指标计算 — V3/V5/V10/V20、分位、range、return                                                                                                                            |
 | `strategy2/scorer.py`                | 策略2量干价稳评分 + 等级                                                                                                                                                      |
@@ -242,7 +244,7 @@ npm --prefix web run preview
 - **Pivot 双边距离**: 新增 `near_pivot_below_pct` 下限（默认 10%），远低于 Pivot 不再误判为 WATCH_BREAKOUT。
 - **VCP 统一引擎**: `StrategyEngine.evaluate_at()` 不再在杯柄未命中时提前返回，统一运行 VCP 分析。移除 `engine.py` 中的重复 VCP 逻辑。
 - **历史回测统一引擎**: `backtester.py` 使用 `CupHandleStrategyEngine` + 逐日大盘数据切片，防止未来数据泄漏。
-- **数据源链顺序**: `_fetch_with_retry` 按 config 顺序迭代（baidu→sina→tencent），busy→跳过不标记为失败，主源用 `retry_attempts` 备源用 `fallback_attempts`。全部 busy→requeue，全部 fail→None。`FetchResult.source_errors` 保留各源失败详情。
+- **传统数据源链顺序**: `_fetch_with_retry` 按 config 顺序迭代（默认 tencent→sina(AkShare)→baidu），busy→跳过不标记为失败，主源用 `retry_attempts` 备源用 `fallback_attempts`。全部 busy→requeue，全部 fail→None。`FetchResult.source_errors` 保留各源失败详情。
 - **历史回测真实止损**: `BacktestResult` 保存策略实际 `stop_loss`/`entry_zone`/`pattern_kind`，`_calc_forward` 使用真实止损而非 `breakout_price*0.95`。`min_score` 参数恢复生效。
 - **VCP 身份模型**: `CupHandleResult.pattern_kind`（cup_handle/vcp），序列化含 `patternKind`，去重按 patternKind 分支避免 VCP 与杯柄碰撞。
 - **最近阻力**: `_find_real_target()` 用 swing high 确认找最近上方阻力，不再用最远高点冒充。
@@ -295,7 +297,7 @@ npm --prefix web run preview
 
 ### Gotchas（2026-06-26 yfinance 剔除）
 
-- **yfinance 已从生产日线源剔除**: 根因是 yfinance 最新日 OHLC 可能与 sina/tencent 明显不一致，曾污染 `daily_ohlc`。生产源链、锁、默认配置、前端配置和依赖均只保留 `baidu`、`sina`、`tencent`。
+- **yfinance 已剔除**: 根因是 yfinance 最新日 OHLC 可能与可信源明显不一致，曾污染 `daily_ohlc`。正式 TickFlow 模式和传统三源备用模式均不得包含 yfinance。
 - **显式 yfinance 配置应失败**: `_daily_fetch_fn("yfinance")` 必须抛 `Unknown daily data source`，不要为兼容旧配置重新注册 yfinance。
 - **历史污染修复**: `tools/data_repair/repair_invalid_ohlc.py --refetch-yfinance-sourced --apply` 用三源重新拉取 `task_stocks` 中曾由 yfinance 成功写入的股票，并替换本地 `daily_ohlc`。
 - **任务恢复不再限定错误类型**: `get_interrupted_task()` 匹配所有 `finished_at IS NULL` 的 failed/cancelled 任务。`mark_dead_tasks_as_failed()` 额外重置崩溃任务的 fetching 股票。代码 bug 导致的失败也可自动恢复。
@@ -335,7 +337,7 @@ npm --prefix web run preview
 ### Gotchas（2026-06-11 策略2 验收修复）
 
 - **全源失败不使用缓存**: 三数据源全部在线失败时，`fetch_with_retry()` 直接返回 `data=None`，股票标记 `failed / ALL_DATA_SOURCES_FAILED`。不使用本地缓存继续扫描。在线拉取成功时仍可与数据库历史合并并持久化。
-- **三源收敛**: 生产数据源为 `baidu / sina / tencent`（可通过 `config.yaml` 的 `data.daily_sources` 配置，但不得包含 yfinance）。`mootdx_source.py` 和 yfinance 生产源均已删除。
+- **模式隔离**: TickFlow 是正式模式；`tencent / sina(AkShare) / baidu` 仅在人工选择 `legacy_multi_source` 后使用。`mootdx_source.py` 和 yfinance 生产源均已删除。
 - **跨策略执行隔离**: `_require_task_strategy(task_id, expected)` 统一校验。策略2 task_id 进入策略1 retry/re-evaluate/candidates 返回 `TASK_STRATEGY_MISMATCH` (400)。策略1 task_id 进入策略2 同理。
 - **历史任务上下文**: URL `?task=` 参数是历史页面唯一任务上下文。`routeTaskId` / `isHistoricalMode` 两种互斥模式。`watch(route.query.task)` 支持 A→B→A→none 切换。历史任务策略类型从任务 API 返回，不依赖当前运行状态。
 - **viewContext 竞态防护**: `beginViewContext()` 每次导航创建新 context。所有 async 函数在 `await` 后用 `isCurrentViewContext(context)` 校验防止 stale response 覆盖新任务。

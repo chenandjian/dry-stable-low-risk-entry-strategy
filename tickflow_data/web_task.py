@@ -11,6 +11,7 @@ from scanner import db
 
 from .cli import ADJUSTMENT, atomic_write_json, backup_database, write_report
 from .client import TickFlowBatchClient
+from .indexes import MARKET_INDEX_SPECS, update_market_indexes
 from .service import TickFlowDailyUpdateService
 
 
@@ -58,6 +59,11 @@ class TickFlowFullRefreshManager:
                 "adjustment": ADJUSTMENT,
             },
             "total_stocks": 0,
+            "total_indexes": len(MARKET_INDEX_SPECS),
+            "indexes_processed": 0,
+            "indexes_succeeded": 0,
+            "indexes_failed": 0,
+            "index_failures": [],
             "total_chunks": 0,
             "current_chunk": 0,
             "processed": 0,
@@ -183,10 +189,24 @@ class TickFlowFullRefreshManager:
                 run_id=task_id,
                 on_result=record_result,
             )
+            index_results = update_market_indexes(client, history_days=HISTORY_DAYS)
+            index_failures = [
+                {"symbol": item["symbol"], "error": item.get("error") or item["status"]}
+                for item in index_results
+                if item["status"] != "success"
+            ]
+            with self._lock:
+                self._state.update(
+                    indexes_processed=len(index_results),
+                    indexes_succeeded=sum(item["status"] == "success" for item in index_results),
+                    indexes_failed=len(index_failures),
+                    index_failures=index_failures,
+                )
             write_report(report_path, result, backup_path)
+            self._append_index_report(report_path, index_results)
             terminal_status = (
                 "completed_with_errors"
-                if any(item.status == "failed" for item in result.results)
+                if any(item.status == "failed" for item in result.results) or index_failures
                 else "completed"
             )
             with self._lock:
@@ -214,3 +234,15 @@ class TickFlowFullRefreshManager:
 
     def _persist_progress(self, path: Path) -> None:
         atomic_write_json(path, self.status())
+
+    @staticmethod
+    def _append_index_report(path: Path, results: list[dict]) -> None:
+        lines = ["", "## 宽基指数", "", "| 指数 | 状态 | 行数 | 最新日期 | 错误 |", "| --- | --- | ---: | --- | --- |"]
+        for item in results:
+            error = str(item.get("error") or "").replace("|", "/")
+            lines.append(
+                f"| {item.get('name') or item['symbol']} | {item['status']} | "
+                f"{item.get('row_count', 0)} | {item.get('latest_date', '')} | {error} |"
+            )
+        with path.open("a", encoding="utf-8") as handle:
+            handle.write("\n".join(lines) + "\n")

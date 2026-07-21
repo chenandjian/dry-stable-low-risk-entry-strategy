@@ -52,6 +52,31 @@ def test_batch_client_locks_daily_forward_additive_parameters():
     assert sdk.closed is False
 
 
+def test_batch_client_fetches_indexes_without_adjustment():
+    frame = pd.DataFrame([{"trade_date": "2026-07-20"}])
+    sdk = _Sdk([{"000001.SH": frame, "399006.SZ": frame}])
+
+    result = TickFlowBatchClient(sdk=sdk).fetch_indexes(
+        ["000001.SH", "399006.SZ"], count=1100
+    )
+
+    assert set(result.frames) == {"000001.SH", "399006.SZ"}
+    assert sdk.klines.calls == [
+        (
+            ["000001.SH", "399006.SZ"],
+            {
+                "period": "1d",
+                "count": 1100,
+                "adjust": "none",
+                "as_dataframe": True,
+                "show_progress": False,
+                "max_workers": 5,
+                "batch_size": 100,
+            },
+        )
+    ]
+
+
 def test_batch_client_reports_missing_symbols_without_losing_successes():
     frame = pd.DataFrame([{"trade_date": "2026-07-20"}])
     sdk = _Sdk([{"600519.SH": frame}])

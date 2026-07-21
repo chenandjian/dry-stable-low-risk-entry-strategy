@@ -52,6 +52,10 @@ class _Client:
         self.calls.append((list(symbols), count))
         return self.responses.pop(0)
 
+    def fetch_indexes(self, symbols, *, count):
+        self.calls.append((list(symbols), count, "indexes"))
+        return BatchFetchResult(frames={symbol: _frame("600519") for symbol in symbols})
+
 
 def _seed_database(path):
     db.init_db(str(path))
@@ -109,7 +113,16 @@ def test_web_full_refresh_uses_fixed_parameters_backup_and_terminal_report(tmp_p
     assert status["backup_path"]
     assert status["progress_path"]
     assert client_kwargs == [{"batch_size": 100, "max_workers": 5}]
-    assert calls == [(["600519.SH", "000001.SZ"], 1100)]
+    assert calls[0] == (["600519.SH", "000001.SZ"], 1100)
+    assert status["total_indexes"] == 4
+    assert status["indexes_processed"] == 4
+    assert status["indexes_failed"] == 0
+    assert calls[-1] == (
+        ["000001.SH", "399001.SZ", "399006.SZ", "000300.SH"],
+        1100,
+        "indexes",
+    )
+    assert db.get_market_index_ohlc("hs300")
     assert db.get_ohlc_metadata("600519")["source"] == "tickflow"
     backup = sqlite3.connect(status["backup_path"])
     try:

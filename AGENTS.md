@@ -98,8 +98,9 @@ python -m pytest tests/test_tushare_hist.py -v
 
 - 策略2扫描、实验、正式参数升级、验收分析和回测默认只使用本地 `stock_pool` / `daily_ohlc`。
 - 没有用户明确要求时，不重新拉取 Baidu/Sina/Tencent/AKShare/Tushare 数据。
-- 生产日线源只允许 `baidu`、`sina`、`tencent`；yfinance 已因 OHLC 可信度问题从生产源链、默认配置、前端配置和依赖中剔除。
-- 三数据源或多数据源全部在线失败时，不使用旧缓存产出扫描结果；股票应标记为失败并保留失败原因。
+- 正式日线模式由 `data.acquisition_mode` 人工选择：默认 `tickflow`；备用 `legacy_multi_source` 使用 `tencent -> sina(AkShare) -> baidu`。运行时禁止自动跨模式回退。
+- TickFlow 股票固定使用 `forward_additive`，四个宽基指数使用不复权日线；手动扫描、定时扫描、失败重试和中断恢复必须遵循任务启动时的模式。
+- TickFlow 或传统多源全部失败时，不使用不新鲜缓存产出扫描结果；股票应标记为失败并保留失败原因。
 - 回测只读本地 DB，禁止调用任何外部行情源。
 - `NEXT_OPEN` 是可信基线执行模型，不得改回信号日收盘成交。
 - 同一股票两个命中之间累计 10 个有效未命中交易日后，才拆分为新机会。

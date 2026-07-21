@@ -90,6 +90,7 @@ function configResponse() {
         min_listing_days: 500,
       },
       data: {
+        acquisition_mode: 'tickflow',
         scan_window_days: 250,
         backtest_window_days: 250,
         daily_sources: ['sina'],
@@ -254,6 +255,23 @@ describe('StrategyConfig scheduler controls', () => {
     expect(payload.strategy4.tracking.strong_attention_days).toBe(20)
     expect(payload.strategy4.tracking.golden_second_wave_days).toBe(20)
     expect(payload.strategy4.tracking.allow_extension_days).toBe(20)
+  })
+
+  it('renders and saves an explicit manual market data acquisition mode', async () => {
+    const wrapper = mount(StrategyConfig)
+    await flushUi()
+
+    expect(wrapper.text()).toContain('日线数据获取模式')
+    expect(wrapper.text()).toContain('TickFlow 批量模式')
+    expect(wrapper.text()).toContain('传统多数据源模式')
+    expect(wrapper.find('[data-test="acquisition-mode-tickflow"]').element.checked).toBe(true)
+
+    await wrapper.find('[data-test="acquisition-mode-legacy"]').setValue()
+    await wrapper.find('.btn-save').trigger('click')
+    await flushUi()
+
+    const payload = api.updateConfig.mock.calls[0][0]
+    expect(payload.data.acquisition_mode).toBe('legacy_multi_source')
   })
 
   it('renders strategy6 real market filter controls and hides removed sector filter controls', async () => {

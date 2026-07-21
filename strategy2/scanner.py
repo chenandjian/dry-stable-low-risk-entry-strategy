@@ -12,6 +12,7 @@ from queue import Queue
 
 import scanner.db as db
 from scanner.data_source import DataSourceManager
+from scanner.data_acquisition import prepare_scan_daily_data
 from scanner.liquidity_filter import passes_liquidity_filter
 from scanner.daily_data_service import (
     DEFAULT_DAILY_SOURCES,
@@ -33,6 +34,7 @@ def scan_strategy2_all(
     stocks: list[dict] = None,
     worker_count: int = 4,
     retry_policy: str = "normal",
+    fetch_daily_fn=None,
 ) -> dict:
     """执行策略2全市场扫描。
 
@@ -59,9 +61,16 @@ def scan_strategy2_all(
         stocks = get_a_stock_pool(config)
         db.save_task_stocks(task_id, stocks)
 
+    prepared_session = prepare_scan_daily_data(config, stocks)
+    if fetch_daily_fn is None and prepared_session is not None:
+        fetch_daily_fn = prepared_session.fetch
+
     strategy2_cfg = config.get("strategy2", {})
     liquidity_cfg = config.get("liquidity", {})
-    daily_sources = config.get("data", {}).get("daily_sources") or DEFAULT_DAILY_SOURCES
+    daily_sources = (
+        ["tickflow"] if prepared_session is not None
+        else config.get("data", {}).get("daily_sources") or DEFAULT_DAILY_SOURCES
+    )
     kline_days = liquidity_cfg.get("min_listing_days", 350)
     configured_workers = config.get("data", {}).get("worker_count")
     worker_count = resolve_effective_worker_count(
@@ -163,7 +172,8 @@ def scan_strategy2_all(
                 )
                 retry_attempts = 3 if retry_policy == "failed_only" else 2
                 fallback_attempts = 3 if retry_policy == "failed_only" else 2
-                fetch_result = fetch_with_retry(
+                fetcher = fetch_daily_fn or fetch_with_retry
+                fetch_result = fetcher(
                     code, daily_sources[0],
                     retry_attempts=retry_attempts, fallback_attempts=fallback_attempts,
                     mgr=mgr, source_chain=daily_sources, kline_days=kline_days,

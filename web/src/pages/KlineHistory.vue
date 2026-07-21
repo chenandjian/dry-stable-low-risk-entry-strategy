@@ -43,13 +43,16 @@
       <div class="tickflow-box" data-test="tickflow-status">
         <div>
           <strong>TickFlow 全市场重新拉取</strong>
-          <p>固定参数：整个股票池 · 约 1100 根日线 · 前复权（forward_additive）· 每批 100 只 · 5 个并发工作线程</p>
+          <p>固定参数：整个股票池 · 约 1100 根前复权日线 · 四个宽基指数（不复权）· 每批 100 只 · 5 个并发工作线程</p>
         </div>
         <div v-if="tickFlowStatus?.status && tickFlowStatus.status !== 'idle'" class="tickflow-progress">
           <strong>{{ tickFlowStatusLabel }}</strong>
           <span>{{ tickFlowStatus.processed || 0 }} / {{ tickFlowStatus.total_stocks || 0 }}</span>
           <span>成功 {{ tickFlowStatus.succeeded || 0 }}，失败 {{ tickFlowStatus.failed || 0 }}</span>
           <span v-if="tickFlowStatus.total_chunks">批次 {{ tickFlowStatus.current_chunk || 0 }} / {{ tickFlowStatus.total_chunks }}</span>
+          <span v-if="tickFlowStatus.total_indexes">
+            指数 {{ tickFlowStatus.indexes_processed || 0 }} / {{ tickFlowStatus.total_indexes }}，失败 {{ tickFlowStatus.indexes_failed || 0 }}
+          </span>
         </div>
         <p v-if="tickFlowError" class="error-line">{{ tickFlowError }}</p>
         <p v-if="tickFlowStatus?.report_path" class="tickflow-report">
@@ -58,6 +61,11 @@
         <ul v-if="tickFlowStatus?.failures?.length" class="tickflow-failures">
           <li v-for="item in tickFlowStatus.failures.slice(0, 10)" :key="item.code">
             {{ item.code }}：{{ item.error }}
+          </li>
+        </ul>
+        <ul v-if="tickFlowStatus?.index_failures?.length" class="tickflow-failures">
+          <li v-for="item in tickFlowStatus.index_failures" :key="item.symbol">
+            {{ item.symbol }}：{{ item.error }}
           </li>
         </ul>
       </div>
@@ -361,7 +369,7 @@ async function loadTickFlowStatus(refreshHealthOnTerminal = false) {
 async function startTickFlowRefresh() {
   if (tickFlowStarting.value || tickFlowStatus.value?.running) return
   const confirmed = window.confirm(
-    '将使用 TickFlow 对整个股票池强制重新拉取约 1100 根前复权日线，并覆盖每只股票的本地历史数据。是否继续？',
+    '将先备份数据库，再使用 TickFlow 对整个股票池强制重新拉取约 1100 根前复权日线，并同步重拉四个宽基指数。是否继续？',
   )
   if (!confirmed) return
   tickFlowStarting.value = true

@@ -123,6 +123,33 @@ def test_update_config_reloads_scheduler_when_scheduler_changes(monkeypatch, tmp
     assert reloaded[0]["scheduler"]["serial_dual_scan"]["cron"] == "50 15 * * 1-5"
 
 
+def test_update_config_reloads_scheduler_when_acquisition_mode_changes(monkeypatch, tmp_path):
+    cfg = _valid_config()
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(yaml.dump(cfg, allow_unicode=True), encoding="utf-8")
+    reloaded = []
+    monkeypatch.setattr(server, "load_config", lambda path="config.yaml": cfg.copy())
+    monkeypatch.setattr(server, "_reload_scheduler_from_config", lambda config: reloaded.append(config.copy()))
+    original_open = builtins.open
+
+    def fake_open(file, *args, **kwargs):
+        if file == "config.yaml":
+            return original_open(config_path, *args, **kwargs)
+        return original_open(file, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "open", fake_open)
+
+    res = TestClient(server.app).put(
+        "/api/config",
+        json={"data": {"acquisition_mode": "tickflow"}},
+    )
+
+    assert res.status_code == 200
+    assert res.json()["schedulerReloaded"] is True
+    assert len(reloaded) == 1
+    assert reloaded[0]["data"]["acquisition_mode"] == "tickflow"
+
+
 def test_update_config_validates_strategy6_and_strips_legacy_sector_fields(monkeypatch, tmp_path):
     cfg = _valid_config()
     cfg["strategy6"] = {
@@ -210,6 +237,22 @@ def test_update_config_rejects_invalid_strategy6_threshold_order(monkeypatch, tm
     assert "Invalid strategy6 config" in response.json()["message"]
     assert writes == []
     assert repository_config.read_bytes() == repository_config_before
+
+
+def test_update_config_rejects_invalid_data_acquisition_mode(monkeypatch):
+    cfg = _valid_config()
+    writes = []
+    monkeypatch.setattr(server, "load_config", lambda path="config.yaml": cfg.copy())
+    monkeypatch.setattr(server.yaml, "dump", lambda *args, **kwargs: writes.append(args))
+
+    res = TestClient(server.app).put(
+        "/api/config",
+        json={"data": {"acquisition_mode": "automatic_fallback"}},
+    )
+
+    assert res.status_code == 400
+    assert "data.acquisition_mode" in res.json()["message"]
+    assert writes == []
 
 
 def test_scheduler_logs_include_runtime_state(monkeypatch):

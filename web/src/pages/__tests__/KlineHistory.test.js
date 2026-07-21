@@ -243,6 +243,9 @@ describe('KlineHistory', () => {
       failed: 2,
       current_chunk: 3,
       total_chunks: 50,
+      total_indexes: 4,
+      indexes_processed: 4,
+      indexes_failed: 0,
       parameters: {
         history_days: 1100,
         chunk_size: 100,
@@ -261,6 +264,7 @@ describe('KlineHistory', () => {
     expect(wrapper.text()).toContain('1100 根')
     expect(wrapper.text()).toContain('230 / 5000')
     expect(wrapper.text()).toContain('成功 228，失败 2')
+    expect(wrapper.text()).toContain('指数 4 / 4，失败 0')
     expect(wrapper.find('[data-test="tickflow-full-refresh"]').attributes('disabled')).toBeDefined()
     wrapper.unmount()
   })

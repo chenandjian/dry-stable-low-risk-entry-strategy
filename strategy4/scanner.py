@@ -14,6 +14,7 @@ from scanner.daily_data_service import (
     fetch_with_retry,
 )
 from scanner.data_source import DataSourceManager
+from scanner.data_acquisition import prepare_scan_daily_data
 from strategy4.config import resolve_strategy4_config
 from strategy4.derived_leader_detector import derive_leaders_for_topic
 from strategy4.derived_topic_detector import derive_hot_topics_for_date
@@ -267,6 +268,10 @@ def _build_leaders_and_candidates_from_topics(
 
     task_stocks = list(stocks_by_code.values())
     db.save_task_stocks(task_id, task_stocks)
+    prepared_session = prepare_scan_daily_data(project_config, task_stocks)
+    if fetch_daily_fn is None and prepared_session is not None:
+        fetch_daily_fn = prepared_session.fetch
+        daily_sources = ["tickflow"]
     stats = {
         "total": len(task_stocks),
         "total_stocks": len(task_stocks),

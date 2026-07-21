@@ -1,4 +1,5 @@
 # server.py
+import asyncio
 import datetime
 import json
 import logging
@@ -49,7 +50,10 @@ from scanner.single_stock_backtest import (
     DataCoverageError,
     run_single_stock_cuphandle_backtest,
 )
-from scanner.stock_pool import _filter_stocks as filter_stock_pool_for_scan
+from scanner.stock_pool import (
+    _filter_stocks as filter_stock_pool_for_scan,
+    get_a_stock_pool_result,
+)
 from scanner.strategy1_backtest_service import run_strategy1_experiment_from_baseline
 from scanner.daily_data_service import (
     build_cache_freshness_context,
@@ -57,6 +61,7 @@ from scanner.daily_data_service import (
     fetch_with_retry,
 )
 from scanner.data_source import DataSourceManager
+from scanner.data_acquisition import resolve_acquisition_mode
 from tickflow_data.web_task import TickFlowFullRefreshManager, TickFlowTaskConflict
 
 logger = logging.getLogger(__name__)
@@ -1536,7 +1541,8 @@ async def start_tickflow_full_refresh():
 
     config = _ensure_db_initialized_from_config()
     database_path = config.get("data", {}).get("database_path", "data/cuphandle.db")
-    stocks = db.get_stock_pool()
+    pool_result = await asyncio.to_thread(get_a_stock_pool_result, config)
+    stocks = pool_result["stocks"]
     if not stocks:
         return JSONResponse(
             {
@@ -1929,6 +1935,14 @@ async def update_config(data: dict):
     _deep_merge(config, data)
 
     try:
+        resolve_acquisition_mode(config)
+    except ValueError as e:
+        return JSONResponse(
+            {"status": "error", "message": f"Invalid data config: {e}"},
+            status_code=400,
+        )
+
+    try:
         _validate_scheduler_config(config)
     except ValueError as e:
         return JSONResponse(
@@ -1978,7 +1992,13 @@ async def update_config(data: dict):
         yaml.dump(config, f, allow_unicode=True, default_flow_style=False, sort_keys=False)
 
     scheduler_reloaded = False
-    if "scheduler" in data:
+    data_update = data.get("data", {}) if isinstance(data.get("data", {}), dict) else {}
+    scheduler_inputs_changed = (
+        "scheduler" in data
+        or "acquisition_mode" in data_update
+        or "daily_sources" in data_update
+    )
+    if scheduler_inputs_changed:
         try:
             _reload_scheduler_from_config(config)
             scheduler_reloaded = True

@@ -51,6 +51,21 @@
         </div>
       </div>
       <div class="param-group" style="margin-top:12px">
+        <label class="param-label">日线数据获取模式</label>
+        <div class="mode-options">
+          <label class="mode-option">
+            <input data-test="acquisition-mode-tickflow" type="radio"
+              v-model="config.data.acquisition_mode" value="tickflow" @change="markDirty" />
+            <span><strong>TickFlow 批量模式</strong><small>正式模式，股票使用前复权批量日线；失败时不会自动切换传统数据源。</small></span>
+          </label>
+          <label class="mode-option">
+            <input data-test="acquisition-mode-legacy" type="radio"
+              v-model="config.data.acquisition_mode" value="legacy_multi_source" @change="markDirty" />
+            <span><strong>传统多数据源模式</strong><small>人工备用模式，按下方启用顺序调用腾讯、AkShare-Sina、百度。</small></span>
+          </label>
+        </div>
+      </div>
+      <div class="param-group" style="margin-top:12px">
         <label class="param-label" title="按优先级排列，首位为主数据源，拉取失败时按顺序尝试后续数据源">日线数据源 <span class="unit">按优先级排列</span></label>
         <div class="toggle-grid">
           <label v-for="src in availableSources" :key="src.key" class="toggle-item">
@@ -1426,7 +1441,7 @@ const defaultStrategy6Config = {
 const config = reactive({
   market: {},
   liquidity: {},
-  data: { scan_window_days: 250, backtest_window_days: 250, daily_sources: ['baidu', 'sina', 'tencent'] },
+  data: { acquisition_mode: 'legacy_multi_source', scan_window_days: 250, backtest_window_days: 250, daily_sources: ['tencent', 'sina', 'baidu'] },
   cup: {},
   handle: {},
   breakout: {},
@@ -1759,9 +1774,9 @@ function toggleStrategy6Brooks(section, key) {
 }
 
 const availableSources = [
-  { key: 'baidu', label: '百度', tip: '百度股票API，国内数据源，稳定可靠' },
-  { key: 'sina', label: '新浪', tip: '新浪财经API，数据覆盖全' },
   { key: 'tencent', label: '腾讯', tip: '腾讯财经API，实时性好' },
+  { key: 'sina', label: 'AkShare-Sina', tip: '通过 AkShare 调用新浪前复权历史行情' },
+  { key: 'baidu', label: '百度', tip: '百度股票API备用源' },
 ]
 const availableSourceKeys = new Set(availableSources.map(s => s.key))
 
@@ -1796,6 +1811,9 @@ function toggleSource(key) {
 
 function sanitizeDailySources() {
   if (!config.data) config.data = {}
+  if (!['tickflow', 'legacy_multi_source'].includes(config.data.acquisition_mode)) {
+    config.data.acquisition_mode = 'legacy_multi_source'
+  }
   const current = Array.isArray(config.data.daily_sources)
     ? config.data.daily_sources
     : availableSources.map(s => s.key)
@@ -1834,6 +1852,7 @@ function validate() {
   if (dataCfg.backtest_window_days < 30) errors.push('回测分析天数最低 30天')
   if (dataCfg.scan_window_days > liq.min_listing_days) errors.push('扫描分析天数不能超过日线拉取天数')
   if (!dataCfg.daily_sources || dataCfg.daily_sources.length === 0) errors.push('至少选择一个日线数据源')
+  if (!['tickflow', 'legacy_multi_source'].includes(dataCfg.acquisition_mode)) errors.push('请选择有效的日线数据获取模式')
   if (!schedulerTimeIsValid()) errors.push('定时任务执行时间格式不正确')
 
   // Strategy2 validation
@@ -2149,6 +2168,11 @@ onMounted(async () => {
 }
 
 .toggle-grid { display: flex; gap: 12px; flex-wrap: wrap; }
+.mode-options { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 10px; margin-top: 8px; }
+.mode-option { display: flex; gap: 10px; align-items: flex-start; padding: 12px; border: 1px solid var(--border-color); border-radius: 8px; cursor: pointer; }
+.mode-option input { margin-top: 3px; accent-color: var(--accent); }
+.mode-option span { display: flex; flex-direction: column; gap: 4px; }
+.mode-option small { color: var(--text-muted); line-height: 1.45; }
 .toggle-item { display: flex; align-items: center; gap: 10px; cursor: pointer; }
 .toggle-label { font-size: 13px; color: var(--text-secondary); min-width: 90px; }
 .toggle {

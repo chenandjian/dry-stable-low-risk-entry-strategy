@@ -456,6 +456,18 @@ def test_tickflow_full_refresh_api_starts_fixed_full_market_task(monkeypatch, tm
     manager = _FakeTickFlowFullRefresh()
     monkeypatch.setattr(server, "load_config", lambda path="config.yaml": {"data": {"database_path": str(db_path)}})
     monkeypatch.setattr(server, "_tickflow_full_refresh", manager, raising=False)
+    monkeypatch.setattr(
+        server,
+        "get_a_stock_pool_result",
+        lambda config: {
+            "stocks": [
+                {"code": "000001", "name": "平安银行", "market": "SZ"},
+                {"code": "600000", "name": "浦发银行", "market": "SH"},
+            ],
+            "source": "akshare",
+            "error": None,
+        },
+    )
 
     response = TestClient(server.app).post("/api/tickflow/full-refresh")
 
@@ -493,6 +505,11 @@ def test_tickflow_full_refresh_rejects_empty_stock_pool(monkeypatch, tmp_path):
     manager = _FakeTickFlowFullRefresh()
     monkeypatch.setattr(server, "load_config", lambda path="config.yaml": {"data": {"database_path": str(db_path)}})
     monkeypatch.setattr(server, "_tickflow_full_refresh", manager, raising=False)
+    monkeypatch.setattr(
+        server,
+        "get_a_stock_pool_result",
+        lambda config: {"stocks": [], "source": "none", "error": "unavailable"},
+    )
 
     response = TestClient(server.app).post("/api/tickflow/full-refresh")
 

@@ -57,6 +57,19 @@ class TickFlowBatchClient:
         return self._sdk
 
     def fetch(self, symbols: list[str], *, count: int) -> BatchFetchResult:
+        return self._fetch(symbols, count=count, adjustment="forward_additive")
+
+    def fetch_indexes(self, symbols: list[str], *, count: int) -> BatchFetchResult:
+        """Fetch unadjusted index bars without weakening the stock price contract."""
+        return self._fetch(symbols, count=count, adjustment="none")
+
+    def _fetch(
+        self,
+        symbols: list[str],
+        *,
+        count: int,
+        adjustment: str,
+    ) -> BatchFetchResult:
         requested = [str(symbol).strip().upper() for symbol in symbols]
         if not requested or count <= 0:
             raise ValueError("symbols must not be empty and count must be positive")
@@ -71,7 +84,7 @@ class TickFlowBatchClient:
                     requested,
                     period="1d",
                     count=count,
-                    adjust="forward_additive",
+                    adjust=adjustment,
                     as_dataframe=True,
                     show_progress=False,
                     max_workers=self.max_workers,
@@ -112,4 +125,3 @@ class TickFlowBatchClient:
                 )
             frames[normalized_symbol] = frame
         return frames
-

@@ -77,7 +77,7 @@ python main.py schedule
 ## 数据与缓存
 
 - 股票池：AKShare 获取，失败时可回退本地缓存。
-- 日线行情：默认 `baidu → sina → tencent`，yfinance 已从生产数据源剔除。
+- 日线行情：默认使用 TickFlow 批量前复权数据；可在策略配置页人工切换为 `tencent → AkShare-Sina → baidu` 传统备用模式，禁止自动跨模式回退。
 - 数据存储：SQLite，默认 `data/cuphandle.db`。
 - 日线表：`daily_ohlc`。
 - 扫描任务：`scan_tasks`。
@@ -95,7 +95,8 @@ python main.py schedule
 编辑 `config.yaml`：
 
 - `market`：市场范围。
-- `data.daily_sources`：日线数据源顺序。
+- `data.acquisition_mode`：`tickflow` 或 `legacy_multi_source`，只能人工保存切换。
+- `data.daily_sources`：传统备用模式的数据源顺序。
 - `data.scan_window_days`：策略1扫描计算窗口。
 - `data.backtest_window_days`：策略1回测计算窗口。
 - `liquidity.min_listing_days`：日线拉取天数与上市天数检查。

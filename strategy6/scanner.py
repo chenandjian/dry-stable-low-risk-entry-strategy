@@ -8,6 +8,7 @@ from datetime import datetime
 from queue import Queue
 
 import scanner.db as db
+from scanner.data_acquisition import load_market_index_daily, prepare_scan_daily_data
 from scanner.index_source import fetch_market_index_daily
 from scanner.daily_data_service import (
     DEFAULT_DAILY_SOURCES,
@@ -53,7 +54,14 @@ def scan_strategy6_all(
         stocks = get_a_stock_pool(config)
     db.save_task_stocks(task_id, stocks)
 
-    daily_sources = config.get("data", {}).get("daily_sources") or DEFAULT_DAILY_SOURCES
+    prepared_session = prepare_scan_daily_data(config, stocks)
+    if fetch_daily_fn is None and prepared_session is not None:
+        fetch_daily_fn = prepared_session.fetch
+
+    daily_sources = (
+        ["tickflow"] if prepared_session is not None
+        else config.get("data", {}).get("daily_sources") or DEFAULT_DAILY_SOURCES
+    )
     kline_days = int(cfg["kline_days"])
     configured_workers = config.get("data", {}).get("worker_count")
     worker_count = resolve_effective_worker_count(
@@ -68,7 +76,7 @@ def scan_strategy6_all(
 
     mgr = DataSourceManager()
     engine = StrongVcpTailEngine({"strategy6": cfg})
-    market_data_by_symbol = _load_market_data_by_symbol(cfg)
+    market_data_by_symbol = _load_market_data_by_symbol(config)
     market_target_date = build_cache_freshness_context(
         now=datetime.strptime(_now(), "%Y-%m-%d %H:%M:%S")
     ).target_trade_date
@@ -353,17 +361,20 @@ def _ensure_scan_task(task_id: str) -> None:
     )
 
 
-def _load_market_data_by_symbol(cfg: dict) -> dict[str, list[dict]]:
+def _load_market_data_by_symbol(config: dict) -> dict[str, list[dict]]:
     result: dict[str, list[dict]] = {}
     for symbol in ("sh000001", "sz399001", "sz399006", "hs300"):
         fetch_symbol = "sh000300" if symbol == "hs300" else symbol
         try:
-            rows = fetch_market_index_daily(fetch_symbol, days=250) or []
+            rows = load_market_index_daily(
+                config,
+                fetch_symbol,
+                days=250,
+                legacy_fetch_fn=fetch_market_index_daily,
+            ) or []
         except Exception as exc:
             logger.warning("Strategy6 market index fetch failed for %s: %s", fetch_symbol, exc)
             rows = []
-        if rows:
-            db.upsert_market_index_ohlc(fetch_symbol, rows, source="sina")
         result[symbol] = rows
     return result
 
