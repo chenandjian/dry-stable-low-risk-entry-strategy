@@ -24,6 +24,7 @@ DEFAULT_STRATEGY6_CONFIG = {
     "consolidation_min_days": 5,
     "consolidation_max_days": 40,
     "tail_window_days": 5,
+    "tail_regime_shadow_enabled": True,
     "dynamic_tail_enabled": True,
     "dynamic_tail_min_days": 3,
     "dynamic_tail_max_days": 10,
@@ -280,6 +281,7 @@ def resolve_strategy6_config(config: dict | None) -> dict:
     _validate_int_range(raw, "consolidation_min_days", 1, 40)
     _validate_int_range(raw, "consolidation_max_days", raw["consolidation_min_days"], 120)
     _validate_int_range(raw, "tail_window_days", 3, 10)
+    raw["tail_regime_shadow_enabled"] = bool(raw.get("tail_regime_shadow_enabled", True))
     raw["dynamic_tail_enabled"] = bool(raw.get("dynamic_tail_enabled", True))
     _validate_int_range(raw, "dynamic_tail_min_days", 3, 10)
     _validate_int_range(raw, "dynamic_tail_max_days", raw["dynamic_tail_min_days"], 15)

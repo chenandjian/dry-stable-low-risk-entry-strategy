@@ -22,6 +22,7 @@ from strategy6.scorer import score_strategy6
 from strategy6.setup_quality import evaluate_setup_quality
 from strategy6.strong_start import evaluate_strong_start
 from strategy6.support import evaluate_support
+from strategy6.tail_regime import evaluate_tail_regime
 from strategy6.trade_plan import calculate_trade_plan
 from strategy6.validation import (
     is_strategy6_research_profile,
@@ -79,6 +80,14 @@ class StrongVcpTailEngine:
         phase = segment_phases(rows, start, self.config)
         pattern = detect_pattern(rows, phase, self.config)
         support = evaluate_support(rows, indicators, start, pattern, self.config)
+        tail_regime = evaluate_tail_regime(
+            rows,
+            consolidation_start_index=phase.consolidation_start_index,
+            enabled=self.config["tail_regime_shadow_enabled"],
+            big_down_return=self.config["big_down_return"],
+            big_down_volume_ratio=self.config["big_down_volume_ratio"],
+            key_support_price=support.key_support_price,
+        )
         setup_quality = evaluate_setup_quality(
             rows,
             start,
@@ -224,6 +233,7 @@ class StrongVcpTailEngine:
             trade_plan=trade_plan,
             score=score,
             setup_quality=setup_quality,
+            tail_regime=tail_regime,
             vcp_observation=vcp_observation,
             strategy_version=STRATEGY6_VERSION,
             config_hash=strategy6_config_hash(self.config),

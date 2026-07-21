@@ -163,6 +163,36 @@ def test_engine_outputs_full_candidate_trade_plan():
     assert candidate["score_model_version"] == "S6_FORMAL_ORIGINAL_V1"
 
 
+def test_tail_regime_shadow_switch_never_changes_formal_decision():
+    data = build_strategy6_candidate_data()
+    enabled = StrongVcpTailEngine({
+        "strategy6": {"tail_regime_shadow_enabled": True},
+    }).evaluate_at(data, code="000001", name="平安银行")
+    disabled = StrongVcpTailEngine({
+        "strategy6": {"tail_regime_shadow_enabled": False},
+    }).evaluate_at(data, code="000001", name="平安银行")
+
+    assert enabled.dry_tail == disabled.dry_tail
+    assert enabled.tail_paths == disabled.tail_paths
+    assert enabled.trade_plan == disabled.trade_plan
+    assert enabled.score == disabled.score
+    assert enabled.reject_reasons == disabled.reject_reasons
+    assert enabled.candidate_type == disabled.candidate_type
+    assert enabled.classification == disabled.classification
+    assert enabled.lifecycle_status == disabled.lifecycle_status
+    assert enabled.tail_regime.enabled is True
+    assert enabled.tail_regime.status in {
+        "FORMING", "CONFIRMED", "BROKEN", "NO_REGIME_CHANGE", "INSUFFICIENT_BASELINE",
+    }
+    assert disabled.tail_regime.enabled is False
+    assert disabled.tail_regime.status == "DISABLED"
+
+    candidate = enabled.to_candidate_dict()
+    assert candidate["tail_regime_model_version"] == "TAIL_REGIME_CP_V1"
+    assert isinstance(candidate["tail_regime_reasons"], list)
+    assert isinstance(candidate["tail_regime_risks"], list)
+
+
 def test_formal_engine_does_not_execute_auxiliary_tail_paths(monkeypatch):
     import strategy6.engine as engine_mod
 
