@@ -114,6 +114,20 @@ describe('Strategy6Results', () => {
           tail_avg_volume: 500000,
           pre_tail_avg_volume_20: 1000000,
           tail_volume_ratio: 0.5,
+          tail_regime_enabled: true,
+          tail_regime_status: 'CONFIRMED',
+          tail_regime_start_date: '2026-07-02',
+          tail_regime_days: 8,
+          tail_regime_delta_bic: 18.75,
+          tail_regime_volume_ratio: 0.52,
+          tail_regime_range_ratio: 0.61,
+          tail_regime_body_ratio: 0.58,
+          tail_regime_abs_return_ratio: 0.63,
+          tail_regime_close_dispersion: 0.012,
+          tail_regime_low_slope_atr: 0.04,
+          tail_regime_model_version: 'TAIL_REGIME_CP_V1',
+          tail_regime_reasons: ['ROBUST_BIC_CHANGE_POINT', 'TAIL_VOLUME_CONTRACTED'],
+          tail_regime_risks: [],
           original_tail_pass: false,
           original_tail_score: 12,
           box_tail_enabled: true,
@@ -357,6 +371,13 @@ describe('Strategy6Results', () => {
     expect(wrapper.text()).toContain('研究质量 V2')
     expect(wrapper.vm.decisionProfileText({ decision_profile: 'formal_original' })).toBe('正式原始链')
     expect(wrapper.text()).toContain('动态收缩尾段')
+    expect(wrapper.text()).toContain('尾部变点观察')
+    expect(wrapper.text()).toContain('影子研究，不参与正式选股')
+    expect(wrapper.text()).toContain('已确认')
+    expect(wrapper.text()).toContain('2026-07-02')
+    expect(wrapper.text()).toContain('BIC证据 18.750')
+    expect(wrapper.text()).toContain('成交量比 0.520')
+    expect(wrapper.text()).toContain('鲁棒BIC识别到状态变点')
     expect(wrapper.text()).toContain('未形成尾段（V5/V20 0.660）')
     expect(wrapper.vm.tailVolumeDisplay({
       tail_avg_volume: 0,

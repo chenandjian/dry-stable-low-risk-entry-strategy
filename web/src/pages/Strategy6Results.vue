@@ -268,6 +268,21 @@
         <div><span>涨跌幅</span><strong>5日 {{ pct(selected.return_5) }} · 10日 {{ pct(selected.return_10) }} · 20日 {{ pct(selected.return_20) }}</strong></div>
         <div data-test="detail-suggestion"><span>建议</span><strong>{{ isExecutionWaiting(selected) ? '观察/等待触发' : (selected.suggestion || '--') }}</strong></div>
       </div>
+      <div v-if="selected.tail_regime_enabled" data-test="tail-regime-detail" class="tail-regime-evidence">
+        <div class="subsection-title">尾部变点观察</div>
+        <div class="tail-regime-note">影子研究，不参与正式选股、评分、过滤或候选分层</div>
+        <div class="tail-regime-grid">
+          <div><span>识别状态</span><strong>{{ tailRegimeStatusText(selected.tail_regime_status) }}</strong></div>
+          <div><span>推导尾段</span><strong>{{ selected.tail_regime_start_date || '--' }} 起 · {{ selected.tail_regime_days ?? 0 }} 个交易日</strong></div>
+          <div><span>统计证据</span><strong>BIC证据 {{ fmt(selected.tail_regime_delta_bic, 3) }} · {{ selected.tail_regime_model_version || '--' }}</strong></div>
+          <div><span>收缩比值</span><strong>成交量比 {{ fmt(selected.tail_regime_volume_ratio, 3) }} · 波幅比 {{ fmt(selected.tail_regime_range_ratio, 3) }} · 实体比 {{ fmt(selected.tail_regime_body_ratio, 3) }} · 涨跌比 {{ fmt(selected.tail_regime_abs_return_ratio, 3) }}</strong></div>
+          <div><span>稳定结构</span><strong>收盘离散 {{ pct(selected.tail_regime_close_dispersion) }} · 低点斜率 {{ fmt(selected.tail_regime_low_slope_atr, 3) }} ATR/日</strong></div>
+        </div>
+        <div class="tags">
+          <span v-for="reason in selected.tail_regime_reasons || []" :key="`trr-${reason}`" class="tag info">{{ tailRegimeEvidenceText(reason) }}</span>
+          <span v-for="risk in selected.tail_regime_risks || []" :key="`trk-${risk}`" class="tag risk">{{ tailRegimeEvidenceText(risk) }}</span>
+        </div>
+      </div>
       <div v-if="selected.vcp_observation_eligible" class="vcp-evidence">
         <div class="subsection-title">VCP收缩证据</div>
         <div data-test="vcp-quality-detail" class="vcp-quality-detail">
@@ -699,6 +714,29 @@ export default {
       const n = Number(v)
       return Number.isFinite(n) ? `${(n * 100).toFixed(2)}%` : '--'
     },
+    tailRegimeStatusText(status) {
+      return ({
+        FORMING: '形成中',
+        CONFIRMED: '已确认',
+        BROKEN: '结构已破坏',
+        NO_REGIME_CHANGE: '未识别到状态切换',
+        INSUFFICIENT_BASELINE: '基准数据不足',
+        DISABLED: '未启用',
+      })[status] || '--'
+    },
+    tailRegimeEvidenceText(code) {
+      return ({
+        ROBUST_BIC_CHANGE_POINT: '鲁棒BIC识别到状态变点',
+        TAIL_VOLUME_CONTRACTED: '尾段成交量收缩',
+        TAIL_PRICE_ACTION_CONTRACTED: '尾段价格波动收缩',
+        TAIL_LOW_STRUCTURE_STABLE: '尾段低点结构稳定',
+        TAIL_REGIME_BIG_DOWN_VOLUME: '尾段出现放量大跌',
+        TAIL_REGIME_LOW_DETERIORATING: '尾段低点继续恶化',
+        SUPPORT_TWO_CLOSE_BREAK: '连续两日收盘跌破关键支撑',
+        TAIL_REGIME_INVALID_KLINE: 'K线数据无效',
+        TAIL_REGIME_SAMPLE_INSUFFICIENT: '尾部变点样本不足',
+      })[code] || code || '--'
+    },
     priceRange(low, high) {
       if (low == null && high == null) return '--'
       return `${this.fmt(low)} - ${this.fmt(high)}`
@@ -1007,6 +1045,11 @@ td { vertical-align: top; }
 .detail-grid div { display: flex; flex-direction: column; gap: 3px; }
 .detail-grid span { color: var(--text-secondary); font-size: 12px; }
 .detail-grid strong { color: var(--text-primary); }
+.tail-regime-evidence { margin: 0 14px 14px; padding: 12px; border: 1px solid rgba(74, 144, 226, 0.35); border-radius: 8px; background: rgba(74, 144, 226, 0.06); }
+.tail-regime-note { margin: 6px 0 10px; color: var(--text-secondary); font-size: 12px; }
+.tail-regime-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 10px; }
+.tail-regime-grid div { display: flex; flex-direction: column; gap: 3px; }
+.tail-regime-grid span { color: var(--text-secondary); font-size: 12px; }
 .brooks-evidence { margin: 0 14px 14px; padding: 14px; border: 1px solid rgba(77, 163, 255, 0.25); border-radius: 8px; background: rgba(77, 163, 255, 0.04); }
 .vcp-evidence { margin: 0 14px 14px; padding: 14px; border: 1px solid rgba(20, 184, 166, 0.3); border-radius: 8px; background: rgba(20, 184, 166, 0.04); }
 .vcp-contraction-row { padding: 5px 0; color: var(--text-primary); font-family: var(--font-mono); font-size: 13px; }
