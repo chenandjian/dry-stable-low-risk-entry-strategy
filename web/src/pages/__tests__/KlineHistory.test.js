@@ -7,6 +7,8 @@ const api = {
   getKlineHealth: vi.fn(),
   refreshKlineData: vi.fn(),
   refreshKlineHealth: vi.fn(),
+  startTickFlowFullRefresh: vi.fn(),
+  getTickFlowFullRefreshStatus: vi.fn(),
 }
 vi.mock('../../composables/useApi.js', () => ({ useApi: () => api }))
 
@@ -97,6 +99,39 @@ describe('KlineHistory', () => {
       failed_count: 0,
       skipped_count: 1,
     })
+    api.startTickFlowFullRefresh.mockResolvedValue({
+      ok: true,
+      task_id: 'tickflow-web-20260721-120000-abc123',
+      running: true,
+      status: 'running',
+      total_stocks: 5000,
+      processed: 0,
+      succeeded: 0,
+      failed: 0,
+      parameters: {
+        history_days: 1100,
+        chunk_size: 100,
+        batch_size: 100,
+        max_workers: 5,
+        adjustment: 'forward_additive',
+      },
+    })
+    api.getTickFlowFullRefreshStatus.mockResolvedValue({
+      running: false,
+      status: 'idle',
+      total_stocks: 0,
+      processed: 0,
+      succeeded: 0,
+      failed: 0,
+      parameters: {
+        history_days: 1100,
+        chunk_size: 100,
+        batch_size: 100,
+        max_workers: 5,
+        adjustment: 'forward_additive',
+      },
+    })
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
   })
 
   it('renders freshness summary and kline rows', async () => {
@@ -195,6 +230,95 @@ describe('KlineHistory', () => {
     expect(api.refreshKlineHealth).toHaveBeenCalledWith({ status: 'problem' })
     expect(wrapper.text()).toContain('批量重拉完成：成功 1，失败 0，跳过 1')
     expect(api.getKlineHealth).toHaveBeenLastCalledWith({ status: 'problem', page: 1, page_size: 100 })
+  })
+
+  it('shows fixed TickFlow full refresh parameters and recovers running progress', async () => {
+    api.getTickFlowFullRefreshStatus.mockResolvedValue({
+      running: true,
+      status: 'running',
+      task_id: 'tickflow-web-running',
+      total_stocks: 5000,
+      processed: 230,
+      succeeded: 228,
+      failed: 2,
+      current_chunk: 3,
+      total_chunks: 50,
+      parameters: {
+        history_days: 1100,
+        chunk_size: 100,
+        batch_size: 100,
+        max_workers: 5,
+        adjustment: 'forward_additive',
+      },
+    })
+
+    const wrapper = mount(KlineHistory)
+    await flushUi()
+
+    expect(api.getTickFlowFullRefreshStatus).toHaveBeenCalled()
+    expect(wrapper.text()).toContain('TickFlow 全市场重新拉取')
+    expect(wrapper.text()).toContain('前复权')
+    expect(wrapper.text()).toContain('1100 根')
+    expect(wrapper.text()).toContain('230 / 5000')
+    expect(wrapper.text()).toContain('成功 228，失败 2')
+    expect(wrapper.find('[data-test="tickflow-full-refresh"]').attributes('disabled')).toBeDefined()
+    wrapper.unmount()
+  })
+
+  it('starts a confirmed TickFlow full-market refresh', async () => {
+    const wrapper = mount(KlineHistory)
+    await flushUi()
+
+    await wrapper.find('[data-test="tickflow-full-refresh"]').trigger('click')
+    await flushUi()
+
+    expect(window.confirm).toHaveBeenCalledWith(expect.stringContaining('整个股票池'))
+    expect(api.startTickFlowFullRefresh).toHaveBeenCalledTimes(1)
+    expect(wrapper.text()).toContain('0 / 5000')
+    wrapper.unmount()
+  })
+
+  it('does not start TickFlow refresh when confirmation is canceled', async () => {
+    window.confirm.mockReturnValue(false)
+    const wrapper = mount(KlineHistory)
+    await flushUi()
+
+    await wrapper.find('[data-test="tickflow-full-refresh"]').trigger('click')
+
+    expect(api.startTickFlowFullRefresh).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
+  it('polls to terminal TickFlow status, shows report path, and refreshes health', async () => {
+    vi.useFakeTimers()
+    api.getTickFlowFullRefreshStatus
+      .mockResolvedValueOnce({ running: false, status: 'idle' })
+      .mockResolvedValueOnce({
+        running: false,
+        status: 'completed_with_errors',
+        task_id: 'tickflow-web-terminal',
+        total_stocks: 5000,
+        processed: 5000,
+        succeeded: 4997,
+        failed: 3,
+        report_path: 'data/tickflow/reports/tickflow-web-terminal.md',
+        failures: [{ code: '000001', error: 'missing response' }],
+      })
+    const wrapper = mount(KlineHistory)
+    await flushUi()
+
+    await wrapper.find('[data-test="tickflow-full-refresh"]').trigger('click')
+    await flushUi()
+    await vi.advanceTimersByTimeAsync(2000)
+    await flushUi()
+
+    expect(wrapper.text()).toContain('全量重拉完成，但有失败股票')
+    expect(wrapper.text()).toContain('4997，失败 3')
+    expect(wrapper.text()).toContain('data/tickflow/reports/tickflow-web-terminal.md')
+    expect(wrapper.text()).toContain('000001：missing response')
+    expect(api.getKlineHealth).toHaveBeenCalledTimes(2)
+    wrapper.unmount()
+    vi.useRealTimers()
   })
 
   it('loads the next page with the current query', async () => {

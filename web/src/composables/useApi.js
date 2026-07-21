@@ -292,6 +292,18 @@ export function useApi() {
     return { ...body, ok: res.ok, statusCode: res.status }
   }
 
+  async function startTickFlowFullRefresh() {
+    const res = await fetch(`${API_BASE}/tickflow/full-refresh`, { method: 'POST' })
+    const body = await res.json().catch(() => ({}))
+    return { ...body, ok: res.ok, statusCode: res.status }
+  }
+
+  async function getTickFlowFullRefreshStatus() {
+    const res = await fetch(`${API_BASE}/tickflow/full-refresh/status`)
+    const body = await res.json().catch(() => ({}))
+    return { ...body, ok: res.ok, statusCode: res.status }
+  }
+
   async function getStrategy6ScanStatus() {
     const res = await fetch(`${API_BASE}/strategy6/scans/status`)
     return res.json().catch(() => ({ running: false, stats: {} }))
@@ -448,6 +460,7 @@ export function useApi() {
   return {
     startScan, getScanStatus, getCandidates, getCandidate, getScanTasks,
     getSchedulerLogs, getKlineHistory, getKlineHealth, refreshKlineData, refreshKlineHealth,
+    startTickFlowFullRefresh, getTickFlowFullRefreshStatus,
     getTaskStocks, retryFailedStocks, reEvaluateTask, getConfig, updateConfig,
     runCupHandleBacktest,
     startStrategy2Scan, getStrategy2ScanStatus, getStrategy2Tasks,

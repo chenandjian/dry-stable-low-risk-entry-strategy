@@ -4,7 +4,7 @@
       <div>
         <p class="eyebrow">本地数据诊断</p>
         <h1>个股 K 线数据诊断</h1>
-        <p class="hint">核对本地历史 K 线是否覆盖最近一个完整交易日。本页面只读本地数据库，不触发行情源拉取。</p>
+        <p class="hint">核对本地历史 K 线是否覆盖最近一个完整交易日。查询本身只读，重新拉取按钮会明确请求行情源。</p>
       </div>
       <div class="status-pill" :class="{ stale: summary?.needs_refetch, fresh: summary?.is_fresh }">
         {{ summary?.needs_refetch ? '需要重新拉取' : summary?.is_fresh ? '数据最新' : '等待查询' }}
@@ -19,6 +19,14 @@
         </div>
         <div class="panel-actions">
           <button
+            class="btn-primary tickflow-action"
+            :disabled="tickFlowStarting || tickFlowStatus?.running"
+            data-test="tickflow-full-refresh"
+            @click="startTickFlowRefresh"
+          >
+            {{ tickFlowStatus?.running ? 'TickFlow 全量拉取中...' : 'TickFlow 全市场重新拉取' }}
+          </button>
+          <button
             class="btn-secondary danger-action"
             :disabled="bulkRefreshing || healthLoading || !bulkRefreshableCount"
             data-test="bulk-refresh-health"
@@ -30,6 +38,28 @@
             {{ healthLoading ? '刷新中...' : '刷新健康状态' }}
           </button>
         </div>
+      </div>
+
+      <div class="tickflow-box" data-test="tickflow-status">
+        <div>
+          <strong>TickFlow 全市场重新拉取</strong>
+          <p>固定参数：整个股票池 · 约 1100 根日线 · 前复权（forward_additive）· 每批 100 只 · 5 个并发工作线程</p>
+        </div>
+        <div v-if="tickFlowStatus?.status && tickFlowStatus.status !== 'idle'" class="tickflow-progress">
+          <strong>{{ tickFlowStatusLabel }}</strong>
+          <span>{{ tickFlowStatus.processed || 0 }} / {{ tickFlowStatus.total_stocks || 0 }}</span>
+          <span>成功 {{ tickFlowStatus.succeeded || 0 }}，失败 {{ tickFlowStatus.failed || 0 }}</span>
+          <span v-if="tickFlowStatus.total_chunks">批次 {{ tickFlowStatus.current_chunk || 0 }} / {{ tickFlowStatus.total_chunks }}</span>
+        </div>
+        <p v-if="tickFlowError" class="error-line">{{ tickFlowError }}</p>
+        <p v-if="tickFlowStatus?.report_path" class="tickflow-report">
+          任务报告：{{ tickFlowStatus.report_path }}
+        </p>
+        <ul v-if="tickFlowStatus?.failures?.length" class="tickflow-failures">
+          <li v-for="item in tickFlowStatus.failures.slice(0, 10)" :key="item.code">
+            {{ item.code }}：{{ item.error }}
+          </li>
+        </ul>
       </div>
 
       <div class="health-grid" v-if="healthSummary">
@@ -233,10 +263,17 @@
 </template>
 
 <script setup>
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { useApi } from '../composables/useApi.js'
 
-const { getKlineHistory, getKlineHealth, refreshKlineData, refreshKlineHealth } = useApi()
+const {
+  getKlineHistory,
+  getKlineHealth,
+  refreshKlineData,
+  refreshKlineHealth,
+  startTickFlowFullRefresh,
+  getTickFlowFullRefreshStatus,
+} = useApi()
 
 const form = reactive({
   code: '000831',
@@ -260,6 +297,10 @@ const healthFilter = ref('problem')
 const refreshingCodes = ref({})
 const bulkRefreshing = ref(false)
 const bulkRefreshMessage = ref('')
+const tickFlowStatus = ref(null)
+const tickFlowStarting = ref(false)
+const tickFlowError = ref('')
+let tickFlowPollTimer = null
 
 const totalPages = computed(() => Math.max(1, Math.ceil(total.value / form.page_size)))
 const healthFilterLabel = computed(() => {
@@ -272,6 +313,70 @@ const bulkRefreshableCount = computed(() => {
   if (healthFilter.value === 'anomaly' || healthFilter.value === 'failed') return healthTotal.value || 0
   return healthItems.value.filter(item => item.needs_refetch).length
 })
+const tickFlowStatusLabel = computed(() => {
+  const labels = {
+    running: '正在全量重新拉取',
+    completed: '全量重新拉取完成',
+    completed_with_errors: '全量重拉完成，但有失败股票',
+    failed: '全量重新拉取失败',
+  }
+  return labels[tickFlowStatus.value?.status] || tickFlowStatus.value?.status || '尚未启动'
+})
+
+function clearTickFlowPoll() {
+  if (tickFlowPollTimer) {
+    clearTimeout(tickFlowPollTimer)
+    tickFlowPollTimer = null
+  }
+}
+
+function scheduleTickFlowPoll() {
+  clearTickFlowPoll()
+  if (!tickFlowStatus.value?.running) return
+  tickFlowPollTimer = setTimeout(async () => {
+    tickFlowPollTimer = null
+    await loadTickFlowStatus(true)
+  }, 2000)
+}
+
+async function loadTickFlowStatus(refreshHealthOnTerminal = false) {
+  try {
+    const data = await getTickFlowFullRefreshStatus()
+    if (data.ok === false) throw new Error(data.message || data.error || 'TickFlow 状态查询失败')
+    const wasRunning = Boolean(tickFlowStatus.value?.running)
+    tickFlowStatus.value = data
+    tickFlowError.value = ''
+    if (data.running) {
+      scheduleTickFlowPoll()
+    } else {
+      clearTickFlowPoll()
+      if (refreshHealthOnTerminal && wasRunning) await loadKlineHealth()
+    }
+  } catch (err) {
+    tickFlowError.value = `TickFlow 状态查询失败：${err?.message || '未知错误'}`
+    if (tickFlowStatus.value?.running) scheduleTickFlowPoll()
+  }
+}
+
+async function startTickFlowRefresh() {
+  if (tickFlowStarting.value || tickFlowStatus.value?.running) return
+  const confirmed = window.confirm(
+    '将使用 TickFlow 对整个股票池强制重新拉取约 1100 根前复权日线，并覆盖每只股票的本地历史数据。是否继续？',
+  )
+  if (!confirmed) return
+  tickFlowStarting.value = true
+  tickFlowError.value = ''
+  try {
+    const data = await startTickFlowFullRefresh()
+    if (data.ok === false) throw new Error(data.message || data.error || 'TickFlow 全量任务启动失败')
+    tickFlowStatus.value = data
+    scheduleTickFlowPoll()
+  } catch (err) {
+    tickFlowError.value = `TickFlow 全量任务启动失败：${err?.message || '未知错误'}`
+  } finally {
+    tickFlowStarting.value = false
+  }
+}
 
 function fmt(value) {
   return value || '--'
@@ -412,7 +517,10 @@ function submitQuery() {
 onMounted(() => {
   loadKlineHealth()
   loadPage(1)
+  loadTickFlowStatus()
 })
+
+onBeforeUnmount(clearTickFlowPoll)
 </script>
 
 <style scoped>
@@ -509,6 +617,36 @@ h2 {
 }
 .health-panel {
   margin-bottom: 16px;
+}
+.tickflow-box {
+  display: grid;
+  gap: 10px;
+  margin: 14px 0 16px;
+  padding: 14px;
+  border: 1px solid rgba(59, 130, 246, 0.35);
+  border-radius: 8px;
+  background: rgba(59, 130, 246, 0.06);
+}
+.tickflow-box p {
+  margin-top: 6px;
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+.tickflow-progress {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 18px;
+  align-items: center;
+}
+.tickflow-progress span {
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+.tickflow-failures {
+  margin: 0;
+  padding-left: 20px;
+  color: var(--down-green);
+  font-size: 12px;
 }
 .health-grid {
   display: grid;
