@@ -127,7 +127,7 @@ describe('Strategy6Results', () => {
           tail_regime_low_slope_atr: 0.04,
           tail_regime_model_version: 'TAIL_REGIME_CP_V1',
           tail_regime_reasons: ['ROBUST_BIC_CHANGE_POINT', 'TAIL_VOLUME_CONTRACTED'],
-          tail_regime_risks: [],
+          tail_regime_risks: ['PREVIOUS_SUPPORT_TWO_CLOSE_BREAK', 'PREVIOUS_PHASE_INVALID'],
           original_tail_pass: false,
           original_tail_score: 12,
           box_tail_enabled: true,
@@ -378,6 +378,8 @@ describe('Strategy6Results', () => {
     expect(wrapper.text()).toContain('BIC证据 18.750')
     expect(wrapper.text()).toContain('成交量比 0.520')
     expect(wrapper.text()).toContain('鲁棒BIC识别到状态变点')
+    expect(wrapper.text()).toContain('前一交易日连续收盘跌破关键支撑')
+    expect(wrapper.text()).toContain('前一交易日阶段划分无效')
     expect(wrapper.text()).toContain('未形成尾段（V5/V20 0.660）')
     expect(wrapper.vm.tailVolumeDisplay({
       tail_avg_volume: 0,

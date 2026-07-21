@@ -14,7 +14,7 @@ from strategy6.filters import (
 )
 from strategy6.indicators import _atr, calculate_indicators
 from strategy6.market import compute_relative_strength_20, evaluate_market_context, has_relative_strength_20_market
-from strategy6.models import Strategy6BoxTail, Strategy6Evaluation
+from strategy6.models import Strategy6BoxTail, Strategy6Evaluation, Strategy6TailRegime
 from strategy6.phase import segment_phases
 from strategy6.pattern import detect_pattern
 from strategy6.pressure import apply_pressure_tags
@@ -80,14 +80,54 @@ class StrongVcpTailEngine:
         phase = segment_phases(rows, start, self.config)
         pattern = detect_pattern(rows, phase, self.config)
         support = evaluate_support(rows, indicators, start, pattern, self.config)
-        tail_regime = evaluate_tail_regime(
-            rows,
-            consolidation_start_index=phase.consolidation_start_index,
-            enabled=self.config["tail_regime_shadow_enabled"],
-            big_down_return=self.config["big_down_return"],
-            big_down_volume_ratio=self.config["big_down_volume_ratio"],
-            key_support_price=support.key_support_price,
-        )
+        previous_consolidation_start_index = None
+        previous_key_support_price = None
+        previous_phase_valid = False
+        if self.config["tail_regime_shadow_enabled"] and phase.valid and len(rows) > 1:
+            previous_rows, previous_indicators = calculate_indicators(
+                rows[:-1],
+                self.config,
+                trading_days_override=(
+                    max(0, trading_days_override - 1)
+                    if trading_days_override is not None else None
+                ),
+                rows_normalized=True,
+            )
+            previous_start = evaluate_strong_start(
+                previous_rows,
+                previous_indicators,
+                self.config,
+                code,
+            )
+            previous_phase = segment_phases(previous_rows, previous_start, self.config)
+            previous_phase_valid = previous_phase.valid
+            previous_consolidation_start_index = previous_phase.consolidation_start_index
+            previous_pattern = detect_pattern(previous_rows, previous_phase, self.config)
+            previous_support = evaluate_support(
+                previous_rows,
+                previous_indicators,
+                previous_start,
+                previous_pattern,
+                self.config,
+            )
+            previous_key_support_price = previous_support.key_support_price
+        if self.config["tail_regime_shadow_enabled"] and not phase.valid:
+            tail_regime = Strategy6TailRegime(
+                status="INSUFFICIENT_BASELINE",
+                risks=[phase.status],
+            )
+        else:
+            tail_regime = evaluate_tail_regime(
+                rows,
+                consolidation_start_index=phase.consolidation_start_index,
+                previous_consolidation_start_index=previous_consolidation_start_index,
+                enabled=self.config["tail_regime_shadow_enabled"],
+                big_down_return=self.config["big_down_return"],
+                big_down_volume_ratio=self.config["big_down_volume_ratio"],
+                key_support_price=support.key_support_price,
+                previous_key_support_price=previous_key_support_price,
+                previous_phase_valid=previous_phase_valid,
+            )
         setup_quality = evaluate_setup_quality(
             rows,
             start,

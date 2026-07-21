@@ -3,18 +3,28 @@ from __future__ import annotations
 
 from collections import Counter
 from dataclasses import asdict, replace
+import math
 
 from strategy6.backtest.data import market_calendar_from_indexes, slice_visible_rows
 from strategy6.backtest.execution import simulate_frozen_trade
+from strategy6.backtest.index_history import validate_index_history_data
 from strategy6.backtest.metrics import calculate_trade_metrics, group_trade_metrics
 from strategy6.backtest.models import BacktestSignal
 from strategy6.backtest.snapshot import build_setup_id, is_trade_ready_snapshot
+from strategy6.backtest.stress import evaluate_stress_acceptance, replay_stress_scenarios
 from strategy6.box_tail import combine_tail_paths
 from strategy6.filters import classify_candidate
 from strategy6.scorer import score_strategy6
 
 
 TAIL_REGIME_GROUPS = ("BOTH", "FIXED_ONLY", "REGIME_ONLY", "NEITHER")
+LOCKED_OOS_START = "2026-01-01"
+RESEARCH_START = "2023-01-01"
+REGIME_SUBSTITUTABLE_REJECTS = {
+    "TAIL_VOLUME_BASE_INSUFFICIENT",
+    "TAIL_CLOSE_RANGE_GT_8PCT",
+    "TAIL_VOLUME_NOT_DRY",
+}
 
 
 def classify_tail_regime_group(snapshot: dict) -> str:
@@ -34,10 +44,21 @@ def replay_tail_regime_labels(
     data_by_code: dict[str, dict],
     evaluation_dates: list[str],
     market_data_by_symbol: dict[str, list[dict]],
+    reference_market_dates: list[str],
     engine_factory,
     minimum_history: int,
     oos_start: str = "2026-01-01",
 ) -> dict:
+    _require_locked_oos_start(oos_start)
+    index_history = _validate_research_indexes(
+        market_data_by_symbol,
+        evaluation_dates,
+        reference_market_dates,
+        oos_start,
+    )
+    if index_history.status != "READY":
+        return _blocked_index_result(index_history, evaluation_dates, oos_start)
+    market_data_by_symbol = index_history.data_by_symbol
     daily_labels = [
         item["label"]
         for item in _iter_as_of_evaluations(
@@ -50,12 +71,15 @@ def replay_tail_regime_labels(
         )
     ]
     locked_dates = {date for date in evaluation_dates if date >= oos_start}
+    pre_research_dates = {date for date in evaluation_dates if date < RESEARCH_START}
     return {
+        "status": "COMPLETED",
         "daily_labels": daily_labels,
         "group_counts": dict(Counter(item["group"] for item in daily_labels)),
         "oos_status": "OOS_LOCKED",
         "oos_start": oos_start,
         "locked_date_count": len(locked_dates),
+        "pre_research_date_count": len(pre_research_dates),
     }
 
 
@@ -65,18 +89,47 @@ def run_tail_regime_research(
     data_by_code: dict[str, dict],
     evaluation_dates: list[str],
     market_data_by_symbol: dict[str, list[dict]],
+    reference_market_dates: list[str],
     backtest_config: dict,
     engine_factory,
     minimum_history: int,
     oos_start: str = "2026-01-01",
 ) -> dict:
     """Replay labels and execute only eligible fixed or regime-hypothesis signals."""
+    _require_locked_oos_start(oos_start)
+    index_history = _validate_research_indexes(
+        market_data_by_symbol,
+        evaluation_dates,
+        reference_market_dates,
+        oos_start,
+    )
+    if index_history.status != "READY":
+        return {
+            **_blocked_index_result(index_history, evaluation_dates, oos_start),
+            "parameter_set_id": parameter_set_id,
+            "signals": [],
+            "orders": [],
+            "trades": [],
+            "summary": calculate_trade_metrics([]),
+            "group_metrics": {},
+            "train_metrics": calculate_trade_metrics([]),
+            "validation_metrics": calculate_trade_metrics([]),
+            "stress_tests": {},
+            "gate": {
+                "status": "BLOCKED_INDEX_HISTORY",
+                "reasons": ["BLOCKED_INDEX_HISTORY"],
+                "stress_status": "NOT_RUN",
+            },
+        }
+    market_data_by_symbol = index_history.data_by_symbol
     market_dates = market_calendar_from_indexes(market_data_by_symbol)
+    execution_market_dates = [date for date in market_dates if date < oos_start]
     daily_labels: list[dict] = []
     signals: list[dict] = []
     orders: list[dict] = []
     trades: list[dict] = []
     seen_setups: set[tuple[str, str]] = set()
+    frozen_regime_signals: list[BacktestSignal] = []
 
     for item in _iter_as_of_evaluations(
         data_by_code=data_by_code,
@@ -130,10 +183,12 @@ def run_tail_regime_research(
             "research_tail_path": signal_path,
         }
         signals.append(signal_record)
+        if signal_path == "REGIME":
+            frozen_regime_signals.append(signal)
         outcome = simulate_frozen_trade(
             signal,
-            item["stock_rows"],
-            market_dates,
+            _rows_before_oos(item["stock_rows"], oos_start),
+            execution_market_dates,
             backtest_config,
         )
         orders.append({
@@ -159,12 +214,24 @@ def run_tail_regime_research(
             trades.append(trade)
 
     closed_trades = [trade for trade in trades if trade.get("exit_date")]
-    train_trades = [trade for trade in closed_trades if trade["signal_date"] <= "2024-12-31"]
-    validation_trades = [
-        trade for trade in closed_trades
-        if "2025-01-01" <= trade["signal_date"] <= "2025-12-31"
-    ]
+    train_trades, validation_trades, cross_period_trades = _partition_closed_trades(
+        closed_trades,
+    )
+    stress_tests = {}
+    if frozen_regime_signals:
+        stress_tests = _filter_stress_results_for_research_periods(
+            replay_stress_scenarios(
+                frozen_regime_signals,
+                load_rows=lambda code: _rows_before_oos(
+                    list((data_by_code.get(code) or {}).get("rows") or []),
+                    oos_start,
+                ),
+                market_dates=execution_market_dates,
+                base_config=backtest_config,
+            ),
+        )
     return {
+        "status": "COMPLETED",
         "parameter_set_id": parameter_set_id,
         "daily_labels": sorted(daily_labels, key=lambda row: (row["evaluation_date"], row["code"])),
         "group_counts": dict(Counter(item["group"] for item in daily_labels)),
@@ -175,10 +242,20 @@ def run_tail_regime_research(
         "group_metrics": group_trade_metrics(closed_trades, "tail_regime_group"),
         "train_metrics": calculate_trade_metrics(train_trades),
         "validation_metrics": calculate_trade_metrics(validation_trades),
-        "gate": _research_gate(train_trades, validation_trades),
+        "cross_period_trades": sorted(
+            cross_period_trades,
+            key=lambda row: (row.get("signal_date", ""), row.get("code", "")),
+        ),
+        "stress_tests": stress_tests,
+        "gate": _research_gate(
+            train_trades,
+            validation_trades,
+            stress_results=stress_tests,
+        ),
         "oos_status": "OOS_LOCKED",
         "oos_start": oos_start,
         "locked_date_count": len({date for date in evaluation_dates if date >= oos_start}),
+        "pre_research_date_count": len({date for date in evaluation_dates if date < RESEARCH_START}),
     }
 
 
@@ -191,11 +268,20 @@ def _iter_as_of_evaluations(
     minimum_history: int,
     oos_start: str,
 ):
-    allowed_dates = sorted({date for date in evaluation_dates if date < oos_start})
+    allowed_dates = sorted({
+        date for date in evaluation_dates
+        if RESEARCH_START <= date < oos_start
+    })
     for code in sorted(data_by_code):
         stock = data_by_code[code]
         stock_rows = list(stock.get("rows") or [])
         engine = engine_factory()
+        engine_config = getattr(engine, "config", None)
+        if (
+            isinstance(engine_config, dict)
+            and engine_config.get("decision_profile") != "formal_original"
+        ):
+            raise ValueError("tail regime research requires decision_profile=formal_original")
         for evaluation_date in allowed_dates:
             visible_rows = slice_visible_rows(stock_rows, evaluation_date)
             if len(visible_rows) < minimum_history:
@@ -244,7 +330,15 @@ def _build_regime_only_hypothesis(evaluation, config: dict) -> dict | None:
         return None
     if evaluation.tail_regime.status != "CONFIRMED" or evaluation.dry_tail.dry_tail_pass:
         return None
-    hypothetical_tail = replace(evaluation.dry_tail, dry_tail_pass=True, rejects=[])
+    remaining_tail_rejects = _remaining_rejects_after_regime(
+        evaluation.dry_tail.rejects,
+        evaluation.dry_tail.rejects,
+    )
+    hypothetical_tail = replace(
+        evaluation.dry_tail,
+        dry_tail_pass=not remaining_tail_rejects,
+        rejects=remaining_tail_rejects,
+    )
     hypothetical_score = score_strategy6(
         evaluation.indicators,
         evaluation.start,
@@ -258,8 +352,10 @@ def _build_regime_only_hypothesis(evaluation, config: dict) -> dict | None:
         brooks_tail=evaluation.brooks_tail,
         setup_quality=evaluation.setup_quality,
     )
-    tail_rejects = set(evaluation.dry_tail.rejects)
-    remaining_rejects = [reason for reason in evaluation.reject_reasons if reason not in tail_rejects]
+    remaining_rejects = _remaining_rejects_after_regime(
+        evaluation.reject_reasons,
+        evaluation.dry_tail.rejects,
+    )
     candidate_type, classification, lifecycle_status, suggestion = classify_candidate(
         evaluation.indicators,
         evaluation.start,
@@ -296,7 +392,20 @@ def _build_regime_only_hypothesis(evaluation, config: dict) -> dict | None:
     return snapshot
 
 
-def _research_gate(train_trades: list[dict], validation_trades: list[dict]) -> dict:
+def _remaining_rejects_after_regime(
+    reject_reasons: list[str],
+    dry_tail_rejects: list[str],
+) -> list[str]:
+    substitutable = set(dry_tail_rejects) & REGIME_SUBSTITUTABLE_REJECTS
+    return [reason for reason in reject_reasons if reason not in substitutable]
+
+
+def _research_gate(
+    train_trades: list[dict],
+    validation_trades: list[dict],
+    *,
+    stress_results: dict | None = None,
+) -> dict:
     regime_train = [
         trade for trade in train_trades
         if trade.get("tail_regime_group") == "REGIME_ONLY"
@@ -319,12 +428,135 @@ def _research_gate(train_trades: list[dict], validation_trades: list[dict]) -> d
             reasons.append(f"{period}_EXPECTANCY_NOT_POSITIVE")
         if metrics["profit_factor"] < 1.20:
             reasons.append(f"{period}_PROFIT_FACTOR_LT_1_20")
-        ratio = metrics["avg_win_r"] / metrics["avg_loss_r"] if metrics["avg_loss_r"] > 0 else 0.0
+        ratio = (
+            metrics["avg_win_r"] / metrics["avg_loss_r"]
+            if metrics["avg_loss_r"] > 0
+            else math.inf if metrics["avg_win_r"] > 0
+            else 0.0
+        )
         if ratio < 2.5:
             reasons.append(f"{period}_AVG_WIN_LOSS_LT_2_5")
+    required_stress = ("HIGH_COST", "LOW_FILL", "ONE_DAY_DELAY")
+    stress_complete = all(
+        (stress_results or {}).get(name, {}).get("status") == "COMPLETED"
+        for name in required_stress
+    )
+    stress_acceptance = (
+        evaluate_stress_acceptance(stress_results or {})
+        if stress_complete else {"passed": False, "checks": {}}
+    )
+    if not stress_complete:
+        reasons.append("STRESS_REPLAYS_REQUIRED")
+    elif not stress_acceptance["passed"]:
+        reasons.append("STRESS_ACCEPTANCE_FAILED")
     return {
         "status": "PASS" if not reasons else "CONTINUE_SHADOW",
         "regime_only_closed_trades": regime_closed,
         "reasons": reasons,
-        "stress_status": "REQUIRES_SEPARATE_REPLAY",
+        "stress_status": (
+            "PASS" if stress_complete and stress_acceptance["passed"]
+            else "FAILED" if stress_complete
+            else "REQUIRES_REPLAY"
+        ),
+        "stress_checks": stress_acceptance["checks"],
+    }
+
+
+def _require_locked_oos_start(oos_start: str) -> None:
+    if oos_start != LOCKED_OOS_START:
+        raise ValueError(f"tail regime research OOS lock must remain {LOCKED_OOS_START}")
+
+
+def _rows_before_oos(rows: list[dict], oos_start: str) -> list[dict]:
+    return [row for row in rows if str(row.get("date") or "") < oos_start]
+
+
+def _validate_research_indexes(
+    market_data_by_symbol: dict[str, list[dict]],
+    evaluation_dates: list[str],
+    reference_market_dates: list[str],
+    oos_start: str,
+):
+    if not reference_market_dates:
+        raise ValueError("tail regime research requires a real reference market calendar")
+    requested_dates = sorted({
+        date for date in evaluation_dates
+        if RESEARCH_START <= date < oos_start
+    })
+    reference_dates = sorted({
+        date for date in reference_market_dates
+        if RESEARCH_START <= date < oos_start
+    })
+    missing_from_reference = sorted(set(requested_dates) - set(reference_dates))
+    if missing_from_reference:
+        raise ValueError(
+            "tail regime research evaluation dates must exist in the reference market calendar"
+        )
+    required_dates = sorted(set(requested_dates) | set(reference_dates))
+    visible_dates = sorted({
+        str(row.get("date") or "")
+        for rows in market_data_by_symbol.values()
+        for row in rows
+        if row.get("date") and str(row.get("date")) < oos_start
+    })
+    if required_dates:
+        start_date = required_dates[0]
+        end_date = required_dates[-1]
+    else:
+        start_date = visible_dates[0] if visible_dates else ""
+        end_date = visible_dates[-1] if visible_dates else ""
+    return validate_index_history_data(
+        market_data_by_symbol,
+        start_date=start_date,
+        end_date=end_date,
+        reference_dates=reference_dates,
+    )
+
+
+def _partition_closed_trades(
+    closed_trades: list[dict],
+) -> tuple[list[dict], list[dict], list[dict]]:
+    train: list[dict] = []
+    validation: list[dict] = []
+    cross_period: list[dict] = []
+    for trade in closed_trades:
+        signal_date = str(trade.get("signal_date") or "")
+        exit_date = str(trade.get("exit_date") or "")
+        if RESEARCH_START <= signal_date <= exit_date <= "2024-12-31":
+            train.append(trade)
+        elif "2025-01-01" <= signal_date <= exit_date <= "2025-12-31":
+            validation.append(trade)
+        else:
+            cross_period.append(trade)
+    return train, validation, cross_period
+
+
+def _filter_stress_results_for_research_periods(results: dict) -> dict:
+    filtered: dict = {}
+    for name, scenario in results.items():
+        trades = list(scenario.get("trades") or [])
+        train, validation, cross_period = _partition_closed_trades(
+            [trade for trade in trades if trade.get("exit_date")],
+        )
+        eligible = train + validation
+        filtered[name] = {
+            **scenario,
+            "trades": eligible,
+            "metrics": calculate_trade_metrics(eligible),
+            "cross_period_trade_count": len(cross_period),
+        }
+    return filtered
+
+
+def _blocked_index_result(index_history, evaluation_dates: list[str], oos_start: str) -> dict:
+    return {
+        "status": "BLOCKED_INDEX_HISTORY",
+        "daily_labels": [],
+        "group_counts": {},
+        "missing_index_symbols": list(index_history.missing_symbols),
+        "index_coverage": index_history.coverage,
+        "oos_status": "OOS_LOCKED",
+        "oos_start": oos_start,
+        "locked_date_count": len({date for date in evaluation_dates if date >= oos_start}),
+        "pre_research_date_count": len({date for date in evaluation_dates if date < RESEARCH_START}),
     }

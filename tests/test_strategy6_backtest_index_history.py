@@ -3,6 +3,7 @@ from strategy6.backtest.index_history import (
     INDEX_SYMBOLS,
     ensure_index_history,
     load_index_history,
+    validate_index_history_data,
 )
 
 
@@ -49,3 +50,24 @@ def test_index_history_blocks_when_one_index_has_internal_trading_date_gap(tmp_p
     assert result.status == "BLOCKED_INDEX_HISTORY"
     assert "sz399006" in result.missing_symbols
     assert result.coverage["sz399006"]["missing_dates"] == ["2025-01-03"]
+
+
+def test_index_history_blocks_when_all_indexes_miss_reference_calendar_date():
+    data = {
+        symbol: [
+            {"date": date, "open": 10, "high": 11, "low": 9, "close": 10, "volume": 1}
+            for date in ("2025-01-02", "2025-01-06")
+        ]
+        for symbol in INDEX_SYMBOLS
+    }
+
+    result = validate_index_history_data(
+        data,
+        start_date="2025-01-02",
+        end_date="2025-01-06",
+        reference_dates=["2025-01-02", "2025-01-03", "2025-01-06"],
+    )
+
+    assert result.status == "BLOCKED_INDEX_HISTORY"
+    assert set(result.missing_symbols) == set(INDEX_SYMBOLS)
+    assert result.coverage["sh000001"]["missing_dates"] == ["2025-01-03"]

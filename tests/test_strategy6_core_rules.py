@@ -193,6 +193,22 @@ def test_tail_regime_shadow_switch_never_changes_formal_decision():
     assert isinstance(candidate["tail_regime_risks"], list)
 
 
+def test_invalid_phase_skips_tail_regime_detection(monkeypatch):
+    import strategy6.engine as engine_mod
+
+    def fail_if_called(*args, **kwargs):
+        raise AssertionError("invalid phase must not run tail regime detection")
+
+    monkeypatch.setattr(engine_mod, "evaluate_tail_regime", fail_if_called)
+    result = StrongVcpTailEngine({
+        "strategy6": {"start_age_max_days": 5},
+    }).evaluate_at(build_strategy6_candidate_data(), code="000001")
+
+    assert result.phase.valid is False
+    assert result.tail_regime.status == "INSUFFICIENT_BASELINE"
+    assert result.phase.status in result.tail_regime.risks
+
+
 def test_formal_engine_does_not_execute_auxiliary_tail_paths(monkeypatch):
     import strategy6.engine as engine_mod
 

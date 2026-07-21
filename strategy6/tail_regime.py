@@ -39,10 +39,13 @@ def evaluate_tail_regime(
     rows: list[dict],
     *,
     consolidation_start_index: int,
+    previous_consolidation_start_index: int | None = None,
     enabled: bool = True,
     big_down_return: float = -0.04,
     big_down_volume_ratio: float = 1.5,
     key_support_price: float | None = None,
+    previous_key_support_price: float | None = None,
+    previous_phase_valid: bool = True,
 ) -> Strategy6TailRegime:
     """Evaluate a diagnostic tail regime without changing formal decisions."""
     if not enabled:
@@ -76,19 +79,34 @@ def evaluate_tail_regime(
         return Strategy6TailRegime(status="NO_REGIME_CHANGE")
 
     current_risks = list(current.risks) + support_risks
+    previous_support_risks = [
+        f"PREVIOUS_{risk}"
+        for risk in _support_risks(normalized[:-1], previous_key_support_price)
+    ]
+    if not previous_phase_valid:
+        previous_support_risks.append("PREVIOUS_PHASE_INVALID")
+    previous_structure_risks: list[str] = []
     if current_risks:
         status = "BROKEN"
     else:
         previous = _detect_visible_regime(
             normalized[:-1],
-            consolidation_start_index=consolidation_start_index,
+            consolidation_start_index=(
+                consolidation_start_index
+                if previous_consolidation_start_index is None
+                else previous_consolidation_start_index
+            ),
             big_down_return=big_down_return,
             big_down_volume_ratio=big_down_volume_ratio,
         )
+        previous_structure_risks = [
+            f"PREVIOUS_{risk}" for risk in (previous.risks if previous else ())
+        ]
         status = (
             "CONFIRMED"
             if previous is not None
             and not previous.risks
+            and not previous_support_risks
             and abs(previous.split_index - current.split_index) <= 1
             else "FORMING"
         )
@@ -106,7 +124,7 @@ def evaluate_tail_regime(
         low_slope_atr=round(current.low_slope_atr, 6),
         model_version=MODEL_VERSION,
         reasons=list(current.reasons),
-        risks=current_risks,
+        risks=current_risks + previous_support_risks + previous_structure_risks,
     )
 
 
@@ -150,18 +168,19 @@ def _detect_visible_regime(
         body_ratio = _feature_ratio(tail_features, baseline_features, 2)
         abs_return_ratio = _feature_ratio(tail_features, baseline_features, 3)
         contraction_count = sum(
-            0 < ratio <= MAX_PRICE_FEATURE_RATIO
+            0 <= ratio <= MAX_PRICE_FEATURE_RATIO
             for ratio in (range_ratio, body_ratio, abs_return_ratio)
         )
         close_dispersion = _close_dispersion(tail_rows)
         close_range = _close_range(tail_rows)
-        low_slope_atr = _low_slope_atr(tail_rows)
         if not (
             0 < volume_ratio <= MAX_VOLUME_RATIO
             and contraction_count >= 2
             and 0 <= close_range <= MAX_CLOSE_RANGE
-            and low_slope_atr >= MIN_LOW_SLOPE_ATR
         ):
+            continue
+        low_slope_atr = _low_slope_atr(tail_rows)
+        if low_slope_atr < MIN_LOW_SLOPE_ATR:
             continue
 
         risks = _structure_risks(
@@ -270,7 +289,10 @@ def _feature_ratio(
     column: int,
 ) -> float:
     denominator = median(item[column] for item in baseline)
-    return median(item[column] for item in tail) / denominator if denominator > EPSILON else 0.0
+    numerator = median(item[column] for item in tail)
+    if denominator <= EPSILON:
+        return 1.0 if numerator <= EPSILON else math.inf
+    return numerator / denominator
 
 
 def _close_dispersion(rows: list[dict]) -> float:
@@ -281,8 +303,11 @@ def _close_dispersion(rows: list[dict]) -> float:
 
 def _close_range(rows: list[dict]) -> float:
     closes = [row["close"] for row in rows]
-    center = median(closes)
-    return (max(closes) - min(closes)) / center if center > EPSILON else 0.0
+    current_close = closes[-1] if closes else 0.0
+    return (
+        (max(closes) - min(closes)) / current_close
+        if current_close > EPSILON else 0.0
+    )
 
 
 def _low_slope_atr(rows: list[dict]) -> float:
@@ -312,7 +337,8 @@ def _structure_risks(
 ) -> list[str]:
     risks: list[str] = []
     baseline_volume = median(row["volume"] for row in baseline)
-    for previous, current in zip(tail, tail[1:]):
+    boundary_and_tail = ([baseline[-1]] if baseline else []) + tail
+    for previous, current in zip(boundary_and_tail, boundary_and_tail[1:]):
         day_return = (current["close"] - previous["close"]) / previous["close"]
         if day_return <= big_down_return and current["volume"] >= baseline_volume * big_down_volume_ratio:
             risks.append("TAIL_REGIME_BIG_DOWN_VOLUME")
