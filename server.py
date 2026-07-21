@@ -57,6 +57,7 @@ from scanner.daily_data_service import (
     fetch_with_retry,
 )
 from scanner.data_source import DataSourceManager
+from tickflow_data.web_task import TickFlowFullRefreshManager, TickFlowTaskConflict
 
 logger = logging.getLogger(__name__)
 
@@ -340,6 +341,8 @@ _backtest_running = {
     "thread": None,
 }
 
+_tickflow_full_refresh = TickFlowFullRefreshManager()
+
 
 def _get_running_task_id() -> str | None:
     """Return the active scan task id from memory or DB."""
@@ -360,6 +363,16 @@ def _get_running_strategy_type() -> str | None:
 
 def _scan_conflict_response():
     """Return a 409 response if any scan or backtest process is already running."""
+    if _tickflow_full_refresh.is_running():
+        status = _tickflow_full_refresh.status()
+        return JSONResponse(
+            {
+                "error": "TICKFLOW_REFRESH_RUNNING",
+                "message": "当前已有 TickFlow 全市场数据重拉任务正在运行",
+                "runningTaskId": status.get("task_id"),
+            },
+            status_code=409,
+        )
     running_id = _get_running_task_id()
     if running_id:
         return JSONResponse(
@@ -1512,6 +1525,44 @@ async def refresh_kline_health(payload: dict | None = None):
         "succeeded": succeeded,
         "failed": failed,
     }
+
+
+@app.post("/api/tickflow/full-refresh", status_code=202)
+async def start_tickflow_full_refresh():
+    """Force a full-market TickFlow refresh using fixed audited parameters."""
+    conflict = _scan_conflict_response()
+    if conflict is not None:
+        return conflict
+
+    config = _ensure_db_initialized_from_config()
+    database_path = config.get("data", {}).get("database_path", "data/cuphandle.db")
+    stocks = db.get_stock_pool()
+    if not stocks:
+        return JSONResponse(
+            {
+                "error": "EMPTY_STOCK_POOL",
+                "message": "股票池为空，无法启动 TickFlow 全市场重拉",
+            },
+            status_code=409,
+        )
+    try:
+        return _tickflow_full_refresh.start(database_path=database_path, stocks=stocks)
+    except TickFlowTaskConflict:
+        status = _tickflow_full_refresh.status()
+        return JSONResponse(
+            {
+                "error": "TICKFLOW_REFRESH_RUNNING",
+                "message": "当前已有 TickFlow 全市场数据重拉任务正在运行",
+                "runningTaskId": status.get("task_id"),
+            },
+            status_code=409,
+        )
+
+
+@app.get("/api/tickflow/full-refresh/status")
+async def get_tickflow_full_refresh_status():
+    """Return the current in-process TickFlow refresh state."""
+    return _tickflow_full_refresh.status()
 
 
 @app.post("/api/stock/{code}/kline-refresh")
@@ -3187,6 +3238,13 @@ async def strategy3_candidate_detail(code: str, task_id: str = None):
 
 def _backtest_conflict_response():
     """Return 409 if any scan or backtest is running."""
+    if _tickflow_full_refresh.is_running():
+        status = _tickflow_full_refresh.status()
+        return JSONResponse({
+            "error": "TICKFLOW_REFRESH_RUNNING",
+            "message": "当前已有 TickFlow 全市场数据重拉任务正在运行",
+            "runningTaskId": status.get("task_id"),
+        }, status_code=409)
     if _running["running"]:
         return JSONResponse({
             "error": "TASK_CONFLICT",
@@ -3792,8 +3850,9 @@ async def strategy2_backtest_resume(task_id: str):
     task = db.get_strategy2_backtest_task(task_id)
     if not task:
         return JSONResponse({"error": "TASK_NOT_FOUND"}, status_code=404)
-    if _backtest_running["running"]:
-        return JSONResponse({"error": "TASK_CONFLICT", "message": "已有回测正在运行"}, status_code=409)
+    conflict = _backtest_conflict_response()
+    if conflict is not None:
+        return conflict
     if str(task.get("status", "")).lower() not in {"interrupted", "canceled"}:
         return JSONResponse({"error": "TASK_NOT_RESUMABLE"}, status_code=409)
     target_stocks = [
@@ -3844,8 +3903,9 @@ async def strategy2_backtest_retry_failed(task_id: str):
     task = db.get_strategy2_backtest_task(task_id)
     if not task:
         return JSONResponse({"error": "TASK_NOT_FOUND"}, status_code=404)
-    if _backtest_running["running"]:
-        return JSONResponse({"error": "TASK_CONFLICT"}, status_code=409)
+    conflict = _backtest_conflict_response()
+    if conflict is not None:
+        return conflict
     if str(task.get("status", "")).lower() == "running":
         return JSONResponse({"error": "TASK_CONFLICT"}, status_code=409)
     target_stocks = db.get_strategy2_backtest_task_stocks(task_id, status="FAILED")

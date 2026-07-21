@@ -6,6 +6,7 @@ from fastapi.testclient import TestClient
 import server
 from scanner import db
 from scanner.daily_data_service import FetchResult
+from tickflow_data.web_task import TickFlowTaskConflict
 
 
 def _row(day: str, close: float = 10.0) -> dict:
@@ -404,3 +405,110 @@ def test_kline_health_bulk_refresh_only_refetches_items_that_need_it(monkeypatch
     assert body["skipped_count"] == 1
     assert refreshed_codes == ["000003", "000005"]
     assert {item["code"] for item in body["succeeded"]} == {"000003", "000005"}
+
+
+class _FakeTickFlowFullRefresh:
+    def __init__(self, *, running: bool = False, raises_conflict: bool = False):
+        self.started = []
+        self.raises_conflict = raises_conflict
+        self.state = {
+            "task_id": "tickflow-full-20260721-120000",
+            "running": running,
+            "status": "running" if running else "idle",
+            "total": 0,
+            "processed": 0,
+            "succeeded": 0,
+            "failed": 0,
+            "parameters": {
+                "history_days": 1100,
+                "adjustment": "forward_additive",
+                "chunk_size": 100,
+                "batch_size": 100,
+                "max_workers": 5,
+            },
+        }
+
+    def is_running(self):
+        return self.state["running"]
+
+    def status(self):
+        return dict(self.state)
+
+    def start(self, *, database_path, stocks):
+        if self.raises_conflict:
+            raise TickFlowTaskConflict("already running")
+        self.started.append({"database_path": str(database_path), "stocks": stocks})
+        self.state.update({
+            "running": True,
+            "status": "running",
+            "total": len(stocks),
+        })
+        return self.status()
+
+
+def test_tickflow_full_refresh_api_starts_fixed_full_market_task(monkeypatch, tmp_path):
+    db_path = tmp_path / "cuphandle.db"
+    db.init_db(str(db_path))
+    db.save_stock_pool([
+        {"code": "000001", "name": "平安银行", "market": "SZ"},
+        {"code": "600000", "name": "浦发银行", "market": "SH"},
+    ])
+    manager = _FakeTickFlowFullRefresh()
+    monkeypatch.setattr(server, "load_config", lambda path="config.yaml": {"data": {"database_path": str(db_path)}})
+    monkeypatch.setattr(server, "_tickflow_full_refresh", manager, raising=False)
+
+    response = TestClient(server.app).post("/api/tickflow/full-refresh")
+
+    assert response.status_code == 202
+    body = response.json()
+    assert body["status"] == "running"
+    assert body["total"] == 2
+    assert body["parameters"]["history_days"] == 1100
+    assert body["parameters"]["adjustment"] == "forward_additive"
+    assert body["parameters"]["chunk_size"] == 100
+    assert manager.started == [{
+        "database_path": str(db_path),
+        "stocks": [
+            {"code": "000001", "name": "平安银行", "market": "SZ"},
+            {"code": "600000", "name": "浦发银行", "market": "SH"},
+        ],
+    }]
+
+
+def test_tickflow_full_refresh_status_api_returns_current_progress(monkeypatch):
+    manager = _FakeTickFlowFullRefresh(running=True)
+    manager.state.update({"total": 5000, "processed": 230, "succeeded": 228, "failed": 2})
+    monkeypatch.setattr(server, "_tickflow_full_refresh", manager, raising=False)
+
+    response = TestClient(server.app).get("/api/tickflow/full-refresh/status")
+
+    assert response.status_code == 200
+    assert response.json()["processed"] == 230
+    assert response.json()["failed"] == 2
+
+
+def test_tickflow_full_refresh_rejects_empty_stock_pool(monkeypatch, tmp_path):
+    db_path = tmp_path / "cuphandle.db"
+    db.init_db(str(db_path))
+    manager = _FakeTickFlowFullRefresh()
+    monkeypatch.setattr(server, "load_config", lambda path="config.yaml": {"data": {"database_path": str(db_path)}})
+    monkeypatch.setattr(server, "_tickflow_full_refresh", manager, raising=False)
+
+    response = TestClient(server.app).post("/api/tickflow/full-refresh")
+
+    assert response.status_code == 409
+    assert response.json()["error"] == "EMPTY_STOCK_POOL"
+    assert manager.started == []
+
+
+def test_tickflow_refresh_and_scan_backtest_are_mutually_exclusive(monkeypatch):
+    manager = _FakeTickFlowFullRefresh(running=True)
+    monkeypatch.setattr(server, "_tickflow_full_refresh", manager, raising=False)
+
+    scan_conflict = server._scan_conflict_response()
+    backtest_conflict = server._backtest_conflict_response()
+
+    assert scan_conflict.status_code == 409
+    assert json.loads(scan_conflict.body)["error"] == "TICKFLOW_REFRESH_RUNNING"
+    assert backtest_conflict.status_code == 409
+    assert json.loads(backtest_conflict.body)["error"] == "TICKFLOW_REFRESH_RUNNING"
