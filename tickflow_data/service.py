@@ -36,6 +36,13 @@ def _chunks(values: list[str], size: int):
         yield values[offset : offset + size]
 
 
+def _has_real_trade(row: dict) -> bool:
+    try:
+        return float(row.get("volume") or 0) > 0 or float(row.get("turnover") or 0) > 0
+    except (TypeError, ValueError):
+        return True
+
+
 class TickFlowDailyUpdateService:
     def __init__(
         self,
@@ -220,18 +227,22 @@ class TickFlowDailyUpdateService:
                     on_result(result)
                 continue
             try:
-                rows = normalize_frame(fetched.frames[symbol])[-self.history_days :]
+                rows = normalize_frame(
+                    fetched.frames[symbol],
+                    trim_non_positive_prefix=True,
+                )[-self.history_days :]
                 existing = db.get_ohlc(code) or []
-                if existing:
-                    required_rows = min(len(existing), self.history_days)
+                existing_trades = [row for row in existing if _has_real_trade(row)]
+                if existing_trades:
+                    required_rows = min(len(existing_trades), self.history_days)
                     if len(rows) < required_rows:
                         raise ValueError(
                             f"full history shortened from {required_rows} to {len(rows)} rows"
                         )
-                    if rows[-1]["date"] < existing[-1]["date"]:
+                    if rows[-1]["date"] < existing_trades[-1]["date"]:
                         raise ValueError(
                             "full history latest date regressed from "
-                            f"{existing[-1]['date']} to {rows[-1]['date']}"
+                            f"{existing_trades[-1]['date']} to {rows[-1]['date']}"
                         )
                 self._finish_stock(
                     result,

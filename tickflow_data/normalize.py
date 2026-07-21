@@ -30,7 +30,7 @@ def _finite_number(value: Any, field: str) -> float:
     return number
 
 
-def normalize_frame(frame) -> list[dict]:
+def normalize_frame(frame, *, trim_non_positive_prefix: bool = False) -> list[dict]:
     if frame is None or getattr(frame, "empty", True):
         raise TickFlowDataError("empty TickFlow daily frame")
 
@@ -39,14 +39,34 @@ def normalize_frame(frame) -> list[dict]:
     if missing:
         raise TickFlowDataError(f"missing columns: {', '.join(missing)}")
 
-    normalized: list[dict] = []
+    prepared: list[tuple[str, dict]] = []
     seen_dates: set[str] = set()
     for raw in frame.to_dict(orient="records"):
         trade_date = _to_date(raw["trade_date"])
         if trade_date in seen_dates:
             raise TickFlowDataError(f"duplicate trade date: {trade_date}")
         seen_dates.add(trade_date)
+        prepared.append((trade_date, raw))
 
+    if trim_non_positive_prefix:
+        non_positive_dates = []
+        for trade_date, raw in prepared:
+            prices = tuple(
+                _finite_number(raw[field], field)
+                for field in ("open", "high", "low", "close")
+            )
+            if min(prices) <= 0:
+                non_positive_dates.append(trade_date)
+        if non_positive_dates:
+            cutoff = max(non_positive_dates)
+            prepared = [(date, raw) for date, raw in prepared if date > cutoff]
+            if not prepared:
+                raise TickFlowDataError(
+                    f"no positive OHLC after adjusted-price cutoff {cutoff}"
+                )
+
+    normalized: list[dict] = []
+    for trade_date, raw in prepared:
         open_price = _finite_number(raw["open"], "open")
         high = _finite_number(raw["high"], "high")
         low = _finite_number(raw["low"], "low")

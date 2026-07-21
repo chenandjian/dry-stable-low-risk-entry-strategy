@@ -198,6 +198,54 @@ def test_full_refresh_never_shortens_or_regresses_existing_history(tmp_path):
     assert db.get_ohlc("600519") == old
 
 
+def test_full_refresh_ignores_zero_volume_placeholder_in_history_guards(tmp_path):
+    _setup_db(tmp_path)
+    real = _rows(1, 3)
+    placeholder = {
+        **real[-1],
+        "date": "2026-07-04",
+        "volume": 0.0,
+        "turnover": 0.0,
+    }
+    _save_existing("688693", [*real, placeholder], source="sina")
+    client = _Client(
+        [BatchFetchResult(frames={"688693.SH": _frame(real)})]
+    )
+    service = TickFlowDailyUpdateService(client)
+
+    result = service.run(
+        [{"code": "688693", "market": "SH"}],
+        dry_run=False,
+        mode="backfill",
+    )
+
+    assert result.results[0].status == "success"
+    assert db.get_ohlc("688693") == real
+    assert db.get_ohlc_metadata("688693")["source"] == "tickflow"
+
+
+def test_full_refresh_trims_non_positive_adjusted_prefix_when_valid_suffix_is_long_enough(tmp_path):
+    _setup_db(tmp_path)
+    existing = _rows(3, 2)
+    _save_existing("600066", existing, source="sina")
+    fetched = _rows(1, 4)
+    fetched[1]["low"] = -0.1
+    client = _Client(
+        [BatchFetchResult(frames={"600066.SH": _frame(fetched)})]
+    )
+    service = TickFlowDailyUpdateService(client)
+
+    result = service.run(
+        [{"code": "600066", "market": "SH"}],
+        dry_run=False,
+        mode="backfill",
+    )
+
+    assert result.results[0].status == "success"
+    assert db.get_ohlc("600066") == fetched[2:]
+    assert result.results[0].first_date == "2026-07-03"
+
+
 def test_full_market_backfill_requests_stocks_in_bounded_chunks(tmp_path):
     _setup_db(tmp_path)
     stocks = [
