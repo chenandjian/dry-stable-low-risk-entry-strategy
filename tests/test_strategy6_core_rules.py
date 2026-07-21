@@ -17,7 +17,7 @@ from strategy6.models import (
 )
 from strategy6.strong_start import evaluate_strong_start
 from strategy6.scorer import _relative_strength_risk_score
-from strategy6.validation import resolve_strategy6_config
+from strategy6.validation import is_strategy6_research_profile, resolve_strategy6_config
 
 
 def _row(i, close=10.0, open_price=None, high=None, low=None, volume=1_000_000, amount=600_000_000):
@@ -692,6 +692,8 @@ def test_config_rejects_invalid_filter_mode():
 def test_strategy6_defaults_enable_real_market_filter_only():
     cfg = resolve_strategy6_config({})
 
+    assert cfg["decision_profile"] == "formal_original"
+    assert is_strategy6_research_profile(cfg) is False
     assert cfg["enable_market_filter"] is True
     assert cfg["market_filter_mode"] == "downgrade"
     assert "enable_sector_filter" not in cfg
@@ -699,6 +701,26 @@ def test_strategy6_defaults_enable_real_market_filter_only():
     assert "sector_min_member_new_high_count" not in cfg
     assert cfg["min_relative_strength_20"] == 0.10
     assert cfg["breakout_extended_max_pct"] == 0.08
+
+
+def test_strategy6_accepts_explicit_research_decision_profile():
+    cfg = resolve_strategy6_config({
+        "strategy6": {"decision_profile": "research_quality_v2"},
+    })
+
+    assert cfg["decision_profile"] == "research_quality_v2"
+    assert is_strategy6_research_profile(cfg) is True
+
+
+def test_strategy6_rejects_unknown_decision_profile():
+    try:
+        resolve_strategy6_config({
+            "strategy6": {"decision_profile": "experimental_guess"},
+        })
+    except ValueError as exc:
+        assert "decision_profile" in str(exc)
+    else:
+        raise AssertionError("unknown decision_profile should fail")
 
 
 def _market_rows(closes, end_date=date(2026, 1, 29)):

@@ -9,6 +9,7 @@ from numbers import Real
 
 DEFAULT_STRATEGY6_CONFIG = {
     "enabled": True,
+    "decision_profile": "formal_original",
     "kline_days": 1100,
     "minimum_trading_days": 500,
     "min_avg_amount_60d_yi": 3,
@@ -264,6 +265,10 @@ def resolve_strategy6_config(config: dict | None) -> dict:
         raw["vcp_first_contraction_max_range"] = raw["vcp_min_first_range"]
 
     raw["enabled"] = bool(raw.get("enabled", True))
+    if raw.get("decision_profile") not in {"formal_original", "research_quality_v2"}:
+        raise ValueError(
+            "decision_profile must be one of formal_original/research_quality_v2"
+        )
     _validate_int_range(raw, "kline_days", 260, 3000)
     _validate_int_range(raw, "minimum_trading_days", 260, raw["kline_days"])
     _validate_int_range(raw, "start_lookback_days", 20, 250)
@@ -370,6 +375,11 @@ def resolve_strategy6_config(config: dict | None) -> dict:
 def strategy6_config_hash(config: dict) -> str:
     payload = json.dumps(config, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def is_strategy6_research_profile(config: dict) -> bool:
+    """Return whether experimental Strategy6 decision paths may affect selection."""
+    return config.get("decision_profile") == "research_quality_v2"
 
 
 def _validate_int_range(config: dict, key: str, min_v: int, max_v: int) -> None:
