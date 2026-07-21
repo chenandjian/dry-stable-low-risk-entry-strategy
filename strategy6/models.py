@@ -155,6 +155,24 @@ class Strategy6DryTail:
 
 
 @dataclass
+class Strategy6TailRegime:
+    enabled: bool = True
+    status: str = "INSUFFICIENT_BASELINE"
+    start_date: str = ""
+    days: int = 0
+    delta_bic: float = 0.0
+    volume_ratio: float = 0.0
+    range_ratio: float = 0.0
+    body_ratio: float = 0.0
+    abs_return_ratio: float = 0.0
+    close_dispersion: float = 0.0
+    low_slope_atr: float = 0.0
+    model_version: str = "TAIL_REGIME_CP_V1"
+    reasons: list[str] = field(default_factory=list)
+    risks: list[str] = field(default_factory=list)
+
+
+@dataclass
 class Strategy6CompactKline:
     enabled: bool = False
     passed: bool = False
@@ -340,6 +358,7 @@ class Strategy6Evaluation:
     trade_plan: Strategy6TradePlan
     score: Strategy6Score
     setup_quality: Strategy6SetupQuality = field(default_factory=Strategy6SetupQuality)
+    tail_regime: Strategy6TailRegime = field(default_factory=Strategy6TailRegime)
     vcp_observation: Strategy6VcpObservation = field(default_factory=Strategy6VcpObservation)
     strategy_version: str = ""
     config_hash: str = ""
@@ -369,6 +388,7 @@ class Strategy6Evaluation:
         compact = box.compact_kline
         tail = self.tail_paths
         quality = self.setup_quality
+        regime = self.tail_regime
         vcp = self.vcp_observation
         vcp_quality = vcp.quality
         return {
@@ -412,6 +432,20 @@ class Strategy6Evaluation:
             "pre_tail_avg_volume_20": self.dry_tail.pre_tail_avg_volume_20,
             "tail_volume_ratio": self.dry_tail.tail_volume_ratio,
             "volume_slope_10": self.dry_tail.volume_slope_10,
+            "tail_regime_enabled": regime.enabled,
+            "tail_regime_status": regime.status,
+            "tail_regime_start_date": regime.start_date,
+            "tail_regime_days": regime.days,
+            "tail_regime_delta_bic": regime.delta_bic,
+            "tail_regime_volume_ratio": regime.volume_ratio,
+            "tail_regime_range_ratio": regime.range_ratio,
+            "tail_regime_body_ratio": regime.body_ratio,
+            "tail_regime_abs_return_ratio": regime.abs_return_ratio,
+            "tail_regime_close_dispersion": regime.close_dispersion,
+            "tail_regime_low_slope_atr": regime.low_slope_atr,
+            "tail_regime_model_version": regime.model_version,
+            "tail_regime_reasons": regime.reasons,
+            "tail_regime_risks": regime.risks,
             "original_tail_pass": tail.original_pass,
             "original_tail_score": tail.original_score,
             "box_tail_enabled": box.enabled,
