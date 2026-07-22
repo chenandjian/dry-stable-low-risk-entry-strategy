@@ -243,7 +243,7 @@
         <div><span>战术价格</span><strong>支撑 {{ fmt(selected.key_support_price) }} · 前置支撑 {{ fmt(selected.prior_key_support_price) }} · 止损 {{ fmt(selected.stop_loss_price) }}</strong></div>
         <div data-test="detail-execution-zone"><span>{{ isExecutionWaiting(selected) ? '入场状态' : '买入区' }}</span><strong>{{ executionZoneText(selected) }}</strong></div>
         <div data-test="detail-entry-archetype"><span>入场类型</span><strong>{{ entryArchetypeText(selected) }}</strong></div>
-        <div><span>阶段</span><strong>{{ label('phaseStatus', selected.phase_status) }} · 整理 {{ selected.consolidation_start_date || '--' }} · 尾段 {{ selected.tail_start_date || '--' }} · {{ isQualityV2(selected) ? label('tailSegmentationStatus', selected.tail_segmentation_status) : '--' }}</strong></div>
+        <div><span>阶段</span><strong>{{ label('phaseStatus', selected.phase_status) }} · 整理 {{ selected.consolidation_start_date || '--' }} · 尾段 {{ selected.tail_start_date || '--' }} · {{ hasTailSegmentation(selected) ? label('tailSegmentationStatus', selected.tail_segmentation_status) : '--' }}</strong></div>
         <div><span>形态</span><strong>{{ label('patternType', selected.pattern_type || 'UNKNOWN') }} · {{ label('pivotSource', selected.pivot_source) }} · 收缩{{ selected.contraction_count ?? 0 }}次</strong></div>
         <div><span>支撑簇</span><strong>战术 {{ fmt(selected.tactical_support_price) }} · {{ joinedLabels('supportSource', selected.support_cluster_sources, ' / ') }}</strong></div>
         <div><span>客观目标</span><strong>{{ fmt(selected.objective_target_1 ?? selected.target_price_1) }} / {{ fmt(selected.objective_target_2 ?? selected.target_price_2) }} · RR {{ fmt(selected.objective_rr_1 ?? selected.risk_reward_ratio_1) }} / {{ fmt(selected.objective_rr_2 ?? selected.risk_reward_ratio_2) }}</strong></div>
@@ -252,12 +252,15 @@
         <div data-test="detail-quality-v2"><span>质量诊断</span><strong>启动质量 {{ qualityValue(selected, 'start_event_quality_score') }} · 整理质量 {{ qualityValue(selected, 'setup_quality_score') }} · 支撑反应 {{ qualityValue(selected, 'support_reaction_score') }} · 路径证据 {{ qualityValue(selected, 'path_evidence_score') }}</strong></div>
         <div><span>六维评分</span><strong>启动{{ selected.strong_start_score ?? 0 }} 形态{{ selected.pattern_score_component ?? 0 }} 支撑{{ selected.support_score ?? 0 }} 尾段{{ selected.tail_score ?? 0 }} 客观RR{{ selected.objective_rr_score ?? 0 }} RS/风险{{ selected.relative_strength_risk_score ?? 0 }}</strong></div>
         <div><span>权威三路径</span><strong>{{ label('tailPathSummary', authoritativeSummary(selected)) }} · 主路径 {{ label('tailPrimaryPath', authoritativePrimary(selected)) }} · 通过 {{ joinedLabels('tailPrimaryPath', authoritativePaths(selected), ' / ') }} · {{ selected.multi_path_confirmed ? '多路径确认' : '单路径或未通过' }}</strong></div>
-        <div><span>旧尾部路径（原始/箱体）</span><strong>{{ label('tailPath', selected.tail_path || 'NONE') }} · 原路径 {{ selected.original_tail_pass ? '通过' : '未通过' }}/{{ selected.original_tail_score ?? 0 }} · 箱体 {{ selected.box_tail_pass ? '通过' : '未通过' }}/{{ selected.box_tail_score ?? 0 }}</strong></div>
-        <div><span>稳定箱体</span><strong>{{ label('boxStatus', selected.box_status || 'NO_BOX') }} · {{ selected.box_start_date || '--' }} 至 {{ selected.box_end_date || '--' }} · {{ selected.box_days ?? 0 }}日</strong></div>
-        <div><span>箱体区间</span><strong>{{ priceRange(selected.box_low, selected.box_high) }} · 宽度 {{ pct(selected.box_width) }} · 位置 {{ pct(selected.box_position) }}</strong></div>
-        <div><span>箱体承接</span><strong>下沿测试{{ selected.box_low_test_count ?? 0 }}次 · 上沿测试{{ selected.box_high_test_count ?? 0 }}次 · 中枢 {{ pct(selected.box_center_shift) }} · 后/前量 {{ fmt(selected.box_volume_contraction_ratio, 3) }}</strong></div>
-        <div><span>紧密排列</span><strong>{{ label('boxQualityTag', selected.box_quality_tag || 'NONE') }} · {{ selected.compact_kline_pass ? '通过' : '未通过' }} · {{ selected.compact_kline_score ?? 0 }}/10 · 箱体质量 {{ selected.box_quality_score ?? 0 }}</strong></div>
-        <div><span>紧密指标</span><strong>平均实体 {{ pct(selected.avg_body_ratio_5) }} · 收盘区间 {{ pct(selected.compact_close_range_5) }} · 重叠{{ selected.kline_overlap_pair_count ?? 0 }}组 · ATR比 {{ fmt(selected.atr_contraction_ratio, 3) }}</strong></div>
+        <div><span>旧尾部路径（原始/箱体）</span><strong>{{ label('tailPath', selected.tail_path || 'NONE') }} · 原路径 {{ selected.original_tail_pass ? '通过' : '未通过' }}/{{ selected.original_tail_score ?? 0 }} · {{ selected.box_tail_enabled ? `箱体 ${selected.box_tail_pass ? '通过' : '未通过'}/${selected.box_tail_score ?? 0}` : '箱体未启用' }}</strong></div>
+        <template v-if="selected.box_tail_enabled">
+          <div><span>稳定箱体</span><strong>{{ label('boxStatus', selected.box_status || 'NO_BOX') }} · {{ selected.box_start_date || '--' }} 至 {{ selected.box_end_date || '--' }} · {{ selected.box_days ?? 0 }}日</strong></div>
+          <div><span>箱体区间</span><strong>{{ priceRange(selected.box_low, selected.box_high) }} · 宽度 {{ pct(selected.box_width) }} · 位置 {{ pct(selected.box_position) }}</strong></div>
+          <div><span>箱体承接</span><strong>下沿测试{{ selected.box_low_test_count ?? 0 }}次 · 上沿测试{{ selected.box_high_test_count ?? 0 }}次 · 中枢 {{ pct(selected.box_center_shift) }} · 后/前量 {{ fmt(selected.box_volume_contraction_ratio, 3) }}</strong></div>
+          <div><span>紧密排列</span><strong>{{ label('boxQualityTag', selected.box_quality_tag || 'NONE') }} · {{ selected.compact_kline_pass ? '通过' : '未通过' }} · {{ selected.compact_kline_score ?? 0 }}/10 · 箱体质量 {{ selected.box_quality_score ?? 0 }}</strong></div>
+          <div><span>紧密指标</span><strong>平均实体 {{ pct(selected.avg_body_ratio_5) }} · 收盘区间 {{ pct(selected.compact_close_range_5) }} · 重叠{{ selected.kline_overlap_pair_count ?? 0 }}组 · ATR比 {{ fmt(selected.atr_contraction_ratio, 3) }}</strong></div>
+        </template>
+        <div v-else><span>稳定箱体</span><strong>{{ researchModuleUnavailableText(selected, '稳定箱体') }}</strong></div>
         <div><span>市场过滤</span><strong>{{ label('marketStatus', selected.market_status || 'UNKNOWN') }} · {{ selected.enable_market_filter ? '开启' : '关闭' }} · {{ label('marketFilterMode', selected.market_filter_mode) }}</strong></div>
         <div><span>相对强度</span><strong>RS20 {{ pct(selected.relative_strength_20) }}</strong></div>
         <div><span>候选池</span><strong>首次入池 {{ selected.first_pool_date || '--' }} · 池龄 {{ selected.pool_age_trading_days ?? 0 }}日</strong></div>
@@ -331,7 +334,7 @@
       </div>
       <div class="brooks-evidence">
         <div class="subsection-title">Brooks价格行为证据</div>
-        <div v-if="!selected.brooks_tail_enabled" class="brooks-empty">{{ label('brooksStatus', 'BROOKS_DISABLED') }}</div>
+        <div v-if="!selected.brooks_tail_enabled" class="brooks-empty">{{ researchModuleUnavailableText(selected, 'Brooks') }}</div>
         <template v-else>
           <div class="brooks-summary">
             <strong>{{ label('brooksStatus', selected.brooks_status || 'BROOKS_WATCH') }}</strong>
@@ -585,11 +588,29 @@ export default {
     isObservationRecord(candidate) {
       return candidate?.candidate_type === 'REJECTED' && candidate?.classification === 'observation'
     },
-    isQualityV2(candidate) {
-      return candidate?.score_model_version === 'S6_QUALITY_V2'
-    },
     hasQualityDiagnostics(candidate) {
-      return ['S6_FORMAL_ORIGINAL_V1', 'S6_QUALITY_V2'].includes(candidate?.score_model_version)
+      if (typeof candidate?.quality_diagnostics_available === 'boolean') {
+        return candidate.quality_diagnostics_available
+      }
+      const version = String(candidate?.score_model_version || '')
+      if (!version.startsWith('S6_')) return false
+      return [
+        'entry_archetype',
+        'start_event_quality_score',
+        'setup_quality_score',
+        'support_reaction_score',
+        'path_evidence_score',
+      ].some(field => candidate?.[field] !== null && candidate?.[field] !== undefined && candidate?.[field] !== '')
+    },
+    hasTailSegmentation(candidate) {
+      return Boolean(candidate?.tail_segmentation_status)
+    },
+    researchModuleUnavailableText(candidate, moduleName) {
+      const displayName = moduleName === 'Brooks' ? ' Brooks ' : moduleName
+      if (candidate?.decision_profile === 'formal_original') {
+        return `正式策略未启用${displayName}研究，未参与评估`
+      }
+      return `${moduleName}未启用或旧任务无数据（未参与评估）`
     },
     decisionProfileText(candidate) {
       const profile = candidate?.decision_profile
@@ -805,9 +826,9 @@ export default {
           { header: '整理质量分', value: c => this.hasQualityDiagnostics(c) ? (c.setup_quality_score ?? '') : '' },
           { header: '支撑反应分', value: c => this.hasQualityDiagnostics(c) ? (c.support_reaction_score ?? '') : '' },
           { header: '路径证据分', value: c => this.hasQualityDiagnostics(c) ? (c.path_evidence_score ?? '') : '' },
-          { header: '尾段划分', value: c => this.isQualityV2(c) ? this.label('tailSegmentationStatus', c.tail_segmentation_status) : '' },
-          { header: '尾段划分原始值', value: c => this.isQualityV2(c) ? (c.tail_segmentation_status || '') : '' },
-          { header: '尾段划分分数', value: c => this.isQualityV2(c) ? (c.tail_segmentation_score ?? '') : '' },
+          { header: '尾段划分', value: c => this.hasTailSegmentation(c) ? this.label('tailSegmentationStatus', c.tail_segmentation_status) : '' },
+          { header: '尾段划分原始值', value: c => this.hasTailSegmentation(c) ? c.tail_segmentation_status : '' },
+          { header: '尾段划分分数', value: c => this.hasTailSegmentation(c) ? (c.tail_segmentation_score ?? '') : '' },
           { header: '阶段状态', value: c => this.label('phaseStatus', c.phase_status) },
           { header: '阶段状态原始值', value: c => c.phase_status || '' },
           { header: '形态类型', value: c => this.label('patternType', c.pattern_type) },

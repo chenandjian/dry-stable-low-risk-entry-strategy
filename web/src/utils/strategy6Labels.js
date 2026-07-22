@@ -35,7 +35,7 @@ const LABELS = {
   },
   tailSegmentationStatus: {
     DYNAMIC_CONTRACTION: '动态收缩尾段', FALLBACK_FIXED: '固定窗口回退',
-    INSUFFICIENT_BASELINE: '基准数据不足', DISABLED: '动态划分关闭',
+    FIXED_WINDOW: '固定窗口', INSUFFICIENT_BASELINE: '基准数据不足', DISABLED: '动态划分关闭',
   },
   startType: {
     NONE: '未识别强势启动', ONE_WORD_LIMIT_UP: '一字涨停启动', VOLUME_LIMIT_UP: '放量涨停启动',

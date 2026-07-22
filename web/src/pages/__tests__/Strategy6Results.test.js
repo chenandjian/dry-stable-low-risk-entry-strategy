@@ -260,6 +260,10 @@ describe('Strategy6Results', () => {
           setup_quality_score: 12,
           support_reaction_score: 10,
           path_evidence_score: 0,
+          tail_segmentation_status: 'FIXED_WINDOW',
+          tail_segmentation_score: 0,
+          box_tail_enabled: false,
+          brooks_tail_enabled: false,
           support_status: 'MA50_TESTING',
           risk_reward_ratio_2: 1.6,
           warn_tags: ['MARKET_WEAK_DOWNGRADED'],
@@ -417,6 +421,39 @@ describe('Strategy6Results', () => {
     expect(wrapper.find('[data-test="detail-market-downgrade"]').text()).toContain(
       '原重点候选 · 因市场偏弱降级',
     )
+  })
+
+  it('shows formal fixed-tail diagnostics and distinguishes disabled research modules from failed evaluation', async () => {
+    const wrapper = mount(Strategy6Results, {
+      global: { mocks: { $route: { query: { task: 's6-task' } } } },
+    })
+    await flushUi()
+
+    await wrapper.find('[data-test="candidate-row-000003"]').trigger('click')
+
+    const detail = wrapper.find('.detail-panel')
+    expect(detail.text()).toContain('固定窗口')
+    expect(detail.text()).toContain('正式策略未启用稳定箱体研究，未参与评估')
+    expect(detail.text()).toContain('正式策略未启用 Brooks 研究，未参与评估')
+    expect(detail.text()).not.toContain('未识别稳定箱体')
+  })
+
+  it('uses populated diagnostic fields instead of a score-model version whitelist', async () => {
+    const wrapper = mount(Strategy6Results, {
+      global: { mocks: { $route: { query: { task: 's6-task' } } } },
+    })
+    await flushUi()
+
+    const futureFormal = {
+      score_model_version: 'S6_FORMAL_ORIGINAL_V2',
+      entry_archetype: 'SUPPORT_PULLBACK',
+      setup_quality_score: 14,
+      support_reaction_score: 9,
+    }
+    expect(wrapper.vm.hasQualityDiagnostics(futureFormal)).toBe(true)
+    expect(wrapper.vm.entryArchetypeText(futureFormal)).toBe('支撑低吸')
+    expect(wrapper.vm.qualityValue(futureFormal, 'setup_quality_score')).toBe(14)
+    expect(wrapper.vm.hasQualityDiagnostics({ setup_quality_score: 0 })).toBe(false)
   })
 
   it('does not guess the original tier for legacy downgraded tasks', async () => {
@@ -867,6 +904,7 @@ describe('Strategy6Results', () => {
     expect(csv).toContain('阶段状态,阶段状态原始值,形态类型,形态类型原始值')
     expect(csv).toContain('决策规则,评分模型版本,入场类型,入场类型原始值,启动事件质量分,整理质量分,支撑反应分,路径证据分')
     expect(csv).toContain('尾段划分,尾段划分原始值,尾段划分分数')
+    expect(csv).toContain('固定窗口,FIXED_WINDOW,0')
     expect(csv).toContain('S6_QUALITY_V2,支撑低吸,SUPPORT_PULLBACK,17,21,8,13')
     expect(csv).toContain('S6_FORMAL_ORIGINAL_V1,支撑低吸,SUPPORT_PULLBACK,18,12,10,0')
     expect(csv).toContain('客观目标1,客观目标2,客观RR1,客观RR2')
