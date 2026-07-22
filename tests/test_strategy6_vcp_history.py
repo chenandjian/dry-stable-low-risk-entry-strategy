@@ -200,6 +200,34 @@ def test_vcp_history_accepts_new_formal_candidate_after_pattern_start():
     assert result.candidate_date == rows[candidate_index]["date"]
 
 
+def test_vcp_history_rejects_post_pattern_candidate_after_deep_drawdown():
+    closes = [10.0] * 60 + [10.2, 10.4, 10.0, 9.5, 8.8, 8.1, 8.0] + [8.2] * 5
+    rows = _trend_rows(closes)
+    pattern_index = 59
+    candidate_index = 61
+    engine = _FakeEngine({rows[candidate_index]["date"]: ("WATCH_CANDIDATE", 65)}, [])
+    from strategy6.vcp_history import evaluate_vcp_candidate_history
+
+    result = evaluate_vcp_candidate_history(
+        rows=rows,
+        market_data_by_symbol={},
+        strategy_config={
+            "minimum_trading_days": 1,
+            "vcp_history_max_start_loss_pct": 0.15,
+            "vcp_history_max_drawdown_pct": 0.20,
+            "vcp_history_bearish_trend_days": 5,
+        },
+        code="000001",
+        name="测试股票",
+        origin_start_date=rows[0]["date"],
+        evaluation_date=rows[-1]["date"],
+        pattern_start_date=rows[pattern_index]["date"],
+        engine_factory=lambda config: engine,
+    )
+
+    assert result.qualified is False
+
+
 def test_vcp_history_does_not_use_older_candidate_after_latest_candidate_is_invalidated():
     from strategy6.vcp_history import evaluate_vcp_candidate_history
 

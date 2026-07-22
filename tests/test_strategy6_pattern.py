@@ -342,3 +342,22 @@ def test_vcp_chain_restarts_instead_of_skipping_an_intermediate_failed_round():
             result.completed_rounds[1:],
         )
     )
+
+
+def test_vcp_round_does_not_keep_stale_peak_after_a_higher_close():
+    rows = _rows(
+        [5.00, 5.58, 5.20, 6.50, 7.92, 7.00, 6.00, 5.00, 4.31,
+         4.77, 4.56, 5.02, 5.16],
+        [400, 380, 360, 350, 340, 330, 320, 300, 280, 220, 180, 160, 300],
+    )
+
+    result = detect_vcp_rounds(rows, resolve_strategy6_config({}))
+
+    assert result.confirmed is False
+    assert all(
+        round_.peak_close >= max(
+            row["close"]
+            for row in rows[round_.peak_index:round_.low_index + 1]
+        )
+        for round_ in result.completed_rounds
+    )
