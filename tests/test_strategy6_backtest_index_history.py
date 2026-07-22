@@ -1,4 +1,5 @@
 from scanner import db
+from strategy6.backtest.cli import audit_database
 from strategy6.backtest.index_history import (
     INDEX_SYMBOLS,
     ensure_index_history,
@@ -95,3 +96,22 @@ def test_index_history_loads_tickflow_hs300_storage_key(tmp_path):
     assert result.missing_symbols == []
     assert [row["date"] for row in result.data_by_symbol["hs300"]] == dates
     assert result.coverage["hs300"]["stored_symbol"] == "hs300"
+
+
+def test_audit_database_reports_tickflow_hs300_storage_key(tmp_path):
+    database_path = tmp_path / "tickflow-audit.db"
+    db.init_db(str(database_path))
+    for symbol in ("sh000001", "sz399001", "sz399006", "hs300"):
+        db.save_market_index_ohlc(symbol, [{
+            "date": "2025-01-02",
+            "open": 10,
+            "high": 11,
+            "low": 9,
+            "close": 10,
+            "volume": 1,
+        }], source="tickflow")
+
+    result = audit_database(str(database_path))
+
+    assert result["index_coverage"]["hs300"]["rows"] == 1
+    assert result["index_coverage"]["hs300"]["stored_symbol"] == "hs300"

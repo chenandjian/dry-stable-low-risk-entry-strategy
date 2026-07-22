@@ -7,7 +7,11 @@ import os
 from pathlib import Path
 
 from scanner import db
-from strategy6.backtest.index_history import ensure_index_history, load_index_history
+from strategy6.backtest.index_history import (
+    INDEX_STORAGE_ALIASES,
+    ensure_index_history,
+    load_index_history,
+)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -58,13 +62,13 @@ def audit_database(path: str) -> dict:
     row = conn.execute(
         "SELECT COUNT(*), COUNT(DISTINCT code), MIN(date), MAX(date) FROM daily_ohlc"
     ).fetchone()
-    index = {
-        symbol: db.get_market_index_coverage(stored)
-        for symbol, stored in {
-            "sh000001": "sh000001", "sz399001": "sz399001",
-            "sz399006": "sz399006", "hs300": "sh000300",
-        }.items()
-    }
+    index = {}
+    for logical_symbol, aliases in INDEX_STORAGE_ALIASES.items():
+        stored_symbol, coverage = max(
+            ((alias, db.get_market_index_coverage(alias)) for alias in aliases),
+            key=lambda item: item[1]["rows"],
+        )
+        index[logical_symbol] = {**coverage, "stored_symbol": stored_symbol}
     return {
         "database": str(Path(path).resolve()),
         "stocks": stock,
