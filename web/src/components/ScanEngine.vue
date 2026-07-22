@@ -22,7 +22,7 @@
         <span class="progress-pct">{{ progressPct }}%</span>
       </div>
       <div class="current-stock">
-        <span class="label">当前扫描</span>
+        <span class="label">{{ currentLabel }}</span>
         <span class="code">{{ currentCode }}</span>
         <span class="name">{{ currentName }}</span>
         <span class="speed">{{ skipText }}</span>
@@ -79,19 +79,50 @@ const props = defineProps({
   candidates: Number,
   latestTradeDate: String,
   stockPoolSource: String,
+  phase: String,
+  dataProcessed: Number,
+  dataTotal: Number,
+  indexProcessed: Number,
+  indexTotal: Number,
   logLines: { type: Array, default: () => [] },
 })
 defineEmits(['start', 'startStrategy2', 'startStrategy3', 'startStrategy4', 'startStrategy5', 'startStrategy6'])
 
 const logExpanded = ref(true)
-const progressPct = computed(() => props.total > 0 ? Math.round(props.scanned / props.total * 100) : 0)
-const progressText = computed(() => {
-  const total = props.total || 0
-  const scanned = props.scanned || 0
-  return `已处理 ${scanned} / ${total || '--'} · 剩余 ${Math.max(0, total - scanned)}只`
+const isDataAcquisition = computed(() => props.phase === 'data_acquisition')
+const isIndexAcquisition = computed(() => props.phase === 'index_acquisition')
+const activeProcessed = computed(() => {
+  if (isDataAcquisition.value) return props.dataProcessed || 0
+  if (isIndexAcquisition.value) return props.indexProcessed || 0
+  return props.scanned || 0
 })
-const statusText = computed(() => props.running ? '扫描任务进行中' : '')
-const skipText = computed(() => `跳过 ${props.skipped || 0} · 失败 ${props.failed || 0} · 候选 ${props.candidates || 0}`)
+const activeTotal = computed(() => {
+  if (isDataAcquisition.value) return props.dataTotal || 0
+  if (isIndexAcquisition.value) return props.indexTotal || 0
+  return props.total || 0
+})
+const progressPct = computed(() => activeTotal.value > 0
+  ? Math.round(activeProcessed.value / activeTotal.value * 100)
+  : 0)
+const progressText = computed(() => {
+  const total = activeTotal.value
+  const processed = activeProcessed.value
+  const action = isDataAcquisition.value ? '已拉取' : isIndexAcquisition.value ? '已更新' : '已处理'
+  return `${action} ${processed} / ${total || '--'} · 剩余 ${Math.max(0, total - processed)}${isIndexAcquisition.value ? '个' : '只'}`
+})
+const statusText = computed(() => {
+  if (!props.running) return ''
+  if (isDataAcquisition.value) return 'TickFlow 批量行情拉取中'
+  if (isIndexAcquisition.value) return 'TickFlow 宽基指数更新中'
+  if (props.phase === 'preparing') return '扫描任务准备中'
+  return '扫描任务进行中'
+})
+const currentLabel = computed(() => isDataAcquisition.value
+  ? '当前拉取'
+  : isIndexAcquisition.value ? '当前指数' : '当前扫描')
+const skipText = computed(() => (isDataAcquisition.value || isIndexAcquisition.value)
+  ? '完成后自动进入策略计算'
+  : `跳过 ${props.skipped || 0} · 失败 ${props.failed || 0} · 候选 ${props.candidates || 0}`)
 const sourceText = computed(() => props.stockPoolSource ? `股票池 ${props.stockPoolSource}` : '股票池 --')
 </script>
 

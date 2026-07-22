@@ -87,6 +87,34 @@ def test_tickflow_prepare_batches_stale_stocks_and_serves_only_prepared_cache(tm
     assert db.get_ohlc_metadata("600519")["source"] == "tickflow"
 
 
+def test_tickflow_prepare_reports_batch_progress_before_strategy_scan(tmp_path):
+    db.init_db(str(tmp_path / "market.db"))
+    client = _Client()
+    events = []
+
+    prepare_scan_daily_data(
+        {
+            "data": {"acquisition_mode": "tickflow"},
+            "liquidity": {"min_listing_days": 1100},
+        },
+        [
+            {"code": "600519", "name": "贵州茅台", "market": "上证主板"},
+            {"code": "000001", "name": "平安银行", "market": "深证主板"},
+        ],
+        now="2026-07-21 16:00:00",
+        client_factory=lambda **kwargs: client,
+        progress_callback=lambda stage, current, total, detail: events.append(
+            (stage, current, total, detail)
+        ),
+    )
+
+    stock_events = [event for event in events if event[0] == "data_acquisition"]
+    assert [(event[1], event[2]) for event in stock_events] == [(0, 2), (1, 2), (2, 2)]
+    assert stock_events[1][3] == "600519 贵州茅台"
+    assert stock_events[2][3] == "000001 平安银行"
+    assert any(event[0] == "index_acquisition" for event in events)
+
+
 def test_tickflow_prepare_failure_never_falls_back_to_legacy_sources(tmp_path):
     db.init_db(str(tmp_path / "market.db"))
     client = _Client(missing_stock=True)

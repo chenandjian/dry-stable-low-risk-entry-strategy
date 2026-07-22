@@ -113,6 +113,7 @@ def prepare_scan_daily_data(
     *,
     now: str | datetime | None = None,
     client_factory=None,
+    progress_callback=None,
 ) -> PreparedTickFlowSession | None:
     """Batch-refresh TickFlow data once before a scan, or keep legacy behavior."""
     if resolve_acquisition_mode(config) == LEGACY_MULTI_SOURCE_MODE:
@@ -146,6 +147,31 @@ def prepare_scan_daily_data(
         factory = client_factory or TickFlowBatchClient
         client = factory(batch_size=100, max_workers=5)
         if stale_stocks:
+            stock_names = {
+                str(stock.get("code", "")): str(stock.get("name", ""))
+                for stock in stale_stocks
+            }
+            data_processed = 0
+            if progress_callback:
+                progress_callback(
+                    "data_acquisition",
+                    0,
+                    len(stale_stocks),
+                    "-- TickFlow批量行情准备中",
+                )
+
+            def report_data_progress(item) -> None:
+                nonlocal data_processed
+                data_processed += 1
+                if progress_callback:
+                    name = stock_names.get(item.code, "")
+                    progress_callback(
+                        "data_acquisition",
+                        data_processed,
+                        len(stale_stocks),
+                        f"{item.code} {name}".strip(),
+                    )
+
             history_days = max(
                 1100,
                 int(config.get("liquidity", {}).get("min_listing_days") or 0),
@@ -159,12 +185,24 @@ def prepare_scan_daily_data(
                 request_chunk_size=100,
             )
             try:
-                result = service.run(stale_stocks, dry_run=False, mode="update")
+                result = service.run(
+                    stale_stocks,
+                    dry_run=False,
+                    mode="update",
+                    on_result=report_data_progress,
+                )
             except Exception as exc:
                 failures.update({
                     str(stock.get("code", "")): f"TickFlow preparation failed: {exc}"
                     for stock in stale_stocks
                 })
+                if progress_callback and data_processed < len(stale_stocks):
+                    progress_callback(
+                        "data_acquisition",
+                        len(stale_stocks),
+                        len(stale_stocks),
+                        "-- TickFlow批量行情拉取失败",
+                    )
             else:
                 failures.update({
                     item.code: item.error or item.status
@@ -172,7 +210,24 @@ def prepare_scan_daily_data(
                     if item.status != "success"
                 })
         if not indexes_fresh:
-            update_market_indexes(client, history_days=1100)
+            from tickflow_data.indexes import MARKET_INDEX_SPECS
+
+            if progress_callback:
+                progress_callback(
+                    "index_acquisition",
+                    0,
+                    len(MARKET_INDEX_SPECS),
+                    "-- TickFlow宽基指数准备中",
+                )
+            index_results = update_market_indexes(client, history_days=1100)
+            if progress_callback:
+                for current_index, item in enumerate(index_results, start=1):
+                    progress_callback(
+                        "index_acquisition",
+                        current_index,
+                        len(MARKET_INDEX_SPECS),
+                        f"-- {item.get('name') or item.get('symbol') or '宽基指数'}",
+                    )
 
     return PreparedTickFlowSession(
         target_trade_date=target_date,

@@ -67,6 +67,11 @@
         :candidates="scanProgress.candidates"
         :latestTradeDate="scanProgress.latestTradeDate"
         :stockPoolSource="scanProgress.stockPoolSource"
+        :phase="scanProgress.phase"
+        :dataProcessed="scanProgress.dataProcessed"
+        :dataTotal="scanProgress.dataTotal"
+        :indexProcessed="scanProgress.indexProcessed"
+        :indexTotal="scanProgress.indexTotal"
         :logLines="logLines"
         @start="handleStartScan"
         @start-strategy2="handleStartStrategy2Scan"
@@ -189,6 +194,11 @@ const scanProgress = reactive({
   candidates: 0,
   latestTradeDate: '',
   stockPoolSource: '',
+  phase: '',
+  dataProcessed: 0,
+  dataTotal: 0,
+  indexProcessed: 0,
+  indexTotal: 0,
 })
 const logLines = ref([])
 const discoveries = ref([])
@@ -453,6 +463,11 @@ async function handleStartStrategy6Scan() {
     scanProgress.taskId = res.taskId
     scanProgress.total = 0
     scanProgress.stockPoolSource = ''
+    scanProgress.phase = 'preparing'
+    scanProgress.dataProcessed = 0
+    scanProgress.dataTotal = 0
+    scanProgress.indexProcessed = 0
+    scanProgress.indexTotal = 0
     failures.value = []
     logLines.value = []
     lastLogScanned = 0
@@ -481,6 +496,11 @@ function applyStats(status, { applyTaskId = true } = {}) {
   scanProgress.currentName = stats.current_name || '--'
   scanProgress.latestTradeDate = stats.latest_trade_date ?? scanProgress.latestTradeDate
   scanProgress.stockPoolSource = stats.stock_pool_source ?? scanProgress.stockPoolSource
+  scanProgress.phase = stats.phase ?? scanProgress.phase
+  scanProgress.dataProcessed = stats.data_processed ?? scanProgress.dataProcessed
+  scanProgress.dataTotal = stats.data_total ?? scanProgress.dataTotal
+  scanProgress.indexProcessed = stats.index_processed ?? scanProgress.indexProcessed
+  scanProgress.indexTotal = stats.index_total ?? scanProgress.indexTotal
 }
 
 function applyTaskSummary(summary = {}) {
@@ -651,6 +671,11 @@ function resetTaskView() {
   scanProgress.currentName = '--'
   scanProgress.latestTradeDate = ''
   scanProgress.stockPoolSource = ''
+  scanProgress.phase = ''
+  scanProgress.dataProcessed = 0
+  scanProgress.dataTotal = 0
+  scanProgress.indexProcessed = 0
+  scanProgress.indexTotal = 0
   activeStrategyType.value = null
   discoveries.value = []
   failures.value = []

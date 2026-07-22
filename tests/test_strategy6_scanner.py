@@ -25,6 +25,31 @@ def _empty_market(monkeypatch):
     monkeypatch.setattr(scanner_mod, "fetch_market_index_daily", lambda *args, **kwargs: [])
 
 
+def test_strategy6_scan_forwards_progress_callback_to_tickflow_prepare(tmp_path, monkeypatch):
+    import strategy6.scanner as scanner_mod
+
+    db_path = str(tmp_path / "s6-progress.db")
+    callback = lambda *args: None
+    captured = {}
+
+    def fake_prepare(config, stocks, *, progress_callback=None):
+        captured["callback"] = progress_callback
+        raise RuntimeError("stop after preparation boundary")
+
+    monkeypatch.setattr(scanner_mod, "prepare_scan_daily_data", fake_prepare)
+
+    import pytest
+    with pytest.raises(RuntimeError, match="preparation boundary"):
+        scan_strategy6_all(
+            {"data": {"database_path": db_path}, "strategy6": {}},
+            task_id="s6-progress",
+            stocks=[{"code": "000001", "name": "平安银行", "market": "深证主板"}],
+            progress_callback=callback,
+        )
+
+    assert captured["callback"] is callback
+
+
 def test_strategy6_scan_marks_all_source_failure_as_failed_stock(tmp_path, monkeypatch):
     _empty_market(monkeypatch)
     db_path = str(tmp_path / "s6scan.db")

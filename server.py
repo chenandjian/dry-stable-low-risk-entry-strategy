@@ -176,22 +176,14 @@ async def lifespan(app: FastAPI):
                 try:
                     pending = db.get_pending_stocks(interrupted["id"])
                     def on_progress(stage, current, total, detail, discovery=None):
-                        stats = _running.get("stats", {})
-                        if stage == "discovery" and discovery:
-                            found = stats.get("candidates_found", 0) + 1
-                            discoveries = list(stats.get("discoveries") or [])
-                            discoveries.insert(0, _strategy6_discovery_from_candidate(discovery))
-                            _running["stats"] = {**stats, "discoveries": discoveries[:20], "candidates_found": found}
-                        else:
-                            code = detail.split()[0] if detail else ""
-                            _running["stats"] = {
-                                **stats,
-                                "scanned": current,
-                                "processed": current,
-                                "total_stocks": total,
-                                "current_code": code,
-                                "current_name": detail[len(code):].strip() if len(detail) > len(code) else detail,
-                            }
+                        _running["stats"] = _strategy6_progress_stats(
+                            _running.get("stats", {}),
+                            stage,
+                            current,
+                            total,
+                            detail,
+                            discovery,
+                        )
                     result = scan_strategy6_all(config, progress_callback=on_progress, task_id=interrupted["id"], stocks=pending)
                     _running["stats"] = result["stats"]
                     s = result["stats"]
@@ -617,6 +609,60 @@ def _strategy6_discovery_from_candidate(candidate: dict) -> dict:
         "risk_reward_ratio_2": candidate.get("risk_reward_ratio_2", 0),
         "risk_tags": candidate.get("risk_tags", []),
         "warn_tags": candidate.get("warn_tags", []),
+    }
+
+
+def _strategy6_progress_stats(
+    stats: dict,
+    stage: str,
+    current: int,
+    total: int,
+    detail: str,
+    discovery=None,
+) -> dict:
+    """Keep TickFlow preparation progress separate from strategy scan counts."""
+    if stage == "discovery" and discovery:
+        discoveries = list(stats.get("discoveries") or [])
+        discoveries.insert(0, _strategy6_discovery_from_candidate(discovery))
+        return {
+            **stats,
+            "phase": "scanning",
+            "discoveries": discoveries[:20],
+            "candidates_found": stats.get("candidates_found", 0) + 1,
+        }
+
+    code = detail.split()[0] if detail else ""
+    current_name = detail[len(code):].strip() if code and len(detail) > len(code) else detail
+    if stage == "data_acquisition":
+        return {
+            **stats,
+            "phase": stage,
+            "data_processed": current,
+            "data_total": total,
+            "current_code": code or "--",
+            "current_name": current_name,
+        }
+    if stage == "index_acquisition":
+        return {
+            **stats,
+            "phase": stage,
+            "index_processed": current,
+            "index_total": total,
+            "current_code": "--",
+            "current_name": current_name,
+        }
+
+    return {
+        **stats,
+        "phase": "scanning",
+        "scanned": current,
+        "processed": current,
+        "total_stocks": total,
+        "current_code": code or "--",
+        "current_name": current_name,
+        "candidates_found": stats.get("candidates_found", 0),
+        "skipped": stats.get("skipped", 0),
+        "failed": stats.get("failed", 0),
     }
 
 
@@ -2448,35 +2494,21 @@ async def start_strategy6_scan():
     def run():
         try:
             def on_progress(stage, current, total, detail, discovery=None):
-                stats = _running.get("stats", {})
-                if stage == "discovery" and discovery:
-                    discoveries = list(stats.get("discoveries") or [])
-                    discoveries.insert(0, _strategy6_discovery_from_candidate(discovery))
-                    _running["stats"] = {
-                        **stats,
-                        "discoveries": discoveries[:20],
-                        "candidates_found": stats.get("candidates_found", 0) + 1,
-                    }
-                else:
-                    code = detail.split()[0] if detail else ""
-                    s = stats.copy()
-                    s.update({
-                        "scanned": current,
-                        "processed": current,
-                        "total_stocks": total,
-                        "current_code": code or "--",
-                        "current_name": detail[len(code):].strip() if code and len(detail) > len(code) else detail,
-                    })
-                    s.setdefault("candidates_found", 0)
-                    s.setdefault("skipped", 0)
-                    s.setdefault("failed", 0)
-                    _running["stats"] = s
-                db.update_scan_progress(
-                    task_id,
-                    scanned=_running["stats"].get("scanned", 0),
-                    skipped=_running["stats"].get("skipped", 0),
-                    candidates_count=_running["stats"].get("candidates_found", 0),
+                _running["stats"] = _strategy6_progress_stats(
+                    _running.get("stats", {}),
+                    stage,
+                    current,
+                    total,
+                    detail,
+                    discovery,
                 )
+                if stage in {"scanning", "discovery"}:
+                    db.update_scan_progress(
+                        task_id,
+                        scanned=_running["stats"].get("scanned", 0),
+                        skipped=_running["stats"].get("skipped", 0),
+                        candidates_count=_running["stats"].get("candidates_found", 0),
+                    )
 
             result = scan_strategy6_all(config, task_id=task_id, progress_callback=on_progress)
             stats = result.get("stats", {})

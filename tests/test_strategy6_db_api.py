@@ -8,6 +8,31 @@ import server as server_mod
 from strategy6 import STRATEGY6_TYPE
 
 
+def test_strategy6_tickflow_progress_does_not_overwrite_strategy_scan_counts():
+    stats = {
+        "processed": 0,
+        "scanned": 0,
+        "total_stocks": 4994,
+        "candidates_found": 0,
+    }
+
+    updated = server_mod._strategy6_progress_stats(
+        stats,
+        "data_acquisition",
+        1200,
+        4994,
+        "600519 贵州茅台",
+    )
+
+    assert updated["phase"] == "data_acquisition"
+    assert updated["data_processed"] == 1200
+    assert updated["data_total"] == 4994
+    assert updated["processed"] == 0
+    assert updated["scanned"] == 0
+    assert updated["current_code"] == "600519"
+    assert updated["current_name"] == "贵州茅台"
+
+
 def _candidate():
     return {
         "code": "000001",

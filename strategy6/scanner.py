@@ -54,7 +54,11 @@ def scan_strategy6_all(
         stocks = get_a_stock_pool(config)
     db.save_task_stocks(task_id, stocks)
 
-    prepared_session = prepare_scan_daily_data(config, stocks)
+    prepared_session = prepare_scan_daily_data(
+        config,
+        stocks,
+        progress_callback=progress_callback,
+    )
     if fetch_daily_fn is None and prepared_session is not None:
         fetch_daily_fn = prepared_session.fetch
 
@@ -62,6 +66,8 @@ def scan_strategy6_all(
         ["tickflow"] if prepared_session is not None
         else config.get("data", {}).get("daily_sources") or DEFAULT_DAILY_SOURCES
     )
+    if progress_callback:
+        progress_callback("scanning", 0, len(stocks), "-- 策略6计算准备中")
     kline_days = int(cfg["kline_days"])
     configured_workers = config.get("data", {}).get("worker_count")
     worker_count = resolve_effective_worker_count(
