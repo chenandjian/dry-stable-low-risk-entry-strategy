@@ -361,6 +361,23 @@ def test_reusable_kline_context_requires_fetch_after_target_close(tmp_path):
     assert reusable["kline_fetched_at"] == "2026-06-15 15:11:00"
 
 
+def test_task_stock_reuse_lookup_has_code_leading_index(tmp_path):
+    db.init_db(str(tmp_path / "cuphandle.db"))
+
+    columns = [
+        row[2]
+        for row in db.get_conn().execute(
+            "PRAGMA index_info('idx_task_stocks_code_target_fetch')"
+        ).fetchall()
+    ]
+
+    assert columns[:3] == [
+        "code",
+        "kline_target_trade_date",
+        "kline_fetched_at",
+    ]
+
+
 def test_reusable_kline_context_rejects_inconclusive_suspended_source_errors(tmp_path):
     db.init_db(str(tmp_path / "cuphandle.db"))
     db.create_scan_task("task-polluted", "2026-06-29 15:20:00", total_stocks=0)

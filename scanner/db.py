@@ -885,6 +885,10 @@ def _ensure_task_stocks_table(conn: sqlite3.Connection):
             conn.execute(f"ALTER TABLE task_stocks ADD COLUMN {name} {typ}")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_task_stocks_task_status ON task_stocks(task_id, status)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_task_stocks_task_idx ON task_stocks(task_id, idx)")
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_task_stocks_code_target_fetch "
+        "ON task_stocks(code, kline_target_trade_date, kline_fetched_at DESC, updated_at DESC)"
+    )
 
 
 

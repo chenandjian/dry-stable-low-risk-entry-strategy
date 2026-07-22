@@ -1,6 +1,7 @@
 """Strategy6 scan orchestration."""
 from __future__ import annotations
 
+import copy
 import logging
 import threading
 import time
@@ -70,10 +71,11 @@ def scan_strategy6_all(
         progress_callback("scanning", 0, len(stocks), "-- 策略6计算准备中")
     kline_days = int(cfg["kline_days"])
     configured_workers = config.get("data", {}).get("worker_count")
-    worker_count = resolve_effective_worker_count(
-        configured_workers if configured_workers is not None else worker_count,
-        daily_sources,
-    )
+    requested_workers = configured_workers if configured_workers is not None else worker_count
+    if prepared_session is not None:
+        worker_count = max(1, min(int(requested_workers), len(stocks)))
+    else:
+        worker_count = resolve_effective_worker_count(requested_workers, daily_sources)
     max_busy_retries = config.get("data", {}).get("source_busy_max_retries", 3)
 
     stock_queue: Queue = Queue()
@@ -98,11 +100,20 @@ def scan_strategy6_all(
     candidate_lock = threading.Lock()
     busy_retries_by_code: dict[str, int] = {}
     busy_retry_lock = threading.Lock()
+    progress_lock = threading.Lock()
+    processed_count = 0
+    progress_sync_interval = 50
+    market_slice_cache: dict[str, dict[str, list[dict]]] = {}
+    market_slice_lock = threading.Lock()
+    base_freshness_context = build_cache_freshness_context(
+        now=datetime.strptime(_now(), "%Y-%m-%d %H:%M:%S")
+    )
     start_time = time.time()
 
     def _cache_freshness_context(code: str):
-        now = datetime.strptime(_now(), "%Y-%m-%d %H:%M:%S")
-        context = build_cache_freshness_context(now=now)
+        context = copy.copy(base_freshness_context)
+        if prepared_session is not None:
+            return context
         prior = db.get_reusable_task_stock_kline_context(
             code,
             context.target_trade_date,
@@ -115,6 +126,14 @@ def scan_strategy6_all(
             context.allow_previous_trade_date = context.quote_status in {"suspended", "no_trade"}
         return context
 
+    def _market_context(evaluation_date: str) -> dict[str, list[dict]]:
+        with market_slice_lock:
+            cached = market_slice_cache.get(evaluation_date)
+            if cached is None:
+                cached = _market_data_until(market_data_by_symbol, evaluation_date)
+                market_slice_cache[evaluation_date] = cached
+            return cached
+
     def _finish_stock(
         code: str,
         name: str,
@@ -124,6 +143,7 @@ def scan_strategy6_all(
         kline_latest_date: str | None = None,
         fetch_result: FetchResult | None = None,
     ) -> None:
+        nonlocal processed_count
         source_fields = {}
         if fetch_result is not None:
             source_fields = {
@@ -148,9 +168,13 @@ def scan_strategy6_all(
             finished_at=_now(),
             **source_fields,
         )
-        summary = db.refresh_scan_task_counts(task_id)
-        if progress_callback:
-            progress_callback("scanning", summary["processed"], summary["total_stocks"], f"{code} {name}")
+        with progress_lock:
+            processed_count += 1
+            current = processed_count
+            if progress_callback:
+                progress_callback("scanning", current, len(stocks), f"{code} {name}")
+        if current % progress_sync_interval == 0 and current < len(stocks):
+            db.refresh_scan_task_counts(task_id)
 
     def worker():
         while not stock_queue.empty():
@@ -219,7 +243,7 @@ def scan_strategy6_all(
                     data_source=fetch_result.primary_source,
                     kline_fetched_at=fetch_result.kline_fetched_at or "",
                     quote_status=fetch_result.quote_status or "",
-                    market_data_by_symbol=_market_data_until(market_data_by_symbol, latest_trade_date or ""),
+                    market_data_by_symbol=_market_context(latest_trade_date or ""),
                 )
                 observation = None
                 vcp = evaluation.vcp_observation
