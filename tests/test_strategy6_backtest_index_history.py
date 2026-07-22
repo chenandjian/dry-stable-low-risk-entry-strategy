@@ -71,3 +71,27 @@ def test_index_history_blocks_when_all_indexes_miss_reference_calendar_date():
     assert result.status == "BLOCKED_INDEX_HISTORY"
     assert set(result.missing_symbols) == set(INDEX_SYMBOLS)
     assert result.coverage["sh000001"]["missing_dates"] == ["2025-01-03"]
+
+
+def test_index_history_loads_tickflow_hs300_storage_key(tmp_path):
+    db.init_db(str(tmp_path / "tickflow-index.db"))
+    dates = ["2025-01-02", "2025-01-03"]
+    for symbol in ("sh000001", "sz399001", "sz399006", "hs300"):
+        db.save_market_index_ohlc(symbol, [
+            {
+                "date": date,
+                "open": 10,
+                "high": 11,
+                "low": 9,
+                "close": 10,
+                "volume": 1,
+            }
+            for date in dates
+        ], source="tickflow")
+
+    result = load_index_history(dates[0], dates[-1])
+
+    assert result.status == "READY"
+    assert result.missing_symbols == []
+    assert [row["date"] for row in result.data_by_symbol["hs300"]] == dates
+    assert result.coverage["hs300"]["stored_symbol"] == "hs300"

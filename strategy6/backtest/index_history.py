@@ -15,6 +15,13 @@ INDEX_SYMBOLS = {
     "hs300": "sh000300",
 }
 
+INDEX_STORAGE_ALIASES = {
+    "sh000001": ("sh000001",),
+    "sz399001": ("sz399001",),
+    "sz399006": ("sz399006",),
+    "hs300": ("hs300", "sh000300"),
+}
+
 
 @dataclass
 class IndexHistoryResult:
@@ -27,10 +34,13 @@ class IndexHistoryResult:
 def load_index_history(start_date: str, end_date: str) -> IndexHistoryResult:
     data: dict[str, list[dict]] = {}
     coverage: dict[str, dict] = {}
-    for logical_symbol, stored_symbol in INDEX_SYMBOLS.items():
-        info = db.get_market_index_coverage(stored_symbol)
-        coverage[logical_symbol] = info
-        rows = db.get_market_index_ohlc(stored_symbol, end_date=end_date)
+    for logical_symbol in INDEX_SYMBOLS:
+        stored_symbol, rows, info = _load_best_storage_alias(
+            logical_symbol,
+            start_date=start_date,
+            end_date=end_date,
+        )
+        coverage[logical_symbol] = {**info, "stored_symbol": stored_symbol}
         data[logical_symbol] = rows
     return validate_index_history_data(
         data,
@@ -38,6 +48,28 @@ def load_index_history(start_date: str, end_date: str) -> IndexHistoryResult:
         end_date=end_date,
         base_coverage=coverage,
     )
+
+
+def _load_best_storage_alias(
+    logical_symbol: str,
+    *,
+    start_date: str,
+    end_date: str,
+) -> tuple[str, list[dict], dict]:
+    candidates = []
+    for stored_symbol in INDEX_STORAGE_ALIASES[logical_symbol]:
+        info = db.get_market_index_coverage(stored_symbol)
+        rows = db.get_market_index_ohlc(stored_symbol, end_date=end_date)
+        dates = [str(row.get("date") or "") for row in rows if row.get("date")]
+        covers_range = bool(
+            dates and dates[0] <= start_date and dates[-1] >= end_date
+        )
+        candidates.append((covers_range, len(rows), stored_symbol, rows, info))
+    _, _, stored_symbol, rows, info = max(
+        candidates,
+        key=lambda item: (item[0], item[1]),
+    )
+    return stored_symbol, rows, info
 
 
 def validate_index_history_data(

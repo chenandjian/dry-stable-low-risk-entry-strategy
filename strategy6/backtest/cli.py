@@ -16,6 +16,7 @@ def build_parser() -> argparse.ArgumentParser:
     for command in (
         "audit-data", "fetch-index", "baseline", "experiments", "optimize",
         "brooks-optimize", "brooks-validate",
+        "tail-regime-full",
         "comprehensive-plan", "comprehensive-run", "comprehensive-status",
         "comprehensive-report",
     ):
@@ -34,7 +35,8 @@ def build_parser() -> argparse.ArgumentParser:
             "--evaluation-step",
             type=int,
             default=(
-                20 if command == "brooks-optimize"
+                1 if command == "tail-regime-full"
+                else 20 if command == "brooks-optimize"
                 else 10 if command == "brooks-validate"
                 else 5
             ),
@@ -116,6 +118,9 @@ def main(argv: list[str] | None = None) -> int:
     if args.command in {"comprehensive-plan", "comprehensive-run"}:
         from strategy6.backtest.comprehensive_runner import run_comprehensive_cli
         return run_comprehensive_cli(args, coverage)
+    if args.command == "tail-regime-full":
+        from strategy6.backtest.tail_regime_runner import run_tail_regime_full_cli
+        return run_tail_regime_full_cli(args, coverage)
     from strategy6.backtest.runner import run_cli_research
     return run_cli_research(args, coverage)
 

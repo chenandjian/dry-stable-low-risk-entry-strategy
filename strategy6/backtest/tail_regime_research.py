@@ -94,6 +94,7 @@ def run_tail_regime_research(
     engine_factory,
     minimum_history: int,
     oos_start: str = "2026-01-01",
+    run_stress: bool = True,
 ) -> dict:
     """Replay labels and execute only eligible fixed or regime-hypothesis signals."""
     _require_locked_oos_start(oos_start)
@@ -218,7 +219,7 @@ def run_tail_regime_research(
         closed_trades,
     )
     stress_tests = {}
-    if frozen_regime_signals:
+    if run_stress and frozen_regime_signals:
         stress_tests = _filter_stress_results_for_research_periods(
             replay_stress_scenarios(
                 frozen_regime_signals,
