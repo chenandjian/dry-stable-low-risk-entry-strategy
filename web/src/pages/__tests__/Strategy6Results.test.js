@@ -253,6 +253,13 @@ describe('Strategy6Results', () => {
           classification: 'watch',
           lifecycle_status: 'SETUP_FORMING',
           total_score: 68,
+          decision_profile: 'formal_original',
+          score_model_version: 'S6_FORMAL_ORIGINAL_V1',
+          entry_archetype: 'SUPPORT_PULLBACK',
+          start_event_quality_score: 18,
+          setup_quality_score: 12,
+          support_reaction_score: 10,
+          path_evidence_score: 0,
           support_status: 'MA50_TESTING',
           risk_reward_ratio_2: 1.6,
           warn_tags: ['MARKET_WEAK_DOWNGRADED'],
@@ -366,6 +373,9 @@ describe('Strategy6Results', () => {
     expect(wrapper.text()).toContain('支撑低吸')
     expect(wrapper.text()).toContain('整理质量 21')
     expect(wrapper.text()).toContain('支撑反应 8')
+    const formalObservation = wrapper.find('[data-test="candidate-row-000003"]')
+    expect(formalObservation.text()).toContain('支撑低吸')
+    expect(formalObservation.text()).toContain('整理 12 · 支撑 10')
     expect(wrapper.text()).toContain('启动质量 17')
     expect(wrapper.text()).toContain('路径证据 13')
     expect(wrapper.text()).toContain('研究质量 V2')
@@ -858,6 +868,7 @@ describe('Strategy6Results', () => {
     expect(csv).toContain('决策规则,评分模型版本,入场类型,入场类型原始值,启动事件质量分,整理质量分,支撑反应分,路径证据分')
     expect(csv).toContain('尾段划分,尾段划分原始值,尾段划分分数')
     expect(csv).toContain('S6_QUALITY_V2,支撑低吸,SUPPORT_PULLBACK,17,21,8,13')
+    expect(csv).toContain('S6_FORMAL_ORIGINAL_V1,支撑低吸,SUPPORT_PULLBACK,18,12,10,0')
     expect(csv).toContain('客观目标1,客观目标2,客观RR1,客观RR2')
     expect(csv).toContain('权威路径汇总,权威路径汇总原始值,主路径,主路径原始值,通过路径')
     expect(csv).toContain('Brooks状态,Brooks状态原始值,Brooks交易状态,Brooks触发类型,Brooks触发类型原始值')

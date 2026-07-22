@@ -249,7 +249,7 @@
         <div><span>客观目标</span><strong>{{ fmt(selected.objective_target_1 ?? selected.target_price_1) }} / {{ fmt(selected.objective_target_2 ?? selected.target_price_2) }} · RR {{ fmt(selected.objective_rr_1 ?? selected.risk_reward_ratio_1) }} / {{ fmt(selected.objective_rr_2 ?? selected.risk_reward_ratio_2) }}</strong></div>
         <div><span>执行R目标</span><strong>1.5R {{ fmt(selected.execution_target_1_5r) }} · 2R {{ fmt(selected.execution_target_2r) }} · 2.5R {{ fmt(selected.execution_target_2_5r) }} · 3.5R {{ fmt(selected.execution_target_3_5r) }}</strong></div>
         <div><span>执行窗口</span><strong>{{ isExecutionWaiting(selected) ? '等待交易触发确认' : `${selected.valid_from_date || '--'} 至 ${selected.valid_until_date || '--'} · 限价 ${fmt(selected.suggested_limit_price)}` }}</strong></div>
-        <div data-test="detail-quality-v2"><span>质量评分（V2）</span><strong>启动质量 {{ qualityValue(selected, 'start_event_quality_score') }} · 整理质量 {{ qualityValue(selected, 'setup_quality_score') }} · 支撑反应 {{ qualityValue(selected, 'support_reaction_score') }} · 路径证据 {{ qualityValue(selected, 'path_evidence_score') }}</strong></div>
+        <div data-test="detail-quality-v2"><span>质量诊断</span><strong>启动质量 {{ qualityValue(selected, 'start_event_quality_score') }} · 整理质量 {{ qualityValue(selected, 'setup_quality_score') }} · 支撑反应 {{ qualityValue(selected, 'support_reaction_score') }} · 路径证据 {{ qualityValue(selected, 'path_evidence_score') }}</strong></div>
         <div><span>六维评分</span><strong>启动{{ selected.strong_start_score ?? 0 }} 形态{{ selected.pattern_score_component ?? 0 }} 支撑{{ selected.support_score ?? 0 }} 尾段{{ selected.tail_score ?? 0 }} 客观RR{{ selected.objective_rr_score ?? 0 }} RS/风险{{ selected.relative_strength_risk_score ?? 0 }}</strong></div>
         <div><span>权威三路径</span><strong>{{ label('tailPathSummary', authoritativeSummary(selected)) }} · 主路径 {{ label('tailPrimaryPath', authoritativePrimary(selected)) }} · 通过 {{ joinedLabels('tailPrimaryPath', authoritativePaths(selected), ' / ') }} · {{ selected.multi_path_confirmed ? '多路径确认' : '单路径或未通过' }}</strong></div>
         <div><span>旧尾部路径（原始/箱体）</span><strong>{{ label('tailPath', selected.tail_path || 'NONE') }} · 原路径 {{ selected.original_tail_pass ? '通过' : '未通过' }}/{{ selected.original_tail_score ?? 0 }} · 箱体 {{ selected.box_tail_pass ? '通过' : '未通过' }}/{{ selected.box_tail_score ?? 0 }}</strong></div>
@@ -588,6 +588,9 @@ export default {
     isQualityV2(candidate) {
       return candidate?.score_model_version === 'S6_QUALITY_V2'
     },
+    hasQualityDiagnostics(candidate) {
+      return ['S6_FORMAL_ORIGINAL_V1', 'S6_QUALITY_V2'].includes(candidate?.score_model_version)
+    },
     decisionProfileText(candidate) {
       const profile = candidate?.decision_profile
       if (profile === 'formal_original') return '正式原始链'
@@ -595,11 +598,11 @@ export default {
       return '历史规则未标记'
     },
     qualityValue(candidate, field) {
-      if (!this.isQualityV2(candidate)) return '--'
+      if (!this.hasQualityDiagnostics(candidate)) return '--'
       return candidate?.[field] ?? '--'
     },
     entryArchetypeText(candidate) {
-      return this.isQualityV2(candidate) ? this.label('entryArchetype', candidate?.entry_archetype) : '--'
+      return this.hasQualityDiagnostics(candidate) ? this.label('entryArchetype', candidate?.entry_archetype || 'NONE') : '--'
     },
     effectiveCandidateType(candidate) {
       if (this.isObservationRecord(candidate)) return 'REJECTED'
@@ -797,11 +800,11 @@ export default {
           { header: '决策规则', value: c => this.decisionProfileText(c) },
           { header: '评分模型版本', value: c => c.score_model_version || '' },
           { header: '入场类型', value: c => this.entryArchetypeText(c) === '--' ? '' : this.entryArchetypeText(c) },
-          { header: '入场类型原始值', value: c => this.isQualityV2(c) ? (c.entry_archetype || '') : '' },
-          { header: '启动事件质量分', value: c => this.isQualityV2(c) ? (c.start_event_quality_score ?? '') : '' },
-          { header: '整理质量分', value: c => this.isQualityV2(c) ? (c.setup_quality_score ?? '') : '' },
-          { header: '支撑反应分', value: c => this.isQualityV2(c) ? (c.support_reaction_score ?? '') : '' },
-          { header: '路径证据分', value: c => this.isQualityV2(c) ? (c.path_evidence_score ?? '') : '' },
+          { header: '入场类型原始值', value: c => this.hasQualityDiagnostics(c) ? (c.entry_archetype || 'NONE') : '' },
+          { header: '启动事件质量分', value: c => this.hasQualityDiagnostics(c) ? (c.start_event_quality_score ?? '') : '' },
+          { header: '整理质量分', value: c => this.hasQualityDiagnostics(c) ? (c.setup_quality_score ?? '') : '' },
+          { header: '支撑反应分', value: c => this.hasQualityDiagnostics(c) ? (c.support_reaction_score ?? '') : '' },
+          { header: '路径证据分', value: c => this.hasQualityDiagnostics(c) ? (c.path_evidence_score ?? '') : '' },
           { header: '尾段划分', value: c => this.isQualityV2(c) ? this.label('tailSegmentationStatus', c.tail_segmentation_status) : '' },
           { header: '尾段划分原始值', value: c => this.isQualityV2(c) ? (c.tail_segmentation_status || '') : '' },
           { header: '尾段划分分数', value: c => this.isQualityV2(c) ? (c.tail_segmentation_score ?? '') : '' },
