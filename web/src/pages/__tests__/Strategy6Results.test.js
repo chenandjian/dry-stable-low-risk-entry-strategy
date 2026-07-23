@@ -116,7 +116,7 @@ describe('Strategy6Results', () => {
           tail_volume_ratio: 0.5,
           consecutive_down_days: 3,
           consecutive_down_low: 11.92,
-          consecutive_down_structure_version: 'CONSECUTIVE_DOWN_INTERVAL_5D_V1',
+          consecutive_down_structure_version: 'CONSECUTIVE_DOWN_INTERVAL_5D_V2',
           consecutive_down_structure_pass: true,
           consecutive_down_no_new_streak_low: true,
           consecutive_down_min_low_margin_pct: 0.012,
@@ -251,7 +251,7 @@ describe('Strategy6Results', () => {
           tail_path: 'NONE',
           consecutive_down_days: 3,
           consecutive_down_low: 8.51,
-          consecutive_down_structure_version: 'CONSECUTIVE_DOWN_INTERVAL_5D_V1',
+          consecutive_down_structure_version: 'CONSECUTIVE_DOWN_INTERVAL_5D_V2',
           consecutive_down_structure_pass: false,
           consecutive_down_no_new_streak_low: false,
           consecutive_down_min_low_margin_pct: 0.008,
@@ -407,15 +407,15 @@ describe('Strategy6Results', () => {
     expect(wrapper.text()).toContain('动态收缩尾段')
     expect(wrapper.text()).toContain('尾部变点观察')
     expect(wrapper.text()).toContain('连续收跌结构')
-    expect(wrapper.find('[data-test="candidate-consecutive-down-000001"]').text()).toBe('3日 · 非5日最低 · 未创5日高')
-    expect(wrapper.find('[data-test="candidate-consecutive-down-000002"]').text()).toBe('3日 · 连跌低点为5日最低')
+    expect(wrapper.find('[data-test="candidate-consecutive-down-000001"]').text()).toBe('3日 · 守5日参考低 · 未创5日高')
+    expect(wrapper.find('[data-test="candidate-consecutive-down-000002"]').text()).toBe('3日 · 跌破5日参考低')
     expect(wrapper.vm.consecutiveDownStructureText({
       consecutive_down_days: 3,
       consecutive_down_structure_pass: true,
       consecutive_down_no_new_streak_low: true,
     })).toBe('未计算')
     expect(wrapper.find('[data-test="detail-consecutive-down-structure"]').text()).toContain('连跌低点 11.92')
-    expect(wrapper.find('[data-test="detail-consecutive-down-structure"]').text()).toContain('高于5日低余量 1.20%')
+    expect(wrapper.find('[data-test="detail-consecutive-down-structure"]').text()).toContain('相对5日参考低余量 1.20%')
     expect(wrapper.find('[data-test="detail-consecutive-down-structure"]').text()).toContain('高点突破 -1.80%')
     expect(wrapper.text()).toContain('影子研究，不参与正式选股')
     expect(wrapper.text()).toContain('已确认')
@@ -516,7 +516,7 @@ describe('Strategy6Results', () => {
         vcp_contraction_count: 2, vcp_pivot_price: 68.21, vcp_structure_low: 65.61,
         vcp_distance_to_pivot_pct: 0.154, vcp_breakout_date: '2026-07-09',
         consecutive_down_days: 3, consecutive_down_low: 66.2,
-        consecutive_down_structure_version: 'CONSECUTIVE_DOWN_INTERVAL_5D_V1',
+        consecutive_down_structure_version: 'CONSECUTIVE_DOWN_INTERVAL_5D_V2',
         consecutive_down_structure_pass: true,
         consecutive_down_no_new_streak_low: true,
         consecutive_down_min_low_margin_pct: 0.011,
@@ -535,7 +535,7 @@ describe('Strategy6Results', () => {
         vcp_history_qualified: true, vcp_history_candidate_date: '2026-07-01',
         vcp_contraction_count: 1, vcp_pivot_price: 21.5, vcp_structure_low: 18.8,
         consecutive_down_days: 2, consecutive_down_low: 19.4,
-        consecutive_down_structure_version: 'CONSECUTIVE_DOWN_INTERVAL_5D_V1',
+        consecutive_down_structure_version: 'CONSECUTIVE_DOWN_INTERVAL_5D_V2',
         consecutive_down_structure_pass: false,
         consecutive_down_no_new_streak_low: true,
         consecutive_down_min_low_margin_pct: 0.006,
@@ -580,7 +580,7 @@ describe('Strategy6Results', () => {
     expect(text.indexOf('VCP确认候选')).toBeLessThan(text.indexOf('VCP早期观察'))
     expect(wrapper.find('[data-test="vcp-row-002156"]').exists()).toBe(true)
     expect(wrapper.find('[data-test="vcp-row-002056"]').exists()).toBe(true)
-    expect(wrapper.find('[data-test="vcp-consecutive-down-002156"]').text()).toBe('3日 · 非5日最低 · 未创5日高')
+    expect(wrapper.find('[data-test="vcp-consecutive-down-002156"]').text()).toBe('3日 · 守5日参考低 · 未创5日高')
     expect(wrapper.find('[data-test="vcp-consecutive-down-002056"]').text()).toBe('2日 · 未满足')
     expect(wrapper.find('[data-test="vcp-row-300001"]').exists()).toBe(false)
     expect(wrapper.find('[data-test="vcp-row-300002"]').exists()).toBe(false)
@@ -950,12 +950,12 @@ describe('Strategy6Results', () => {
     expect(csv).toContain('阶段状态,阶段状态原始值,形态类型,形态类型原始值')
     expect(csv).toContain('决策规则,评分模型版本,入场类型,入场类型原始值,启动事件质量分,整理质量分,支撑反应分,路径证据分')
     expect(csv).toContain('尾段划分,尾段划分原始值,尾段划分分数')
-    expect(csv).toContain('连续收跌天数,连续收跌最低价,连续收跌结构,连跌低点非5日最低,高于5日低余量,5日高最大突破')
-    expect(csv).toContain('3,11.92,3日 · 非5日最低 · 未创5日高,是,1.20%,-1.80%')
+    expect(csv).toContain('连续收跌天数,连续收跌最低价,连续收跌结构,守住5日参考低,相对5日参考低余量,5日高最大突破')
+    expect(csv).toContain('3,11.92,3日 · 守5日参考低 · 未创5日高,是,1.20%,-1.80%')
     const csvLines = csv.trim().split('\n')
     const csvHeaders = csvLines[0].split(',')
     const legacyRow = csvLines.find(line => line.startsWith('000003,')).split(',')
-    expect(legacyRow[csvHeaders.indexOf('连跌低点非5日最低')]).toBe('')
+    expect(legacyRow[csvHeaders.indexOf('守住5日参考低')]).toBe('')
     expect(csv).toContain('固定窗口,FIXED_WINDOW,0')
     expect(csv).toContain('S6_QUALITY_V2,支撑低吸,SUPPORT_PULLBACK,17,21,8,13')
     expect(csv).toContain('S6_FORMAL_ORIGINAL_V1,支撑低吸,SUPPORT_PULLBACK,18,12,10,0')

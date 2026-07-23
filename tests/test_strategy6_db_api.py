@@ -54,7 +54,7 @@ def _candidate():
         "current_close_position": 0.72,
         "consecutive_down_days": 3,
         "consecutive_down_low": 11.92,
-        "consecutive_down_structure_version": "CONSECUTIVE_DOWN_INTERVAL_5D_V1",
+        "consecutive_down_structure_version": "CONSECUTIVE_DOWN_INTERVAL_5D_V2",
         "consecutive_down_structure_pass": True,
         "consecutive_down_no_new_streak_low": True,
         "consecutive_down_min_low_margin_pct": 0.012,
@@ -230,7 +230,7 @@ def test_strategy6_candidate_table_is_independent(tmp_path):
     assert rows[0]["warn_tags"] == ["PRESSURE_NEAR_HIGH"]
     assert rows[0]["consecutive_down_days"] == 3
     assert rows[0]["consecutive_down_low"] == 11.92
-    assert rows[0]["consecutive_down_structure_version"] == "CONSECUTIVE_DOWN_INTERVAL_5D_V1"
+    assert rows[0]["consecutive_down_structure_version"] == "CONSECUTIVE_DOWN_INTERVAL_5D_V2"
     assert rows[0]["consecutive_down_structure_pass"] is True
     assert rows[0]["consecutive_down_no_new_streak_low"] is True
     assert rows[0]["consecutive_down_min_low_margin_pct"] == 0.012

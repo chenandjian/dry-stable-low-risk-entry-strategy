@@ -2,7 +2,7 @@
 
 > **面向 AI 代理的工作者：** 必需子技能：使用 superpowers:subagent-driven-development（推荐）或 superpowers:executing-plans 逐任务实现此计划。步骤使用复选框（`- [ ]`）语法来跟踪进度。
 
-**目标：** 为策略6增加只用于前端解释的“连续收跌至少3日、连跌区间最低价严格高于最近5日最低价、且逐日未创滚动5日新高”组合诊断指标。
+**目标：** 为策略6增加只用于前端解释的“连续收跌至少3日、连跌区间最低价不低于5日窗口内非收跌区间参考低点、且逐日未创滚动5日新高”组合诊断指标。
 
 **架构：** 指标在统一策略入口已经使用的 `calculate_indicators()` 中计算，随 `Strategy6Indicators` 和候选字典向下传递。SQLite通过兼容新增列持久化，现有候选API透传，Vue结果页统一展示；评分、过滤、分类和生命周期完全不读取这些字段。
 
@@ -29,7 +29,7 @@
 
 - [x] **步骤1：编写失败测试**
 
-增加用例，分别构造：连续3日收跌且连跌低点严格高于5日低；连跌低点等于5日低；连续5日收跌；收跌日创滚动5日新高；只有2日收跌；平收中断；前复权多位小数相等边界。断言：
+增加用例，分别构造：连续3日收跌且连跌低点高于参考低；连跌低点等于参考低；连续5日收跌无参考样本；收跌日创滚动5日新高；只有2日收跌；平收中断；前复权多位小数相等边界。断言：
 
 ```python
 assert result.indicators.consecutive_down_days == 3
@@ -56,13 +56,13 @@ python -m pytest tests/test_strategy6_core_rules.py -k "consecutive_down" -q
 ```python
 consecutive_down_days: int = 0
 consecutive_down_low: float | None = None
-consecutive_down_structure_version: str = "CONSECUTIVE_DOWN_INTERVAL_5D_V1"
+consecutive_down_structure_version: str = "CONSECUTIVE_DOWN_INTERVAL_5D_V2"
 consecutive_down_structure_pass: bool = False
 consecutive_down_min_low_margin_pct: float | None = None
 consecutive_down_max_high_break_pct: float | None = None
 ```
 
-在 `calculate_indicators()` 调用专用私有函数。函数从最后一根K线向前统计 `close[t] < close[t-1]` 的连续区间；低点条件使用 `min(连续收跌区间low) > min(最近5日low)`，相等失败；高点继续逐日与此前4日最高价比较。仅当连续天数不少于3、低点严格大于且最大高点突破比例不大于0时判定为真。
+在 `calculate_indicators()` 调用专用私有函数。函数从最后一根K线向前统计 `close[t] < close[t-1]` 的连续区间；最近5日排除该连续区间后计算参考最低价，低点条件使用 `min(连续收跌区间low) >= five_day_reference_low`，相等通过；高点继续逐日与此前4日最高价比较。连续收跌占满5日时没有参考样本，组合指标不通过。
 
 - [x] **步骤4：运行绿灯测试**
 
@@ -116,7 +116,7 @@ fixture加入新字段，断言页面出现：
 
 ```text
 连续收跌结构
-3日 · 非5日最低 · 未创5日高
+3日 · 守5日参考低 · 未创5日高
 连跌低 11.92
 ```
 
@@ -132,7 +132,7 @@ npm.cmd --prefix web test -- --run Strategy6Results
 
 - [x] **步骤3：实现展示函数**
 
-新增单一格式化函数：NULL显示“未计算”；达到3日且组合布尔真显示完整通过文案；达到3日且组合布尔假时显示“连跌低点为5日最低”和/或“已创5日高”；不足3日显示“未满足”。候选表、详情和CSV复用同一字段语义。
+新增单一格式化函数：NULL显示“未计算”；达到3日且组合布尔真显示完整通过文案；达到3日且组合布尔假时显示“跌破5日参考低”和/或“已创5日高”；不足3日显示“未满足”。候选表、详情和CSV复用同一字段语义。
 
 - [x] **步骤4：运行绿灯测试**
 
@@ -232,11 +232,11 @@ python -m pytest tests/test_strategy6_core_rules.py -k "consecutive_down" -q
 
 - [x] **步骤3：实现最小计算和兼容存储**
 
-删除逐日低点比较。使用 `min(连续收跌区间low) > min(最近5个交易日low)` 的区间级严格比较；相等失败。计算使用未舍入原值，展示值单独四舍五入。兼容字段 `consecutive_down_no_new_streak_low` 保持数据库列名不变。
+删除逐日低点比较。最近5日排除连续收跌区间后得到参考样本，使用 `min(连续收跌区间low) >= min(参考样本low)`；相等允许通过。计算使用未舍入原值，展示值单独四舍五入。兼容字段 `consecutive_down_no_new_streak_low` 保持数据库列名不变。
 
 - [x] **步骤4：增强前端解释**
 
-复用组合指标格式化函数：通过显示“非5日最低 · 未创5日高”，相等或更低时显示“连跌低点为5日最低”；CSV证据列改为“连跌低点非5日最低”。不得修改评分、过滤、候选分层和VCP排序。
+复用组合指标格式化函数：通过显示“守5日参考低 · 未创5日高”，低于参考低时显示“跌破5日参考低”；CSV证据列改为“守住5日参考低”。不得修改评分、过滤、候选分层和VCP排序。
 
 - [x] **步骤5：真实数据与完整门禁**
 

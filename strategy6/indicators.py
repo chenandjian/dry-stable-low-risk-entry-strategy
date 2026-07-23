@@ -169,11 +169,20 @@ def _consecutive_decline_support(
 
     decline_low_raw = min(rows[index]["low"] for index in decline_indexes)
     decline_low = round(decline_low_raw, 4)
-    five_day_low = min(row["low"] for row in rows[-5:])
-    if five_day_low <= 0:
+    recent_start = len(rows) - 5
+    decline_index_set = set(decline_indexes)
+    reference_rows = [
+        rows[index]
+        for index in range(recent_start, len(rows))
+        if index not in decline_index_set
+    ]
+    if not reference_rows:
         return days, decline_low, False, None, None, None
-    decline_low_margin = decline_low_raw / five_day_low - 1.0
-    decline_low_is_above_five_day_low = decline_low_margin > 0
+    five_day_reference_low = min(row["low"] for row in reference_rows)
+    if five_day_reference_low <= 0:
+        return days, decline_low, False, None, None, None
+    decline_low_margin = decline_low_raw / five_day_reference_low - 1.0
+    decline_low_holds_reference = decline_low_margin >= 0
 
     high_breaks: list[float] = []
     for index in decline_indexes:
@@ -188,14 +197,14 @@ def _consecutive_decline_support(
     max_high_break = max(high_breaks)
     passed = (
         days >= 3
-        and decline_low_is_above_five_day_low
+        and decline_low_holds_reference
         and max_high_break <= 0
     )
     return (
         days,
         decline_low,
         passed,
-        decline_low_is_above_five_day_low,
+        decline_low_holds_reference,
         round(decline_low_margin, 6),
         round(max_high_break, 6),
     )
