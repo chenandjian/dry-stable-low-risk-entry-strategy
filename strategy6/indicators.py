@@ -166,20 +166,16 @@ def _consecutive_decline_support(
         return 0, None, False, None, None, None
 
     decline_low = round(min(rows[index]["low"] for index in decline_indexes), 4)
-    first_decline_low = rows[decline_indexes[0]]["low"]
-    no_new_streak_low = (
-        all(rows[index]["low"] >= first_decline_low for index in decline_indexes[1:])
-        if days >= 2
-        else None
-    )
     low_margins: list[float] = []
     high_breaks: list[float] = []
     for index in decline_indexes:
-        if index < 5:
+        if index < 4:
             return days, decline_low, False, None, None, None
-        prior_five = rows[index - 5:index]
-        prior_low = min(row["low"] for row in prior_five)
-        prior_high = max(row["high"] for row in prior_five)
+        # The rolling five-day window includes the current day, so compare it
+        # with the preceding four sessions. Equality means the old low held.
+        prior_four = rows[index - 4:index]
+        prior_low = min(row["low"] for row in prior_four)
+        prior_high = max(row["high"] for row in prior_four)
         if prior_low <= 0 or prior_high <= 0:
             return days, decline_low, False, None, None, None
         low_margins.append(rows[index]["low"] / prior_low - 1.0)
@@ -187,17 +183,17 @@ def _consecutive_decline_support(
 
     min_low_margin = min(low_margins)
     max_high_break = max(high_breaks)
+    holds_rolling_five_day_low = min_low_margin >= 0
     passed = (
         days >= 3
-        and no_new_streak_low is True
-        and min_low_margin >= 0
+        and holds_rolling_five_day_low
         and max_high_break <= 0
     )
     return (
         days,
         decline_low,
         passed,
-        no_new_streak_low,
+        holds_rolling_five_day_low,
         round(min_low_margin, 6),
         round(max_high_break, 6),
     )

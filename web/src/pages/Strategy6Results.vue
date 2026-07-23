@@ -810,11 +810,10 @@ export default {
       if (candidate.consecutive_down_no_new_streak_low === null
         || candidate.consecutive_down_no_new_streak_low === undefined) return '未计算'
       if (candidate.consecutive_down_structure_pass) {
-        return `${days}日 · 本轮未创新低 · 守5日低 · 未创5日高`
+        return `${days}日 · 守5日低 · 未创5日高`
       }
       const failures = []
-      if (candidate.consecutive_down_no_new_streak_low === false) failures.push('本轮创新低')
-      if (Number(candidate.consecutive_down_min_low_margin_pct) < 0) failures.push('已破5日低')
+      if (candidate.consecutive_down_no_new_streak_low === false) failures.push('已破5日低')
       if (Number(candidate.consecutive_down_max_high_break_pct) > 0) failures.push('已创5日高')
       return `${days}日 · ${failures.join(' · ') || '未满足'}`
     },
@@ -862,7 +861,7 @@ export default {
           { header: '连续收跌天数', value: c => this.hasConsecutiveDownDiagnostic(c) ? c.consecutive_down_days : '' },
           { header: '连续收跌最低价', value: c => this.hasConsecutiveDownDiagnostic(c) ? this.fmt(c.consecutive_down_low) : '' },
           { header: '连续收跌结构', value: c => this.hasConsecutiveDownDiagnostic(c) ? this.consecutiveDownStructureText(c) : '' },
-          { header: '本轮未创新低', value: c => c.consecutive_down_no_new_streak_low == null ? '' : (c.consecutive_down_no_new_streak_low ? '是' : '否') },
+          { header: '守住滚动5日低', value: c => c.consecutive_down_no_new_streak_low == null ? '' : (c.consecutive_down_no_new_streak_low ? '是' : '否') },
           { header: '守5日低最弱余量', value: c => this.hasConsecutiveDownDiagnostic(c) ? this.pct(c.consecutive_down_min_low_margin_pct) : '' },
           { header: '5日高最大突破', value: c => this.hasConsecutiveDownDiagnostic(c) ? this.pct(c.consecutive_down_max_high_break_pct) : '' },
           { header: '阶段状态', value: c => this.label('phaseStatus', c.phase_status) },
