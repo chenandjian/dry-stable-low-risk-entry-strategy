@@ -41,8 +41,9 @@ def _frame(symbol, date="2026-07-21"):
 
 
 class _Client:
-    def __init__(self, *, missing_stock=False):
+    def __init__(self, *, missing_stock=False, stock_date="2026-07-21"):
         self.missing_stock = missing_stock
+        self.stock_date = stock_date
         self.stock_calls = []
         self.index_calls = []
 
@@ -54,7 +55,11 @@ class _Client:
 
     def fetch(self, symbols, *, count):
         self.stock_calls.append((list(symbols), count))
-        frames = {} if self.missing_stock else {symbol: _frame(symbol) for symbol in symbols}
+        frames = (
+            {}
+            if self.missing_stock
+            else {symbol: _frame(symbol, self.stock_date) for symbol in symbols}
+        )
         missing = list(symbols) if self.missing_stock else []
         return BatchFetchResult(frames=frames, missing_symbols=missing)
 
@@ -195,6 +200,81 @@ def test_tickflow_freshness_check_does_not_load_full_ohlc_history(monkeypatch, t
         target_date="2026-07-21",
         min_fetch_time="2026-07-21 15:00:00",
     ) is True
+
+
+def test_tickflow_cache_requires_exact_target_trade_date(tmp_path):
+    db.init_db(str(tmp_path / "market.db"))
+
+    from scanner.data_acquisition import _tickflow_stock_cache_is_fresh
+
+    for latest_date, expected in (
+        ("2026-07-22", False),
+        ("2026-07-23", True),
+        ("2026-07-24", False),
+    ):
+        db.replace_ohlc_with_metadata(
+            "600519",
+            [{"date": latest_date, "open": 10, "high": 11, "low": 9,
+              "close": 10.5, "volume": 1000, "turnover": 10000}],
+            source="tickflow",
+            fetched_at="2026-07-23 16:00:00",
+        )
+        assert _tickflow_stock_cache_is_fresh(
+            "600519",
+            target_date="2026-07-23",
+            min_fetch_time="2026-07-23 15:00:00",
+        ) is expected
+
+
+def test_tickflow_prepare_fails_stale_stocks_when_target_date_has_zero_coverage(tmp_path):
+    db.init_db(str(tmp_path / "market.db"))
+    client = _Client(stock_date="2026-07-22")
+
+    session = prepare_scan_daily_data(
+        {
+            "data": {"acquisition_mode": "tickflow"},
+            "liquidity": {"min_listing_days": 1100},
+        },
+        [{"code": "600519", "name": "贵州茅台", "market": "上证主板"}],
+        now="2026-07-23 16:00:00",
+        client_factory=lambda **kwargs: client,
+    )
+
+    result = session.fetch("600519", "tickflow", kline_days=1100)
+
+    assert result.data is None
+    assert result.quote_status != "suspended"
+    assert "TARGET_TRADE_DATE_UNAVAILABLE" in result.primary_error
+    assert "target=2026-07-23" in result.primary_error
+    assert "remote_latest=2026-07-22" in result.primary_error
+
+
+def test_tickflow_prepare_keeps_individual_suspension_after_target_date_is_available(tmp_path):
+    db.init_db(str(tmp_path / "market.db"))
+    db.replace_ohlc_with_metadata(
+        "000001",
+        [{"date": "2026-07-23", "open": 10, "high": 11, "low": 9,
+          "close": 10.5, "volume": 1000, "turnover": 10000}],
+        source="tickflow",
+        fetched_at="2026-07-23 16:00:00",
+    )
+    client = _Client(stock_date="2026-07-22")
+
+    session = prepare_scan_daily_data(
+        {
+            "data": {"acquisition_mode": "tickflow"},
+            "liquidity": {"min_listing_days": 1100},
+        },
+        [{"code": "600519", "name": "贵州茅台", "market": "上证主板"}],
+        now="2026-07-23 16:00:00",
+        client_factory=lambda **kwargs: client,
+    )
+
+    result = session.fetch("600519", "tickflow", kline_days=1100)
+
+    assert result.data[-1]["date"] == "2026-07-22"
+    assert result.quote_status == "suspended"
+    assert result.source_errors == {}
 
 
 def test_tickflow_mode_loads_market_index_only_from_local_tickflow_cache(monkeypatch, tmp_path):

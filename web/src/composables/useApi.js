@@ -304,6 +304,16 @@ export function useApi() {
     return { ...body, ok: res.ok, statusCode: res.status }
   }
 
+  async function checkTickFlowFreshness(stockCode) {
+    const res = await fetch(`${API_BASE}/tickflow/freshness-check`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ stock_code: stockCode }),
+    })
+    const body = await res.json().catch(() => ({}))
+    return { ...body, ok: res.ok, statusCode: res.status }
+  }
+
   async function getStrategy6ScanStatus() {
     const res = await fetch(`${API_BASE}/strategy6/scans/status`)
     return res.json().catch(() => ({ running: false, stats: {} }))
@@ -460,7 +470,7 @@ export function useApi() {
   return {
     startScan, getScanStatus, getCandidates, getCandidate, getScanTasks,
     getSchedulerLogs, getKlineHistory, getKlineHealth, refreshKlineData, refreshKlineHealth,
-    startTickFlowFullRefresh, getTickFlowFullRefreshStatus,
+    startTickFlowFullRefresh, getTickFlowFullRefreshStatus, checkTickFlowFreshness,
     getTaskStocks, retryFailedStocks, reEvaluateTask, getConfig, updateConfig,
     runCupHandleBacktest,
     startStrategy2Scan, getStrategy2ScanStatus, getStrategy2Tasks,

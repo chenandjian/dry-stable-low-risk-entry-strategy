@@ -9,6 +9,7 @@ const api = {
   refreshKlineHealth: vi.fn(),
   startTickFlowFullRefresh: vi.fn(),
   getTickFlowFullRefreshStatus: vi.fn(),
+  checkTickFlowFreshness: vi.fn(),
 }
 vi.mock('../../composables/useApi.js', () => ({ useApi: () => api }))
 
@@ -131,6 +132,23 @@ describe('KlineHistory', () => {
         adjustment: 'forward_additive',
       },
     })
+    api.checkTickFlowFreshness.mockResolvedValue({
+      ok: true,
+      checked_at: '2026-07-23T16:00:01',
+      target_trade_date: '2026-07-23',
+      overall_status: 'PARTIAL_FAILURE',
+      stock: {
+        code: '000655', name: '金岭矿业', remote_latest_date: '2026-07-23',
+        local_latest_date: '2026-07-22', target_trade_date: '2026-07-23',
+        status: 'FRESH', row_count: 5, elapsed_ms: 120, error: null,
+      },
+      indexes: [
+        { code: 'sh000001', name: '上证指数', remote_latest_date: '2026-07-23', local_latest_date: '2026-07-22', target_trade_date: '2026-07-23', status: 'FRESH', row_count: 5, elapsed_ms: 80, error: null },
+        { code: 'sz399001', name: '深证成指', remote_latest_date: '2026-07-22', local_latest_date: '2026-07-22', target_trade_date: '2026-07-23', status: 'STALE', row_count: 5, elapsed_ms: 80, error: null },
+        { code: 'sz399006', name: '创业板指', remote_latest_date: null, local_latest_date: '2026-07-22', target_trade_date: '2026-07-23', status: 'FAILED', row_count: 0, elapsed_ms: 80, error: 'request failed' },
+        { code: 'hs300', name: '沪深300', remote_latest_date: '2026-07-23', local_latest_date: '2026-07-22', target_trade_date: '2026-07-23', status: 'FRESH', row_count: 5, elapsed_ms: 80, error: null },
+      ],
+    })
     vi.spyOn(window, 'confirm').mockReturnValue(true)
   })
 
@@ -230,6 +248,40 @@ describe('KlineHistory', () => {
     expect(api.refreshKlineHealth).toHaveBeenCalledWith({ status: 'problem' })
     expect(wrapper.text()).toContain('批量重拉完成：成功 1，失败 0，跳过 1')
     expect(api.getKlineHealth).toHaveBeenLastCalledWith({ status: 'problem', page: 1, page_size: 100 })
+  })
+
+  it('checks remote TickFlow freshness for one stock and four indexes', async () => {
+    const wrapper = mount(KlineHistory)
+    await flushUi()
+
+    await wrapper.find('[data-test="tickflow-probe-code"]').setValue('000655')
+    await wrapper.find('[data-test="tickflow-freshness-check"]').trigger('click')
+    await flushUi()
+
+    expect(api.checkTickFlowFreshness).toHaveBeenCalledWith('000655')
+    expect(wrapper.text()).toContain('TickFlow 数据新鲜度测试')
+    expect(wrapper.text()).toContain('金岭矿业')
+    expect(wrapper.text()).toContain('上证指数')
+    expect(wrapper.text()).toContain('深证成指')
+    expect(wrapper.text()).toContain('创业板指')
+    expect(wrapper.text()).toContain('沪深300')
+    expect(wrapper.text()).toContain('最新')
+    expect(wrapper.text()).toContain('落后')
+    expect(wrapper.text()).toContain('请求失败')
+    expect(wrapper.text()).toContain('2026-07-23')
+    expect(api.getKlineHistory).toHaveBeenLastCalledWith(expect.objectContaining({ code: '000831' }))
+  })
+
+  it('rejects an invalid TickFlow probe code without calling the API', async () => {
+    const wrapper = mount(KlineHistory)
+    await flushUi()
+
+    await wrapper.find('[data-test="tickflow-probe-code"]').setValue('12345')
+    await wrapper.find('[data-test="tickflow-freshness-check"]').trigger('click')
+    await flushUi()
+
+    expect(api.checkTickFlowFreshness).not.toHaveBeenCalled()
+    expect(wrapper.text()).toContain('请输入6位股票代码')
   })
 
   it('shows fixed TickFlow full refresh parameters and recovers running progress', async () => {

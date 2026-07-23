@@ -1,6 +1,7 @@
 from datetime import datetime
 import json
 
+import pytest
 from fastapi.testclient import TestClient
 
 import server
@@ -529,3 +530,83 @@ def test_tickflow_refresh_and_scan_backtest_are_mutually_exclusive(monkeypatch):
     assert json.loads(scan_conflict.body)["error"] == "TICKFLOW_REFRESH_RUNNING"
     assert backtest_conflict.status_code == 409
     assert json.loads(backtest_conflict.body)["error"] == "TICKFLOW_REFRESH_RUNNING"
+
+
+def test_tickflow_freshness_api_returns_read_only_probe(monkeypatch, tmp_path):
+    db_path = tmp_path / "cuphandle.db"
+    db.init_db(str(db_path))
+    calls = []
+    monkeypatch.setattr(
+        server,
+        "_ensure_db_initialized_from_config",
+        lambda: {"data": {"database_path": str(db_path)}},
+    )
+    monkeypatch.setattr(
+        server,
+        "_now",
+        lambda: datetime(2026, 7, 23, 16, 0, 0),
+    )
+
+    def fake_probe(code, *, target_trade_date):
+        calls.append((code, target_trade_date))
+        return {
+            "checked_at": "2026-07-23T16:00:01",
+            "target_trade_date": target_trade_date,
+            "overall_status": "FRESH",
+            "stock": {"code": code, "status": "FRESH"},
+            "indexes": [{"code": "sh000001", "status": "FRESH"}],
+        }
+
+    monkeypatch.setattr(server, "check_tickflow_freshness", fake_probe, raising=False)
+
+    response = TestClient(server.app).post(
+        "/api/tickflow/freshness-check",
+        json={"stock_code": "000655"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["overall_status"] == "FRESH"
+    assert calls == [("000655", "2026-07-23")]
+
+
+@pytest.mark.parametrize("stock_code", ["", "12345", "1234567", "ABC655"])
+def test_tickflow_freshness_api_rejects_invalid_stock_code(monkeypatch, stock_code):
+    monkeypatch.setattr(
+        server,
+        "check_tickflow_freshness",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("probe called")),
+        raising=False,
+    )
+
+    response = TestClient(server.app).post(
+        "/api/tickflow/freshness-check",
+        json={"stock_code": stock_code},
+    )
+
+    assert response.status_code == 400
+    assert response.json()["error"] == "INVALID_STOCK_CODE"
+
+
+def test_tickflow_freshness_api_returns_structured_gateway_error(monkeypatch, tmp_path):
+    db_path = tmp_path / "cuphandle.db"
+    db.init_db(str(db_path))
+    monkeypatch.setattr(
+        server,
+        "_ensure_db_initialized_from_config",
+        lambda: {"data": {"database_path": str(db_path)}},
+    )
+    monkeypatch.setattr(
+        server,
+        "check_tickflow_freshness",
+        lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("SDK unavailable")),
+        raising=False,
+    )
+
+    response = TestClient(server.app).post(
+        "/api/tickflow/freshness-check",
+        json={"stock_code": "000655"},
+    )
+
+    assert response.status_code == 502
+    assert response.json()["error"] == "TICKFLOW_FRESHNESS_CHECK_FAILED"
+    assert "SDK unavailable" in response.json()["message"]

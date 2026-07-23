@@ -70,6 +70,65 @@
         </ul>
       </div>
 
+      <div class="tickflow-probe" data-test="tickflow-freshness-panel">
+        <div class="table-head">
+          <div>
+            <h2>TickFlow 数据新鲜度测试</h2>
+            <p>真实读取指定股票的前复权日线和四个宽基指数，不写入本地数据库。</p>
+          </div>
+          <div class="probe-actions">
+            <input
+              v-model.trim="probeCode"
+              maxlength="6"
+              inputmode="numeric"
+              placeholder="6位股票代码"
+              data-test="tickflow-probe-code"
+              @keyup.enter="runTickFlowProbe"
+            />
+            <button
+              class="btn-secondary"
+              :disabled="probeLoading"
+              data-test="tickflow-freshness-check"
+              @click="runTickFlowProbe"
+            >
+              {{ probeLoading ? '测试中...' : '测试远端新鲜度' }}
+            </button>
+          </div>
+        </div>
+        <p v-if="probeError" class="error-line">{{ probeError }}</p>
+        <div v-if="probeResult" class="probe-summary">
+          <span>目标完整交易日：<strong>{{ fmt(probeResult.target_trade_date) }}</strong></span>
+          <span>检测时间：<strong>{{ fmt(probeResult.checked_at) }}</strong></span>
+          <span>整体状态：<strong>{{ probeOverallLabel }}</strong></span>
+        </div>
+        <table v-if="probeItems.length" class="probe-table">
+          <thead>
+            <tr>
+              <th>对象</th>
+              <th>远端最新日</th>
+              <th>本地最新日</th>
+              <th>目标日</th>
+              <th>状态</th>
+              <th>行数</th>
+              <th>耗时</th>
+              <th>错误</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="item in probeItems" :key="`${item.code}-${item.symbol}`">
+              <td>{{ item.code }} {{ item.name || '' }}</td>
+              <td>{{ fmt(item.remote_latest_date) }}</td>
+              <td>{{ fmt(item.local_latest_date) }}</td>
+              <td>{{ fmt(item.target_trade_date) }}</td>
+              <td><span class="health-badge" :class="probeStatusClass(item.status)">{{ probeStatusLabel(item.status) }}</span></td>
+              <td>{{ item.row_count ?? 0 }}</td>
+              <td>{{ item.elapsed_ms ?? 0 }} ms</td>
+              <td class="reason-cell">{{ item.error || '--' }}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
       <div class="health-grid" v-if="healthSummary">
         <button class="health-card ok" @click="setHealthFilter('fresh')">
           <span>最新数据</span>
@@ -281,6 +340,7 @@ const {
   refreshKlineHealth,
   startTickFlowFullRefresh,
   getTickFlowFullRefreshStatus,
+  checkTickFlowFreshness,
 } = useApi()
 
 const form = reactive({
@@ -308,6 +368,10 @@ const bulkRefreshMessage = ref('')
 const tickFlowStatus = ref(null)
 const tickFlowStarting = ref(false)
 const tickFlowError = ref('')
+const probeCode = ref('000655')
+const probeLoading = ref(false)
+const probeError = ref('')
+const probeResult = ref(null)
 let tickFlowPollTimer = null
 
 const totalPages = computed(() => Math.max(1, Math.ceil(total.value / form.page_size)))
@@ -330,6 +394,47 @@ const tickFlowStatusLabel = computed(() => {
   }
   return labels[tickFlowStatus.value?.status] || tickFlowStatus.value?.status || '尚未启动'
 })
+const probeItems = computed(() => {
+  if (!probeResult.value) return []
+  return [probeResult.value.stock, ...(probeResult.value.indexes || [])].filter(Boolean)
+})
+const probeOverallLabel = computed(() => {
+  const labels = {
+    FRESH: '全部最新',
+    STALE: '存在落后数据',
+    PARTIAL_FAILURE: '部分请求失败',
+    FAILED: '全部请求失败',
+  }
+  return labels[probeResult.value?.overall_status] || probeResult.value?.overall_status || '--'
+})
+
+function probeStatusLabel(status) {
+  return { FRESH: '最新', STALE: '落后', FAILED: '请求失败' }[status] || status || '--'
+}
+
+function probeStatusClass(status) {
+  return status === 'FRESH' ? 'ok' : status === 'STALE' ? 'warning' : 'danger'
+}
+
+async function runTickFlowProbe() {
+  const code = probeCode.value.trim()
+  if (!/^\d{6}$/.test(code)) {
+    probeError.value = '请输入6位股票代码'
+    return
+  }
+  if (probeLoading.value) return
+  probeLoading.value = true
+  probeError.value = ''
+  try {
+    const data = await checkTickFlowFreshness(code)
+    if (data.ok === false) throw new Error(data.message || data.error || '新鲜度测试失败')
+    probeResult.value = data
+  } catch (err) {
+    probeError.value = `TickFlow 新鲜度测试失败：${err?.message || '未知错误'}`
+  } finally {
+    probeLoading.value = false
+  }
+}
 
 function clearTickFlowPoll() {
   if (tickFlowPollTimer) {
@@ -655,6 +760,32 @@ h2 {
   padding-left: 20px;
   color: var(--down-green);
   font-size: 12px;
+}
+.tickflow-probe {
+  margin: 0 0 16px;
+  padding: 14px;
+  border: 1px solid rgba(59, 130, 246, 0.35);
+  border-radius: 8px;
+  background: rgba(59, 130, 246, 0.04);
+}
+.probe-actions,
+.probe-summary {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px 16px;
+}
+.probe-actions input {
+  width: 140px;
+}
+.probe-summary {
+  margin: 8px 0 14px;
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+.probe-table th,
+.probe-table td {
+  text-align: left;
 }
 .health-grid {
   display: grid;

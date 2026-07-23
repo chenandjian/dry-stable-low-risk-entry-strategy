@@ -86,7 +86,25 @@ def _tickflow_stock_cache_is_fresh(code: str, *, target_date: str, min_fetch_tim
         latest_date
         and metadata.get("source") == TICKFLOW_MODE
         and str(metadata.get("fetched_at") or "") >= min_fetch_time
-        and latest_date <= target_date
+        and latest_date == target_date
+    )
+
+
+def _tickflow_target_date_is_available(target_date: str) -> bool:
+    row = db.get_conn().execute(
+        """SELECT 1 FROM daily_ohlc_metadata
+           WHERE source=? AND latest_date=? LIMIT 1""",
+        (TICKFLOW_MODE, target_date),
+    ).fetchone()
+    return row is not None
+
+
+def _target_date_unavailable_error(code: str, target_date: str) -> str:
+    metadata = db.get_ohlc_metadata(code) or {}
+    remote_latest = metadata.get("latest_date") or "none"
+    return (
+        "TARGET_TRADE_DATE_UNAVAILABLE: "
+        f"target={target_date} remote_latest={remote_latest}"
     )
 
 
@@ -209,6 +227,15 @@ def prepare_scan_daily_data(
                     for item in result.results
                     if item.status != "success"
                 })
+                if not _tickflow_target_date_is_available(target_date):
+                    for stock in stale_stocks:
+                        code = str(stock.get("code", ""))
+                        metadata = db.get_ohlc_metadata(code) or {}
+                        if metadata.get("latest_date") != target_date:
+                            failures.setdefault(
+                                code,
+                                _target_date_unavailable_error(code, target_date),
+                            )
         if not indexes_fresh:
             from tickflow_data.indexes import MARKET_INDEX_SPECS
 

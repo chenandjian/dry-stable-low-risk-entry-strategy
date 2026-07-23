@@ -3,6 +3,7 @@ import asyncio
 import datetime
 import json
 import logging
+import re
 import sys
 import threading
 from contextlib import asynccontextmanager
@@ -63,6 +64,7 @@ from scanner.daily_data_service import (
 from scanner.data_source import DataSourceManager
 from scanner.data_acquisition import resolve_acquisition_mode
 from tickflow_data.web_task import TickFlowFullRefreshManager, TickFlowTaskConflict
+from tickflow_data.freshness import check_tickflow_freshness
 
 logger = logging.getLogger(__name__)
 
@@ -1615,6 +1617,38 @@ async def start_tickflow_full_refresh():
 async def get_tickflow_full_refresh_status():
     """Return the current in-process TickFlow refresh state."""
     return _tickflow_full_refresh.status()
+
+
+@app.post("/api/tickflow/freshness-check")
+async def tickflow_freshness_check(payload: dict):
+    """Probe one stock and the four required indexes without writing local history."""
+    stock_code = str((payload or {}).get("stock_code") or "").strip()
+    if re.fullmatch(r"\d{6}", stock_code) is None:
+        return JSONResponse(
+            {
+                "error": "INVALID_STOCK_CODE",
+                "message": "股票代码必须是6位数字",
+            },
+            status_code=400,
+        )
+
+    _ensure_db_initialized_from_config()
+    freshness = build_cache_freshness_context(now=_now())
+    try:
+        return await asyncio.to_thread(
+            check_tickflow_freshness,
+            stock_code,
+            target_trade_date=freshness.target_trade_date,
+        )
+    except Exception as exc:
+        logger.exception("TickFlow freshness probe failed for %s", stock_code)
+        return JSONResponse(
+            {
+                "error": "TICKFLOW_FRESHNESS_CHECK_FAILED",
+                "message": str(exc),
+            },
+            status_code=502,
+        )
 
 
 @app.post("/api/stock/{code}/kline-refresh")
