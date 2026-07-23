@@ -2834,6 +2834,7 @@ def _ensure_strategy6_candidates_table(conn: sqlite3.Connection):
         "consecutive_down_days": "INTEGER",
         "consecutive_down_low": "REAL",
         "consecutive_down_structure_pass": "INTEGER",
+        "consecutive_down_no_new_streak_low": "INTEGER",
         "consecutive_down_min_low_margin_pct": "REAL",
         "consecutive_down_max_high_break_pct": "REAL",
         "relative_strength_20": "REAL DEFAULT 0",
@@ -4026,7 +4027,8 @@ def upsert_strategy6_candidate(
         "first_seen_date", "last_seen_date", "days_in_pool", "exit_date", "exit_reason", "cooldown_until_date", "reentry_count",
         "strategy_version", "config_hash", "decision_profile", "price_basis", "current_price_adj", "current_price_raw",
         "atr14", "consecutive_down_days", "consecutive_down_low",
-        "consecutive_down_structure_pass", "consecutive_down_min_low_margin_pct",
+        "consecutive_down_structure_pass", "consecutive_down_no_new_streak_low",
+        "consecutive_down_min_low_margin_pct",
         "consecutive_down_max_high_break_pct", "start_day_self_amount_percentile",
         "phase_status", "consolidation_start_date", "tail_start_date", "signal_date",
         "start_age_days", "consolidation_days", "tail_days",
@@ -4108,6 +4110,11 @@ def upsert_strategy6_candidate(
             None
             if d.get("consecutive_down_structure_pass") is None
             else 1 if d.get("consecutive_down_structure_pass") else 0
+        ),
+        (
+            None
+            if d.get("consecutive_down_no_new_streak_low") is None
+            else 1 if d.get("consecutive_down_no_new_streak_low") else 0
         ),
         d.get("consecutive_down_min_low_margin_pct"),
         d.get("consecutive_down_max_high_break_pct"),
@@ -5644,6 +5651,10 @@ def _deserialize_strategy6_row(row: dict) -> dict:
     if row.get("consecutive_down_structure_pass") is not None:
         row["consecutive_down_structure_pass"] = _strategy6_safe_bool(
             row.get("consecutive_down_structure_pass")
+        )
+    if row.get("consecutive_down_no_new_streak_low") is not None:
+        row["consecutive_down_no_new_streak_low"] = _strategy6_safe_bool(
+            row.get("consecutive_down_no_new_streak_low")
         )
     for field in ("original_tail_score", "box_tail_score", "brooks_tail_score"):
         if field in row:

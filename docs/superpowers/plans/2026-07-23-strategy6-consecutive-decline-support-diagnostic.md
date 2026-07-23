@@ -205,3 +205,38 @@ npm.cmd --prefix web run build
 ```
 
 预期：所有测试和构建通过。
+
+### 任务6：连续收跌期间禁止本轮创新低
+
+**文件：**
+- 修改：`tests/test_strategy6_core_rules.py`
+- 修改：`strategy6/indicators.py`
+- 修改：`strategy6/models.py`
+- 修改：`tests/test_strategy6_db_api.py`
+- 修改：`scanner/db.py`
+- 修改：`web/src/pages/Strategy6Results.vue`
+- 修改：`web/src/pages/__tests__/Strategy6Results.test.js`
+
+- [x] **步骤1：编写失败测试**
+
+构造最低价为 `10.00 -> 10.20 -> 10.05` 的连续收跌，断言允许通过；构造 `10.00 -> 10.20 -> 9.98`，即使仍高于此前5日最低价，也必须因本轮创新低失败。候选字典、SQLite/API和前端同时断言 `consecutive_down_no_new_streak_low`。
+
+- [x] **步骤2：运行红灯测试**
+
+```bash
+python -m pytest tests/test_strategy6_core_rules.py -k "consecutive_down" -q
+```
+
+预期：本轮创新低样本仍被旧规则接受，且新证据字段不存在。
+
+- [x] **步骤3：实现最小计算和兼容存储**
+
+首个收跌日的最低价作为本轮基准；后续最低价均不低于该值时 `consecutive_down_no_new_streak_low=True`。该字段加入候选字典和SQLite可空兼容列；旧任务保持NULL。
+
+- [x] **步骤4：增强前端解释**
+
+复用组合指标格式化函数：本轮内部跌破时显示“本轮创新低”；CSV增加“本轮未创新低”证据列。不得修改评分、过滤、候选分层和VCP排序。
+
+- [x] **步骤5：真实数据与完整门禁**
+
+使用本地 `data/cuphandle.db` 重新筛选真实样本并更新验证报告，然后执行策略6专项、全量后端、全量前端和生产构建。

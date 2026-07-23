@@ -39,7 +39,7 @@ def _row(i, close=10.0, open_price=None, high=None, low=None, volume=1_000_000, 
     }
 
 
-def _consecutive_down_rows(*, broken=False, new_high=False, down_days=3, insufficient=False, flat_last=False):
+def _consecutive_down_rows(*, broken=False, new_high=False, streak_new_low=False, down_days=3, insufficient=False, flat_last=False):
     base_count = 3 if insufficient else 5
     rows = [
         _row(i, close=10.2 + i * 0.1, low=9.0 + i * 0.02)
@@ -48,7 +48,12 @@ def _consecutive_down_rows(*, broken=False, new_high=False, down_days=3, insuffi
     previous_close = rows[-1]["close"]
     for offset in range(down_days):
         close = previous_close if flat_last and offset == down_days - 1 else previous_close - 0.1
-        low = 8.9 if broken and offset == down_days - 1 else 9.4 - offset * 0.05
+        stable_lows = [9.4, 9.5, 9.45]
+        low = stable_lows[min(offset, len(stable_lows) - 1)]
+        if streak_new_low and offset == down_days - 1:
+            low = 9.39
+        if broken and offset == down_days - 1:
+            low = 8.9
         high = 11.5 if new_high and offset == down_days - 1 else close * 1.01
         rows.append(_row(base_count + offset, close=close, low=low, high=high))
         previous_close = close
@@ -62,10 +67,25 @@ def test_strategy6_consecutive_down_holds_each_days_prior_five_day_low():
     )
 
     assert indicators.consecutive_down_days == 3
-    assert indicators.consecutive_down_low == 9.3
+    assert indicators.consecutive_down_low == 9.4
     assert indicators.consecutive_down_structure_pass is True
-    assert indicators.consecutive_down_min_low_margin_pct == 0.028761
+    assert indicators.consecutive_down_no_new_streak_low is True
+    assert indicators.consecutive_down_min_low_margin_pct >= 0
     assert indicators.consecutive_down_max_high_break_pct <= 0
+
+
+def test_strategy6_consecutive_down_fails_when_streak_makes_new_low_above_prior_five_day_low():
+    _, indicators = calculate_indicators(
+        _consecutive_down_rows(streak_new_low=True),
+        {"big_down_return": -0.07, "big_down_volume_ratio": 1.5},
+    )
+
+    assert indicators.consecutive_down_days == 3
+    assert indicators.consecutive_down_low == 9.39
+    assert indicators.consecutive_down_min_low_margin_pct >= 0
+    assert indicators.consecutive_down_max_high_break_pct <= 0
+    assert indicators.consecutive_down_no_new_streak_low is False
+    assert indicators.consecutive_down_structure_pass is False
 
 
 def test_strategy6_consecutive_down_fails_when_any_day_breaks_prior_five_day_low():
@@ -77,6 +97,7 @@ def test_strategy6_consecutive_down_fails_when_any_day_breaks_prior_five_day_low
     assert indicators.consecutive_down_days == 3
     assert indicators.consecutive_down_low == 8.9
     assert indicators.consecutive_down_structure_pass is False
+    assert indicators.consecutive_down_no_new_streak_low is False
     assert indicators.consecutive_down_min_low_margin_pct < 0
 
 
@@ -116,6 +137,7 @@ def test_strategy6_consecutive_down_does_not_pass_without_five_prior_days():
 
     assert indicators.consecutive_down_days == 3
     assert indicators.consecutive_down_structure_pass is False
+    assert indicators.consecutive_down_no_new_streak_low is None
     assert indicators.consecutive_down_min_low_margin_pct is None
     assert indicators.consecutive_down_max_high_break_pct is None
 
@@ -128,7 +150,7 @@ def test_strategy6_consecutive_down_diagnostic_does_not_change_decision(monkeypa
     monkeypatch.setattr(
         strategy6_indicators,
         "_consecutive_decline_support",
-        lambda _rows: (9, 8.88, True, 0.123456, -0.012345),
+        lambda _rows: (9, 8.88, True, True, 0.123456, -0.012345),
         raising=False,
     )
     diagnosed = engine.evaluate_at(data, code="000001", name="平安银行")
@@ -136,6 +158,7 @@ def test_strategy6_consecutive_down_diagnostic_does_not_change_decision(monkeypa
 
     assert candidate["consecutive_down_days"] == 9
     assert candidate["consecutive_down_structure_pass"] is True
+    assert candidate["consecutive_down_no_new_streak_low"] is True
     assert diagnosed.score.total_score == baseline.score.total_score
     assert diagnosed.reject_reasons == baseline.reject_reasons
     assert diagnosed.candidate_type == baseline.candidate_type

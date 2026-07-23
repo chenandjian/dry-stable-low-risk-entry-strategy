@@ -40,6 +40,7 @@ class Strategy6Indicators:
     consecutive_down_days: int = 0
     consecutive_down_low: float | None = None
     consecutive_down_structure_pass: bool = False
+    consecutive_down_no_new_streak_low: bool | None = None
     consecutive_down_min_low_margin_pct: float | None = None
     consecutive_down_max_high_break_pct: float | None = None
     relative_strength_20: float = 0.0
@@ -509,6 +510,7 @@ class Strategy6Evaluation:
             "consecutive_down_days": ind.consecutive_down_days,
             "consecutive_down_low": ind.consecutive_down_low,
             "consecutive_down_structure_pass": ind.consecutive_down_structure_pass,
+            "consecutive_down_no_new_streak_low": ind.consecutive_down_no_new_streak_low,
             "consecutive_down_min_low_margin_pct": ind.consecutive_down_min_low_margin_pct,
             "consecutive_down_max_high_break_pct": ind.consecutive_down_max_high_break_pct,
             "start_date": start.start_date,

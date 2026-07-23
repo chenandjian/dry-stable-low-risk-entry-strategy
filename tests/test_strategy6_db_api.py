@@ -55,6 +55,7 @@ def _candidate():
         "consecutive_down_days": 3,
         "consecutive_down_low": 11.92,
         "consecutive_down_structure_pass": True,
+        "consecutive_down_no_new_streak_low": True,
         "consecutive_down_min_low_margin_pct": 0.012,
         "consecutive_down_max_high_break_pct": -0.018,
         "start_low": 11.5,
@@ -229,6 +230,7 @@ def test_strategy6_candidate_table_is_independent(tmp_path):
     assert rows[0]["consecutive_down_days"] == 3
     assert rows[0]["consecutive_down_low"] == 11.92
     assert rows[0]["consecutive_down_structure_pass"] is True
+    assert rows[0]["consecutive_down_no_new_streak_low"] is True
     assert rows[0]["consecutive_down_min_low_margin_pct"] == 0.012
     assert rows[0]["consecutive_down_max_high_break_pct"] == -0.018
     assert detail["risk_reward_ratio_2"] == 2.5
@@ -301,7 +303,8 @@ def test_strategy6_candidate_schema_contains_all_box_tail_output_fields(tmp_path
     required = {
         "decision_profile",
         "consecutive_down_days", "consecutive_down_low",
-        "consecutive_down_structure_pass", "consecutive_down_min_low_margin_pct",
+        "consecutive_down_structure_pass", "consecutive_down_no_new_streak_low",
+        "consecutive_down_min_low_margin_pct",
         "consecutive_down_max_high_break_pct",
         "original_tail_pass", "original_tail_score", "box_tail_enabled",
         "box_tail_pass", "box_tail_score", "box_status", "tail_pass", "tail_path",
@@ -364,6 +367,7 @@ def test_strategy6_legacy_candidate_keeps_missing_consecutive_down_diagnostic_as
     assert row["consecutive_down_days"] is None
     assert row["consecutive_down_low"] is None
     assert row["consecutive_down_structure_pass"] is None
+    assert row["consecutive_down_no_new_streak_low"] is None
     assert row["consecutive_down_min_low_margin_pct"] is None
     assert row["consecutive_down_max_high_break_pct"] is None
 
@@ -694,12 +698,14 @@ def test_strategy6_api_returns_candidates_and_rejects_cross_strategy(tmp_path, m
     assert listed["brooks_result"]["trade_trigger"]["trigger_price"] == 12.48
     assert listed["consecutive_down_days"] == 3
     assert listed["consecutive_down_structure_pass"] is True
+    assert listed["consecutive_down_no_new_streak_low"] is True
     assert detailed["candidate_type"] == "KEY_CANDIDATE"
     assert detailed["tail_path"] == "BOX"
     assert detailed["brooks_status"] == "SECOND_ENTRY_LONG_READY"
     assert detailed["brooks_trigger_price"] == 12.48
     assert detailed["brooks_result"]["structure"]["setup_types"] == ["SECOND_ENTRY_LONG"]
     assert detailed["consecutive_down_low"] == 11.92
+    assert detailed["consecutive_down_no_new_streak_low"] is True
     assert detailed["consecutive_down_min_low_margin_pct"] == 0.012
     assert detailed["consecutive_down_max_high_break_pct"] == -0.018
 
