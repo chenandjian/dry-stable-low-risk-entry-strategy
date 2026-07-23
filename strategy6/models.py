@@ -37,6 +37,11 @@ class Strategy6Indicators:
     range_5: float = 0.0
     range_10: float = 0.0
     close_range_5: float = 0.0
+    consecutive_down_days: int = 0
+    consecutive_down_low: float | None = None
+    consecutive_down_structure_pass: bool = False
+    consecutive_down_min_low_margin_pct: float | None = None
+    consecutive_down_max_high_break_pct: float | None = None
     relative_strength_20: float = 0.0
     relative_strength_20_observed: bool = False
     market_status: str = "UNKNOWN"
@@ -501,6 +506,11 @@ class Strategy6Evaluation:
             "range_5": ind.range_5,
             "range_10": ind.range_10,
             "close_range_5": ind.close_range_5,
+            "consecutive_down_days": ind.consecutive_down_days,
+            "consecutive_down_low": ind.consecutive_down_low,
+            "consecutive_down_structure_pass": ind.consecutive_down_structure_pass,
+            "consecutive_down_min_low_margin_pct": ind.consecutive_down_min_low_margin_pct,
+            "consecutive_down_max_high_break_pct": ind.consecutive_down_max_high_break_pct,
             "start_date": start.start_date,
             "start_type": start.start_type,
             "start_grade": start.start_grade,

@@ -84,7 +84,7 @@
             <tr>
               <th>股票</th><th>现价</th><th>总分</th><th>入场/质量</th><th>分类</th><th>生命周期</th>
               <th>启动类型/等级</th><th>支撑状态</th><th>关键/前置支撑</th><th>执行区间/状态</th>
-              <th>止损</th><th>客观目标1/2</th><th>客观RR2</th><th>形态</th><th>权威路径/Brooks</th><th>尾段/前20量比</th><th>市场/RS</th><th>入池</th><th>风险/警告</th><th>数据日</th>
+              <th>止损</th><th>客观目标1/2</th><th>客观RR2</th><th>形态</th><th>权威路径/Brooks</th><th>尾段/前20量比</th><th>连续收跌结构</th><th>市场/RS</th><th>入池</th><th>风险/警告</th><th>数据日</th>
             </tr>
           </thead>
           <tbody>
@@ -116,6 +116,7 @@
                 <div v-else class="muted">旧路径 {{ label('tailPath', c.tail_path || 'NONE') }}</div>
               </td>
               <td>{{ tailVolumeDisplay(c) }}</td>
+              <td :data-test="`candidate-consecutive-down-${c.code}`">{{ consecutiveDownStructureText(c) }}</td>
               <td>
                 <div>{{ label('marketStatus', c.market_status || 'UNKNOWN') }}</div>
                 <div class="muted">RS20 {{ pct(c.relative_strength_20) }}</div>
@@ -245,6 +246,7 @@
         <div data-test="detail-entry-archetype"><span>入场类型</span><strong>{{ entryArchetypeText(selected) }}</strong></div>
         <div><span>阶段</span><strong>{{ label('phaseStatus', selected.phase_status) }} · 整理 {{ selected.consolidation_start_date || '--' }} · 尾段 {{ selected.tail_start_date || '--' }} · {{ hasTailSegmentation(selected) ? label('tailSegmentationStatus', selected.tail_segmentation_status) : '--' }}</strong></div>
         <div><span>形态</span><strong>{{ label('patternType', selected.pattern_type || 'UNKNOWN') }} · {{ label('pivotSource', selected.pivot_source) }} · 收缩{{ selected.contraction_count ?? 0 }}次</strong></div>
+        <div data-test="detail-consecutive-down-structure"><span>连续收跌结构</span><strong>{{ consecutiveDownStructureDetail(selected) }}</strong></div>
         <div><span>支撑簇</span><strong>战术 {{ fmt(selected.tactical_support_price) }} · {{ joinedLabels('supportSource', selected.support_cluster_sources, ' / ') }}</strong></div>
         <div><span>客观目标</span><strong>{{ fmt(selected.objective_target_1 ?? selected.target_price_1) }} / {{ fmt(selected.objective_target_2 ?? selected.target_price_2) }} · RR {{ fmt(selected.objective_rr_1 ?? selected.risk_reward_ratio_1) }} / {{ fmt(selected.objective_rr_2 ?? selected.risk_reward_ratio_2) }}</strong></div>
         <div><span>执行R目标</span><strong>1.5R {{ fmt(selected.execution_target_1_5r) }} · 2R {{ fmt(selected.execution_target_2r) }} · 2.5R {{ fmt(selected.execution_target_2_5r) }} · 3.5R {{ fmt(selected.execution_target_3_5r) }}</strong></div>
@@ -794,6 +796,28 @@ export default {
     vcpFormingRoundText(item) {
       return `形成中轮次 ${item?.peak_date || '--'} → ${item?.low_date || '--'} · ${this.label('vcpFormingPhase', item?.phase)}`
     },
+    hasConsecutiveDownDiagnostic(candidate) {
+      return candidate?.consecutive_down_days !== null
+        && candidate?.consecutive_down_days !== undefined
+        && candidate?.consecutive_down_structure_pass !== null
+        && candidate?.consecutive_down_structure_pass !== undefined
+    },
+    consecutiveDownStructureText(candidate) {
+      if (!this.hasConsecutiveDownDiagnostic(candidate)) return '未计算'
+      const days = Number(candidate.consecutive_down_days) || 0
+      if (days < 3) return `${days}日 · 未满足`
+      if (candidate.consecutive_down_structure_pass) {
+        return `${days}日 · 守5日低 · 未创5日高`
+      }
+      const failures = []
+      if (Number(candidate.consecutive_down_min_low_margin_pct) < 0) failures.push('已破5日低')
+      if (Number(candidate.consecutive_down_max_high_break_pct) > 0) failures.push('已创5日高')
+      return `${days}日 · ${failures.join(' · ') || '未满足'}`
+    },
+    consecutiveDownStructureDetail(candidate) {
+      if (!this.hasConsecutiveDownDiagnostic(candidate)) return '未计算'
+      return `${this.consecutiveDownStructureText(candidate)} · 连跌低点 ${this.fmt(candidate.consecutive_down_low)} · 守低余量 ${this.pct(candidate.consecutive_down_min_low_margin_pct)} · 高点突破 ${this.pct(candidate.consecutive_down_max_high_break_pct)}`
+    },
     isVcpQualityV2(candidate) {
       return ['VCP_QUALITY_V2', 'VCP_QUALITY_V3'].includes(candidate?.vcp_quality_model_version)
     },
@@ -829,6 +853,11 @@ export default {
           { header: '尾段划分', value: c => this.hasTailSegmentation(c) ? this.label('tailSegmentationStatus', c.tail_segmentation_status) : '' },
           { header: '尾段划分原始值', value: c => this.hasTailSegmentation(c) ? c.tail_segmentation_status : '' },
           { header: '尾段划分分数', value: c => this.hasTailSegmentation(c) ? (c.tail_segmentation_score ?? '') : '' },
+          { header: '连续收跌天数', value: c => this.hasConsecutiveDownDiagnostic(c) ? c.consecutive_down_days : '' },
+          { header: '连续收跌最低价', value: c => this.hasConsecutiveDownDiagnostic(c) ? this.fmt(c.consecutive_down_low) : '' },
+          { header: '连续收跌结构', value: c => this.hasConsecutiveDownDiagnostic(c) ? this.consecutiveDownStructureText(c) : '' },
+          { header: '守5日低最弱余量', value: c => this.hasConsecutiveDownDiagnostic(c) ? this.pct(c.consecutive_down_min_low_margin_pct) : '' },
+          { header: '5日高最大突破', value: c => this.hasConsecutiveDownDiagnostic(c) ? this.pct(c.consecutive_down_max_high_break_pct) : '' },
           { header: '阶段状态', value: c => this.label('phaseStatus', c.phase_status) },
           { header: '阶段状态原始值', value: c => c.phase_status || '' },
           { header: '形态类型', value: c => this.label('patternType', c.pattern_type) },

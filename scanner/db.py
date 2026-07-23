@@ -2831,6 +2831,11 @@ def _ensure_strategy6_candidates_table(conn: sqlite3.Connection):
         "current_price": "REAL DEFAULT 0",
         "current_close_position": "REAL DEFAULT 0",
         "atr14": "REAL",
+        "consecutive_down_days": "INTEGER",
+        "consecutive_down_low": "REAL",
+        "consecutive_down_structure_pass": "INTEGER",
+        "consecutive_down_min_low_margin_pct": "REAL",
+        "consecutive_down_max_high_break_pct": "REAL",
         "relative_strength_20": "REAL DEFAULT 0",
         "current_volume_ratio_20": "REAL",
         "relative_strength_20_observed": "INTEGER DEFAULT 0",
@@ -4020,7 +4025,9 @@ def upsert_strategy6_candidate(
     extra_columns = [
         "first_seen_date", "last_seen_date", "days_in_pool", "exit_date", "exit_reason", "cooldown_until_date", "reentry_count",
         "strategy_version", "config_hash", "decision_profile", "price_basis", "current_price_adj", "current_price_raw",
-        "atr14", "start_day_self_amount_percentile",
+        "atr14", "consecutive_down_days", "consecutive_down_low",
+        "consecutive_down_structure_pass", "consecutive_down_min_low_margin_pct",
+        "consecutive_down_max_high_break_pct", "start_day_self_amount_percentile",
         "phase_status", "consolidation_start_date", "tail_start_date", "signal_date",
         "start_age_days", "consolidation_days", "tail_days",
         "pattern_type", "pattern_score", "pattern_start_date", "pattern_end_date",
@@ -4095,6 +4102,15 @@ def upsert_strategy6_candidate(
         d.get("current_price_adj", d.get("current_price")),
         None,
         d.get("atr14"),
+        d.get("consecutive_down_days"),
+        d.get("consecutive_down_low"),
+        (
+            None
+            if d.get("consecutive_down_structure_pass") is None
+            else 1 if d.get("consecutive_down_structure_pass") else 0
+        ),
+        d.get("consecutive_down_min_low_margin_pct"),
+        d.get("consecutive_down_max_high_break_pct"),
         d.get("start_day_self_amount_percentile", 0),
         d.get("phase_status", ""),
         d.get("consolidation_start_date", ""),
@@ -5625,6 +5641,10 @@ def _deserialize_strategy6_row(row: dict) -> dict:
     ):
         if field in row:
             row[field] = _strategy6_safe_bool(row.get(field))
+    if row.get("consecutive_down_structure_pass") is not None:
+        row["consecutive_down_structure_pass"] = _strategy6_safe_bool(
+            row.get("consecutive_down_structure_pass")
+        )
     for field in ("original_tail_score", "box_tail_score", "brooks_tail_score"):
         if field in row:
             row[field] = _strategy6_safe_int(row.get(field))

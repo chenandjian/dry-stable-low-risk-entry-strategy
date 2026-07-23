@@ -52,6 +52,11 @@ def _candidate():
         "start_type": "NORMAL_STRONG_BREAKOUT",
         "start_grade": "A",
         "current_close_position": 0.72,
+        "consecutive_down_days": 3,
+        "consecutive_down_low": 11.92,
+        "consecutive_down_structure_pass": True,
+        "consecutive_down_min_low_margin_pct": 0.012,
+        "consecutive_down_max_high_break_pct": -0.018,
         "start_low": 11.5,
         "days_since_start": 5,
         "support_status": "MA20_SUPPORT",
@@ -221,6 +226,11 @@ def test_strategy6_candidate_table_is_independent(tmp_path):
     assert rows[0]["first_pool_date"] == "2026-07-01"
     assert rows[0]["pool_age_trading_days"] == 6
     assert rows[0]["warn_tags"] == ["PRESSURE_NEAR_HIGH"]
+    assert rows[0]["consecutive_down_days"] == 3
+    assert rows[0]["consecutive_down_low"] == 11.92
+    assert rows[0]["consecutive_down_structure_pass"] is True
+    assert rows[0]["consecutive_down_min_low_margin_pct"] == 0.012
+    assert rows[0]["consecutive_down_max_high_break_pct"] == -0.018
     assert detail["risk_reward_ratio_2"] == 2.5
     assert detail["strategy_version"] == "4.0.0"
     assert detail["decision_profile"] == "research_quality_v2"
@@ -290,6 +300,9 @@ def test_strategy6_candidate_schema_contains_all_box_tail_output_fields(tmp_path
     }
     required = {
         "decision_profile",
+        "consecutive_down_days", "consecutive_down_low",
+        "consecutive_down_structure_pass", "consecutive_down_min_low_margin_pct",
+        "consecutive_down_max_high_break_pct",
         "original_tail_pass", "original_tail_score", "box_tail_enabled",
         "box_tail_pass", "box_tail_score", "box_status", "tail_pass", "tail_path",
         "box_start_date", "box_end_date", "box_days", "box_high", "box_low",
@@ -333,6 +346,26 @@ def test_strategy6_candidate_schema_contains_all_box_tail_output_fields(tmp_path
     }
 
     assert required <= columns
+
+
+def test_strategy6_legacy_candidate_keeps_missing_consecutive_down_diagnostic_as_null(tmp_path):
+    db.init_db(str(tmp_path / "s6-consecutive-down-legacy.db"))
+    db.create_scan_task("s6-legacy-down", "2026-07-09 10:00:00", strategy_type=STRATEGY6_TYPE)
+    db.get_conn().execute(
+        """INSERT INTO strategy6_candidates (
+               task_id, code, name, evaluation_date, candidate_type, classification, total_score
+           ) VALUES (?, ?, ?, ?, ?, ?, ?)""",
+        ("s6-legacy-down", "000001", "旧任务", "2026-07-09", "WATCH_CANDIDATE", "observe", 60),
+    )
+    db.get_conn().commit()
+
+    row = db.get_strategy6_candidate("000001", task_id="s6-legacy-down")
+
+    assert row["consecutive_down_days"] is None
+    assert row["consecutive_down_low"] is None
+    assert row["consecutive_down_structure_pass"] is None
+    assert row["consecutive_down_min_low_margin_pct"] is None
+    assert row["consecutive_down_max_high_break_pct"] is None
 
 
 def test_strategy6_candidate_round_trips_vcp_observation_fields(tmp_path):
@@ -659,11 +692,16 @@ def test_strategy6_api_returns_candidates_and_rejects_cross_strategy(tmp_path, m
     assert listed["brooks_result"]["trade_trigger"]["ready"] is True
     assert listed["brooks_trigger_price"] == 12.48
     assert listed["brooks_result"]["trade_trigger"]["trigger_price"] == 12.48
+    assert listed["consecutive_down_days"] == 3
+    assert listed["consecutive_down_structure_pass"] is True
     assert detailed["candidate_type"] == "KEY_CANDIDATE"
     assert detailed["tail_path"] == "BOX"
     assert detailed["brooks_status"] == "SECOND_ENTRY_LONG_READY"
     assert detailed["brooks_trigger_price"] == 12.48
     assert detailed["brooks_result"]["structure"]["setup_types"] == ["SECOND_ENTRY_LONG"]
+    assert detailed["consecutive_down_low"] == 11.92
+    assert detailed["consecutive_down_min_low_margin_pct"] == 0.012
+    assert detailed["consecutive_down_max_high_break_pct"] == -0.018
 
     mismatch = client.get("/api/strategy6/tasks/s1-task/candidates")
     assert mismatch.status_code == 400

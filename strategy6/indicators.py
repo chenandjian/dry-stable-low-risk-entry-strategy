@@ -66,6 +66,13 @@ def calculate_indicators(
     ind.range_5 = _range(rows, 5)
     ind.range_10 = _range(rows, 10)
     ind.close_range_5 = _close_range(rows, 5)
+    (
+        ind.consecutive_down_days,
+        ind.consecutive_down_low,
+        ind.consecutive_down_structure_pass,
+        ind.consecutive_down_min_low_margin_pct,
+        ind.consecutive_down_max_high_break_pct,
+    ) = _consecutive_decline_support(rows)
     ind.has_big_down_volume = _has_big_down_volume(rows, ind.v20, config)
     if ind.has_big_down_volume:
         ind.risk_tags.append("BIG_DOWN_VOLUME")
@@ -141,6 +148,46 @@ def _close_range(rows: list[dict], days: int) -> float:
     selected = rows[-days:]
     close = rows[-1]["close"] if rows else 0.0
     return round((max(r["close"] for r in selected) - min(r["close"] for r in selected)) / close, 6) if close > 0 and selected else 0.0
+
+
+def _consecutive_decline_support(
+    rows: list[dict],
+) -> tuple[int, float | None, bool, float | None, float | None]:
+    decline_indexes: list[int] = []
+    for index in range(len(rows) - 1, 0, -1):
+        if rows[index]["close"] >= rows[index - 1]["close"]:
+            break
+        decline_indexes.append(index)
+    decline_indexes.reverse()
+
+    days = len(decline_indexes)
+    if not decline_indexes:
+        return 0, None, False, None, None
+
+    decline_low = round(min(rows[index]["low"] for index in decline_indexes), 4)
+    low_margins: list[float] = []
+    high_breaks: list[float] = []
+    for index in decline_indexes:
+        if index < 5:
+            return days, decline_low, False, None, None
+        prior_five = rows[index - 5:index]
+        prior_low = min(row["low"] for row in prior_five)
+        prior_high = max(row["high"] for row in prior_five)
+        if prior_low <= 0 or prior_high <= 0:
+            return days, decline_low, False, None, None
+        low_margins.append(rows[index]["low"] / prior_low - 1.0)
+        high_breaks.append(rows[index]["high"] / prior_high - 1.0)
+
+    min_low_margin = min(low_margins)
+    max_high_break = max(high_breaks)
+    passed = days >= 3 and min_low_margin >= 0 and max_high_break <= 0
+    return (
+        days,
+        decline_low,
+        passed,
+        round(min_low_margin, 6),
+        round(max_high_break, 6),
+    )
 
 
 def _has_big_down_volume(rows: list[dict], v20: float, config: dict) -> bool:

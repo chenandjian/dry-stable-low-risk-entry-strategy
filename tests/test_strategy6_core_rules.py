@@ -2,6 +2,7 @@ from datetime import date, timedelta
 from dataclasses import replace
 
 from strategy6.engine import StrongVcpTailEngine
+import strategy6.indicators as strategy6_indicators
 from strategy6.filters import (
     _quality_threshold_met,
     classify_candidate,
@@ -36,6 +37,108 @@ def _row(i, close=10.0, open_price=None, high=None, low=None, volume=1_000_000, 
         "volume": volume,
         "amount": amount,
     }
+
+
+def _consecutive_down_rows(*, broken=False, new_high=False, down_days=3, insufficient=False, flat_last=False):
+    base_count = 3 if insufficient else 5
+    rows = [
+        _row(i, close=10.2 + i * 0.1, low=9.0 + i * 0.02)
+        for i in range(base_count)
+    ]
+    previous_close = rows[-1]["close"]
+    for offset in range(down_days):
+        close = previous_close if flat_last and offset == down_days - 1 else previous_close - 0.1
+        low = 8.9 if broken and offset == down_days - 1 else 9.4 - offset * 0.05
+        high = 11.5 if new_high and offset == down_days - 1 else close * 1.01
+        rows.append(_row(base_count + offset, close=close, low=low, high=high))
+        previous_close = close
+    return rows
+
+
+def test_strategy6_consecutive_down_holds_each_days_prior_five_day_low():
+    _, indicators = calculate_indicators(
+        _consecutive_down_rows(),
+        {"big_down_return": -0.07, "big_down_volume_ratio": 1.5},
+    )
+
+    assert indicators.consecutive_down_days == 3
+    assert indicators.consecutive_down_low == 9.3
+    assert indicators.consecutive_down_structure_pass is True
+    assert indicators.consecutive_down_min_low_margin_pct == 0.028761
+    assert indicators.consecutive_down_max_high_break_pct <= 0
+
+
+def test_strategy6_consecutive_down_fails_when_any_day_breaks_prior_five_day_low():
+    _, indicators = calculate_indicators(
+        _consecutive_down_rows(broken=True),
+        {"big_down_return": -0.07, "big_down_volume_ratio": 1.5},
+    )
+
+    assert indicators.consecutive_down_days == 3
+    assert indicators.consecutive_down_low == 8.9
+    assert indicators.consecutive_down_structure_pass is False
+    assert indicators.consecutive_down_min_low_margin_pct < 0
+
+
+def test_strategy6_consecutive_down_fails_when_any_day_makes_prior_five_day_high():
+    _, indicators = calculate_indicators(
+        _consecutive_down_rows(new_high=True),
+        {"big_down_return": -0.07, "big_down_volume_ratio": 1.5},
+    )
+
+    assert indicators.consecutive_down_days == 3
+    assert indicators.consecutive_down_min_low_margin_pct >= 0
+    assert indicators.consecutive_down_max_high_break_pct > 0
+    assert indicators.consecutive_down_structure_pass is False
+
+
+def test_strategy6_consecutive_down_requires_three_days_and_resets_on_flat_close():
+    _, two_days = calculate_indicators(
+        _consecutive_down_rows(down_days=2),
+        {"big_down_return": -0.07, "big_down_volume_ratio": 1.5},
+    )
+    _, flat_last = calculate_indicators(
+        _consecutive_down_rows(flat_last=True),
+        {"big_down_return": -0.07, "big_down_volume_ratio": 1.5},
+    )
+
+    assert two_days.consecutive_down_days == 2
+    assert two_days.consecutive_down_structure_pass is False
+    assert flat_last.consecutive_down_days == 0
+    assert flat_last.consecutive_down_structure_pass is False
+
+
+def test_strategy6_consecutive_down_does_not_pass_without_five_prior_days():
+    _, indicators = calculate_indicators(
+        _consecutive_down_rows(insufficient=True),
+        {"big_down_return": -0.07, "big_down_volume_ratio": 1.5},
+    )
+
+    assert indicators.consecutive_down_days == 3
+    assert indicators.consecutive_down_structure_pass is False
+    assert indicators.consecutive_down_min_low_margin_pct is None
+    assert indicators.consecutive_down_max_high_break_pct is None
+
+
+def test_strategy6_consecutive_down_diagnostic_does_not_change_decision(monkeypatch):
+    data = build_strategy6_candidate_data()
+    engine = StrongVcpTailEngine({})
+    baseline = engine.evaluate_at(data, code="000001", name="平安银行")
+
+    monkeypatch.setattr(
+        strategy6_indicators,
+        "_consecutive_decline_support",
+        lambda _rows: (9, 8.88, True, 0.123456, -0.012345),
+        raising=False,
+    )
+    diagnosed = engine.evaluate_at(data, code="000001", name="平安银行")
+    candidate = diagnosed.to_candidate_dict()
+
+    assert candidate["consecutive_down_days"] == 9
+    assert candidate["consecutive_down_structure_pass"] is True
+    assert diagnosed.score.total_score == baseline.score.total_score
+    assert diagnosed.reject_reasons == baseline.reject_reasons
+    assert diagnosed.candidate_type == baseline.candidate_type
 
 
 def build_strategy6_candidate_data(length=760):
