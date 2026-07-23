@@ -4638,6 +4638,7 @@ def update_strategy6_lifecycle(
     _conn: sqlite3.Connection | None = None,
     _commit: bool = True,
 ) -> dict:
+    no_trade_reasons = {"LATEST_TRADE_SUSPENDED", "LATEST_TRADE_NO_TRADE"}
     conn = _conn or get_conn()
     if _commit:
         _ensure_strategy6_lifecycle_table(conn)
@@ -4668,7 +4669,15 @@ def update_strategy6_lifecycle(
             state["last_seen_date"] = evaluation_date
             state["blocked"] = False
             if not is_candidate:
-                if lifecycle_status == "EXTENDED" or "BREAKOUT_EXTENDED" in reject_reasons:
+                no_trade_only = bool(reject_reasons) and all(
+                    reason in no_trade_reasons for reason in reject_reasons
+                )
+                if no_trade_only:
+                    # A missing target-date trade cannot prove that the setup failed.
+                    # Keep the last valid lifecycle intact while blocking this scan.
+                    state.update(previous)
+                    state["blocked"] = True
+                elif lifecycle_status == "EXTENDED" or "BREAKOUT_EXTENDED" in reject_reasons:
                     state.update({
                         "lifecycle_status": "EXTENDED",
                         "exit_date": evaluation_date,
@@ -4694,12 +4703,26 @@ def update_strategy6_lifecycle(
             elif previous["lifecycle_status"] in {"FAILED", "EXPIRED", "COOLDOWN"}:
                 cooldown = str(previous.get("cooldown_until_date") or "")
                 same_event = event_key == str(previous.get("last_event_key") or "")
+                legacy_no_trade_failure = previous.get("exit_reason") in no_trade_reasons
                 support_recovered = (
                     previous["lifecycle_status"] in {"FAILED", "COOLDOWN"}
                     and previous.get("exit_reason") != "MAX_WATCH_DAYS_REACHED"
                     and lifecycle_status in {"READY", "BUY_ZONE", "BREAKOUT_CONFIRMED"}
                 )
-                if (cooldown and evaluation_date <= cooldown) or (same_event and not support_recovered):
+                if legacy_no_trade_failure:
+                    first_seen = str(previous.get("first_seen_date") or evaluation_date)
+                    state.update({
+                        "lifecycle_status": lifecycle_status,
+                        "first_seen_date": first_seen,
+                        "last_seen_date": evaluation_date,
+                        "days_in_pool": _weekday_distance(first_seen, evaluation_date),
+                        "exit_date": "",
+                        "exit_reason": "",
+                        "cooldown_until_date": "",
+                        "last_event_key": event_key,
+                        "blocked": False,
+                    })
+                elif (cooldown and evaluation_date <= cooldown) or (same_event and not support_recovered):
                     state.update({
                         "lifecycle_status": "COOLDOWN",
                         "blocked": True,
