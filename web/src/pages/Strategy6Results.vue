@@ -146,7 +146,7 @@
           <thead>
             <tr>
               <th>股票</th><th>VCP形态分/等级</th><th>VCP状态</th><th>收缩次数</th><th>VCP支点</th><th>结构低点</th>
-              <th>距支点</th><th>突破日期</th><th>历史正式候选</th><th>策略总分</th><th>原交易分类</th><th>风险提示</th>
+              <th>距支点</th><th>突破日期</th><th>连续收跌结构</th><th>历史正式候选</th><th>策略总分</th><th>原交易分类</th><th>风险提示</th>
             </tr>
           </thead>
           <tbody>
@@ -171,6 +171,7 @@
               <td>{{ fmt(c.vcp_structure_low) }}</td>
               <td>{{ pct(c.vcp_distance_to_pivot_pct) }}</td>
               <td>{{ c.vcp_breakout_date || '--' }}</td>
+              <td :data-test="`vcp-consecutive-down-${c.code}`">{{ consecutiveDownStructureText(c) }}</td>
               <td>
                 <div>{{ c.vcp_history_candidate_date || '--' }} · {{ label('candidateType', c.vcp_history_candidate_type) }}</div>
                 <div class="muted">{{ fmt(c.vcp_history_candidate_score, 0) }}分 · {{ label('source', c.vcp_history_source) }}</div>

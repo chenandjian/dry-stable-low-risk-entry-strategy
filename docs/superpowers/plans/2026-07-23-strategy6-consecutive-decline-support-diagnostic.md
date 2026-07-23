@@ -170,6 +170,38 @@ npm.cmd --prefix web test -- --run
 npm.cmd --prefix web run build
 ```
 
-- [ ] **步骤5：只提交本功能文件并推送**
+- [x] **步骤5：只提交本功能文件并推送**
 
 确认不暂存现有 `config.yaml` 和用户文档修改，只提交本计划列出的文件。
+
+### 任务5：VCP观察板块展示同一诊断列
+
+**文件：**
+- 修改：`web/src/pages/__tests__/Strategy6Results.test.js`
+- 修改：`web/src/pages/Strategy6Results.vue`
+
+- [x] **步骤1：编写失败测试**
+
+在VCP确认与VCP早期观察fixture中提供诊断字段，断言两个板块的行都显示“连续收跌结构”，并验证旧任务空字段显示“未计算”。
+
+- [x] **步骤2：运行红灯测试**
+
+```bash
+npm.cmd --prefix web test -- --run Strategy6Results
+```
+
+预期：VCP表尚无对应表头和单元格，断言失败。
+
+- [x] **步骤3：实现最小前端改动**
+
+在两个VCP分组共用的表格中增加“连续收跌结构”表头，并复用已有 `consecutiveDownStructureText(c)` 输出。不得修改 `vcpCandidates`、`vcpGroups`、VCP评分或排序。
+
+- [x] **步骤4：运行专项和全量前端验证**
+
+```bash
+npm.cmd --prefix web test -- --run Strategy6Results
+npm.cmd --prefix web test -- --run
+npm.cmd --prefix web run build
+```
+
+预期：所有测试和构建通过。

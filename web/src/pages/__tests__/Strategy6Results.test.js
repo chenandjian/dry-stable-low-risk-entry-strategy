@@ -494,6 +494,10 @@ describe('Strategy6Results', () => {
         vcp_history_source: 'DAILY_AS_OF_REPLAY',
         vcp_contraction_count: 2, vcp_pivot_price: 68.21, vcp_structure_low: 65.61,
         vcp_distance_to_pivot_pct: 0.154, vcp_breakout_date: '2026-07-09',
+        consecutive_down_days: 3, consecutive_down_low: 66.2,
+        consecutive_down_structure_pass: true,
+        consecutive_down_min_low_margin_pct: 0.011,
+        consecutive_down_max_high_break_pct: -0.016,
         vcp_contractions: [
           { peak_date: '2026-06-30', low_date: '2026-07-03', recovery_peak_date: '2026-07-07', amplitude: 0.1459, rebound: 0.08, decline_avg_volume: 138603150 },
           { peak_date: '2026-07-07', low_date: '2026-07-08', recovery_peak_date: '2026-07-09', amplitude: 0.0381, rebound: 0.06, decline_avg_volume: 120261046 },
@@ -507,6 +511,10 @@ describe('Strategy6Results', () => {
         vcp_observation_eligible: true, vcp_lifecycle_status: 'VCP_ROUND1_CONFIRMED',
         vcp_history_qualified: true, vcp_history_candidate_date: '2026-07-01',
         vcp_contraction_count: 1, vcp_pivot_price: 21.5, vcp_structure_low: 18.8,
+        consecutive_down_days: 2, consecutive_down_low: 19.4,
+        consecutive_down_structure_pass: false,
+        consecutive_down_min_low_margin_pct: 0.006,
+        consecutive_down_max_high_break_pct: -0.009,
         vcp_forming_round: { peak_date: '2026-07-08', low_date: '2026-07-10', phase: 'REBOUNDING' },
       },
       {
@@ -547,6 +555,8 @@ describe('Strategy6Results', () => {
     expect(text.indexOf('VCP确认候选')).toBeLessThan(text.indexOf('VCP早期观察'))
     expect(wrapper.find('[data-test="vcp-row-002156"]').exists()).toBe(true)
     expect(wrapper.find('[data-test="vcp-row-002056"]').exists()).toBe(true)
+    expect(wrapper.find('[data-test="vcp-consecutive-down-002156"]').text()).toBe('3日 · 守5日低 · 未创5日高')
+    expect(wrapper.find('[data-test="vcp-consecutive-down-002056"]').text()).toBe('2日 · 未满足')
     expect(wrapper.find('[data-test="vcp-row-300001"]').exists()).toBe(false)
     expect(wrapper.find('[data-test="vcp-row-300002"]').exists()).toBe(false)
     expect(wrapper.find('[data-test="vcp-row-600001"]').exists()).toBe(false)
