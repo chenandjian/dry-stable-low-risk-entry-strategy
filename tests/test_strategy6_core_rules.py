@@ -90,7 +90,7 @@ def test_strategy6_consecutive_down_allows_lower_streak_low_when_it_holds_rollin
     assert indicators.consecutive_down_structure_pass is True
 
 
-def test_strategy6_consecutive_down_allows_low_equal_to_prior_four_day_minimum():
+def test_strategy6_consecutive_down_fails_when_decline_low_is_five_day_low():
     _, indicators = calculate_indicators(
         _consecutive_down_rows(equal_prior_four_low=True),
         {"big_down_return": -0.07, "big_down_volume_ratio": 1.5},
@@ -99,11 +99,38 @@ def test_strategy6_consecutive_down_allows_low_equal_to_prior_four_day_minimum()
     assert indicators.consecutive_down_days == 3
     assert indicators.consecutive_down_low == 9.06
     assert indicators.consecutive_down_min_low_margin_pct == 0
-    assert indicators.consecutive_down_no_new_streak_low is True
-    assert indicators.consecutive_down_structure_pass is True
+    assert indicators.consecutive_down_no_new_streak_low is False
+    assert indicators.consecutive_down_structure_pass is False
 
 
-def test_strategy6_consecutive_down_fails_when_any_day_breaks_rolling_five_day_low():
+def test_strategy6_consecutive_down_five_days_cannot_avoid_five_day_low():
+    _, indicators = calculate_indicators(
+        _consecutive_down_rows(down_days=5),
+        {"big_down_return": -0.07, "big_down_volume_ratio": 1.5},
+    )
+
+    assert indicators.consecutive_down_days == 5
+    assert indicators.consecutive_down_no_new_streak_low is False
+    assert indicators.consecutive_down_structure_pass is False
+
+
+def test_strategy6_consecutive_down_does_not_turn_equal_adjusted_low_into_positive_margin():
+    rows = _consecutive_down_rows(equal_prior_four_low=True)
+    rows[3]["low"] = 9.059999
+    rows[-1]["low"] = 9.059999
+
+    _, indicators = calculate_indicators(
+        rows,
+        {"big_down_return": -0.07, "big_down_volume_ratio": 1.5},
+    )
+
+    assert indicators.consecutive_down_low == 9.06
+    assert indicators.consecutive_down_min_low_margin_pct == 0
+    assert indicators.consecutive_down_no_new_streak_low is False
+    assert indicators.consecutive_down_structure_pass is False
+
+
+def test_strategy6_consecutive_down_fails_when_decline_creates_five_day_low():
     _, indicators = calculate_indicators(
         _consecutive_down_rows(broken=True),
         {"big_down_return": -0.07, "big_down_volume_ratio": 1.5},
@@ -113,7 +140,7 @@ def test_strategy6_consecutive_down_fails_when_any_day_breaks_rolling_five_day_l
     assert indicators.consecutive_down_low == 8.9
     assert indicators.consecutive_down_structure_pass is False
     assert indicators.consecutive_down_no_new_streak_low is False
-    assert indicators.consecutive_down_min_low_margin_pct < 0
+    assert indicators.consecutive_down_min_low_margin_pct == 0
 
 
 def test_strategy6_consecutive_down_fails_when_any_day_makes_rolling_five_day_high():
@@ -171,6 +198,7 @@ def test_strategy6_consecutive_down_diagnostic_does_not_change_decision(monkeypa
     diagnosed = engine.evaluate_at(data, code="000001", name="平安银行")
     candidate = diagnosed.to_candidate_dict()
 
+    assert candidate["consecutive_down_structure_version"] == "CONSECUTIVE_DOWN_INTERVAL_5D_V1"
     assert candidate["consecutive_down_days"] == 9
     assert candidate["consecutive_down_structure_pass"] is True
     assert candidate["consecutive_down_no_new_streak_low"] is True

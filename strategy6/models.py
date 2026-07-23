@@ -39,6 +39,7 @@ class Strategy6Indicators:
     close_range_5: float = 0.0
     consecutive_down_days: int = 0
     consecutive_down_low: float | None = None
+    consecutive_down_structure_version: str = "CONSECUTIVE_DOWN_INTERVAL_5D_V1"
     consecutive_down_structure_pass: bool = False
     consecutive_down_no_new_streak_low: bool | None = None
     consecutive_down_min_low_margin_pct: float | None = None
@@ -509,6 +510,7 @@ class Strategy6Evaluation:
             "close_range_5": ind.close_range_5,
             "consecutive_down_days": ind.consecutive_down_days,
             "consecutive_down_low": ind.consecutive_down_low,
+            "consecutive_down_structure_version": ind.consecutive_down_structure_version,
             "consecutive_down_structure_pass": ind.consecutive_down_structure_pass,
             "consecutive_down_no_new_streak_low": ind.consecutive_down_no_new_streak_low,
             "consecutive_down_min_low_margin_pct": ind.consecutive_down_min_low_margin_pct,

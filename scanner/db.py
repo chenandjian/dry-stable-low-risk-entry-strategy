@@ -2833,6 +2833,7 @@ def _ensure_strategy6_candidates_table(conn: sqlite3.Connection):
         "atr14": "REAL",
         "consecutive_down_days": "INTEGER",
         "consecutive_down_low": "REAL",
+        "consecutive_down_structure_version": "TEXT",
         "consecutive_down_structure_pass": "INTEGER",
         "consecutive_down_no_new_streak_low": "INTEGER",
         "consecutive_down_min_low_margin_pct": "REAL",
@@ -4026,7 +4027,7 @@ def upsert_strategy6_candidate(
     extra_columns = [
         "first_seen_date", "last_seen_date", "days_in_pool", "exit_date", "exit_reason", "cooldown_until_date", "reentry_count",
         "strategy_version", "config_hash", "decision_profile", "price_basis", "current_price_adj", "current_price_raw",
-        "atr14", "consecutive_down_days", "consecutive_down_low",
+        "atr14", "consecutive_down_days", "consecutive_down_low", "consecutive_down_structure_version",
         "consecutive_down_structure_pass", "consecutive_down_no_new_streak_low",
         "consecutive_down_min_low_margin_pct",
         "consecutive_down_max_high_break_pct", "start_day_self_amount_percentile",
@@ -4106,6 +4107,7 @@ def upsert_strategy6_candidate(
         d.get("atr14"),
         d.get("consecutive_down_days"),
         d.get("consecutive_down_low"),
+        d.get("consecutive_down_structure_version"),
         (
             None
             if d.get("consecutive_down_structure_pass") is None

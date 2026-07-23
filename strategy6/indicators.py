@@ -164,37 +164,39 @@ def _consecutive_decline_support(
     days = len(decline_indexes)
     if not decline_indexes:
         return 0, None, False, None, None, None
+    if len(rows) < 5:
+        return days, None, False, None, None, None
 
-    decline_low = round(min(rows[index]["low"] for index in decline_indexes), 4)
-    low_margins: list[float] = []
+    decline_low_raw = min(rows[index]["low"] for index in decline_indexes)
+    decline_low = round(decline_low_raw, 4)
+    five_day_low = min(row["low"] for row in rows[-5:])
+    if five_day_low <= 0:
+        return days, decline_low, False, None, None, None
+    decline_low_margin = decline_low_raw / five_day_low - 1.0
+    decline_low_is_above_five_day_low = decline_low_margin > 0
+
     high_breaks: list[float] = []
     for index in decline_indexes:
         if index < 4:
             return days, decline_low, False, None, None, None
-        # The rolling five-day window includes the current day, so compare it
-        # with the preceding four sessions. Equality means the old low held.
         prior_four = rows[index - 4:index]
-        prior_low = min(row["low"] for row in prior_four)
         prior_high = max(row["high"] for row in prior_four)
-        if prior_low <= 0 or prior_high <= 0:
+        if prior_high <= 0:
             return days, decline_low, False, None, None, None
-        low_margins.append(rows[index]["low"] / prior_low - 1.0)
         high_breaks.append(rows[index]["high"] / prior_high - 1.0)
 
-    min_low_margin = min(low_margins)
     max_high_break = max(high_breaks)
-    holds_rolling_five_day_low = min_low_margin >= 0
     passed = (
         days >= 3
-        and holds_rolling_five_day_low
+        and decline_low_is_above_five_day_low
         and max_high_break <= 0
     )
     return (
         days,
         decline_low,
         passed,
-        holds_rolling_five_day_low,
-        round(min_low_margin, 6),
+        decline_low_is_above_five_day_low,
+        round(decline_low_margin, 6),
         round(max_high_break, 6),
     )
 

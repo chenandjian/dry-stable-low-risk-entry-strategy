@@ -798,7 +798,8 @@ export default {
       return `形成中轮次 ${item?.peak_date || '--'} → ${item?.low_date || '--'} · ${this.label('vcpFormingPhase', item?.phase)}`
     },
     hasConsecutiveDownDiagnostic(candidate) {
-      return candidate?.consecutive_down_days !== null
+      return candidate?.consecutive_down_structure_version === 'CONSECUTIVE_DOWN_INTERVAL_5D_V1'
+        && candidate?.consecutive_down_days !== null
         && candidate?.consecutive_down_days !== undefined
         && candidate?.consecutive_down_structure_pass !== null
         && candidate?.consecutive_down_structure_pass !== undefined
@@ -810,10 +811,10 @@ export default {
       if (candidate.consecutive_down_no_new_streak_low === null
         || candidate.consecutive_down_no_new_streak_low === undefined) return '未计算'
       if (candidate.consecutive_down_structure_pass) {
-        return `${days}日 · 守5日低 · 未创5日高`
+        return `${days}日 · 非5日最低 · 未创5日高`
       }
       const failures = []
-      if (candidate.consecutive_down_no_new_streak_low === false) failures.push('已破5日低')
+      if (candidate.consecutive_down_no_new_streak_low === false) failures.push('连跌低点为5日最低')
       if (Number(candidate.consecutive_down_max_high_break_pct) > 0) failures.push('已创5日高')
       return `${days}日 · ${failures.join(' · ') || '未满足'}`
     },
@@ -821,7 +822,7 @@ export default {
       if (!this.hasConsecutiveDownDiagnostic(candidate)) return '未计算'
       const summary = this.consecutiveDownStructureText(candidate)
       if (summary === '未计算') return summary
-      return `${summary} · 连跌低点 ${this.fmt(candidate.consecutive_down_low)} · 守低余量 ${this.pct(candidate.consecutive_down_min_low_margin_pct)} · 高点突破 ${this.pct(candidate.consecutive_down_max_high_break_pct)}`
+      return `${summary} · 连跌低点 ${this.fmt(candidate.consecutive_down_low)} · 高于5日低余量 ${this.pct(candidate.consecutive_down_min_low_margin_pct)} · 高点突破 ${this.pct(candidate.consecutive_down_max_high_break_pct)}`
     },
     isVcpQualityV2(candidate) {
       return ['VCP_QUALITY_V2', 'VCP_QUALITY_V3'].includes(candidate?.vcp_quality_model_version)
@@ -861,8 +862,8 @@ export default {
           { header: '连续收跌天数', value: c => this.hasConsecutiveDownDiagnostic(c) ? c.consecutive_down_days : '' },
           { header: '连续收跌最低价', value: c => this.hasConsecutiveDownDiagnostic(c) ? this.fmt(c.consecutive_down_low) : '' },
           { header: '连续收跌结构', value: c => this.hasConsecutiveDownDiagnostic(c) ? this.consecutiveDownStructureText(c) : '' },
-          { header: '守住滚动5日低', value: c => c.consecutive_down_no_new_streak_low == null ? '' : (c.consecutive_down_no_new_streak_low ? '是' : '否') },
-          { header: '守5日低最弱余量', value: c => this.hasConsecutiveDownDiagnostic(c) ? this.pct(c.consecutive_down_min_low_margin_pct) : '' },
+          { header: '连跌低点非5日最低', value: c => this.hasConsecutiveDownDiagnostic(c) ? (c.consecutive_down_no_new_streak_low ? '是' : '否') : '' },
+          { header: '高于5日低余量', value: c => this.hasConsecutiveDownDiagnostic(c) ? this.pct(c.consecutive_down_min_low_margin_pct) : '' },
           { header: '5日高最大突破', value: c => this.hasConsecutiveDownDiagnostic(c) ? this.pct(c.consecutive_down_max_high_break_pct) : '' },
           { header: '阶段状态', value: c => this.label('phaseStatus', c.phase_status) },
           { header: '阶段状态原始值', value: c => c.phase_status || '' },

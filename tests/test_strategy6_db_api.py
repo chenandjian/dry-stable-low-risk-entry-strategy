@@ -54,6 +54,7 @@ def _candidate():
         "current_close_position": 0.72,
         "consecutive_down_days": 3,
         "consecutive_down_low": 11.92,
+        "consecutive_down_structure_version": "CONSECUTIVE_DOWN_INTERVAL_5D_V1",
         "consecutive_down_structure_pass": True,
         "consecutive_down_no_new_streak_low": True,
         "consecutive_down_min_low_margin_pct": 0.012,
@@ -229,6 +230,7 @@ def test_strategy6_candidate_table_is_independent(tmp_path):
     assert rows[0]["warn_tags"] == ["PRESSURE_NEAR_HIGH"]
     assert rows[0]["consecutive_down_days"] == 3
     assert rows[0]["consecutive_down_low"] == 11.92
+    assert rows[0]["consecutive_down_structure_version"] == "CONSECUTIVE_DOWN_INTERVAL_5D_V1"
     assert rows[0]["consecutive_down_structure_pass"] is True
     assert rows[0]["consecutive_down_no_new_streak_low"] is True
     assert rows[0]["consecutive_down_min_low_margin_pct"] == 0.012
@@ -302,7 +304,7 @@ def test_strategy6_candidate_schema_contains_all_box_tail_output_fields(tmp_path
     }
     required = {
         "decision_profile",
-        "consecutive_down_days", "consecutive_down_low",
+        "consecutive_down_days", "consecutive_down_low", "consecutive_down_structure_version",
         "consecutive_down_structure_pass", "consecutive_down_no_new_streak_low",
         "consecutive_down_min_low_margin_pct",
         "consecutive_down_max_high_break_pct",
@@ -366,6 +368,7 @@ def test_strategy6_legacy_candidate_keeps_missing_consecutive_down_diagnostic_as
 
     assert row["consecutive_down_days"] is None
     assert row["consecutive_down_low"] is None
+    assert row["consecutive_down_structure_version"] is None
     assert row["consecutive_down_structure_pass"] is None
     assert row["consecutive_down_no_new_streak_low"] is None
     assert row["consecutive_down_min_low_margin_pct"] is None
