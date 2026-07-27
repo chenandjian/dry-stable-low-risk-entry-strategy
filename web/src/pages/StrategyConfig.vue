@@ -65,6 +65,27 @@
           </label>
         </div>
       </div>
+      <div class="param-group tickflow-key-group" style="margin-top:12px">
+        <label class="param-label" for="tickflow-api-key">
+          TickFlow API Key
+          <span class="key-status" :class="{ configured: config.data.tickflow_api_key_configured }">
+            {{ config.data.tickflow_api_key_configured ? '已配置' : '未配置' }}
+          </span>
+        </label>
+        <div class="secret-input-row">
+          <input id="tickflow-api-key" data-test="tickflow-api-key"
+            :type="showTickFlowApiKey ? 'text' : 'password'"
+            v-model="config.data.tickflow_api_key"
+            autocomplete="new-password"
+            placeholder="留空表示保留现有密钥"
+            @input="markDirty" />
+          <button type="button" class="btn-secondary" data-test="tickflow-api-key-visible"
+            @click="showTickFlowApiKey = !showTickFlowApiKey">
+            {{ showTickFlowApiKey ? '隐藏' : '显示' }}
+          </button>
+        </div>
+        <p class="section-hint">后端不会回显已保存的密钥；输入新值并保存才会替换，留空会保留原值。</p>
+      </div>
       <div class="param-group" style="margin-top:12px">
         <label class="param-label" title="按优先级排列，首位为主数据源，拉取失败时按顺序尝试后续数据源">日线数据源 <span class="unit">按优先级排列</span></label>
         <div class="toggle-grid">
@@ -1441,7 +1462,14 @@ const defaultStrategy6Config = {
 const config = reactive({
   market: {},
   liquidity: {},
-  data: { acquisition_mode: 'legacy_multi_source', scan_window_days: 250, backtest_window_days: 250, daily_sources: ['tencent', 'sina', 'baidu'] },
+  data: {
+    acquisition_mode: 'legacy_multi_source',
+    tickflow_api_key: '',
+    tickflow_api_key_configured: false,
+    scan_window_days: 250,
+    backtest_window_days: 250,
+    daily_sources: ['tencent', 'sina', 'baidu'],
+  },
   cup: {},
   handle: {},
   breakout: {},
@@ -1474,6 +1502,7 @@ const saved = ref(false)
 const saving = ref(false)
 const error = ref('')
 const showAdvanced = ref(false)
+const showTickFlowApiKey = ref(false)
 
 // Computed: convert cup depth from 0-1 to percentage for slider display
 const cupMinDepth = computed({
@@ -2064,11 +2093,22 @@ async function saveConfig() {
   saving.value = true
   error.value = ''
   try {
+    const replacementTickFlowKey = String(config.data.tickflow_api_key || '').trim()
+    const dataPayload = {
+      ...config.data,
+      daily_sources: [...config.data.daily_sources],
+    }
+    delete dataPayload.tickflow_api_key_configured
+    if (replacementTickFlowKey) {
+      dataPayload.tickflow_api_key = replacementTickFlowKey
+    } else {
+      delete dataPayload.tickflow_api_key
+    }
     // Build the payload matching config.yaml structure
     const payload = {
       market: { ...config.market },
       liquidity: { ...config.liquidity },
-      data: { ...config.data, daily_sources: [...config.data.daily_sources] },
+      data: dataPayload,
       cup: {
         min_duration: config.cup.min_duration,
         max_duration: config.cup.max_duration,
@@ -2102,6 +2142,11 @@ async function saveConfig() {
     }
     const res = await updateConfig(payload)
     if (res.status === 'ok') {
+      if (replacementTickFlowKey) {
+        config.data.tickflow_api_key = ''
+        config.data.tickflow_api_key_configured = true
+        showTickFlowApiKey.value = false
+      }
       dirty.value = false
       saved.value = true
       setTimeout(() => { saved.value = false }, 3000)
@@ -2169,6 +2214,10 @@ onMounted(async () => {
 
 .toggle-grid { display: flex; gap: 12px; flex-wrap: wrap; }
 .mode-options { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 10px; margin-top: 8px; }
+.secret-input-row { display: flex; gap: 8px; align-items: center; margin-top: 8px; }
+.secret-input-row input { flex: 1; min-width: 0; }
+.key-status { margin-left: 8px; color: var(--text-muted); font-size: 12px; }
+.key-status.configured { color: var(--success, #22a06b); }
 .mode-option { display: flex; gap: 10px; align-items: flex-start; padding: 12px; border: 1px solid var(--border-color); border-radius: 8px; cursor: pointer; }
 .mode-option input { margin-top: 3px; accent-color: var(--accent); }
 .mode-option span { display: flex; flex-direction: column; gap: 4px; }

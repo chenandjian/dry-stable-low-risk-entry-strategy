@@ -88,7 +88,7 @@ def test_web_full_refresh_uses_fixed_parameters_backup_and_terminal_report(tmp_p
         thread_launcher=launcher,
     )
 
-    started = manager.start(database, stocks)
+    started = manager.start(database, stocks, api_key="refresh-secret")
     assert started["status"] == "running"
     assert started["parameters"] == {
         "history_days": 1100,
@@ -98,7 +98,7 @@ def test_web_full_refresh_uses_fixed_parameters_backup_and_terminal_report(tmp_p
         "adjustment": "forward_additive",
     }
     with pytest.raises(TickFlowTaskConflict):
-        manager.start(database, stocks)
+        manager.start(database, stocks, api_key="other-secret")
 
     launcher.run_next()
 
@@ -112,7 +112,13 @@ def test_web_full_refresh_uses_fixed_parameters_backup_and_terminal_report(tmp_p
     assert status["report_path"]
     assert status["backup_path"]
     assert status["progress_path"]
-    assert client_kwargs == [{"batch_size": 100, "max_workers": 5}]
+    assert client_kwargs == [{
+        "api_key": "refresh-secret",
+        "batch_size": 100,
+        "max_workers": 5,
+    }]
+    assert "api_key" not in str(status)
+    assert "refresh-secret" not in str(status)
     assert calls[0] == (["600519.SH", "000001.SZ"], 1100)
     assert status["total_indexes"] == 4
     assert status["indexes_processed"] == 4

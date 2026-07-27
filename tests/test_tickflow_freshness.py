@@ -82,7 +82,8 @@ def test_freshness_probe_checks_stock_and_four_indexes_without_writing(monkeypat
     result = check_tickflow_freshness(
         "000655",
         target_trade_date="2026-07-23",
-        client_factory=lambda: client,
+        api_key="freshness-secret",
+        client_factory=lambda **kwargs: client,
         count=5,
     )
 
@@ -110,7 +111,7 @@ def test_freshness_probe_preserves_indexes_when_stock_request_fails(tmp_path):
     result = check_tickflow_freshness(
         "000655",
         target_trade_date="2026-07-23",
-        client_factory=lambda: client,
+        client_factory=lambda **kwargs: client,
     )
 
     assert result["stock"]["status"] == "FAILED"
@@ -129,7 +130,7 @@ def test_freshness_probe_preserves_stock_when_index_request_fails(tmp_path):
     result = check_tickflow_freshness(
         "000655",
         target_trade_date="2026-07-23",
-        client_factory=lambda: client,
+        client_factory=lambda **kwargs: client,
     )
 
     assert result["stock"]["status"] == "FRESH"

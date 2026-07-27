@@ -87,7 +87,13 @@ class TickFlowFullRefreshManager:
         with self._lock:
             return copy.deepcopy(self._state)
 
-    def start(self, database_path: str | Path, stocks: list[dict]) -> dict:
+    def start(
+        self,
+        database_path: str | Path,
+        stocks: list[dict],
+        *,
+        api_key: str | None = None,
+    ) -> dict:
         if not stocks:
             raise ValueError("stock_pool is empty")
         database = Path(database_path).resolve()
@@ -120,6 +126,7 @@ class TickFlowFullRefreshManager:
                 task_id=task_id,
                 progress_path=progress_path,
                 report_path=report_path,
+                api_key=api_key,
             )
 
         try:
@@ -143,6 +150,7 @@ class TickFlowFullRefreshManager:
         task_id: str,
         progress_path: Path,
         report_path: Path,
+        api_key: str | None,
     ) -> None:
         started = dt.datetime.now()
         try:
@@ -152,7 +160,11 @@ class TickFlowFullRefreshManager:
             self._persist_progress(progress_path)
 
             db.init_db(str(database))
-            client = self._client_factory(batch_size=BATCH_SIZE, max_workers=MAX_WORKERS)
+            client = self._client_factory(
+                api_key=api_key,
+                batch_size=BATCH_SIZE,
+                max_workers=MAX_WORKERS,
+            )
             service = TickFlowDailyUpdateService(
                 client,
                 history_days=HISTORY_DAYS,

@@ -71,8 +71,12 @@ class _Client:
 def test_tickflow_prepare_batches_stale_stocks_and_serves_only_prepared_cache(tmp_path):
     db.init_db(str(tmp_path / "market.db"))
     client = _Client()
+    client_kwargs = []
     config = {
-        "data": {"acquisition_mode": "tickflow"},
+        "data": {
+            "acquisition_mode": "tickflow",
+            "tickflow_api_key": "scan-secret",
+        },
         "liquidity": {"min_listing_days": 1100},
     }
 
@@ -80,7 +84,7 @@ def test_tickflow_prepare_batches_stale_stocks_and_serves_only_prepared_cache(tm
         config,
         [{"code": "600519", "name": "贵州茅台", "market": "SH"}],
         now="2026-07-21 16:00:00",
-        client_factory=lambda **kwargs: client,
+        client_factory=lambda **kwargs: client_kwargs.append(kwargs) or client,
     )
     result = session.fetch("600519", "tickflow", kline_days=1100)
 
@@ -90,6 +94,11 @@ def test_tickflow_prepare_batches_stale_stocks_and_serves_only_prepared_cache(tm
     assert result.fallback_source == "tickflow"
     assert result.source_errors == {}
     assert db.get_ohlc_metadata("600519")["source"] == "tickflow"
+    assert client_kwargs == [{
+        "api_key": "scan-secret",
+        "batch_size": 100,
+        "max_workers": 5,
+    }]
 
 
 def test_tickflow_prepare_reports_batch_progress_before_strategy_scan(tmp_path):

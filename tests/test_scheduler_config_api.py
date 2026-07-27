@@ -1,5 +1,8 @@
-import server
 import builtins
+import copy
+
+import pytest
+import server
 import yaml
 from fastapi.testclient import TestClient
 from pathlib import Path
@@ -208,6 +211,87 @@ def test_get_config_completes_legacy_strategy6_brooks_defaults(monkeypatch):
     assert returned["strategy6"]["brooks_tail"]["enabled"] is True
     assert returned["strategy6"]["brooks_tail"]["trade_trigger"]["breakout_follow_through_days"] == 2
     assert returned["strategy6"]["brooks_tail"]["scoring"]["pass_score_min"] == 14
+
+
+def test_get_config_masks_tickflow_api_key_without_mutating_loaded_config(monkeypatch):
+    cfg = _valid_config()
+    cfg["data"]["tickflow_api_key"] = "secret-value"
+    monkeypatch.setattr(server, "load_config", lambda path="config.yaml": cfg)
+
+    response = TestClient(server.app).get("/api/config")
+
+    assert response.status_code == 200
+    returned = response.json()["config"]["data"]
+    assert returned["tickflow_api_key"] == ""
+    assert returned["tickflow_api_key_configured"] is True
+    assert cfg["data"]["tickflow_api_key"] == "secret-value"
+
+
+@pytest.mark.parametrize("incoming", [None, "", "   "])
+def test_update_config_blank_or_missing_tickflow_key_preserves_existing(
+    monkeypatch, tmp_path, incoming
+):
+    cfg = _valid_config()
+    cfg["data"]["tickflow_api_key"] = "existing-secret"
+    config_path = tmp_path / "config.yaml"
+    monkeypatch.setattr(server, "load_config", lambda path="config.yaml": copy.deepcopy(cfg))
+    monkeypatch.setattr(server, "_reload_scheduler_from_config", lambda config: None)
+    original_open = builtins.open
+    monkeypatch.setattr(
+        builtins,
+        "open",
+        lambda file, *args, **kwargs: original_open(config_path, *args, **kwargs)
+        if file == "config.yaml" else original_open(file, *args, **kwargs),
+    )
+    payload = {"data": {"scan_window_days": 300}}
+    if incoming is not None:
+        payload["data"]["tickflow_api_key"] = incoming
+
+    response = TestClient(server.app).put("/api/config", json=payload)
+
+    assert response.status_code == 200
+    written = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    assert written["data"]["tickflow_api_key"] == "existing-secret"
+
+
+def test_update_config_replaces_trimmed_tickflow_key_and_reloads_scheduler(monkeypatch, tmp_path):
+    cfg = _valid_config()
+    cfg["data"]["tickflow_api_key"] = "old-secret"
+    config_path = tmp_path / "config.yaml"
+    reloaded = []
+    monkeypatch.setattr(server, "load_config", lambda path="config.yaml": copy.deepcopy(cfg))
+    monkeypatch.setattr(server, "_reload_scheduler_from_config", lambda config: reloaded.append(config))
+    original_open = builtins.open
+    monkeypatch.setattr(
+        builtins,
+        "open",
+        lambda file, *args, **kwargs: original_open(config_path, *args, **kwargs)
+        if file == "config.yaml" else original_open(file, *args, **kwargs),
+    )
+
+    response = TestClient(server.app).put(
+        "/api/config", json={"data": {"tickflow_api_key": " new-format-key "}}
+    )
+
+    assert response.status_code == 200
+    written = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    assert written["data"]["tickflow_api_key"] == "new-format-key"
+    assert len(reloaded) == 1
+
+
+def test_update_config_rejects_non_string_tickflow_key_without_writing(monkeypatch):
+    cfg = _valid_config()
+    writes = []
+    monkeypatch.setattr(server, "load_config", lambda path="config.yaml": copy.deepcopy(cfg))
+    monkeypatch.setattr(server.yaml, "dump", lambda *args, **kwargs: writes.append(args))
+
+    response = TestClient(server.app).put(
+        "/api/config", json={"data": {"tickflow_api_key": 12345}}
+    )
+
+    assert response.status_code == 400
+    assert "tickflow_api_key" in response.json()["message"]
+    assert writes == []
 
 
 def test_update_config_rejects_invalid_strategy6_threshold_order(monkeypatch, tmp_path):

@@ -1,5 +1,6 @@
 # server.py
 import asyncio
+import copy
 import datetime
 import json
 import logging
@@ -65,6 +66,7 @@ from scanner.data_source import DataSourceManager
 from scanner.data_acquisition import resolve_acquisition_mode
 from tickflow_data.web_task import TickFlowFullRefreshManager, TickFlowTaskConflict
 from tickflow_data.freshness import check_tickflow_freshness
+from tickflow_data.client import resolve_tickflow_api_key
 
 logger = logging.getLogger(__name__)
 
@@ -1600,7 +1602,13 @@ async def start_tickflow_full_refresh():
             status_code=409,
         )
     try:
-        return _tickflow_full_refresh.start(database_path=database_path, stocks=stocks)
+        return _tickflow_full_refresh.start(
+            database_path=database_path,
+            stocks=stocks,
+            api_key=resolve_tickflow_api_key(
+                config.get("data", {}).get("tickflow_api_key")
+            ),
+        )
     except TickFlowTaskConflict:
         status = _tickflow_full_refresh.status()
         return JSONResponse(
@@ -1632,13 +1640,16 @@ async def tickflow_freshness_check(payload: dict):
             status_code=400,
         )
 
-    _ensure_db_initialized_from_config()
+    config = _ensure_db_initialized_from_config()
     freshness = build_cache_freshness_context(now=_now())
     try:
         return await asyncio.to_thread(
             check_tickflow_freshness,
             stock_code,
             target_trade_date=freshness.target_trade_date,
+            api_key=resolve_tickflow_api_key(
+                config.get("data", {}).get("tickflow_api_key")
+            ),
         )
     except Exception as exc:
         logger.exception("TickFlow freshness probe failed for %s", stock_code)
@@ -1955,7 +1966,11 @@ def _candidate_to_pattern_result(c: dict) -> CupHandleResult:
 @app.get("/api/config")
 async def get_config():
     """Return current configuration (excluding sensitive fields)."""
-    config = load_config()
+    config = copy.deepcopy(load_config())
+    data_config = config.setdefault("data", {})
+    configured_key = resolve_tickflow_api_key(data_config.get("tickflow_api_key"))
+    data_config["tickflow_api_key"] = ""
+    data_config["tickflow_api_key_configured"] = bool(configured_key)
     return {
         "config": {
             **config,
@@ -2010,9 +2025,28 @@ async def update_config(data: dict):
     Accepts partial config updates. Only specified fields are changed.
     """
     config = load_config()
+    update = copy.deepcopy(data)
+    update_data = update.get("data", {})
+    if isinstance(update_data, dict):
+        update_data.pop("tickflow_api_key_configured", None)
+        if "tickflow_api_key" in update_data:
+            incoming_key = update_data["tickflow_api_key"]
+            if not isinstance(incoming_key, str):
+                return JSONResponse(
+                    {
+                        "status": "error",
+                        "message": "Invalid data config: data.tickflow_api_key must be a string",
+                    },
+                    status_code=400,
+                )
+            incoming_key = incoming_key.strip()
+            if incoming_key:
+                update_data["tickflow_api_key"] = incoming_key
+            else:
+                update_data.pop("tickflow_api_key", None)
 
     # Deep merge: only update provided keys
-    _deep_merge(config, data)
+    _deep_merge(config, update)
 
     try:
         resolve_acquisition_mode(config)
@@ -2072,11 +2106,12 @@ async def update_config(data: dict):
         yaml.dump(config, f, allow_unicode=True, default_flow_style=False, sort_keys=False)
 
     scheduler_reloaded = False
-    data_update = data.get("data", {}) if isinstance(data.get("data", {}), dict) else {}
+    data_update = update.get("data", {}) if isinstance(update.get("data", {}), dict) else {}
     scheduler_inputs_changed = (
-        "scheduler" in data
+        "scheduler" in update
         or "acquisition_mode" in data_update
         or "daily_sources" in data_update
+        or "tickflow_api_key" in data_update
     )
     if scheduler_inputs_changed:
         try:

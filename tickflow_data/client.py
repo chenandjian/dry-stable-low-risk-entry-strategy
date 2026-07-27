@@ -8,8 +8,27 @@ from typing import Any
 from .models import BatchFetchResult
 
 
+DEFAULT_TICKFLOW_API_KEY = "tk_c585255a8a8843a08bc15bc5a7539acf"
+
+
 class TickFlowClientError(RuntimeError):
     """Raised when a TickFlow batch request cannot be completed safely."""
+
+
+def resolve_tickflow_api_key(api_key: str | None = None) -> str:
+    """Resolve an authenticated key without assuming a provider-specific prefix."""
+    if api_key is not None and not isinstance(api_key, str):
+        raise TickFlowClientError("TickFlow API key must be a string")
+    explicit = (api_key or "").strip()
+    if explicit:
+        return explicit
+    environment = os.environ.get("TICKFLOW_API_KEY", "").strip()
+    if environment:
+        return environment
+    default = DEFAULT_TICKFLOW_API_KEY.strip()
+    if default:
+        return default
+    raise TickFlowClientError("TickFlow API key is not configured")
 
 
 class TickFlowBatchClient:
@@ -17,6 +36,7 @@ class TickFlowBatchClient:
         self,
         *,
         sdk: Any | None = None,
+        api_key: str | None = None,
         batch_size: int = 100,
         max_workers: int = 5,
         batch_retries: int = 1,
@@ -25,6 +45,7 @@ class TickFlowBatchClient:
         if batch_size <= 0 or max_workers <= 0 or batch_retries < 0:
             raise ValueError("invalid TickFlow batch client settings")
         self._sdk = sdk
+        self._api_key = api_key
         self._owns_sdk = False
         self.batch_size = batch_size
         self.max_workers = max_workers
@@ -51,8 +72,7 @@ class TickFlowBatchClient:
                 "TickFlow SDK is not installed; run pip install -r requirements.txt"
             ) from exc
 
-        api_key = os.environ.get("TICKFLOW_API_KEY", "").strip()
-        self._sdk = TickFlow(api_key=api_key) if api_key else TickFlow.free()
+        self._sdk = TickFlow(api_key=resolve_tickflow_api_key(self._api_key))
         self._owns_sdk = True
         return self._sdk
 
@@ -125,3 +145,11 @@ class TickFlowBatchClient:
                 )
             frames[normalized_symbol] = frame
         return frames
+
+
+__all__ = [
+    "DEFAULT_TICKFLOW_API_KEY",
+    "TickFlowBatchClient",
+    "TickFlowClientError",
+    "resolve_tickflow_api_key",
+]

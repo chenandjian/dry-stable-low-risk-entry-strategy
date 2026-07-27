@@ -91,6 +91,8 @@ function configResponse() {
       },
       data: {
         acquisition_mode: 'tickflow',
+        tickflow_api_key: '',
+        tickflow_api_key_configured: true,
         scan_window_days: 250,
         backtest_window_days: 250,
         daily_sources: ['sina'],
@@ -272,6 +274,41 @@ describe('StrategyConfig scheduler controls', () => {
 
     const payload = api.updateConfig.mock.calls[0][0]
     expect(payload.data.acquisition_mode).toBe('legacy_multi_source')
+  })
+
+  it('shows masked TickFlow key state and omits a blank key when saving', async () => {
+    const wrapper = mount(StrategyConfig)
+    await flushUi()
+
+    const input = wrapper.find('[data-test="tickflow-api-key"]')
+    expect(wrapper.text()).toContain('TickFlow API Key')
+    expect(wrapper.text()).toContain('已配置')
+    expect(input.attributes('type')).toBe('password')
+    expect(input.element.value).toBe('')
+
+    await wrapper.find('[data-test="tickflow-api-key-visible"]').trigger('click')
+    expect(input.attributes('type')).toBe('text')
+    await wrapper.find('.btn-save').trigger('click')
+    await flushUi()
+
+    const payload = api.updateConfig.mock.calls[0][0]
+    expect(payload.data).not.toHaveProperty('tickflow_api_key')
+    expect(payload.data).not.toHaveProperty('tickflow_api_key_configured')
+  })
+
+  it('submits a trimmed replacement TickFlow key and clears it after success', async () => {
+    const wrapper = mount(StrategyConfig)
+    await flushUi()
+
+    const input = wrapper.find('[data-test="tickflow-api-key"]')
+    await input.setValue(' future-format-key ')
+    await wrapper.find('.btn-save').trigger('click')
+    await flushUi()
+
+    const payload = api.updateConfig.mock.calls[0][0]
+    expect(payload.data.tickflow_api_key).toBe('future-format-key')
+    expect(input.element.value).toBe('')
+    expect(wrapper.text()).toContain('已配置')
   })
 
   it('renders strategy6 real market filter controls and hides removed sector filter controls', async () => {

@@ -1,7 +1,15 @@
+import sys
+import types
+
 import pandas as pd
 import pytest
 
-from tickflow_data.client import TickFlowBatchClient, TickFlowClientError
+from tickflow_data.client import (
+    DEFAULT_TICKFLOW_API_KEY,
+    TickFlowBatchClient,
+    TickFlowClientError,
+    resolve_tickflow_api_key,
+)
 
 
 class _Klines:
@@ -24,6 +32,40 @@ class _Sdk:
 
     def close(self):
         self.closed = True
+
+
+def test_api_key_resolution_prefers_explicit_then_environment(monkeypatch):
+    monkeypatch.setenv("TICKFLOW_API_KEY", " environment-key ")
+
+    assert resolve_tickflow_api_key(" explicit-key ") == "explicit-key"
+    assert resolve_tickflow_api_key() == "environment-key"
+
+
+def test_api_key_resolution_falls_back_to_default_without_prefix_validation(monkeypatch):
+    monkeypatch.delenv("TICKFLOW_API_KEY", raising=False)
+
+    assert resolve_tickflow_api_key("   ") == DEFAULT_TICKFLOW_API_KEY
+    assert resolve_tickflow_api_key("future-provider-format") == "future-provider-format"
+
+
+def test_batch_client_always_constructs_authenticated_sdk(monkeypatch):
+    constructed = []
+
+    class FakeTickFlow:
+        def __new__(cls, *, api_key):
+            constructed.append(api_key)
+            return _Sdk([{}])
+
+        @classmethod
+        def free(cls):
+            raise AssertionError("free mode must never be used")
+
+    monkeypatch.setitem(sys.modules, "tickflow", types.SimpleNamespace(TickFlow=FakeTickFlow))
+
+    with TickFlowBatchClient(api_key="authenticated-key"):
+        pass
+
+    assert constructed == ["authenticated-key"]
 
 
 def test_batch_client_locks_daily_forward_additive_parameters():

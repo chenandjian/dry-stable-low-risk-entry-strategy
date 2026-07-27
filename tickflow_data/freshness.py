@@ -84,6 +84,7 @@ def check_tickflow_freshness(
     stock_code: str,
     *,
     target_trade_date: str,
+    api_key: str | None = None,
     client_factory=TickFlowBatchClient,
     count: int = 5,
 ) -> dict:
@@ -96,7 +97,7 @@ def check_tickflow_freshness(
     stock_item = None
     index_items: list[dict] = []
     try:
-        client_context = client_factory()
+        client_context = client_factory(api_key=api_key)
         with client_context as client:
             started = time.perf_counter()
             try:
