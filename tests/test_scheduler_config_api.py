@@ -222,9 +222,56 @@ def test_get_config_masks_tickflow_api_key_without_mutating_loaded_config(monkey
 
     assert response.status_code == 200
     returned = response.json()["config"]["data"]
+    assert returned["tickflow_access_mode"] == "free"
     assert returned["tickflow_api_key"] == ""
     assert returned["tickflow_api_key_configured"] is True
     assert cfg["data"]["tickflow_api_key"] == "secret-value"
+
+
+def test_update_config_switches_tickflow_mode_without_deleting_key_and_reloads_scheduler(
+    monkeypatch, tmp_path
+):
+    cfg = _valid_config()
+    cfg["data"]["tickflow_api_key"] = "existing-secret"
+    config_path = tmp_path / "config.yaml"
+    reloaded = []
+    monkeypatch.setattr(server, "load_config", lambda path="config.yaml": copy.deepcopy(cfg))
+    monkeypatch.setattr(server, "_reload_scheduler_from_config", lambda config: reloaded.append(config))
+    original_open = builtins.open
+    monkeypatch.setattr(
+        builtins,
+        "open",
+        lambda file, *args, **kwargs: original_open(config_path, *args, **kwargs)
+        if file == "config.yaml" else original_open(file, *args, **kwargs),
+    )
+
+    response = TestClient(server.app).put(
+        "/api/config", json={"data": {"tickflow_access_mode": "free"}}
+    )
+
+    assert response.status_code == 200
+    written = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    assert written["data"]["tickflow_access_mode"] == "free"
+    assert written["data"]["tickflow_api_key"] == "existing-secret"
+    assert len(reloaded) == 1
+
+
+@pytest.mark.parametrize("invalid_mode", ["automatic", 123, None])
+def test_update_config_rejects_invalid_tickflow_access_mode_without_writing(
+    monkeypatch, invalid_mode
+):
+    cfg = _valid_config()
+    writes = []
+    monkeypatch.setattr(server, "load_config", lambda path="config.yaml": copy.deepcopy(cfg))
+    monkeypatch.setattr(server.yaml, "dump", lambda *args, **kwargs: writes.append(args))
+
+    response = TestClient(server.app).put(
+        "/api/config", json={"data": {"tickflow_access_mode": invalid_mode}}
+    )
+
+    assert response.status_code == 400
+    assert "tickflow_access_mode" in response.json()["message"]
+    assert writes == []
 
 
 @pytest.mark.parametrize("incoming", [None, "", "   "])

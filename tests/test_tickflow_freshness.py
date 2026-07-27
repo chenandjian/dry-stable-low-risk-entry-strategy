@@ -82,6 +82,7 @@ def test_freshness_probe_checks_stock_and_four_indexes_without_writing(monkeypat
     result = check_tickflow_freshness(
         "000655",
         target_trade_date="2026-07-23",
+        access_mode="authenticated",
         api_key="freshness-secret",
         client_factory=lambda **kwargs: client,
         count=5,

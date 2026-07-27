@@ -75,6 +75,7 @@ def test_tickflow_prepare_batches_stale_stocks_and_serves_only_prepared_cache(tm
     config = {
         "data": {
             "acquisition_mode": "tickflow",
+            "tickflow_access_mode": "authenticated",
             "tickflow_api_key": "scan-secret",
         },
         "liquidity": {"min_listing_days": 1100},
@@ -95,6 +96,7 @@ def test_tickflow_prepare_batches_stale_stocks_and_serves_only_prepared_cache(tm
     assert result.source_errors == {}
     assert db.get_ohlc_metadata("600519")["source"] == "tickflow"
     assert client_kwargs == [{
+        "access_mode": "authenticated",
         "api_key": "scan-secret",
         "batch_size": 100,
         "max_workers": 5,
@@ -104,11 +106,15 @@ def test_tickflow_prepare_batches_stale_stocks_and_serves_only_prepared_cache(tm
 def test_tickflow_prepare_reports_batch_progress_before_strategy_scan(tmp_path):
     db.init_db(str(tmp_path / "market.db"))
     client = _Client()
+    client_kwargs = []
     events = []
 
     prepare_scan_daily_data(
         {
-            "data": {"acquisition_mode": "tickflow"},
+            "data": {
+                "acquisition_mode": "tickflow",
+                "tickflow_api_key": "must-not-reach-free-client",
+            },
             "liquidity": {"min_listing_days": 1100},
         },
         [
@@ -116,7 +122,7 @@ def test_tickflow_prepare_reports_batch_progress_before_strategy_scan(tmp_path):
             {"code": "000001", "name": "平安银行", "market": "深证主板"},
         ],
         now="2026-07-21 16:00:00",
-        client_factory=lambda **kwargs: client,
+        client_factory=lambda **kwargs: client_kwargs.append(kwargs) or client,
         progress_callback=lambda stage, current, total, detail: events.append(
             (stage, current, total, detail)
         ),
@@ -127,6 +133,8 @@ def test_tickflow_prepare_reports_batch_progress_before_strategy_scan(tmp_path):
     assert stock_events[1][3] == "600519 贵州茅台"
     assert stock_events[2][3] == "000001 平安银行"
     assert any(event[0] == "index_acquisition" for event in events)
+    assert client_kwargs[0]["access_mode"] == "free"
+    assert client_kwargs[0]["api_key"] is None
 
 
 def test_tickflow_prepare_failure_never_falls_back_to_legacy_sources(tmp_path):

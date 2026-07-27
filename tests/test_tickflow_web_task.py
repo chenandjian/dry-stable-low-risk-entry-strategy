@@ -88,7 +88,12 @@ def test_web_full_refresh_uses_fixed_parameters_backup_and_terminal_report(tmp_p
         thread_launcher=launcher,
     )
 
-    started = manager.start(database, stocks, api_key="refresh-secret")
+    started = manager.start(
+        database,
+        stocks,
+        access_mode="authenticated",
+        api_key="refresh-secret",
+    )
     assert started["status"] == "running"
     assert started["parameters"] == {
         "history_days": 1100,
@@ -96,6 +101,7 @@ def test_web_full_refresh_uses_fixed_parameters_backup_and_terminal_report(tmp_p
         "batch_size": 100,
         "max_workers": 5,
         "adjustment": "forward_additive",
+        "access_mode": "authenticated",
     }
     with pytest.raises(TickFlowTaskConflict):
         manager.start(database, stocks, api_key="other-secret")
@@ -113,6 +119,7 @@ def test_web_full_refresh_uses_fixed_parameters_backup_and_terminal_report(tmp_p
     assert status["backup_path"]
     assert status["progress_path"]
     assert client_kwargs == [{
+        "access_mode": "authenticated",
         "api_key": "refresh-secret",
         "batch_size": 100,
         "max_workers": 5,

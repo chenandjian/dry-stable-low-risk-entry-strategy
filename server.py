@@ -66,7 +66,10 @@ from scanner.data_source import DataSourceManager
 from scanner.data_acquisition import resolve_acquisition_mode
 from tickflow_data.web_task import TickFlowFullRefreshManager, TickFlowTaskConflict
 from tickflow_data.freshness import check_tickflow_freshness
-from tickflow_data.client import resolve_tickflow_api_key
+from tickflow_data.client import (
+    resolve_tickflow_access_mode,
+    resolve_tickflow_api_key,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -1602,12 +1605,14 @@ async def start_tickflow_full_refresh():
             status_code=409,
         )
     try:
+        data_config = config.get("data", {})
         return _tickflow_full_refresh.start(
             database_path=database_path,
             stocks=stocks,
-            api_key=resolve_tickflow_api_key(
-                config.get("data", {}).get("tickflow_api_key")
+            access_mode=resolve_tickflow_access_mode(
+                data_config.get("tickflow_access_mode")
             ),
+            api_key=data_config.get("tickflow_api_key"),
         )
     except TickFlowTaskConflict:
         status = _tickflow_full_refresh.status()
@@ -1642,14 +1647,16 @@ async def tickflow_freshness_check(payload: dict):
 
     config = _ensure_db_initialized_from_config()
     freshness = build_cache_freshness_context(now=_now())
+    data_config = config.get("data", {})
     try:
         return await asyncio.to_thread(
             check_tickflow_freshness,
             stock_code,
             target_trade_date=freshness.target_trade_date,
-            api_key=resolve_tickflow_api_key(
-                config.get("data", {}).get("tickflow_api_key")
+            access_mode=resolve_tickflow_access_mode(
+                data_config.get("tickflow_access_mode")
             ),
+            api_key=data_config.get("tickflow_api_key"),
         )
     except Exception as exc:
         logger.exception("TickFlow freshness probe failed for %s", stock_code)
@@ -1968,6 +1975,9 @@ async def get_config():
     """Return current configuration (excluding sensitive fields)."""
     config = copy.deepcopy(load_config())
     data_config = config.setdefault("data", {})
+    data_config["tickflow_access_mode"] = resolve_tickflow_access_mode(
+        data_config.get("tickflow_access_mode")
+    )
     configured_key = resolve_tickflow_api_key(data_config.get("tickflow_api_key"))
     data_config["tickflow_api_key"] = ""
     data_config["tickflow_api_key_configured"] = bool(configured_key)
@@ -2029,6 +2039,25 @@ async def update_config(data: dict):
     update_data = update.get("data", {})
     if isinstance(update_data, dict):
         update_data.pop("tickflow_api_key_configured", None)
+        if "tickflow_access_mode" in update_data:
+            incoming_mode = update_data["tickflow_access_mode"]
+            if not isinstance(incoming_mode, str):
+                return JSONResponse(
+                    {
+                        "status": "error",
+                        "message": "Invalid data config: data.tickflow_access_mode must be a string",
+                    },
+                    status_code=400,
+                )
+            try:
+                update_data["tickflow_access_mode"] = resolve_tickflow_access_mode(
+                    incoming_mode
+                )
+            except ValueError as e:
+                return JSONResponse(
+                    {"status": "error", "message": f"Invalid data config: {e}"},
+                    status_code=400,
+                )
         if "tickflow_api_key" in update_data:
             incoming_key = update_data["tickflow_api_key"]
             if not isinstance(incoming_key, str):
@@ -2050,6 +2079,9 @@ async def update_config(data: dict):
 
     try:
         resolve_acquisition_mode(config)
+        resolve_tickflow_access_mode(
+            config.get("data", {}).get("tickflow_access_mode")
+        )
     except ValueError as e:
         return JSONResponse(
             {"status": "error", "message": f"Invalid data config: {e}"},
@@ -2111,6 +2143,7 @@ async def update_config(data: dict):
         "scheduler" in update
         or "acquisition_mode" in data_update
         or "daily_sources" in data_update
+        or "tickflow_access_mode" in data_update
         or "tickflow_api_key" in data_update
     )
     if scheduler_inputs_changed:

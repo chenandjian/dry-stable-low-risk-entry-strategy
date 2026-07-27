@@ -6,7 +6,11 @@ import time
 
 from scanner import db
 
-from .client import TickFlowBatchClient
+from .client import (
+    AUTHENTICATED_ACCESS_MODE,
+    TickFlowBatchClient,
+    resolve_tickflow_access_mode,
+)
 from .indexes import MARKET_INDEX_SPECS
 from .normalize import normalize_frame
 from .symbols import to_tickflow_symbol
@@ -84,6 +88,7 @@ def check_tickflow_freshness(
     stock_code: str,
     *,
     target_trade_date: str,
+    access_mode: str | None = None,
     api_key: str | None = None,
     client_factory=TickFlowBatchClient,
     count: int = 5,
@@ -97,7 +102,11 @@ def check_tickflow_freshness(
     stock_item = None
     index_items: list[dict] = []
     try:
-        client_context = client_factory(api_key=api_key)
+        resolved_access_mode = resolve_tickflow_access_mode(access_mode)
+        client_context = client_factory(
+            access_mode=resolved_access_mode,
+            api_key=(api_key if resolved_access_mode == AUTHENTICATED_ACCESS_MODE else None),
+        )
         with client_context as client:
             started = time.perf_counter()
             try:

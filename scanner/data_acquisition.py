@@ -137,7 +137,11 @@ def prepare_scan_daily_data(
     if resolve_acquisition_mode(config) == LEGACY_MULTI_SOURCE_MODE:
         return None
 
-    from tickflow_data.client import TickFlowBatchClient, resolve_tickflow_api_key
+    from tickflow_data.client import (
+        AUTHENTICATED_ACCESS_MODE,
+        TickFlowBatchClient,
+        resolve_tickflow_access_mode,
+    )
     from tickflow_data.indexes import update_market_indexes
     from tickflow_data.service import TickFlowDailyUpdateService
 
@@ -163,10 +167,20 @@ def prepare_scan_daily_data(
     failures: dict[str, str] = {}
     if stale_stocks or not indexes_fresh:
         factory = client_factory or TickFlowBatchClient
-        api_key = resolve_tickflow_api_key(
-            config.get("data", {}).get("tickflow_api_key")
+        data_config = config.get("data", {})
+        access_mode = resolve_tickflow_access_mode(
+            data_config.get("tickflow_access_mode")
         )
-        client = factory(api_key=api_key, batch_size=100, max_workers=5)
+        client = factory(
+            access_mode=access_mode,
+            api_key=(
+                data_config.get("tickflow_api_key")
+                if access_mode == AUTHENTICATED_ACCESS_MODE
+                else None
+            ),
+            batch_size=100,
+            max_workers=5,
+        )
         if stale_stocks:
             stock_names = {
                 str(stock.get("code", "")): str(stock.get("name", ""))

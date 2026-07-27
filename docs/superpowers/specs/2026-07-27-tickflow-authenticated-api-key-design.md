@@ -1,5 +1,7 @@
 # TickFlow 认证 Key 配置设计
 
+> **版本说明：** 本文的“统一认证模式”结论已被 `2026-07-27-tickflow-free-auth-mode-design.md` 取代。当前规则是人工选择 `free` 或 `authenticated`，默认严格使用 `TickFlow.free()`。
+
 ## 1. 目标
 
 将 TickFlow 从“环境变量存在则认证、否则自动免费模式”升级为统一认证模式，并允许用户在前端策略配置页维护 API Key。

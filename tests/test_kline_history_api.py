@@ -435,12 +435,13 @@ class _FakeTickFlowFullRefresh:
     def status(self):
         return dict(self.state)
 
-    def start(self, *, database_path, stocks, api_key=None):
+    def start(self, *, database_path, stocks, access_mode=None, api_key=None):
         if self.raises_conflict:
             raise TickFlowTaskConflict("already running")
         self.started.append({
             "database_path": str(database_path),
             "stocks": stocks,
+            "access_mode": access_mode,
             "api_key": api_key,
         })
         self.state.update({
@@ -461,6 +462,7 @@ def test_tickflow_full_refresh_api_starts_fixed_full_market_task(monkeypatch, tm
     manager = _FakeTickFlowFullRefresh()
     monkeypatch.setattr(server, "load_config", lambda path="config.yaml": {"data": {
         "database_path": str(db_path),
+        "tickflow_access_mode": "authenticated",
         "tickflow_api_key": "refresh-api-secret",
     }})
     monkeypatch.setattr(server, "_tickflow_full_refresh", manager, raising=False)
@@ -492,6 +494,7 @@ def test_tickflow_full_refresh_api_starts_fixed_full_market_task(monkeypatch, tm
             {"code": "000001", "name": "平安银行", "market": "SZ"},
             {"code": "600000", "name": "浦发银行", "market": "SH"},
         ],
+        "access_mode": "authenticated",
         "api_key": "refresh-api-secret",
     }]
 
@@ -549,6 +552,7 @@ def test_tickflow_freshness_api_returns_read_only_probe(monkeypatch, tmp_path):
         "_ensure_db_initialized_from_config",
         lambda: {"data": {
             "database_path": str(db_path),
+            "tickflow_access_mode": "authenticated",
             "tickflow_api_key": "freshness-api-secret",
         }},
     )
@@ -558,8 +562,8 @@ def test_tickflow_freshness_api_returns_read_only_probe(monkeypatch, tmp_path):
         lambda: datetime(2026, 7, 23, 16, 0, 0),
     )
 
-    def fake_probe(code, *, target_trade_date, api_key):
-        calls.append((code, target_trade_date, api_key))
+    def fake_probe(code, *, target_trade_date, access_mode, api_key):
+        calls.append((code, target_trade_date, access_mode, api_key))
         return {
             "checked_at": "2026-07-23T16:00:01",
             "target_trade_date": target_trade_date,
@@ -577,7 +581,12 @@ def test_tickflow_freshness_api_returns_read_only_probe(monkeypatch, tmp_path):
 
     assert response.status_code == 200
     assert response.json()["overall_status"] == "FRESH"
-    assert calls == [("000655", "2026-07-23", "freshness-api-secret")]
+    assert calls == [(
+        "000655",
+        "2026-07-23",
+        "authenticated",
+        "freshness-api-secret",
+    )]
 
 
 @pytest.mark.parametrize("stock_code", ["", "12345", "1234567", "ABC655"])

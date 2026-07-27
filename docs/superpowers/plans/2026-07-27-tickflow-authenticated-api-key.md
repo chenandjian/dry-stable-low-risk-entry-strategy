@@ -1,5 +1,7 @@
 # TickFlow 认证密钥实现计划
 
+> **版本说明：** 本计划记录上一阶段认证功能；当前运行模式以 `2026-07-27-tickflow-free-auth-mode.md` 为准，默认严格使用免费模式，认证模式由用户人工选择。
+
 > **面向 AI 代理的工作者：** 必需子技能：使用 superpowers:subagent-driven-development（推荐）或 superpowers:executing-plans 逐任务实现此计划。步骤使用复选框（`- [ ]`）语法来跟踪进度。
 
 **目标：** 将 TickFlow 全部运行入口切换为显式 API Key 认证，并在策略配置页提供不会回显明文、空值保存保留旧密钥的配置能力。

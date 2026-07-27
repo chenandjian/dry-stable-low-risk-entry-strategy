@@ -9,10 +9,24 @@ from .models import BatchFetchResult
 
 
 DEFAULT_TICKFLOW_API_KEY = "tk_c585255a8a8843a08bc15bc5a7539acf"
+FREE_ACCESS_MODE = "free"
+AUTHENTICATED_ACCESS_MODE = "authenticated"
+TICKFLOW_ACCESS_MODES = {FREE_ACCESS_MODE, AUTHENTICATED_ACCESS_MODE}
 
 
 class TickFlowClientError(RuntimeError):
     """Raised when a TickFlow batch request cannot be completed safely."""
+
+
+def resolve_tickflow_access_mode(access_mode: str | None = None) -> str:
+    value = FREE_ACCESS_MODE if access_mode is None else access_mode
+    if not isinstance(value, str):
+        raise ValueError("data.tickflow_access_mode must be a string")
+    normalized = value.strip().lower()
+    if normalized not in TICKFLOW_ACCESS_MODES:
+        allowed = ", ".join(sorted(TICKFLOW_ACCESS_MODES))
+        raise ValueError(f"data.tickflow_access_mode must be one of: {allowed}")
+    return normalized
 
 
 def resolve_tickflow_api_key(api_key: str | None = None) -> str:
@@ -36,6 +50,7 @@ class TickFlowBatchClient:
         self,
         *,
         sdk: Any | None = None,
+        access_mode: str | None = None,
         api_key: str | None = None,
         batch_size: int = 100,
         max_workers: int = 5,
@@ -45,6 +60,7 @@ class TickFlowBatchClient:
         if batch_size <= 0 or max_workers <= 0 or batch_retries < 0:
             raise ValueError("invalid TickFlow batch client settings")
         self._sdk = sdk
+        self._access_mode = resolve_tickflow_access_mode(access_mode)
         self._api_key = api_key
         self._owns_sdk = False
         self.batch_size = batch_size
@@ -72,7 +88,10 @@ class TickFlowBatchClient:
                 "TickFlow SDK is not installed; run pip install -r requirements.txt"
             ) from exc
 
-        self._sdk = TickFlow(api_key=resolve_tickflow_api_key(self._api_key))
+        if self._access_mode == FREE_ACCESS_MODE:
+            self._sdk = TickFlow.free()
+        else:
+            self._sdk = TickFlow(api_key=resolve_tickflow_api_key(self._api_key))
         self._owns_sdk = True
         return self._sdk
 
@@ -148,8 +167,12 @@ class TickFlowBatchClient:
 
 
 __all__ = [
+    "AUTHENTICATED_ACCESS_MODE",
     "DEFAULT_TICKFLOW_API_KEY",
+    "FREE_ACCESS_MODE",
+    "TICKFLOW_ACCESS_MODES",
     "TickFlowBatchClient",
     "TickFlowClientError",
+    "resolve_tickflow_access_mode",
     "resolve_tickflow_api_key",
 ]

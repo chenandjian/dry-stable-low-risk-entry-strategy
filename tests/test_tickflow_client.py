@@ -5,9 +5,12 @@ import pandas as pd
 import pytest
 
 from tickflow_data.client import (
+    AUTHENTICATED_ACCESS_MODE,
     DEFAULT_TICKFLOW_API_KEY,
+    FREE_ACCESS_MODE,
     TickFlowBatchClient,
     TickFlowClientError,
+    resolve_tickflow_access_mode,
     resolve_tickflow_api_key,
 )
 
@@ -48,24 +51,56 @@ def test_api_key_resolution_falls_back_to_default_without_prefix_validation(monk
     assert resolve_tickflow_api_key("future-provider-format") == "future-provider-format"
 
 
-def test_batch_client_always_constructs_authenticated_sdk(monkeypatch):
-    constructed = []
+def test_access_mode_defaults_free_and_rejects_unknown_values():
+    assert resolve_tickflow_access_mode() == FREE_ACCESS_MODE
+    assert resolve_tickflow_access_mode(" authenticated ") == AUTHENTICATED_ACCESS_MODE
+    with pytest.raises(ValueError, match="tickflow_access_mode"):
+        resolve_tickflow_access_mode("automatic")
+
+
+def test_batch_client_default_free_mode_ignores_available_api_key(monkeypatch):
+    calls = []
 
     class FakeTickFlow:
         def __new__(cls, *, api_key):
-            constructed.append(api_key)
+            calls.append(("authenticated", api_key))
             return _Sdk([{}])
 
         @classmethod
         def free(cls):
-            raise AssertionError("free mode must never be used")
+            calls.append(("free", None))
+            return _Sdk([{}])
+
+    monkeypatch.setitem(sys.modules, "tickflow", types.SimpleNamespace(TickFlow=FakeTickFlow))
+    monkeypatch.setenv("TICKFLOW_API_KEY", "environment-key")
+
+    with TickFlowBatchClient(api_key="configured-key"):
+        pass
+
+    assert calls == [("free", None)]
+
+
+def test_batch_client_authenticated_mode_never_calls_free(monkeypatch):
+    calls = []
+
+    class FakeTickFlow:
+        def __new__(cls, *, api_key):
+            calls.append(("authenticated", api_key))
+            return _Sdk([{}])
+
+        @classmethod
+        def free(cls):
+            raise AssertionError("authenticated mode must never use free mode")
 
     monkeypatch.setitem(sys.modules, "tickflow", types.SimpleNamespace(TickFlow=FakeTickFlow))
 
-    with TickFlowBatchClient(api_key="authenticated-key"):
+    with TickFlowBatchClient(
+        access_mode=AUTHENTICATED_ACCESS_MODE,
+        api_key="authenticated-key",
+    ):
         pass
 
-    assert constructed == ["authenticated-key"]
+    assert calls == [("authenticated", "authenticated-key")]
 
 
 def test_batch_client_locks_daily_forward_additive_parameters():

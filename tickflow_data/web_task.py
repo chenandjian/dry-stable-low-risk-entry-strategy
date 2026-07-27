@@ -10,7 +10,12 @@ from pathlib import Path
 from scanner import db
 
 from .cli import ADJUSTMENT, atomic_write_json, backup_database, write_report
-from .client import TickFlowBatchClient
+from .client import (
+    AUTHENTICATED_ACCESS_MODE,
+    FREE_ACCESS_MODE,
+    TickFlowBatchClient,
+    resolve_tickflow_access_mode,
+)
 from .indexes import MARKET_INDEX_SPECS, update_market_indexes
 from .service import TickFlowDailyUpdateService
 
@@ -57,6 +62,7 @@ class TickFlowFullRefreshManager:
                 "batch_size": BATCH_SIZE,
                 "max_workers": MAX_WORKERS,
                 "adjustment": ADJUSTMENT,
+                "access_mode": FREE_ACCESS_MODE,
             },
             "total_stocks": 0,
             "total_indexes": len(MARKET_INDEX_SPECS),
@@ -92,6 +98,7 @@ class TickFlowFullRefreshManager:
         database_path: str | Path,
         stocks: list[dict],
         *,
+        access_mode: str | None = None,
         api_key: str | None = None,
     ) -> dict:
         if not stocks:
@@ -103,6 +110,10 @@ class TickFlowFullRefreshManager:
         data_dir = database.parent / "tickflow"
         progress_path = data_dir / "progress" / f"{task_id}.json"
         report_path = data_dir / "reports" / f"{task_id}.md"
+        resolved_access_mode = resolve_tickflow_access_mode(access_mode)
+        effective_api_key = (
+            api_key if resolved_access_mode == AUTHENTICATED_ACCESS_MODE else None
+        )
 
         with self._lock:
             if self._state["running"]:
@@ -117,6 +128,10 @@ class TickFlowFullRefreshManager:
                 "started_at": started_at,
                 "progress_path": str(progress_path),
                 "report_path": str(report_path),
+                "parameters": {
+                    **self._idle_state()["parameters"],
+                    "access_mode": resolved_access_mode,
+                },
             }
 
         def worker():
@@ -126,7 +141,8 @@ class TickFlowFullRefreshManager:
                 task_id=task_id,
                 progress_path=progress_path,
                 report_path=report_path,
-                api_key=api_key,
+                access_mode=resolved_access_mode,
+                api_key=effective_api_key,
             )
 
         try:
@@ -150,6 +166,7 @@ class TickFlowFullRefreshManager:
         task_id: str,
         progress_path: Path,
         report_path: Path,
+        access_mode: str,
         api_key: str | None,
     ) -> None:
         started = dt.datetime.now()
@@ -161,6 +178,7 @@ class TickFlowFullRefreshManager:
 
             db.init_db(str(database))
             client = self._client_factory(
+                access_mode=access_mode,
                 api_key=api_key,
                 batch_size=BATCH_SIZE,
                 max_workers=MAX_WORKERS,

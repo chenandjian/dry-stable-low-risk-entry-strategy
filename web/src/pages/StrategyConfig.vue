@@ -65,7 +65,26 @@
           </label>
         </div>
       </div>
-      <div class="param-group tickflow-key-group" style="margin-top:12px">
+      <div class="param-group" style="margin-top:12px">
+        <label class="param-label">TickFlow 访问模式</label>
+        <div class="mode-options">
+          <label class="mode-option">
+            <input data-test="tickflow-access-free" type="radio"
+              v-model="config.data.tickflow_access_mode" value="free" @change="markDirty" />
+            <span><strong>免费模式（默认）</strong><small>始终调用 TickFlow.free()，不会使用已保存的 API Key。</small></span>
+          </label>
+          <label class="mode-option">
+            <input data-test="tickflow-access-authenticated" type="radio"
+              v-model="config.data.tickflow_access_mode" value="authenticated" @change="markDirty" />
+            <span><strong>API Key 认证模式</strong><small>只使用 API Key 认证，失败时不会自动切换免费模式。</small></span>
+          </label>
+        </div>
+        <p v-if="config.data.tickflow_access_mode === 'free'" class="section-hint">
+          已保存的 Key 会保留，但当前不会使用。
+        </p>
+      </div>
+      <div v-if="config.data.tickflow_access_mode === 'authenticated'"
+        class="param-group tickflow-key-group" style="margin-top:12px">
         <label class="param-label" for="tickflow-api-key">
           TickFlow API Key
           <span class="key-status" :class="{ configured: config.data.tickflow_api_key_configured }">
@@ -1464,6 +1483,7 @@ const config = reactive({
   liquidity: {},
   data: {
     acquisition_mode: 'legacy_multi_source',
+    tickflow_access_mode: 'free',
     tickflow_api_key: '',
     tickflow_api_key_configured: false,
     scan_window_days: 250,
@@ -1843,6 +1863,9 @@ function sanitizeDailySources() {
   if (!['tickflow', 'legacy_multi_source'].includes(config.data.acquisition_mode)) {
     config.data.acquisition_mode = 'legacy_multi_source'
   }
+  if (!['free', 'authenticated'].includes(config.data.tickflow_access_mode)) {
+    config.data.tickflow_access_mode = 'free'
+  }
   const current = Array.isArray(config.data.daily_sources)
     ? config.data.daily_sources
     : availableSources.map(s => s.key)
@@ -1882,6 +1905,7 @@ function validate() {
   if (dataCfg.scan_window_days > liq.min_listing_days) errors.push('扫描分析天数不能超过日线拉取天数')
   if (!dataCfg.daily_sources || dataCfg.daily_sources.length === 0) errors.push('至少选择一个日线数据源')
   if (!['tickflow', 'legacy_multi_source'].includes(dataCfg.acquisition_mode)) errors.push('请选择有效的日线数据获取模式')
+  if (!['free', 'authenticated'].includes(dataCfg.tickflow_access_mode)) errors.push('请选择有效的 TickFlow 访问模式')
   if (!schedulerTimeIsValid()) errors.push('定时任务执行时间格式不正确')
 
   // Strategy2 validation
@@ -2093,7 +2117,9 @@ async function saveConfig() {
   saving.value = true
   error.value = ''
   try {
-    const replacementTickFlowKey = String(config.data.tickflow_api_key || '').trim()
+    const replacementTickFlowKey = config.data.tickflow_access_mode === 'authenticated'
+      ? String(config.data.tickflow_api_key || '').trim()
+      : ''
     const dataPayload = {
       ...config.data,
       daily_sources: [...config.data.daily_sources],
