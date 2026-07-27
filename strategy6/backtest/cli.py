@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 
 from scanner import db
+from scanner.config_io import load_yaml_config
 from strategy6.backtest.index_history import (
     INDEX_STORAGE_ALIASES,
     ensure_index_history,
@@ -94,11 +95,9 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps(campaign_status(args.campaign_id), ensure_ascii=False, indent=2, default=str))
         return 0
     if args.command == "comprehensive-report":
-        import yaml
         from strategy6.backtest.comprehensive_report import write_comprehensive_report
         from strategy6.validation import resolve_strategy6_config
-        with open(args.config, "r", encoding="utf-8") as handle:
-            root_config = yaml.safe_load(handle) or {}
+        root_config = load_yaml_config(args.config)
         production_config = resolve_strategy6_config({"strategy6": root_config.get("strategy6") or {}})
         result = write_comprehensive_report(args.campaign_id, args.output, production_config)
         print(json.dumps(result, ensure_ascii=False, indent=2, default=str))

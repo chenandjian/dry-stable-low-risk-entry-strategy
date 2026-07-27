@@ -11,9 +11,8 @@ import hashlib
 import subprocess
 import time
 
-import yaml
-
 from scanner import db
+from scanner.config_io import load_yaml_config
 from strategy6.backtest.config import resolve_backtest_config
 from strategy6.backtest.data import build_database_fingerprint, market_calendar_from_indexes
 from strategy6.backtest.metrics import calculate_trade_metrics, group_trade_metrics
@@ -245,8 +244,7 @@ def _json(value) -> str:
 def run_tail_regime_full_cli(args, coverage) -> int:
     output_dir = Path(args.output)
     output_dir.mkdir(parents=True, exist_ok=True)
-    with open(args.config, "r", encoding="utf-8") as handle:
-        root_config = yaml.safe_load(handle) or {}
+    root_config = load_yaml_config(args.config)
     strategy_config = copy.deepcopy(root_config.get("strategy6") or {})
     strategy_config["decision_profile"] = "formal_original"
     backtest_config = resolve_backtest_config({})

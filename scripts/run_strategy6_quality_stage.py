@@ -7,11 +7,10 @@ from pathlib import Path
 import sys
 from types import SimpleNamespace
 
-import yaml
-
 sys.path.insert(0, str(Path.cwd()))
 
 from scanner import db
+from scanner.config_io import load_yaml_config
 from strategy6.backtest.config import resolve_backtest_config
 from strategy6.backtest.index_history import load_index_history
 from strategy6.backtest.report import write_backtest_report
@@ -40,8 +39,7 @@ def main(argv: list[str] | None = None) -> int:
     coverage = load_index_history(args.start, args.end)
     if coverage.status != "READY":
         raise RuntimeError(f"real index history unavailable: {coverage.missing_symbols}")
-    with open(args.config, "r", encoding="utf-8") as handle:
-        root = yaml.safe_load(handle) or {}
+    root = load_yaml_config(args.config)
     strategy_config = resolve_strategy6_config({"strategy6": root.get("strategy6") or {}})
     run_args = SimpleNamespace(
         db=args.db,

@@ -7,6 +7,18 @@ import yaml
 from fastapi.testclient import TestClient
 from pathlib import Path
 
+from scanner.config_io import write_yaml_config_atomic
+
+
+@pytest.fixture(autouse=True)
+def _isolate_atomic_config_writes(monkeypatch, tmp_path):
+    config_path = tmp_path / "config.yaml"
+    monkeypatch.setattr(
+        server,
+        "write_yaml_config_atomic",
+        lambda config, path="config.yaml", **kwargs: write_yaml_config_atomic(config, config_path),
+    )
+
 
 def _valid_config() -> dict:
     return {
@@ -38,7 +50,11 @@ def test_update_config_rejects_invalid_scheduler_cron(monkeypatch, tmp_path):
     cfg = _valid_config()
     writes = []
     monkeypatch.setattr(server, "load_config", lambda path="config.yaml": cfg.copy())
-    monkeypatch.setattr(server.yaml, "dump", lambda *args, **kwargs: writes.append(args))
+    monkeypatch.setattr(
+        server,
+        "write_yaml_config_atomic",
+        lambda *args, **kwargs: writes.append(args),
+    )
 
     res = TestClient(server.app).put(
         "/api/config",
@@ -56,7 +72,7 @@ def test_update_config_rejects_invalid_scheduler_shape(monkeypatch):
     cfg = _valid_config()
     writes = []
     monkeypatch.setattr(server, "load_config", lambda path="config.yaml": cfg.copy())
-    monkeypatch.setattr(server.yaml, "dump", lambda *args, **kwargs: writes.append(args))
+    monkeypatch.setattr(server, "write_yaml_config_atomic", lambda *args, **kwargs: writes.append(args))
 
     res = TestClient(server.app).put("/api/config", json={"scheduler": {"serial_dual_scan": False}})
 
@@ -70,7 +86,6 @@ def test_update_config_accepts_weekday_serial_scan_time(monkeypatch, tmp_path):
     cfg = _valid_config()
     config_path = tmp_path / "config.yaml"
     config_path.write_text(yaml.dump(cfg, allow_unicode=True), encoding="utf-8")
-    written = {}
     monkeypatch.setattr(server, "load_config", lambda path="config.yaml": cfg.copy())
     original_open = builtins.open
 
@@ -79,12 +94,7 @@ def test_update_config_accepts_weekday_serial_scan_time(monkeypatch, tmp_path):
             return original_open(config_path, *args, **kwargs)
         return original_open(file, *args, **kwargs)
 
-    def fake_dump(config, file_obj, **kwargs):
-        written.update(config)
-        return yaml.safe_dump(config, file_obj, allow_unicode=True)
-
     monkeypatch.setattr(builtins, "open", fake_open)
-    monkeypatch.setattr(server.yaml, "dump", fake_dump)
 
     res = TestClient(server.app).put(
         "/api/config",
@@ -93,6 +103,7 @@ def test_update_config_accepts_weekday_serial_scan_time(monkeypatch, tmp_path):
 
     assert res.status_code == 200
     assert res.json()["status"] == "ok"
+    written = yaml.safe_load(config_path.read_text(encoding="utf-8"))
     assert written["scheduler"]["enabled"] is True
     assert written["scheduler"]["serial_dual_scan"]["cron"] == "30 14 * * 1-5"
     assert yaml.safe_load(config_path.read_text(encoding="utf-8"))["scheduler"]["serial_dual_scan"]["cron"] == "30 14 * * 1-5"
@@ -160,7 +171,6 @@ def test_update_config_validates_strategy6_and_strips_legacy_sector_fields(monke
         "enable_sector_filter": True,
         "sector_filter_mode": "strict",
     }
-    written = {}
     repository_config = Path("config.yaml")
     repository_config_before = repository_config.read_bytes()
     temporary_config = tmp_path / "config.yaml"
@@ -173,7 +183,6 @@ def test_update_config_validates_strategy6_and_strips_legacy_sector_fields(monke
 
     monkeypatch.setattr(server, "load_config", lambda path="config.yaml": cfg.copy())
     monkeypatch.setattr(builtins, "open", fake_open)
-    monkeypatch.setattr(server.yaml, "dump", lambda config, *args, **kwargs: written.update(config))
 
     response = TestClient(server.app).put(
         "/api/config",
@@ -186,6 +195,7 @@ def test_update_config_validates_strategy6_and_strips_legacy_sector_fields(monke
     )
 
     assert response.status_code == 200
+    written = yaml.safe_load(temporary_config.read_text(encoding="utf-8"))
     assert "enable_sector_filter" not in written["strategy6"]
     assert "sector_filter_mode" not in written["strategy6"]
     assert written["strategy6"]["pattern_filter_mode"] == "score_only"
@@ -263,7 +273,7 @@ def test_update_config_rejects_invalid_tickflow_access_mode_without_writing(
     cfg = _valid_config()
     writes = []
     monkeypatch.setattr(server, "load_config", lambda path="config.yaml": copy.deepcopy(cfg))
-    monkeypatch.setattr(server.yaml, "dump", lambda *args, **kwargs: writes.append(args))
+    monkeypatch.setattr(server, "write_yaml_config_atomic", lambda *args, **kwargs: writes.append(args))
 
     response = TestClient(server.app).put(
         "/api/config", json={"data": {"tickflow_access_mode": invalid_mode}}
@@ -330,7 +340,7 @@ def test_update_config_rejects_non_string_tickflow_key_without_writing(monkeypat
     cfg = _valid_config()
     writes = []
     monkeypatch.setattr(server, "load_config", lambda path="config.yaml": copy.deepcopy(cfg))
-    monkeypatch.setattr(server.yaml, "dump", lambda *args, **kwargs: writes.append(args))
+    monkeypatch.setattr(server, "write_yaml_config_atomic", lambda *args, **kwargs: writes.append(args))
 
     response = TestClient(server.app).put(
         "/api/config", json={"data": {"tickflow_api_key": 12345}}
@@ -357,7 +367,7 @@ def test_update_config_rejects_invalid_strategy6_threshold_order(monkeypatch, tm
 
     monkeypatch.setattr(server, "load_config", lambda path="config.yaml": cfg.copy())
     monkeypatch.setattr(builtins, "open", fake_open)
-    monkeypatch.setattr(server.yaml, "dump", lambda *args, **kwargs: writes.append(args))
+    monkeypatch.setattr(server, "write_yaml_config_atomic", lambda *args, **kwargs: writes.append(args))
 
     response = TestClient(server.app).put(
         "/api/config",
@@ -374,7 +384,7 @@ def test_update_config_rejects_invalid_data_acquisition_mode(monkeypatch):
     cfg = _valid_config()
     writes = []
     monkeypatch.setattr(server, "load_config", lambda path="config.yaml": cfg.copy())
-    monkeypatch.setattr(server.yaml, "dump", lambda *args, **kwargs: writes.append(args))
+    monkeypatch.setattr(server, "write_yaml_config_atomic", lambda *args, **kwargs: writes.append(args))
 
     res = TestClient(server.app).put(
         "/api/config",

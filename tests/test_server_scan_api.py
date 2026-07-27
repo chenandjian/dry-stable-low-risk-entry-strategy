@@ -1,7 +1,19 @@
 from fastapi.testclient import TestClient
+import pytest
 
 import server
 from scanner import db
+from scanner.config_io import write_yaml_config_atomic
+
+
+@pytest.fixture(autouse=True)
+def _isolate_atomic_config_writes(monkeypatch, tmp_path):
+    config_path = tmp_path / "config.yaml"
+    monkeypatch.setattr(
+        server,
+        "write_yaml_config_atomic",
+        lambda config, path="config.yaml", **kwargs: write_yaml_config_atomic(config, config_path),
+    )
 
 
 def test_start_scan_rejects_when_db_task_running(monkeypatch, tmp_path):

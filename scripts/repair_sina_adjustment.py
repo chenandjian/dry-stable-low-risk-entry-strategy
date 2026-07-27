@@ -14,13 +14,12 @@ from dataclasses import asdict
 from datetime import datetime
 from pathlib import Path
 
-import yaml
-
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from scanner import db  # noqa: E402
+from scanner.config_io import load_yaml_config  # noqa: E402
 from scanner.data_source import DataSourceManager  # noqa: E402
 from scanner.kline_repair import find_legacy_sina_candidates, repair_stock  # noqa: E402
 
@@ -150,8 +149,7 @@ def _resolve(value: str) -> Path:
 
 
 def _load_requested_days(config_path: Path) -> int:
-    with config_path.open("r", encoding="utf-8") as handle:
-        config = yaml.safe_load(handle) or {}
+    config = load_yaml_config(config_path)
     windows = [int(config.get("liquidity", {}).get("min_listing_days", 800))]
     for section in config.values():
         if isinstance(section, dict) and "kline_days" in section:

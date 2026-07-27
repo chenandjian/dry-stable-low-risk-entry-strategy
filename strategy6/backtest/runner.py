@@ -8,9 +8,8 @@ from pathlib import Path
 import subprocess
 import time
 
-import yaml
-
 from scanner import db
+from scanner.config_io import load_yaml_config
 from strategy6.backtest.cli import audit_database
 from strategy6.backtest.config import resolve_backtest_config
 from strategy6.backtest.data import build_data_fingerprint, market_calendar_from_indexes
@@ -642,8 +641,7 @@ def build_phase_selection_results(trades: list[dict], position: dict) -> dict:
 
 
 def _load_yaml(path: str) -> dict:
-    with open(path, "r", encoding="utf-8") as handle:
-        return yaml.safe_load(handle) or {}
+    return load_yaml_config(path)
 
 
 def _load_stock_rows(conn, code: str, end_date: str) -> list[dict]:

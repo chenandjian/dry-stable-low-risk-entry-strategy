@@ -6,9 +6,8 @@ from collections.abc import Callable
 import json
 import subprocess
 
-import yaml
-
 from scanner import db
+from scanner.config_io import load_yaml_config
 from strategy6.backtest.models import ParameterSet
 from strategy6.backtest.data import build_database_fingerprint
 from strategy6.backtest.campaign import (
@@ -483,8 +482,7 @@ def run_comprehensive_cli(args, coverage) -> int:
     from strategy6.backtest.config import resolve_backtest_config
     from strategy6.backtest.runner import run_local_parameter_set
 
-    with open(args.config, "r", encoding="utf-8") as handle:
-        root_config = yaml.safe_load(handle) or {}
+    root_config = load_yaml_config(args.config)
     research_config = copy.deepcopy(root_config.get("strategy6") or {})
     research_config["decision_profile"] = "research_quality_v2"
     base_config = resolve_strategy6_config({"strategy6": research_config})

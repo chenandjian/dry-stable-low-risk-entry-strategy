@@ -17,9 +17,9 @@ logging.basicConfig(
     handlers=[logging.StreamHandler(sys.stdout)],
 )
 from fastapi.middleware.cors import CORSMiddleware
-import yaml
 
 import scanner.db as db
+from scanner.config_io import ConfigFileError, load_yaml_config, write_yaml_config_atomic
 from scanner.engine import scan_all, re_evaluate_task
 from strategy2.scanner import scan_strategy2_all
 from strategy2.validation import resolve_strategy2_config
@@ -718,8 +718,7 @@ def _db_running_scan_status(running_task: dict) -> dict:
 
 
 def load_config(path: str = "config.yaml") -> dict:
-    with open(path, "r", encoding="utf-8") as f:
-        return yaml.safe_load(f)
+    return load_yaml_config(path)
 
 
 def _deep_merge(base: dict, update: dict):
@@ -2133,9 +2132,22 @@ async def update_config(data: dict):
                 status_code=400,
             )
 
-    # Write back to config.yaml
-    with open("config.yaml", "w", encoding="utf-8") as f:
-        yaml.dump(config, f, allow_unicode=True, default_flow_style=False, sort_keys=False)
+    try:
+        write_yaml_config_atomic(
+            config,
+            "config.yaml",
+            backup_path="data/config-backups/config.yaml.bak",
+        )
+    except ConfigFileError as e:
+        logger.exception("Failed to save configuration")
+        return JSONResponse(
+            {
+                "status": "error",
+                "error": "CONFIG_WRITE_FAILED",
+                "message": f"配置保存失败，原配置保持不变: {e}",
+            },
+            status_code=500,
+        )
 
     scheduler_reloaded = False
     data_update = update.get("data", {}) if isinstance(update.get("data", {}), dict) else {}
