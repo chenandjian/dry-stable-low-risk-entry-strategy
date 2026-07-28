@@ -105,6 +105,17 @@ DEFAULT_STRATEGY6_CONFIG = {
     "setup_quality_min_ready": 18,
     "support_reaction_min_key": 3,
     "support_reaction_min_ready": 5,
+    "ttm_squeeze": {
+        "enabled": True,
+        "bb_period": 20,
+        "bb_stddev": 2.0,
+        "kc_ema_period": 20,
+        "kc_atr_period": 20,
+        "kc_atr_multiplier": 1.5,
+        "momentum_period": 20,
+        "bullish_squeeze_min_days": 3,
+        "max_ranking_bonus": 4,
+    },
     "box_tail": {
         "enabled": True,
         "min_box_days": 5,
@@ -251,8 +262,8 @@ def resolve_strategy6_config(config: dict | None) -> dict:
                         for nested_key, nested_value in compact_override.items()
                         if nested_key in raw["box_tail"]["compact_kline"]
                     })
-            elif key == "brooks_tail" and isinstance(value, dict):
-                _merge_known_dict(raw["brooks_tail"], value)
+            elif key in {"brooks_tail", "ttm_squeeze"} and isinstance(value, dict):
+                _merge_known_dict(raw[key], value)
             else:
                 raw[key] = value
 
@@ -371,6 +382,7 @@ def resolve_strategy6_config(config: dict | None) -> dict:
         raise ValueError("support reaction thresholds must satisfy key <= ready")
     _validate_box_tail_config(raw["box_tail"])
     _validate_brooks_tail_config(raw["brooks_tail"])
+    _validate_ttm_squeeze_config(raw["ttm_squeeze"])
     return raw
 
 
@@ -419,6 +431,16 @@ def _validate_between(
     if lower_invalid or value > max_v:
         bracket = "(" if lower_exclusive else "["
         raise ValueError(f"{key} must be in {bracket}{min_v}, {max_v}]")
+
+
+def _validate_ttm_squeeze_config(config: dict) -> None:
+    config["enabled"] = bool(config.get("enabled", True))
+    for key in ("bb_period", "kc_ema_period", "kc_atr_period", "momentum_period"):
+        _validate_int_range(config, key, 5, 120)
+    _validate_between(config, "bb_stddev", 0, 10, lower_exclusive=True)
+    _validate_between(config, "kc_atr_multiplier", 0, 10, lower_exclusive=True)
+    _validate_int_range(config, "bullish_squeeze_min_days", 1, 20)
+    _validate_int_range(config, "max_ranking_bonus", 4, 4)
 
 
 def _validate_box_tail_config(config: dict) -> None:

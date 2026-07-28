@@ -385,6 +385,16 @@ strategy6:
   setup_quality_min_ready: 18
   support_reaction_min_key: 3
   support_reaction_min_ready: 5
+  ttm_squeeze:
+    enabled: true
+    bb_period: 20
+    bb_stddev: 2.0
+    kc_ema_period: 20
+    kc_atr_period: 20
+    kc_atr_multiplier: 1.5
+    momentum_period: 20
+    bullish_squeeze_min_days: 3
+    max_ranking_bonus: 4
   box_tail:
     enabled: true
     min_box_days: 5

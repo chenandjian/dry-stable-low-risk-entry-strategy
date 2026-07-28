@@ -3,6 +3,9 @@ from __future__ import annotations
 from datetime import date, timedelta
 from math import isclose, sqrt
 
+import pytest
+
+from strategy6.engine import StrongVcpTailEngine
 from strategy6.ttm_squeeze import (
     _ema_series,
     _linear_regression_last,
@@ -11,6 +14,7 @@ from strategy6.ttm_squeeze import (
     calculate_ttm_squeeze,
     classify_ttm_state,
 )
+from strategy6.validation import resolve_strategy6_config
 
 
 TTM_CONFIG = {
@@ -146,3 +150,60 @@ def test_ttm_disabled_does_not_require_market_data():
     assert result.status == "DISABLED"
     assert result.score == 0
     assert result.risk_tags == []
+
+
+def _engine_rows(length: int = 520) -> list[dict]:
+    rows = []
+    for index in range(length):
+        close = 10.0 + index * 0.003 + ((index % 7) - 3) * 0.002
+        rows.append(_row(index, close))
+    return rows
+
+
+def test_strategy6_ttm_config_partial_override_preserves_defaults():
+    config = resolve_strategy6_config({"strategy6": {"ttm_squeeze": {"enabled": False}}})
+
+    assert config["ttm_squeeze"]["enabled"] is False
+    assert config["ttm_squeeze"]["bb_period"] == 20
+    assert config["ttm_squeeze"]["kc_atr_multiplier"] == 1.5
+    assert config["ttm_squeeze"]["max_ranking_bonus"] == 4
+
+
+@pytest.mark.parametrize(
+    ("key", "value"),
+    [
+        ("bb_period", 4),
+        ("kc_ema_period", 121),
+        ("kc_atr_period", 4.5),
+        ("momentum_period", 0),
+        ("bb_stddev", 0),
+        ("kc_atr_multiplier", 10.1),
+        ("bullish_squeeze_min_days", 21),
+        ("max_ranking_bonus", 3),
+    ],
+)
+def test_strategy6_ttm_config_rejects_invalid_values(key, value):
+    with pytest.raises(ValueError):
+        resolve_strategy6_config({"strategy6": {"ttm_squeeze": {key: value}}})
+
+
+def test_strategy6_ttm_only_changes_new_audit_fields_and_ranking_score():
+    rows = _engine_rows()
+    enabled = StrongVcpTailEngine({}).evaluate_at(rows, code="000001", name="平安银行")
+    disabled = StrongVcpTailEngine({
+        "strategy6": {"ttm_squeeze": {"enabled": False}},
+    }).evaluate_at(rows, code="000001", name="平安银行")
+
+    assert enabled.score.total_score == disabled.score.total_score
+    assert enabled.candidate_type == disabled.candidate_type
+    assert enabled.reject_reasons == disabled.reject_reasons
+    assert enabled.lifecycle_status == disabled.lifecycle_status
+    assert enabled.trade_plan == disabled.trade_plan
+    assert enabled.ranking_score == enabled.score.total_score + enabled.ttm_squeeze.score
+    assert disabled.ranking_score == disabled.score.total_score
+
+    candidate = enabled.to_candidate_dict()
+    assert candidate["ttm_squeeze_status"] == enabled.ttm_squeeze.status
+    assert candidate["ttm_squeeze_score"] == enabled.ttm_squeeze.score
+    assert candidate["ranking_score"] == enabled.ranking_score
+    assert candidate["ttm_model_version"] == "S6_TTM_SQUEEZE_V1"

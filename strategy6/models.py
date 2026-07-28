@@ -383,6 +383,8 @@ class Strategy6Evaluation:
     tail_paths: Strategy6TailPaths
     trade_plan: Strategy6TradePlan
     score: Strategy6Score
+    ttm_squeeze: Strategy6TtmSqueeze = field(default_factory=Strategy6TtmSqueeze)
+    ranking_score: int = 0
     setup_quality: Strategy6SetupQuality = field(default_factory=Strategy6SetupQuality)
     tail_regime: Strategy6TailRegime = field(default_factory=Strategy6TailRegime)
     vcp_observation: Strategy6VcpObservation = field(default_factory=Strategy6VcpObservation)
@@ -415,6 +417,7 @@ class Strategy6Evaluation:
         tail = self.tail_paths
         quality = self.setup_quality
         regime = self.tail_regime
+        ttm = self.ttm_squeeze
         vcp = self.vcp_observation
         vcp_quality = vcp.quality
         return {
@@ -635,6 +638,22 @@ class Strategy6Evaluation:
             "risk_reward_score": score.risk_reward_score,
             "risk_control_score": score.risk_control_score,
             "total_score": score.total_score,
+            "ttm_squeeze_status": ttm.status,
+            "ttm_squeeze_on": ttm.squeeze_on,
+            "ttm_squeeze_days": ttm.squeeze_days,
+            "ttm_fired": ttm.fired,
+            "ttm_momentum": ttm.momentum,
+            "ttm_previous_momentum": ttm.previous_momentum,
+            "ttm_momentum_direction": ttm.momentum_direction,
+            "ttm_bb_upper": ttm.bb_upper,
+            "ttm_bb_lower": ttm.bb_lower,
+            "ttm_kc_upper": ttm.kc_upper,
+            "ttm_kc_lower": ttm.kc_lower,
+            "ttm_squeeze_score": ttm.score,
+            "ranking_score": self.ranking_score,
+            "ttm_reasons": ttm.reasons,
+            "ttm_risk_tags": ttm.risk_tags,
+            "ttm_model_version": ttm.model_version,
             "pattern_score_component": score.pattern_score_component,
             "tail_score": score.tail_score,
             "objective_rr_score": score.objective_rr_score,

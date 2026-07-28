@@ -23,6 +23,7 @@ from strategy6.setup_quality import evaluate_setup_quality
 from strategy6.strong_start import evaluate_strong_start
 from strategy6.support import evaluate_support
 from strategy6.tail_regime import evaluate_tail_regime
+from strategy6.ttm_squeeze import calculate_ttm_squeeze
 from strategy6.trade_plan import calculate_trade_plan
 from strategy6.validation import (
     is_strategy6_research_profile,
@@ -59,6 +60,7 @@ class StrongVcpTailEngine:
             trading_days_override=trading_days_override,
             rows_normalized=rows_normalized,
         )
+        ttm_squeeze = calculate_ttm_squeeze(rows, self.config["ttm_squeeze"])
         vcp_observation = evaluate_vcp_observation(rows, self.config, code=code)
         market_context = evaluate_market_context(
             market_data_by_symbol,
@@ -203,6 +205,7 @@ class StrongVcpTailEngine:
             brooks_tail=brooks_tail,
             setup_quality=setup_quality,
         )
+        ranking_score = score.total_score + ttm_squeeze.score
         reject_reasons = hard_filter_reasons(
             rows, indicators, start, phase, pattern, support, dry_tail, trade_plan, self.config,
             box_tail=box_tail,
@@ -272,6 +275,8 @@ class StrongVcpTailEngine:
             tail_paths=tail_paths,
             trade_plan=trade_plan,
             score=score,
+            ttm_squeeze=ttm_squeeze,
+            ranking_score=ranking_score,
             setup_quality=setup_quality,
             tail_regime=tail_regime,
             vcp_observation=vcp_observation,
