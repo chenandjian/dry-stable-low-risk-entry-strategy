@@ -304,6 +304,25 @@ class Strategy6Score:
 
 
 @dataclass
+class Strategy6TtmSqueeze:
+    status: str = "INSUFFICIENT_DATA"
+    squeeze_on: bool = False
+    squeeze_days: int = 0
+    fired: bool = False
+    momentum: float | None = None
+    previous_momentum: float | None = None
+    momentum_direction: str = "UNKNOWN"
+    bb_upper: float | None = None
+    bb_lower: float | None = None
+    kc_upper: float | None = None
+    kc_lower: float | None = None
+    score: int = 0
+    reasons: list[str] = field(default_factory=list)
+    risk_tags: list[str] = field(default_factory=list)
+    model_version: str = "S6_TTM_SQUEEZE_V1"
+
+
+@dataclass
 class Strategy6VcpQuality:
     scored: bool = False
     score: int | None = None
