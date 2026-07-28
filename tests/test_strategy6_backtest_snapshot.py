@@ -5,6 +5,7 @@ from strategy6.backtest.snapshot import (
     rebuild_stock_signals,
 )
 from strategy6.engine import StrongVcpTailEngine
+from strategy6.ttm_squeeze import calculate_ttm_squeeze
 
 
 class FakeEvaluation:
@@ -65,6 +66,73 @@ def test_asof_rebuild_never_passes_future_stock_or_market_rows():
     )
     assert engine.calls == [("2025-01-05", "2025-01-05"), ("2025-01-06", "2025-01-06")]
     assert [signal.evaluation_date for signal in signals] == ["2025-01-05", "2025-01-06"]
+
+
+def test_asof_rebuild_ttm_snapshot_is_unchanged_when_future_rows_are_appended():
+    class TtmEvaluation(FakeEvaluation):
+        def __init__(self, rows):
+            ttm = calculate_ttm_squeeze(rows, {
+                "enabled": True,
+                "bb_period": 5,
+                "bb_stddev": 2.0,
+                "kc_ema_period": 5,
+                "kc_atr_period": 5,
+                "kc_atr_multiplier": 1.5,
+                "momentum_period": 5,
+                "bullish_squeeze_min_days": 3,
+            })
+            super().__init__(rows[-1]["date"], **{
+                "ttm_squeeze_status": ttm.status,
+                "ttm_squeeze_score": ttm.score,
+                "ttm_momentum": ttm.momentum,
+                "ttm_bb_upper": ttm.bb_upper,
+                "ttm_kc_upper": ttm.kc_upper,
+            })
+
+    class TtmEngine:
+        def evaluate_at(self, rows, **kwargs):
+            return TtmEvaluation(rows)
+
+    history = [
+        {
+            "date": f"2025-01-{day:02d}",
+            "open": 10 + day * 0.01,
+            "high": 10.2 + day * 0.01,
+            "low": 9.8 + day * 0.01,
+            "close": 10 + day * 0.01,
+            "volume": 100,
+        }
+        for day in range(1, 12)
+    ]
+    evaluation_date = history[-1]["date"]
+    future_rows = history + [{
+        "date": "2025-01-12",
+        "open": 20,
+        "high": 25,
+        "low": 15,
+        "close": 24,
+        "volume": 1000,
+    }]
+
+    base = rebuild_stock_signals(
+        code="000001", name="样本", rows=history, evaluation_dates=[evaluation_date],
+        market_data_by_symbol={}, parameter_set_id="s6ps-base",
+        engine=TtmEngine(), minimum_history=1,
+    )[0].snapshot
+    extended = rebuild_stock_signals(
+        code="000001", name="样本", rows=future_rows, evaluation_dates=[evaluation_date],
+        market_data_by_symbol={}, parameter_set_id="s6ps-future",
+        engine=TtmEngine(), minimum_history=1,
+    )[0].snapshot
+
+    for field in (
+        "ttm_squeeze_status",
+        "ttm_squeeze_score",
+        "ttm_momentum",
+        "ttm_bb_upper",
+        "ttm_kc_upper",
+    ):
+        assert extended[field] == base[field]
 
 
 def test_wait_breakout_snapshot_is_observable_but_not_trade_ready():

@@ -97,6 +97,15 @@ def _momentum_direction(momentum: float | None, previous: float | None, close: f
     return "RISING" if difference > 0 else "FALLING"
 
 
+def _bands_inside_keltner(
+    bb_upper: float,
+    bb_lower: float,
+    kc_upper: float,
+    kc_lower: float,
+) -> bool:
+    return bb_upper < kc_upper and bb_lower > kc_lower
+
+
 def classify_ttm_state(
     *,
     enabled: bool,
@@ -123,7 +132,7 @@ def classify_ttm_state(
     risk_tags: list[str] = []
     if squeeze_on:
         reasons.append("TTM_SQUEEZE_ON")
-        if squeeze_days >= min_bullish_days:
+        if squeeze_days >= 3:
             reasons.append("TTM_SQUEEZE_3D_PLUS")
     if fired:
         reasons.append("TTM_FIRED")
@@ -193,9 +202,9 @@ def calculate_ttm_squeeze(rows: list[dict], config: dict) -> Strategy6TtmSqueeze
     momentum_period = int(config.get("momentum_period", 20))
     min_bullish_days = int(config.get("bullish_squeeze_min_days", 3))
     minimum_rows = max(
-        bb_period,
-        kc_ema_period,
-        kc_atr_period,
+        bb_period + 1,
+        kc_ema_period + 1,
+        kc_atr_period + 1,
         momentum_period * 2,
     )
     if len(rows) < minimum_rows or not _valid_ohlc_rows(rows):
@@ -226,9 +235,11 @@ def calculate_ttm_squeeze(rows: list[dict], config: dict) -> Strategy6TtmSqueeze
             kc_upper[index] = kc_middle[index] + kc_atr_multiplier * atr[index]
             kc_lower[index] = kc_middle[index] - kc_atr_multiplier * atr[index]
         if None not in (bb_upper[index], bb_lower[index], kc_upper[index], kc_lower[index]):
-            squeeze_flags[index] = bool(
-                bb_upper[index] < kc_upper[index]
-                and bb_lower[index] > kc_lower[index]
+            squeeze_flags[index] = _bands_inside_keltner(
+                float(bb_upper[index]),
+                float(bb_lower[index]),
+                float(kc_upper[index]),
+                float(kc_lower[index]),
             )
 
     sma_momentum = _sma_series(closes, momentum_period)

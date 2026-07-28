@@ -4,6 +4,7 @@ from __future__ import annotations
 import copy
 import hashlib
 import json
+from math import isfinite
 from numbers import Real
 
 
@@ -406,7 +407,7 @@ def _validate_int_range(config: dict, key: str, min_v: int, max_v: int) -> None:
 
 def _validate_number(config: dict, key: str) -> None:
     value = config.get(key)
-    if isinstance(value, bool) or not isinstance(value, Real):
+    if isinstance(value, bool) or not isinstance(value, Real) or not isfinite(value):
         raise ValueError(f"{key} must be a number")
 
 
@@ -434,6 +435,8 @@ def _validate_between(
 
 
 def _validate_ttm_squeeze_config(config: dict) -> None:
+    if not isinstance(config, dict):
+        raise ValueError("ttm_squeeze must be a mapping")
     config["enabled"] = bool(config.get("enabled", True))
     for key in ("bb_period", "kc_ema_period", "kc_atr_period", "momentum_period"):
         _validate_int_range(config, key, 5, 120)

@@ -407,7 +407,16 @@ export default {
   },
   computed: {
     sortedCandidates() {
+      const typePriority = {
+        READY_CANDIDATE: 0,
+        KEY_CANDIDATE: 1,
+        WATCH_CANDIDATE: 2,
+        REJECTED: 3,
+      }
       return [...this.candidates].sort((left, right) => {
+        const typeDifference = (typePriority[this.effectiveCandidateType(left)] ?? 4)
+          - (typePriority[this.effectiveCandidateType(right)] ?? 4)
+        if (typeDifference !== 0) return typeDifference
         const rankingDifference = this.candidateRankingScore(right) - this.candidateRankingScore(left)
         if (rankingDifference !== 0) return rankingDifference
         const scoreDifference = Number(right.total_score || 0) - Number(left.total_score || 0)
@@ -512,7 +521,8 @@ export default {
       ].filter(group => group.items.length)
     },
     topScore() {
-      return this.tradingCandidates[0]?.total_score ?? '--'
+      if (!this.tradingCandidates.length) return '--'
+      return Math.max(...this.tradingCandidates.map(candidate => Number(candidate.total_score || 0)))
     },
     topRr2() {
       const best = this.tradingCandidates.reduce((max, c) => Math.max(max, Number(c.objective_rr_2 ?? c.risk_reward_ratio_2 ?? 0)), 0)
@@ -947,6 +957,8 @@ export default {
           { header: 'TTM加分', value: c => this.hasTtmData(c) ? (c.ttm_squeeze_score ?? 0) : '' },
           { header: '排序分', value: c => this.hasTtmData(c) ? this.candidateRankingScore(c) : (c.total_score ?? '') },
           { header: '连续挤压天数', value: c => this.hasTtmData(c) ? (c.ttm_squeeze_days ?? 0) : '' },
+          { header: '当前挤压', value: c => this.hasTtmData(c) ? (c.ttm_squeeze_on ? '是' : '否') : '' },
+          { header: '挤压刚解除', value: c => this.hasTtmData(c) ? (c.ttm_fired ? '是' : '否') : '' },
           { header: 'TTM动量', value: c => this.hasTtmData(c) ? this.fmt(c.ttm_momentum, 3) : '' },
           { header: '前一日TTM动量', value: c => this.hasTtmData(c) ? this.fmt(c.ttm_previous_momentum, 3) : '' },
           { header: 'TTM动量方向', value: c => this.hasTtmData(c) ? this.label('ttmMomentumDirection', c.ttm_momentum_direction) : '' },

@@ -7,6 +7,7 @@ import pytest
 
 from strategy6.engine import StrongVcpTailEngine
 from strategy6.ttm_squeeze import (
+    _bands_inside_keltner,
     _ema_series,
     _linear_regression_last,
     _population_stddev,
@@ -76,6 +77,12 @@ def test_ttm_constant_compact_prices_are_inside_keltner_channel():
     assert result.score == 2
 
 
+def test_ttm_squeeze_requires_bollinger_bands_strictly_inside_keltner_channel():
+    assert _bands_inside_keltner(10.9, 9.1, 11.0, 9.0) is True
+    assert _bands_inside_keltner(11.0, 9.1, 11.0, 9.0) is False
+    assert _bands_inside_keltner(10.9, 9.0, 11.0, 9.0) is False
+
+
 def test_ttm_state_classifier_covers_all_business_states():
     cases = [
         ({"enabled": False}, "DISABLED", 0),
@@ -132,6 +139,36 @@ def test_ttm_bearish_and_weak_release_have_stable_risk_codes():
     assert weak_release.risk_tags == ["TTM_FIRED_WITHOUT_BULLISH_MOMENTUM"]
 
 
+def test_ttm_three_day_reason_describes_actual_duration_not_configured_threshold():
+    one_day_bullish = classify_ttm_state(
+        enabled=True,
+        calculable=True,
+        squeeze_on=True,
+        previous_squeeze_on=False,
+        squeeze_days=1,
+        momentum=1.0,
+        previous_momentum=0.5,
+        close=10.0,
+        min_bullish_days=1,
+    )
+    three_day_neutral = classify_ttm_state(
+        enabled=True,
+        calculable=True,
+        squeeze_on=True,
+        previous_squeeze_on=True,
+        squeeze_days=3,
+        momentum=1.0,
+        previous_momentum=0.5,
+        close=10.0,
+        min_bullish_days=5,
+    )
+
+    assert one_day_bullish.status == "SQUEEZE_BULLISH"
+    assert "TTM_SQUEEZE_3D_PLUS" not in one_day_bullish.reasons
+    assert three_day_neutral.status == "SQUEEZE_NEUTRAL"
+    assert "TTM_SQUEEZE_3D_PLUS" in three_day_neutral.reasons
+
+
 def test_ttm_returns_insufficient_instead_of_raising_for_short_or_invalid_ohlc():
     short = calculate_ttm_squeeze([_row(i) for i in range(39)], TTM_CONFIG)
     invalid_rows = [_row(i) for i in range(45)]
@@ -142,6 +179,21 @@ def test_ttm_returns_insufficient_instead_of_raising_for_short_or_invalid_ohlc()
     assert short.risk_tags == ["TTM_DATA_INSUFFICIENT"]
     assert invalid.status == "INSUFFICIENT_DATA"
     assert invalid.risk_tags == ["TTM_DATA_INSUFFICIENT"]
+
+
+def test_ttm_requires_previous_day_bands_to_be_mature_for_release_detection():
+    config = {
+        **TTM_CONFIG,
+        "bb_period": 120,
+        "kc_ema_period": 120,
+        "kc_atr_period": 120,
+        "momentum_period": 5,
+    }
+
+    result = calculate_ttm_squeeze([_row(i) for i in range(120)], config)
+
+    assert result.status == "INSUFFICIENT_DATA"
+    assert result.risk_tags == ["TTM_DATA_INSUFFICIENT"]
 
 
 def test_ttm_disabled_does_not_require_market_data():
@@ -185,6 +237,17 @@ def test_strategy6_ttm_config_partial_override_preserves_defaults():
 def test_strategy6_ttm_config_rejects_invalid_values(key, value):
     with pytest.raises(ValueError):
         resolve_strategy6_config({"strategy6": {"ttm_squeeze": {key: value}}})
+
+
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), "2.0"])
+def test_strategy6_ttm_config_rejects_non_finite_or_non_numeric_multipliers(value):
+    with pytest.raises(ValueError):
+        resolve_strategy6_config({"strategy6": {"ttm_squeeze": {"bb_stddev": value}}})
+
+
+def test_strategy6_ttm_config_rejects_non_mapping_value_with_clear_error():
+    with pytest.raises(ValueError, match="ttm_squeeze must be a mapping"):
+        resolve_strategy6_config({"strategy6": {"ttm_squeeze": "enabled"}})
 
 
 def test_strategy6_ttm_only_changes_new_audit_fields_and_ranking_score():

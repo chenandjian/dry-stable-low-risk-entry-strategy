@@ -718,6 +718,26 @@ describe('Strategy6Results', () => {
     ])
   })
 
+  it('keeps formal candidate type priority ahead of TTM ranking score', async () => {
+    api.getStrategy6Candidates.mockResolvedValue({ candidates: [
+      { code: '000003', name: '高排序观察', candidate_type: 'WATCH_CANDIDATE', total_score: 96, ranking_score: 100 },
+      { code: '000002', name: '中排序重点', candidate_type: 'KEY_CANDIDATE', total_score: 80, ranking_score: 80 },
+      { code: '000001', name: '低排序就绪', candidate_type: 'READY_CANDIDATE', total_score: 70, ranking_score: 70 },
+    ] })
+
+    const wrapper = mount(Strategy6Results, {
+      global: { mocks: { $route: { query: { task: 's6-ranking-priority' } } } },
+    })
+    await flushUi()
+
+    expect(wrapper.vm.tradingCandidates.map(candidate => candidate.code)).toEqual([
+      '000001',
+      '000002',
+      '000003',
+    ])
+    expect(wrapper.vm.topScore).toBe(96)
+  })
+
   it('shows VCP quality score, grade, components, reasons and warnings', async () => {
     api.getStrategy6Candidates.mockResolvedValue({ candidates: [{
       code: '000001', name: '高质量VCP', candidate_type: 'WATCH_CANDIDATE',
@@ -1019,8 +1039,9 @@ describe('Strategy6Results', () => {
     expect(csv).toContain('VCP支点,VCP结构低点,距VCP支点,VCP突破日期,VCP突破后天数')
     expect(csv).toContain('VCP形态分,VCP等级,VCP完整轮次分,VCP振幅递减分,VCP下跌量递减分,VCP低点稳定分,VCP启动涨幅保留分,VCP时间结构分,VCP支点收紧分,VCP突破质量分')
     expect(csv).toContain('VCP评分原因,VCP评分警告,VCP评分模型版本')
-    expect(csv).toContain('总分,TTM状态,TTM状态原始值,TTM加分,排序分,连续挤压天数,TTM动量,前一日TTM动量,TTM动量方向')
-    expect(csv).toContain('91,多头挤压释放,FIRED_BULLISH,4,95,0,0.420,0.310,上升')
+    expect(csv).toContain('总分,TTM状态,TTM状态原始值,TTM加分,排序分,连续挤压天数,当前挤压,挤压刚解除,TTM动量,前一日TTM动量,TTM动量方向')
+    expect(csv).toContain('当前挤压,挤压刚解除')
+    expect(csv).toContain('91,多头挤压释放,FIRED_BULLISH,4,95,0,否,是,0.420,0.310,上升')
   })
 
   it('exports Brooks-only waiting candidates without READY or immediate-buy semantics', async () => {
