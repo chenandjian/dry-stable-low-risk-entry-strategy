@@ -285,6 +285,8 @@ def test_strategy6_candidate_table_is_independent(tmp_path):
     assert detail["path_evidence_score"] == 13
     assert detail["entry_archetype"] == "SUPPORT_PULLBACK"
     assert detail["score_model_version"] == "S6_QUALITY_V2"
+    assert detail["ranking_score"] == detail["total_score"]
+    assert detail["ttm_squeeze_status"] == ""
     assert detail["vcp_observation_eligible"] is False
     assert detail["vcp_lifecycle_status"] == "VCP_NONE"
     assert detail["vcp_contractions"] == []
@@ -332,6 +334,11 @@ def test_strategy6_candidate_schema_contains_all_box_tail_output_fields(tmp_path
         "brooks_trade_trigger_type", "brooks_trigger_price", "brooks_trigger_valid_until", "tail_paths",
         "tail_path_summary", "tail_primary_path", "passed_path_count",
         "multi_path_confirmed", "brooks_result_json",
+        "ttm_squeeze_status", "ttm_squeeze_on", "ttm_squeeze_days", "ttm_fired",
+        "ttm_momentum", "ttm_previous_momentum", "ttm_momentum_direction",
+        "ttm_bb_upper", "ttm_bb_lower", "ttm_kc_upper", "ttm_kc_lower",
+        "ttm_squeeze_score", "ranking_score", "ttm_reasons", "ttm_risk_tags",
+        "ttm_model_version",
         "vcp_observation_eligible", "vcp_lifecycle_status",
         "vcp_origin_start_date", "vcp_pattern_start_date", "vcp_pattern_end_date",
         "vcp_contraction_count", "vcp_contractions", "vcp_forming_round", "vcp_pivot_price",
@@ -351,6 +358,64 @@ def test_strategy6_candidate_schema_contains_all_box_tail_output_fields(tmp_path
     }
 
     assert required <= columns
+
+
+def test_strategy6_candidates_persist_ttm_fields_and_sort_within_candidate_type(tmp_path):
+    db.init_db(str(tmp_path / "s6-ttm.db"))
+    db.create_scan_task("s6-ttm", "2026-07-28 10:00:00", strategy_type=STRATEGY6_TYPE)
+
+    candidates = [
+        {
+            **_candidate(),
+            "code": "000003",
+            "candidate_type": "KEY_CANDIDATE",
+            "total_score": 75,
+            "ranking_score": 75,
+        },
+        {
+            **_candidate(),
+            "code": "000001",
+            "candidate_type": "WATCH_CANDIDATE",
+            "total_score": 80,
+            "ranking_score": 84,
+            "ttm_squeeze_status": "FIRED_BULLISH",
+            "ttm_squeeze_on": False,
+            "ttm_squeeze_days": 0,
+            "ttm_fired": True,
+            "ttm_momentum": 0.42,
+            "ttm_previous_momentum": 0.31,
+            "ttm_momentum_direction": "RISING",
+            "ttm_bb_upper": 12.8,
+            "ttm_bb_lower": 11.9,
+            "ttm_kc_upper": 12.7,
+            "ttm_kc_lower": 11.8,
+            "ttm_squeeze_score": 4,
+            "ttm_reasons": ["TTM_FIRED", "TTM_MOMENTUM_POSITIVE"],
+            "ttm_risk_tags": [],
+            "ttm_model_version": "S6_TTM_SQUEEZE_V1",
+        },
+        {
+            **_candidate(),
+            "code": "000002",
+            "candidate_type": "WATCH_CANDIDATE",
+            "total_score": 82,
+            "ranking_score": 82,
+        },
+    ]
+    for candidate in candidates:
+        db.upsert_strategy6_candidate("s6-ttm", candidate)
+
+    rows = db.get_strategy6_candidates("s6-ttm")
+
+    assert [row["code"] for row in rows] == ["000003", "000001", "000002"]
+    fired = rows[1]
+    assert fired["ttm_squeeze_status"] == "FIRED_BULLISH"
+    assert fired["ttm_squeeze_on"] is False
+    assert fired["ttm_fired"] is True
+    assert fired["ttm_squeeze_score"] == 4
+    assert fired["ranking_score"] == 84
+    assert fired["ttm_reasons"] == ["TTM_FIRED", "TTM_MOMENTUM_POSITIVE"]
+    assert fired["ttm_risk_tags"] == []
 
 
 def test_strategy6_legacy_candidate_keeps_missing_consecutive_down_diagnostic_as_null(tmp_path):

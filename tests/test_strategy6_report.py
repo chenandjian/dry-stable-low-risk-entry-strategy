@@ -39,6 +39,14 @@ def test_strategy6_report_xlsx_handles_empty_candidates():
     assert "price_basis" in shared
     assert "start_day_self_amount_percentile" in shared
     for header in (
+        "ttm_squeeze_status", "ttm_squeeze_on", "ttm_squeeze_days", "ttm_fired",
+        "ttm_momentum", "ttm_previous_momentum", "ttm_momentum_direction",
+        "ttm_bb_upper", "ttm_bb_lower", "ttm_kc_upper", "ttm_kc_lower",
+        "ttm_squeeze_score", "ranking_score", "ttm_reasons", "ttm_risk_tags",
+        "ttm_model_version",
+    ):
+        assert header in shared
+    for header in (
         "original_tail_pass", "box_tail_enabled", "box_tail_pass", "box_status",
         "tail_path", "box_start_date", "box_high", "box_low", "box_width",
         "box_low_test_count", "box_volume_contraction_ratio", "box_center_shift",

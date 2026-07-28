@@ -2783,6 +2783,22 @@ def _ensure_strategy6_candidates_table(conn: sqlite3.Connection):
             risk_reward_score INTEGER DEFAULT 0,
             risk_control_score INTEGER DEFAULT 0,
             total_score REAL DEFAULT 0,
+            ttm_squeeze_status TEXT,
+            ttm_squeeze_on INTEGER,
+            ttm_squeeze_days INTEGER,
+            ttm_fired INTEGER,
+            ttm_momentum REAL,
+            ttm_previous_momentum REAL,
+            ttm_momentum_direction TEXT,
+            ttm_bb_upper REAL,
+            ttm_bb_lower REAL,
+            ttm_kc_upper REAL,
+            ttm_kc_lower REAL,
+            ttm_squeeze_score INTEGER,
+            ranking_score REAL,
+            ttm_reasons TEXT,
+            ttm_risk_tags TEXT,
+            ttm_model_version TEXT,
             pattern_score_component INTEGER DEFAULT 0,
             tail_score INTEGER DEFAULT 0,
             objective_rr_score INTEGER DEFAULT 0,
@@ -2881,6 +2897,22 @@ def _ensure_strategy6_candidates_table(conn: sqlite3.Connection):
         "tail_score": "INTEGER DEFAULT 0",
         "objective_rr_score": "INTEGER DEFAULT 0",
         "relative_strength_risk_score": "INTEGER DEFAULT 0",
+        "ttm_squeeze_status": "TEXT",
+        "ttm_squeeze_on": "INTEGER",
+        "ttm_squeeze_days": "INTEGER",
+        "ttm_fired": "INTEGER",
+        "ttm_momentum": "REAL",
+        "ttm_previous_momentum": "REAL",
+        "ttm_momentum_direction": "TEXT",
+        "ttm_bb_upper": "REAL",
+        "ttm_bb_lower": "REAL",
+        "ttm_kc_upper": "REAL",
+        "ttm_kc_lower": "REAL",
+        "ttm_squeeze_score": "INTEGER",
+        "ranking_score": "REAL",
+        "ttm_reasons": "TEXT",
+        "ttm_risk_tags": "TEXT",
+        "ttm_model_version": "TEXT",
         "tail_avg_volume": "REAL",
         "pre_tail_avg_volume_20": "REAL",
         "tail_volume_ratio": "REAL",
@@ -4089,6 +4121,11 @@ def upsert_strategy6_candidate(
         "vcp_quality_pivot_score", "vcp_quality_breakout_score",
         "vcp_quality_reasons", "vcp_quality_warnings",
         "vcp_quality_model_version",
+        "ttm_squeeze_status", "ttm_squeeze_on", "ttm_squeeze_days", "ttm_fired",
+        "ttm_momentum", "ttm_previous_momentum", "ttm_momentum_direction",
+        "ttm_bb_upper", "ttm_bb_lower", "ttm_kc_upper", "ttm_kc_lower",
+        "ttm_squeeze_score", "ranking_score", "ttm_reasons", "ttm_risk_tags",
+        "ttm_model_version",
     ]
     extra_values = [
         "" if observation_only else d.get("first_seen_date", first_pool_date),
@@ -4299,6 +4336,22 @@ def upsert_strategy6_candidate(
         _json_any(d.get("vcp_quality_reasons", [])),
         _json_any(d.get("vcp_quality_warnings", [])),
         d.get("vcp_quality_model_version"),
+        d.get("ttm_squeeze_status"),
+        None if d.get("ttm_squeeze_on") is None else 1 if d.get("ttm_squeeze_on") else 0,
+        d.get("ttm_squeeze_days"),
+        None if d.get("ttm_fired") is None else 1 if d.get("ttm_fired") else 0,
+        d.get("ttm_momentum"),
+        d.get("ttm_previous_momentum"),
+        d.get("ttm_momentum_direction"),
+        d.get("ttm_bb_upper"),
+        d.get("ttm_bb_lower"),
+        d.get("ttm_kc_upper"),
+        d.get("ttm_kc_lower"),
+        d.get("ttm_squeeze_score"),
+        d.get("ranking_score"),
+        _json_any(d.get("ttm_reasons", [])),
+        _json_any(d.get("ttm_risk_tags", [])),
+        d.get("ttm_model_version"),
     ]
     columns.extend(extra_columns)
     values.extend(extra_values)
@@ -4338,7 +4391,8 @@ def get_strategy6_candidates(task_id: str = None) -> list[dict]:
         rows = conn.execute(
             "SELECT * FROM strategy6_candidates WHERE task_id=? "
             "ORDER BY CASE candidate_type WHEN 'READY_CANDIDATE' THEN 0 WHEN 'KEY_CANDIDATE' THEN 1 "
-            "WHEN 'WATCH_CANDIDATE' THEN 2 ELSE 3 END, total_score DESC, code ASC",
+            "WHEN 'WATCH_CANDIDATE' THEN 2 ELSE 3 END, "
+            "COALESCE(ranking_score, total_score) DESC, total_score DESC, code ASC",
             (task_id,),
         ).fetchall()
     else:
@@ -4351,7 +4405,9 @@ def get_strategy6_candidates(task_id: str = None) -> list[dict]:
             return []
         rows = conn.execute(
             "SELECT * FROM strategy6_candidates WHERE task_id=? "
-            "ORDER BY total_score DESC, code ASC",
+            "ORDER BY CASE candidate_type WHEN 'READY_CANDIDATE' THEN 0 WHEN 'KEY_CANDIDATE' THEN 1 "
+            "WHEN 'WATCH_CANDIDATE' THEN 2 ELSE 3 END, "
+            "COALESCE(ranking_score, total_score) DESC, total_score DESC, code ASC",
             (row[0],),
         ).fetchall()
     cols = [d[1] for d in conn.execute("PRAGMA table_info(strategy6_candidates)").fetchall()]
@@ -5642,6 +5698,7 @@ def _deserialize_strategy6_row(row: dict) -> dict:
         "support_reaction_reasons", "support_reaction_risk_tags",
         "vcp_contractions", "vcp_observation_reasons", "vcp_observation_risk_tags",
         "vcp_quality_reasons", "vcp_quality_warnings",
+        "ttm_reasons", "ttm_risk_tags",
     ):
         value = row.get(field)
         if isinstance(value, str) and value:
@@ -5670,6 +5727,7 @@ def _deserialize_strategy6_row(row: dict) -> dict:
         "brooks_tail_enabled", "brooks_tail_pass", "brooks_tail_premium",
         "brooks_trade_ready", "multi_path_confirmed",
         "vcp_observation_eligible", "vcp_exit_audit", "vcp_history_qualified",
+        "ttm_squeeze_on", "ttm_fired",
     ):
         if field in row:
             row[field] = _strategy6_safe_bool(row.get(field))
@@ -5684,6 +5742,12 @@ def _deserialize_strategy6_row(row: dict) -> dict:
     for field in ("original_tail_score", "box_tail_score", "brooks_tail_score"):
         if field in row:
             row[field] = _strategy6_safe_int(row.get(field))
+    row["ttm_squeeze_status"] = row.get("ttm_squeeze_status") or ""
+    row["ttm_momentum_direction"] = row.get("ttm_momentum_direction") or ""
+    row["ttm_model_version"] = row.get("ttm_model_version") or ""
+    row["ttm_squeeze_score"] = _strategy6_safe_int(row.get("ttm_squeeze_score"))
+    if row.get("ranking_score") is None:
+        row["ranking_score"] = row.get("total_score", 0)
     raw_tail_paths = row.get("tail_paths")
     if isinstance(raw_tail_paths, str) and raw_tail_paths:
         try:
