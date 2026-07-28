@@ -354,6 +354,34 @@ describe('StrategyConfig scheduler controls', () => {
     expect(strategy6Text).not.toContain('Pivot')
   })
 
+  it('renders and saves strategy6 TTM squeeze ranking defaults', async () => {
+    const wrapper = mount(StrategyConfig)
+    await flushUi()
+
+    expect(wrapper.text()).toContain('TTM Squeeze 质量排序')
+    expect(wrapper.find('[data-test="strategy6-ttm-enabled"]').exists()).toBe(true)
+    expect(wrapper.find('[data-test="strategy6-ttm-bb-period"]').element.value).toBe('20')
+    expect(wrapper.find('[data-test="strategy6-ttm-kc-multiplier"]').element.value).toBe('1.5')
+    expect(wrapper.find('[data-test="strategy6-ttm-momentum-period"]').element.value).toBe('20')
+
+    await wrapper.find('[data-test="strategy6-ttm-enabled"]').trigger('click')
+    await wrapper.find('.btn-save').trigger('click')
+    await flushUi()
+
+    const payload = api.updateConfig.mock.calls[0][0]
+    expect(payload.strategy6.ttm_squeeze).toEqual({
+      enabled: false,
+      bb_period: 20,
+      bb_stddev: 2,
+      kc_ema_period: 20,
+      kc_atr_period: 20,
+      kc_atr_multiplier: 1.5,
+      momentum_period: 20,
+      bullish_squeeze_min_days: 3,
+      max_ranking_bonus: 4,
+    })
+  })
+
   it('saves strategy6 market filter mode without legacy sector filter fields', async () => {
     const wrapper = mount(StrategyConfig)
     await flushUi()

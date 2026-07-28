@@ -1040,6 +1040,26 @@
         </div>
       </div>
 
+      <h4 class="subsection-title">TTM Squeeze 质量排序</h4>
+      <div class="toggle-row">
+        <div class="toggle-item">
+          <span>启用TTM质量加分</span>
+          <button data-test="strategy6-ttm-enabled" class="toggle" :class="{ active: config.strategy6.ttm_squeeze.enabled }"
+            @click="toggleStrategy6Ttm('enabled')">{{ config.strategy6.ttm_squeeze.enabled ? '开' : '关' }}</button>
+        </div>
+      </div>
+      <div class="param-grid">
+        <div class="param"><label title="布林带计算周期">布林带周期</label><input data-test="strategy6-ttm-bb-period" type="number" v-model.number="config.strategy6.ttm_squeeze.bb_period" @input="markDirty" min="5" max="120" /><span class="default">默认 20</span></div>
+        <div class="param"><label title="布林带标准差倍数">布林带倍数</label><input type="number" v-model.number="config.strategy6.ttm_squeeze.bb_stddev" @input="markDirty" min="0.01" max="10" step="0.1" /><span class="default">默认 2.0</span></div>
+        <div class="param"><label title="Keltner中轨EMA周期">Keltner EMA周期</label><input type="number" v-model.number="config.strategy6.ttm_squeeze.kc_ema_period" @input="markDirty" min="5" max="120" /><span class="default">默认 20</span></div>
+        <div class="param"><label title="Keltner通道ATR周期">Keltner ATR周期</label><input type="number" v-model.number="config.strategy6.ttm_squeeze.kc_atr_period" @input="markDirty" min="5" max="120" /><span class="default">默认 20</span></div>
+        <div class="param"><label title="Keltner通道ATR倍数">Keltner ATR倍数</label><input data-test="strategy6-ttm-kc-multiplier" type="number" v-model.number="config.strategy6.ttm_squeeze.kc_atr_multiplier" @input="markDirty" min="0.01" max="10" step="0.1" /><span class="default">默认 1.5</span></div>
+        <div class="param"><label title="TTM线性回归动量周期">动量周期</label><input data-test="strategy6-ttm-momentum-period" type="number" v-model.number="config.strategy6.ttm_squeeze.momentum_period" @input="markDirty" min="5" max="120" /><span class="default">默认 20</span></div>
+        <div class="param"><label title="多头挤压加3分所需的最少连续交易日">多头挤压最少天数</label><input type="number" v-model.number="config.strategy6.ttm_squeeze.bullish_squeeze_min_days" @input="markDirty" min="1" max="20" /><span class="default">默认 3</span></div>
+        <div class="param"><label title="本版本固定为4，避免改变候选资格">最大排序加分</label><input type="number" v-model.number="config.strategy6.ttm_squeeze.max_ranking_bonus" @input="markDirty" min="4" max="4" /><span class="default">固定 4</span></div>
+      </div>
+      <p class="section-note">ⓘ TTM只增加独立质量分和同类候选排序，不改变策略6原100分、硬过滤、候选类型和交易计划。</p>
+
       <h4 class="subsection-title">稳定箱体尾部路径</h4>
       <div class="toggle-row">
         <div class="toggle-item">
@@ -1394,6 +1414,18 @@ const defaultStrategy6BoxTailConfig = {
   },
 }
 
+const defaultStrategy6TtmSqueezeConfig = {
+  enabled: true,
+  bb_period: 20,
+  bb_stddev: 2.0,
+  kc_ema_period: 20,
+  kc_atr_period: 20,
+  kc_atr_multiplier: 1.5,
+  momentum_period: 20,
+  bullish_squeeze_min_days: 3,
+  max_ranking_bonus: 4,
+}
+
 const defaultStrategy6Config = {
   enabled: true,
   decision_profile: 'formal_original',
@@ -1474,6 +1506,7 @@ const defaultStrategy6Config = {
   ready_min_score: 85,
   key_min_score: 75,
   watch_min_score: 60,
+  ttm_squeeze: defaultStrategy6TtmSqueezeConfig,
   box_tail: defaultStrategy6BoxTailConfig,
   brooks_tail: null,
 }
@@ -1678,12 +1711,17 @@ function sanitizeStrategy6Config(value) {
     Object.entries(value || {}).filter(([key]) => Object.prototype.hasOwnProperty.call(defaultStrategy6Config, key))
   )
   const boxTail = known.box_tail || {}
+  const ttmSqueeze = known.ttm_squeeze || {}
   const brooksTail = known.brooks_tail && typeof known.brooks_tail === 'object'
     ? JSON.parse(JSON.stringify(known.brooks_tail))
     : null
   return {
     ...defaultStrategy6Config,
     ...known,
+    ttm_squeeze: {
+      ...defaultStrategy6TtmSqueezeConfig,
+      ...ttmSqueeze,
+    },
     box_tail: {
       ...defaultStrategy6BoxTailConfig,
       ...boxTail,
@@ -1804,6 +1842,12 @@ function toggleStrategy6(key) {
 function toggleStrategy6BoxTail(key) {
   ensureStrategy6Config()
   config.strategy6.box_tail[key] = !config.strategy6.box_tail[key]
+  markDirty()
+}
+
+function toggleStrategy6Ttm(key) {
+  ensureStrategy6Config()
+  config.strategy6.ttm_squeeze[key] = !config.strategy6.ttm_squeeze[key]
   markDirty()
 }
 
@@ -2031,6 +2075,16 @@ function validate() {
   if (s6.key_min_score < s6.watch_min_score || s6.key_min_score > s6.ready_min_score) errors.push('策略6: 重点最低分需在观察和就绪之间')
   if (s6.ready_min_score < s6.key_min_score || s6.ready_min_score > 100) errors.push('策略6: 就绪最低分需不低于重点且不超过100')
   if (s6.max_watch_days < 1 || s6.max_watch_days > 60) errors.push('策略6: 最大观察天数需在 1-60')
+  const ttm = s6.ttm_squeeze || {}
+  const ttmIntegerInRange = (value, min, max) => Number.isInteger(value) && value >= min && value <= max
+  const ttmNumberInRange = (value, min, max) => typeof value === 'number' && Number.isFinite(value) && value > min && value <= max
+  for (const [key, label] of [['bb_period', '布林带周期'], ['kc_ema_period', 'Keltner EMA周期'], ['kc_atr_period', 'Keltner ATR周期'], ['momentum_period', '动量周期']]) {
+    if (!ttmIntegerInRange(ttm[key], 5, 120)) errors.push(`策略6 TTM: ${label}需为5-120的整数`)
+  }
+  if (!ttmNumberInRange(ttm.bb_stddev, 0, 10)) errors.push('策略6 TTM: 布林带倍数需在 (0,10]')
+  if (!ttmNumberInRange(ttm.kc_atr_multiplier, 0, 10)) errors.push('策略6 TTM: Keltner ATR倍数需在 (0,10]')
+  if (!ttmIntegerInRange(ttm.bullish_squeeze_min_days, 1, 20)) errors.push('策略6 TTM: 多头挤压最少天数需为1-20的整数')
+  if (ttm.max_ranking_bonus !== 4) errors.push('策略6 TTM: 最大排序加分本版本必须为4')
   const box = s6.box_tail || {}
   const compact = box.compact_kline || {}
   if (box.min_box_days < 5 || box.min_box_days > box.max_box_days) errors.push('策略6箱体: 最短天数需在 5 到最长天数之间')

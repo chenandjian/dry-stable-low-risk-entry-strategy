@@ -49,6 +49,22 @@ describe('Strategy6Results', () => {
           classification: 'ready',
           lifecycle_status: 'BUY_ZONE',
           total_score: 91,
+          ranking_score: 95,
+          ttm_squeeze_status: 'FIRED_BULLISH',
+          ttm_squeeze_on: false,
+          ttm_squeeze_days: 0,
+          ttm_fired: true,
+          ttm_momentum: 0.42,
+          ttm_previous_momentum: 0.31,
+          ttm_momentum_direction: 'RISING',
+          ttm_bb_upper: 12.8,
+          ttm_bb_lower: 11.9,
+          ttm_kc_upper: 12.9,
+          ttm_kc_lower: 11.8,
+          ttm_squeeze_score: 4,
+          ttm_reasons: ['TTM_FIRED', 'TTM_MOMENTUM_POSITIVE', 'TTM_MOMENTUM_RISING'],
+          ttm_risk_tags: [],
+          ttm_model_version: 'S6_TTM_SQUEEZE_V1',
           decision_profile: 'research_quality_v2',
           score_model_version: 'S6_QUALITY_V2',
           entry_archetype: 'SUPPORT_PULLBACK',
@@ -397,6 +413,14 @@ describe('Strategy6Results', () => {
     expect(wrapper.text()).toContain('支撑低吸')
     expect(wrapper.text()).toContain('整理质量 21')
     expect(wrapper.text()).toContain('支撑反应 8')
+    expect(wrapper.find('[data-test="candidate-ttm-000001"]').text()).toContain('多头挤压释放')
+    expect(wrapper.find('[data-test="candidate-ttm-000001"]').text()).toContain('TTM +4')
+    expect(wrapper.find('[data-test="candidate-ttm-000003"]').text()).toBe('未计算')
+    expect(wrapper.find('[data-test="detail-ttm-squeeze"]').text()).toContain('多头挤压释放')
+    expect(wrapper.find('[data-test="detail-ttm-squeeze"]').text()).toContain('排序分 95')
+    expect(wrapper.find('[data-test="detail-ttm-bands"]').text()).toContain('BB 11.90 - 12.80')
+    expect(wrapper.find('[data-test="detail-ttm-momentum"]').text()).toContain('上升')
+    expect(wrapper.text()).not.toContain('FIRED_BULLISH')
     const formalObservation = wrapper.find('[data-test="candidate-row-000003"]')
     expect(formalObservation.text()).toContain('支撑低吸')
     expect(formalObservation.text()).toContain('整理 12 · 支撑 10')
@@ -672,6 +696,25 @@ describe('Strategy6Results', () => {
       'vcp-row-000004',
       'vcp-row-000003',
       'vcp-row-000005',
+    ])
+  })
+
+  it('sorts candidates within the same type by ranking score and keeps legacy fallback', async () => {
+    api.getStrategy6Candidates.mockResolvedValue({ candidates: [
+      { code: '000001', name: '原总分较高', candidate_type: 'WATCH_CANDIDATE', total_score: 82, ranking_score: 82 },
+      { code: '000002', name: 'TTM加分领先', candidate_type: 'WATCH_CANDIDATE', total_score: 80, ranking_score: 84 },
+      { code: '000003', name: '旧任务回退', candidate_type: 'WATCH_CANDIDATE', total_score: 81 },
+    ] })
+
+    const wrapper = mount(Strategy6Results, {
+      global: { mocks: { $route: { query: { task: 's6-ranking' } } } },
+    })
+    await flushUi()
+
+    expect(wrapper.findAll('[data-test^="candidate-row-"]').map(row => row.attributes('data-test'))).toEqual([
+      'candidate-row-000002',
+      'candidate-row-000001',
+      'candidate-row-000003',
     ])
   })
 
@@ -976,6 +1019,8 @@ describe('Strategy6Results', () => {
     expect(csv).toContain('VCP支点,VCP结构低点,距VCP支点,VCP突破日期,VCP突破后天数')
     expect(csv).toContain('VCP形态分,VCP等级,VCP完整轮次分,VCP振幅递减分,VCP下跌量递减分,VCP低点稳定分,VCP启动涨幅保留分,VCP时间结构分,VCP支点收紧分,VCP突破质量分')
     expect(csv).toContain('VCP评分原因,VCP评分警告,VCP评分模型版本')
+    expect(csv).toContain('总分,TTM状态,TTM状态原始值,TTM加分,排序分,连续挤压天数,TTM动量,前一日TTM动量,TTM动量方向')
+    expect(csv).toContain('91,多头挤压释放,FIRED_BULLISH,4,95,0,0.420,0.310,上升')
   })
 
   it('exports Brooks-only waiting candidates without READY or immediate-buy semantics', async () => {

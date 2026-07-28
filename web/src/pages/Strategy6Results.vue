@@ -82,7 +82,7 @@
         <table class="candidate-table">
           <thead>
             <tr>
-              <th>股票</th><th>现价</th><th>总分</th><th>入场/质量</th><th>分类</th><th>生命周期</th>
+              <th>股票</th><th>现价</th><th>总分</th><th>TTM状态</th><th>入场/质量</th><th>分类</th><th>生命周期</th>
               <th>启动类型/等级</th><th>支撑状态</th><th>关键/前置支撑</th><th>执行区间/状态</th>
               <th>止损</th><th>客观目标1/2</th><th>客观RR2</th><th>形态</th><th>权威路径/Brooks</th><th>尾段/前20量比</th><th>连续收跌结构</th><th>市场/RS</th><th>入池</th><th>风险/警告</th><th>数据日</th>
             </tr>
@@ -92,6 +92,7 @@
               <td><span class="code">{{ c.code }}</span> {{ c.name }}</td>
               <td>{{ fmt(c.current_price) }}</td>
               <td class="score">{{ fmt(c.total_score, 0) }}</td>
+              <td :data-test="`candidate-ttm-${c.code}`">{{ ttmSummary(c) }}</td>
               <td>
                 <div>{{ entryArchetypeText(c) }}</div>
                 <div class="muted">整理 {{ qualityValue(c, 'setup_quality_score') }} · 支撑 {{ qualityValue(c, 'support_reaction_score') }}</div>
@@ -146,7 +147,7 @@
           <thead>
             <tr>
               <th>股票</th><th>VCP形态分/等级</th><th>VCP状态</th><th>收缩次数</th><th>VCP支点</th><th>结构低点</th>
-              <th>距支点</th><th>突破日期</th><th>连续收跌结构</th><th>历史正式候选</th><th>策略总分</th><th>原交易分类</th><th>风险提示</th>
+              <th>距支点</th><th>突破日期</th><th>连续收跌结构</th><th>历史正式候选</th><th>策略总分</th><th>TTM状态</th><th>原交易分类</th><th>风险提示</th>
             </tr>
           </thead>
           <tbody>
@@ -177,6 +178,7 @@
                 <div class="muted">{{ fmt(c.vcp_history_candidate_score, 0) }}分 · {{ label('source', c.vcp_history_source) }}</div>
               </td>
               <td class="score">{{ fmt(c.total_score, 0) }}</td>
+              <td :data-test="`vcp-ttm-${c.code}`">{{ ttmSummary(c) }}</td>
               <td>{{ candidateTypeText(c) }}</td>
               <td>
                 <span v-for="tag in c.vcp_observation_risk_tags || []" :key="tag" class="tag warn">{{ label('tag', tag) }}</span>
@@ -236,6 +238,10 @@
         <div v-if="selected.vcp_observation_eligible"><span>VCP突破</span><strong>{{ selected.vcp_breakout_date || '--' }} · 突破后 {{ selected.vcp_days_since_breakout ?? 0 }} 个交易日</strong></div>
         <div><span>分类</span><strong>{{ candidateTypeText(selected) }} / {{ isExecutionWaiting(selected) ? '观察' : label('classification', selected.classification) }}</strong></div>
         <div data-test="detail-decision-profile"><span>决策规则</span><strong>{{ decisionProfileText(selected) }} · {{ selected.score_model_version || '--' }}</strong></div>
+        <div data-test="detail-ttm-squeeze"><span>TTM Squeeze</span><strong>{{ ttmDetail(selected) }}</strong></div>
+        <div data-test="detail-ttm-bands"><span>TTM波动通道</span><strong>{{ ttmBandsDetail(selected) }}</strong></div>
+        <div data-test="detail-ttm-momentum"><span>TTM动量</span><strong>{{ ttmMomentumDetail(selected) }}</strong></div>
+        <div v-if="hasTtmData(selected)"><span>TTM原因/风险</span><strong>{{ joinedLabels('tag', [...(selected.ttm_reasons || []), ...(selected.ttm_risk_tags || [])]) }}</strong></div>
         <div v-if="selected.decision_profile === 'formal_original'"><span>研究模块</span><strong>稳定箱体 / Brooks / 质量V2 未参与正式选股</strong></div>
         <div v-if="marketDowngradeText(selected)" data-test="detail-market-downgrade"><span>市场降级前等级</span><strong>{{ marketDowngradeText(selected) }}</strong></div>
         <div><span>生命周期</span><strong>{{ lifecycleText(selected) }}</strong></div>
@@ -401,7 +407,13 @@ export default {
   },
   computed: {
     sortedCandidates() {
-      return [...this.candidates].sort((a, b) => (b.total_score || 0) - (a.total_score || 0))
+      return [...this.candidates].sort((left, right) => {
+        const rankingDifference = this.candidateRankingScore(right) - this.candidateRankingScore(left)
+        if (rankingDifference !== 0) return rankingDifference
+        const scoreDifference = Number(right.total_score || 0) - Number(left.total_score || 0)
+        if (scoreDifference !== 0) return scoreDifference
+        return String(left.code || '').localeCompare(String(right.code || ''))
+      })
     },
     tradingCandidates() {
       return this.sortedCandidates.filter(c => this.effectiveCandidateType(c) !== 'REJECTED')
@@ -532,6 +544,32 @@ export default {
     }
   },
   methods: {
+    candidateRankingScore(candidate) {
+      const rankingScore = Number(candidate?.ranking_score)
+      return Number.isFinite(rankingScore) ? rankingScore : Number(candidate?.total_score || 0)
+    },
+    hasTtmData(candidate) {
+      return Boolean(candidate?.ttm_model_version && candidate?.ttm_squeeze_status)
+    },
+    ttmSummary(candidate) {
+      if (!this.hasTtmData(candidate)) return '未计算'
+      const days = candidate.ttm_squeeze_on && Number(candidate.ttm_squeeze_days) > 0
+        ? ` · ${candidate.ttm_squeeze_days}日`
+        : ''
+      return `${this.label('ttmSqueezeStatus', candidate.ttm_squeeze_status)} · TTM +${candidate.ttm_squeeze_score ?? 0}${days}`
+    },
+    ttmDetail(candidate) {
+      if (!this.hasTtmData(candidate)) return '未计算'
+      return `${this.ttmSummary(candidate)} · 排序分 ${this.candidateRankingScore(candidate)} · ${candidate.ttm_model_version}`
+    },
+    ttmBandsDetail(candidate) {
+      if (!this.hasTtmData(candidate)) return '未计算'
+      return `BB ${this.priceRange(candidate.ttm_bb_lower, candidate.ttm_bb_upper)} · Keltner ${this.priceRange(candidate.ttm_kc_lower, candidate.ttm_kc_upper)}`
+    },
+    ttmMomentumDetail(candidate) {
+      if (!this.hasTtmData(candidate)) return '未计算'
+      return `当前 ${this.fmt(candidate.ttm_momentum, 3)} · 前一日 ${this.fmt(candidate.ttm_previous_momentum, 3)} · ${this.label('ttmMomentumDirection', candidate.ttm_momentum_direction)}`
+    },
     hasVcpQuality(candidate) {
       return typeof candidate?.vcp_quality_score === 'number'
         && Number.isFinite(candidate.vcp_quality_score)
@@ -904,6 +942,21 @@ export default {
           { header: 'VCP历史资格来源', value: c => c.vcp_history_source || '' },
           { header: 'VCP历史资格起点', value: c => c.vcp_history_origin_start_date || '' },
           { header: '总分', value: c => c.total_score ?? '' },
+          { header: 'TTM状态', value: c => this.hasTtmData(c) ? this.label('ttmSqueezeStatus', c.ttm_squeeze_status) : '' },
+          { header: 'TTM状态原始值', value: c => this.hasTtmData(c) ? c.ttm_squeeze_status : '' },
+          { header: 'TTM加分', value: c => this.hasTtmData(c) ? (c.ttm_squeeze_score ?? 0) : '' },
+          { header: '排序分', value: c => this.hasTtmData(c) ? this.candidateRankingScore(c) : (c.total_score ?? '') },
+          { header: '连续挤压天数', value: c => this.hasTtmData(c) ? (c.ttm_squeeze_days ?? 0) : '' },
+          { header: 'TTM动量', value: c => this.hasTtmData(c) ? this.fmt(c.ttm_momentum, 3) : '' },
+          { header: '前一日TTM动量', value: c => this.hasTtmData(c) ? this.fmt(c.ttm_previous_momentum, 3) : '' },
+          { header: 'TTM动量方向', value: c => this.hasTtmData(c) ? this.label('ttmMomentumDirection', c.ttm_momentum_direction) : '' },
+          { header: '布林带下轨', value: c => this.hasTtmData(c) ? this.fmt(c.ttm_bb_lower) : '' },
+          { header: '布林带上轨', value: c => this.hasTtmData(c) ? this.fmt(c.ttm_bb_upper) : '' },
+          { header: 'Keltner下轨', value: c => this.hasTtmData(c) ? this.fmt(c.ttm_kc_lower) : '' },
+          { header: 'Keltner上轨', value: c => this.hasTtmData(c) ? this.fmt(c.ttm_kc_upper) : '' },
+          { header: 'TTM原因', value: c => this.hasTtmData(c) ? strategy6Labels('tag', c.ttm_reasons).join('|') : '' },
+          { header: 'TTM风险', value: c => this.hasTtmData(c) ? strategy6Labels('tag', c.ttm_risk_tags).join('|') : '' },
+          { header: 'TTM模型版本', value: c => c.ttm_model_version || '' },
           { header: '市场过滤', value: c => c.enable_market_filter ? '开启' : '关闭' },
           { header: '市场过滤模式', value: c => this.label('marketFilterMode', c.market_filter_mode) },
           { header: '市场过滤模式原始值', value: c => c.market_filter_mode || '' },

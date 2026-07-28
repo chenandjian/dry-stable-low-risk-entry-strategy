@@ -112,6 +112,13 @@ const LABELS = {
   },
   marketFilterMode: { strict: '严格过滤', downgrade: '降级处理', score_only: '仅调整评分', disabled: '已关闭' },
   marketDataStatus: { FRESH: '新鲜', STALE: '已过期', MISSING: '缺失' },
+  ttmSqueezeStatus: {
+    FIRED_BULLISH: '多头挤压释放', SQUEEZE_BULLISH: '多头挤压蓄力',
+    SQUEEZE_NEUTRAL: '挤压中', SQUEEZE_BEARISH: '弱势挤压',
+    FIRED_WEAK: '弱势释放', OFF: '未挤压', INSUFFICIENT_DATA: '数据不足',
+    DISABLED: '已关闭',
+  },
+  ttmMomentumDirection: { RISING: '上升', FALLING: '下降', FLAT: '持平', UNKNOWN: '未知' },
   source: {
     sina: '新浪', tencent: '腾讯', baidu: '百度',
     DAILY_AS_OF_REPLAY: '逐日真实数据重放',
@@ -221,6 +228,14 @@ const LABELS = {
     VCP_QUALITY_EVIDENCE_INVALID: 'VCP评分证据无效',
     VCP_MICRO_CONTRACTION_NOISE: '单日微小收缩，形态分已封顶',
     TRADING_LIFECYCLE_BLOCKED: '原交易生命周期处于退出或冷却状态',
+    TTM_SQUEEZE_ON: '布林带位于Keltner通道内',
+    TTM_SQUEEZE_3D_PLUS: '挤压已连续至少3日',
+    TTM_FIRED: '挤压当日解除',
+    TTM_MOMENTUM_POSITIVE: 'TTM动量为正',
+    TTM_MOMENTUM_RISING: 'TTM动量上升',
+    TTM_SQUEEZE_BEARISH_MOMENTUM: '挤压期间动量偏空且继续下降',
+    TTM_FIRED_WITHOUT_BULLISH_MOMENTUM: '挤压解除但未获得多头动量确认',
+    TTM_DATA_INSUFFICIENT: 'TTM计算数据不足或OHLC异常',
   },
 }
 
