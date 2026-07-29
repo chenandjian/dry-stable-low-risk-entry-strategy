@@ -5,25 +5,41 @@
         <h1>策略6 · 强势 VCP 尾部候选池</h1>
         <p>强势启动后有支撑横盘，尾部价稳量干且盈亏比合格的候选池。</p>
       </div>
-      <div class="task-picker">
-        <select data-test="strategy6-task-select" v-model="selectedTaskId" @change="loadCandidates">
-          <option value="">选择策略6任务</option>
-          <option v-for="task in taskOptions" :key="task.id" :value="task.id">
-            {{ task.id }} · {{ label('taskStatus', task.status) }} · {{ task.candidates || 0 }} 候选
-          </option>
-        </select>
-        <div v-if="tasks.length > taskPageSize" class="task-pagination">
-          <button
-            data-test="strategy6-task-prev"
-            :disabled="taskPage <= 1"
-            @click="changeTaskPage(-1)"
-          >上一页</button>
-          <span data-test="strategy6-task-page-info">第 {{ taskPage }} / {{ taskPageCount }} 页 · 共 {{ tasks.length }} 个任务</span>
-          <button
-            data-test="strategy6-task-next"
-            :disabled="taskPage >= taskPageCount"
-            @click="changeTaskPage(1)"
-          >下一页</button>
+      <div ref="taskPicker" class="task-picker" @click.stop>
+        <button
+          data-test="strategy6-task-trigger"
+          class="task-select-trigger"
+          :aria-expanded="taskDropdownOpen"
+          @click="taskDropdownOpen = !taskDropdownOpen"
+        >
+          <span>{{ selectedTask ? taskDisplayText(selectedTask) : '选择策略6任务' }}</span>
+          <span class="task-select-arrow">{{ taskDropdownOpen ? '▲' : '▼' }}</span>
+        </button>
+        <div v-if="taskDropdownOpen" data-test="strategy6-task-dropdown" class="task-dropdown">
+          <div class="task-options">
+            <button
+              v-for="task in pagedTasks"
+              :key="task.id"
+              :data-test="`strategy6-task-option-${task.id}`"
+              class="task-option"
+              :class="{ selected: task.id === selectedTaskId }"
+              @click="selectTask(task)"
+            >{{ taskDisplayText(task) }}</button>
+            <div v-if="!pagedTasks.length" class="task-option-empty">暂无策略6任务</div>
+          </div>
+          <div v-if="tasks.length > taskPageSize" class="task-pagination">
+            <button
+              data-test="strategy6-task-prev"
+              :disabled="taskPage <= 1"
+              @click="changeTaskPage(-1)"
+            >上一页</button>
+            <span data-test="strategy6-task-page-info">第 {{ taskPage }} / {{ taskPageCount }} 页 · 共 {{ tasks.length }} 个任务</span>
+            <button
+              data-test="strategy6-task-next"
+              :disabled="taskPage >= taskPageCount"
+              @click="changeTaskPage(1)"
+            >下一页</button>
+          </div>
         </div>
       </div>
       <button
@@ -413,6 +429,7 @@ export default {
       tasks: [],
       taskPage: 1,
       taskPageSize: 10,
+      taskDropdownOpen: false,
       candidates: [],
       selectedTaskId: '',
       selected: null,
@@ -430,12 +447,8 @@ export default {
       const start = (this.taskPage - 1) * this.taskPageSize
       return this.tasks.slice(start, start + this.taskPageSize)
     },
-    taskOptions() {
-      if (!this.selectedTaskId || this.pagedTasks.some(task => task.id === this.selectedTaskId)) {
-        return this.pagedTasks
-      }
-      const selectedTask = this.tasks.find(task => task.id === this.selectedTaskId)
-      return selectedTask ? [selectedTask, ...this.pagedTasks] : this.pagedTasks
+    selectedTask() {
+      return this.tasks.find(task => task.id === this.selectedTaskId) || null
     },
     sortedCandidates() {
       const typePriority = {
@@ -567,6 +580,7 @@ export default {
     },
   },
   async mounted() {
+    document.addEventListener('click', this.closeTaskDropdown)
     const api = useApi()
     try {
       const res = await api.getStrategy6Tasks()
@@ -585,7 +599,24 @@ export default {
       await this.loadCandidates()
     }
   },
+  beforeUnmount() {
+    document.removeEventListener('click', this.closeTaskDropdown)
+  },
   methods: {
+    taskDisplayText(task) {
+      return `${task.id} · ${this.label('taskStatus', task.status)} · ${task.candidates || 0} 候选`
+    },
+    closeTaskDropdown(event) {
+      const picker = this.$refs.taskPicker
+      if (this.taskDropdownOpen && (!picker || !picker.contains(event.target))) {
+        this.taskDropdownOpen = false
+      }
+    },
+    async selectTask(task) {
+      this.selectedTaskId = task.id
+      this.taskDropdownOpen = false
+      await this.loadCandidates()
+    },
     locateTaskPage(taskId) {
       const index = this.tasks.findIndex(task => task.id === taskId)
       this.taskPage = index >= 0 ? Math.floor(index / this.taskPageSize) + 1 : 1
@@ -1181,9 +1212,17 @@ export default {
 .page-header { display: flex; justify-content: space-between; gap: 16px; align-items: flex-start; margin-bottom: 16px; }
 h1 { margin: 0 0 6px; font-size: 22px; }
 p { margin: 0; color: var(--text-secondary); }
-select { background: var(--bg-panel); color: var(--text-primary); border: 1px solid var(--border); border-radius: 4px; padding: 8px; min-width: 340px; }
-.task-picker { display: flex; flex-direction: column; gap: 6px; }
-.task-pagination { display: flex; align-items: center; justify-content: center; gap: 8px; color: var(--text-secondary); font-size: 12px; }
+.task-picker { position: relative; min-width: 380px; }
+.task-select-trigger { width: 100%; display: flex; align-items: center; justify-content: space-between; gap: 12px; background: var(--bg-panel); color: var(--text-primary); border: 1px solid var(--border); border-radius: 4px; padding: 8px 10px; cursor: pointer; text-align: left; }
+.task-select-trigger:hover, .task-select-trigger[aria-expanded="true"] { border-color: var(--accent); }
+.task-select-arrow { color: var(--text-secondary); font-size: 10px; }
+.task-dropdown { position: absolute; z-index: 40; top: calc(100% + 6px); left: 0; right: 0; overflow: hidden; background: var(--bg-panel); border: 1px solid var(--border); border-radius: 6px; box-shadow: 0 12px 32px rgba(0, 0, 0, 0.38); }
+.task-options { display: flex; flex-direction: column; padding: 5px; }
+.task-option { width: 100%; background: transparent; color: var(--text-primary); border: 0; border-radius: 4px; padding: 8px 10px; cursor: pointer; text-align: left; }
+.task-option:hover { background: rgba(59, 130, 246, 0.12); }
+.task-option.selected { background: rgba(59, 130, 246, 0.2); color: #bfdbfe; }
+.task-option-empty { padding: 12px; color: var(--text-secondary); text-align: center; }
+.task-pagination { display: flex; align-items: center; justify-content: center; gap: 8px; padding: 8px; border-top: 1px solid var(--border); color: var(--text-secondary); font-size: 12px; }
 .task-pagination button { background: transparent; color: var(--text-primary); border: 1px solid var(--border); border-radius: 4px; padding: 4px 9px; cursor: pointer; }
 .task-pagination button:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
 .task-pagination button:disabled { opacity: 0.4; cursor: not-allowed; }
