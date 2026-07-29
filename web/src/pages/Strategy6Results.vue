@@ -5,12 +5,27 @@
         <h1>策略6 · 强势 VCP 尾部候选池</h1>
         <p>强势启动后有支撑横盘，尾部价稳量干且盈亏比合格的候选池。</p>
       </div>
-      <select v-model="selectedTaskId" @change="loadCandidates">
-        <option value="">选择策略6任务</option>
-        <option v-for="task in tasks" :key="task.id" :value="task.id">
-          {{ task.id }} · {{ label('taskStatus', task.status) }} · {{ task.candidates || 0 }} 候选
-        </option>
-      </select>
+      <div class="task-picker">
+        <select data-test="strategy6-task-select" v-model="selectedTaskId" @change="loadCandidates">
+          <option value="">选择策略6任务</option>
+          <option v-for="task in taskOptions" :key="task.id" :value="task.id">
+            {{ task.id }} · {{ label('taskStatus', task.status) }} · {{ task.candidates || 0 }} 候选
+          </option>
+        </select>
+        <div v-if="tasks.length > taskPageSize" class="task-pagination">
+          <button
+            data-test="strategy6-task-prev"
+            :disabled="taskPage <= 1"
+            @click="changeTaskPage(-1)"
+          >上一页</button>
+          <span data-test="strategy6-task-page-info">第 {{ taskPage }} / {{ taskPageCount }} 页 · 共 {{ tasks.length }} 个任务</span>
+          <button
+            data-test="strategy6-task-next"
+            :disabled="taskPage >= taskPageCount"
+            @click="changeTaskPage(1)"
+          >下一页</button>
+        </div>
+      </div>
       <button
         data-test="export-candidates"
         class="export-btn"
@@ -396,6 +411,8 @@ export default {
   data() {
     return {
       tasks: [],
+      taskPage: 1,
+      taskPageSize: 10,
       candidates: [],
       selectedTaskId: '',
       selected: null,
@@ -406,6 +423,20 @@ export default {
     }
   },
   computed: {
+    taskPageCount() {
+      return Math.max(1, Math.ceil(this.tasks.length / this.taskPageSize))
+    },
+    pagedTasks() {
+      const start = (this.taskPage - 1) * this.taskPageSize
+      return this.tasks.slice(start, start + this.taskPageSize)
+    },
+    taskOptions() {
+      if (!this.selectedTaskId || this.pagedTasks.some(task => task.id === this.selectedTaskId)) {
+        return this.pagedTasks
+      }
+      const selectedTask = this.tasks.find(task => task.id === this.selectedTaskId)
+      return selectedTask ? [selectedTask, ...this.pagedTasks] : this.pagedTasks
+    },
     sortedCandidates() {
       const typePriority = {
         READY_CANDIDATE: 0,
@@ -549,11 +580,19 @@ export default {
       if (!this.tasks.some(t => t.id === defaultTaskId)) {
         this.tasks = [{ id: defaultTaskId, status: 'selected', candidates: 0 }, ...this.tasks]
       }
+      this.locateTaskPage(defaultTaskId)
       this.selectedTaskId = defaultTaskId
       await this.loadCandidates()
     }
   },
   methods: {
+    locateTaskPage(taskId) {
+      const index = this.tasks.findIndex(task => task.id === taskId)
+      this.taskPage = index >= 0 ? Math.floor(index / this.taskPageSize) + 1 : 1
+    },
+    changeTaskPage(offset) {
+      this.taskPage = Math.min(this.taskPageCount, Math.max(1, this.taskPage + offset))
+    },
     candidateRankingScore(candidate) {
       const rankingScore = Number(candidate?.ranking_score)
       return Number.isFinite(rankingScore) ? rankingScore : Number(candidate?.total_score || 0)
@@ -1143,6 +1182,11 @@ export default {
 h1 { margin: 0 0 6px; font-size: 22px; }
 p { margin: 0; color: var(--text-secondary); }
 select { background: var(--bg-panel); color: var(--text-primary); border: 1px solid var(--border); border-radius: 4px; padding: 8px; min-width: 340px; }
+.task-picker { display: flex; flex-direction: column; gap: 6px; }
+.task-pagination { display: flex; align-items: center; justify-content: center; gap: 8px; color: var(--text-secondary); font-size: 12px; }
+.task-pagination button { background: transparent; color: var(--text-primary); border: 1px solid var(--border); border-radius: 4px; padding: 4px 9px; cursor: pointer; }
+.task-pagination button:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+.task-pagination button:disabled { opacity: 0.4; cursor: not-allowed; }
 .export-btn { background: transparent; color: var(--text-primary); border: 1px solid var(--border); border-radius: 4px; padding: 8px 12px; cursor: pointer; }
 .export-btn:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
 .export-btn:disabled { opacity: 0.45; cursor: not-allowed; }

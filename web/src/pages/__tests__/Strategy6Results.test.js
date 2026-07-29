@@ -343,6 +343,60 @@ describe('Strategy6Results', () => {
     }))
   })
 
+  it('paginates the strategy6 task selector with ten tasks per page', async () => {
+    api.getStrategy6Tasks.mockResolvedValue({
+      tasks: Array.from({ length: 23 }, (_, index) => ({
+        id: `s6-task-${String(index + 1).padStart(2, '0')}`,
+        status: 'completed',
+        candidates: index,
+      })),
+    })
+
+    const wrapper = mount(Strategy6Results, {
+      global: { mocks: { $route: { query: {} } } },
+    })
+    await flushUi()
+
+    expect(wrapper.findAll('[data-test="strategy6-task-select"] option')).toHaveLength(11)
+    expect(wrapper.find('[data-test="strategy6-task-select"]').text()).toContain('s6-task-01')
+    expect(wrapper.find('[data-test="strategy6-task-select"]').text()).not.toContain('s6-task-11')
+    expect(wrapper.find('[data-test="strategy6-task-page-info"]').text()).toBe('第 1 / 3 页 · 共 23 个任务')
+    expect(wrapper.find('[data-test="strategy6-task-prev"]').attributes('disabled')).toBeDefined()
+
+    await wrapper.find('[data-test="strategy6-task-next"]').trigger('click')
+
+    expect(wrapper.find('[data-test="strategy6-task-select"]').text()).toContain('s6-task-11')
+    expect(wrapper.find('[data-test="strategy6-task-select"]').text()).toContain('s6-task-20')
+    expect(wrapper.find('[data-test="strategy6-task-select"]').text()).not.toContain('s6-task-01')
+    expect(wrapper.find('[data-test="strategy6-task-page-info"]').text()).toBe('第 2 / 3 页 · 共 23 个任务')
+  })
+
+  it('locates a URL-selected task on its page and keeps it selected while paging', async () => {
+    api.getStrategy6Tasks.mockResolvedValue({
+      tasks: Array.from({ length: 23 }, (_, index) => ({
+        id: `s6-task-${String(index + 1).padStart(2, '0')}`,
+        status: 'completed',
+        candidates: index,
+      })),
+    })
+
+    const wrapper = mount(Strategy6Results, {
+      global: { mocks: { $route: { query: { task: 's6-task-17' } } } },
+    })
+    await flushUi()
+
+    expect(wrapper.vm.selectedTaskId).toBe('s6-task-17')
+    expect(wrapper.find('[data-test="strategy6-task-page-info"]').text()).toContain('第 2 / 3 页')
+    expect(wrapper.find('[data-test="strategy6-task-select"]').element.value).toBe('s6-task-17')
+    expect(api.getStrategy6Candidates).toHaveBeenCalledWith('s6-task-17')
+
+    await wrapper.find('[data-test="strategy6-task-next"]').trigger('click')
+
+    expect(wrapper.vm.selectedTaskId).toBe('s6-task-17')
+    expect(wrapper.find('[data-test="strategy6-task-select"]').element.value).toBe('s6-task-17')
+    expect(wrapper.find('[data-test="strategy6-task-page-info"]').text()).toContain('第 3 / 3 页')
+  })
+
   afterEach(() => {
     vi.restoreAllMocks()
   })
