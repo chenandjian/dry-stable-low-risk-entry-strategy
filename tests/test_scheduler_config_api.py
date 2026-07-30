@@ -410,7 +410,7 @@ def test_scheduler_logs_include_runtime_state(monkeypatch):
             "running": True,
             "jobs": [
                 {
-                    "id": "serial_dual_strategy_scan",
+                    "id": "strategy6_scan",
                     "next_run_time": "2026-06-17 15:50:00",
                 }
             ],
@@ -423,4 +423,4 @@ def test_scheduler_logs_include_runtime_state(monkeypatch):
     body = res.json()
     assert body["scheduler"]["enabled"] is True
     assert body["runtime"]["running"] is True
-    assert body["runtime"]["jobs"][0]["id"] == "serial_dual_strategy_scan"
+    assert body["runtime"]["jobs"][0]["id"] == "strategy6_scan"

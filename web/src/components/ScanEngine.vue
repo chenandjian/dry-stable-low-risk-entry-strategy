@@ -44,22 +44,7 @@
       </div>
     </div>
     <div v-if="!running" class="scan-controls">
-      <button class="btn-primary" @click="$emit('start')" title="策略1: 杯柄/VCP形态识别">
-        启动策略1扫描
-      </button>
-      <button class="btn-secondary" @click="$emit('startStrategy2')" title="策略2: 极致量干价稳">
-        启动策略2扫描
-      </button>
-      <button class="btn-secondary strategy3" @click="$emit('startStrategy3')" title="策略3: 强势回踩二次启动">
-        启动策略3扫描
-      </button>
-      <button class="btn-secondary strategy4" @click="$emit('startStrategy4')" title="策略4: 热点龙头二波">
-        启动策略4扫描
-      </button>
-      <button class="btn-secondary strategy5" @click="$emit('startStrategy5')" title="策略5: 短线强势冲刺盘整支撑">
-        启动策略5扫描
-      </button>
-      <button class="btn-secondary strategy6" @click="$emit('startStrategy6')" title="策略6: 强势VCP尾部候选池">
+      <button class="btn-primary" @click="$emit('startStrategy6')" title="策略6: 强势VCP尾部候选池">
         启动策略6扫描
       </button>
     </div>
@@ -86,7 +71,7 @@ const props = defineProps({
   indexTotal: Number,
   logLines: { type: Array, default: () => [] },
 })
-defineEmits(['start', 'startStrategy2', 'startStrategy3', 'startStrategy4', 'startStrategy5', 'startStrategy6'])
+defineEmits(['startStrategy6'])
 
 const logExpanded = ref(true)
 const isDataAcquisition = computed(() => props.phase === 'data_acquisition')
@@ -173,17 +158,4 @@ const sourceText = computed(() => props.stockPoolSource ? `股票池 ${props.sto
   transition: background 0.15s;
 }
 .btn-primary:hover { background: #3D6BEE; }
-.btn-secondary {
-  background: transparent; color: var(--text-secondary); border: 1px solid var(--border);
-  padding: 6px 14px; border-radius: 4px; font-size: 12px; cursor: pointer;
-}
-.btn-secondary:hover { border-color: var(--accent); color: var(--accent); }
-.btn-secondary.strategy3 { color: #d6b35a; border-color: rgba(214,179,90,0.5); }
-.btn-secondary.strategy3:hover { border-color: #d6b35a; color: #f0ca6a; }
-.btn-secondary.strategy4 { color: #f97316; border-color: rgba(249,115,22,0.55); }
-.btn-secondary.strategy4:hover { border-color: #f97316; color: #fb923c; }
-.btn-secondary.strategy5 { color: #22c55e; border-color: rgba(34,197,94,0.55); }
-.btn-secondary.strategy5:hover { border-color: #22c55e; color: #86efac; }
-.btn-secondary.strategy6 { color: #a78bfa; border-color: rgba(167,139,250,0.55); }
-.btn-secondary.strategy6:hover { border-color: #a78bfa; color: #c4b5fd; }
 </style>

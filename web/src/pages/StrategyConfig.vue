@@ -1,7 +1,7 @@
 <template>
   <div class="page-content">
     <h2 class="page-title">策略配置</h2>
-    <p class="page-sub">修改扫描参数，保存后下次扫描生效</p>
+    <p class="page-sub">配置策略6扫描、行情数据与定时任务，保存后立即生效</p>
 
     <!-- 市场范围 -->
     <section class="section">
@@ -17,8 +17,8 @@
 
     <!-- 基础参数 -->
     <section class="section">
-      <h3 class="section-title">基础参数</h3>
-      <div class="param-grid">
+      <h3 class="section-title">行情数据</h3>
+      <div v-if="false" class="param-grid">
         <div class="param">
           <label title="近20日平均成交额低于此值的股票将被过滤（单位：元）">平均成交额阈值 <span class="unit">元</span></label>
           <input type="number" v-model.number="config.liquidity.min_avg_turnover"
@@ -121,18 +121,13 @@
     <section class="section scheduler-section">
       <h3 class="section-title">定时任务</h3>
       <p class="section-hint">
-        串行任务会在工作日按设定时间先执行策略1，完成后再执行策略2和策略3。保存后会立即重载后端定时任务。
+        工作日按设定时间执行策略6全市场扫描。保存后会立即重载后端定时任务。
       </p>
       <div class="toggle-grid" style="margin-bottom:16px">
         <label class="toggle-item">
           <span class="toggle-label">启用定时任务</span>
           <button data-test="scheduler-enabled" class="toggle" :class="{ active: config.scheduler?.enabled === true }"
             @click="toggleScheduler('enabled')">{{ config.scheduler?.enabled === true ? '开' : '关' }}</button>
-        </label>
-        <label class="toggle-item">
-          <span class="toggle-label">启用串行三策略扫描</span>
-          <button data-test="serial-dual-scan-enabled" class="toggle" :class="{ active: config.scheduler?.serial_dual_scan?.enabled !== false }"
-            @click="toggleSerialDualScan">{{ config.scheduler?.serial_dual_scan?.enabled !== false ? '开' : '关' }}</button>
         </label>
       </div>
       <div class="param-grid">
@@ -145,7 +140,7 @@
     </section>
 
     <!-- 高级参数 -->
-    <section class="section">
+    <section v-if="false" class="section">
       <h3 class="section-title" style="cursor:pointer" @click="showAdvanced = !showAdvanced">
         {{ showAdvanced ? '▾' : '▸' }} 高级参数
       </h3>
@@ -317,7 +312,7 @@
     </section>
 
     <!-- 策略2：极致量干价稳 -->
-    <section class="section strategy2-section">
+    <section v-if="false" class="section strategy2-section">
       <h3 class="section-title strategy2-title">策略2 · 极致量干价稳</h3>
       <p class="section-hint">
         策略2 独立扫描全部股票，不依赖杯柄/VCP 形态识别。日线拉取天数沿用全局配置；本期不支持回测。
@@ -392,7 +387,7 @@
     </section>
 
     <!-- 策略3：强势回踩二次启动 -->
-    <section class="section strategy3-section">
+    <section v-if="false" class="section strategy3-section">
       <h3 class="section-title strategy3-title">策略3 · 强势回踩二次启动</h3>
       <p class="section-hint">
         策略3不是杯柄/VCP策略，也不是极致量干价稳策略。它寻找已证明强势的股票，在健康回踩、缩量企稳后二次转强的机会。
@@ -492,7 +487,7 @@
     </section>
 
     <!-- 策略4：热点龙头二波 -->
-    <section class="section strategy4-section">
+    <section v-if="false" class="section strategy4-section">
       <h3 class="section-title strategy4-title">策略4 · 热点龙头二波</h3>
       <p class="section-hint">
         策略4先确认热点行业/题材，再识别核心龙头，最后只在龙头池中判断第一波回踩后的二波机会。
@@ -587,7 +582,7 @@
     </section>
 
     <!-- 策略5：短线强势冲刺盘整支撑 -->
-    <section class="section strategy5-section">
+    <section v-if="false" class="section strategy5-section">
       <h3 class="section-title strategy5-title">策略5 · 短线强势冲刺盘整支撑</h3>
       <p class="section-hint">
         策略5从全市场日线中寻找短线强度、新高确认、盘整可控且贴近 MA 支撑的重点/观察候选。
@@ -1795,6 +1790,9 @@ function schedulerTimeIsValid() {
 function toggleScheduler(key) {
   ensureSchedulerConfig()
   config.scheduler[key] = !config.scheduler[key]
+  if (key === 'enabled') {
+    config.scheduler.serial_dual_scan.enabled = config.scheduler.enabled
+  }
   markDirty()
 }
 
@@ -1925,6 +1923,14 @@ function markDirty() {
 function validate() {
   const errors = []
   sanitizeDailySources()
+  const strategy6OnlyFrontend = true
+  const strategy6Data = config.data || {}
+  if (!strategy6Data.daily_sources || strategy6Data.daily_sources.length === 0) errors.push('至少选择一个日线数据源')
+  if (!['tickflow', 'legacy_multi_source'].includes(strategy6Data.acquisition_mode)) errors.push('请选择有效的日线数据获取模式')
+  if (!['free', 'authenticated'].includes(strategy6Data.tickflow_access_mode)) errors.push('请选择有效的 TickFlow 访问模式')
+  if (!schedulerTimeIsValid()) errors.push('定时任务执行时间格式不正确')
+
+  if (!strategy6OnlyFrontend) {
   const cup = config.cup
   const handle = config.handle
 
@@ -2031,6 +2037,8 @@ function validate() {
   if (s5.trade_short_weighted_min_score < 0 || s5.trade_short_weighted_min_score > 150) errors.push('策略5: 短线加权最低分需在 0-150')
   if (s5.trade_total_score_weight < 0 || s5.trade_total_score_weight > 2) errors.push('策略5: 总分权重需在 0-2')
   if (s5.trade_short_strength_weight < 0 || s5.trade_short_strength_weight > 5) errors.push('策略5: 短线强度权重需在 0-5')
+
+  }
 
   // Strategy6 validation
   ensureStrategy6Config()
@@ -2184,40 +2192,18 @@ async function saveConfig() {
     } else {
       delete dataPayload.tickflow_api_key
     }
-    // Build the payload matching config.yaml structure
+    // Only send settings owned by the Strategy6 service UI. The backend
+    // deep-merges this payload, preserving legacy strategy configuration.
     const payload = {
       market: { ...config.market },
-      liquidity: { ...config.liquidity },
       data: dataPayload,
-      cup: {
-        min_duration: config.cup.min_duration,
-        max_duration: config.cup.max_duration,
-        min_depth: config.cup.min_depth,
-        max_depth: config.cup.max_depth,
-        max_lip_deviation: config.cup.max_lip_deviation,
-        min_bottom_roundness: config.cup.min_bottom_roundness,
-      },
-      handle: {
-        min_duration: config.handle.min_duration,
-        max_duration: config.handle.max_duration,
-        max_depth: config.handle.max_depth,
-      },
-      breakout: {
-        buffer_pct: config.breakout.buffer_pct,
-        volume_multiplier: config.breakout.volume_multiplier,
-      },
-      decision: { ...config.decision },
-      volume_dry: { ...config.volume_dry },
-      price_stable: { ...config.price_stable },
-      risk_reward: { ...config.risk_reward },
       scheduler: {
         enabled: config.scheduler?.enabled === true,
-        serial_dual_scan: { ...config.scheduler?.serial_dual_scan },
+        serial_dual_scan: {
+          ...config.scheduler?.serial_dual_scan,
+          enabled: config.scheduler?.enabled === true,
+        },
       },
-      strategy2: { ...config.strategy2 },
-      strategy3: { ...config.strategy3 },
-      strategy4: { ...config.strategy4 },
-      strategy5: sanitizeStrategy5Config(config.strategy5),
       strategy6: sanitizeStrategy6Config(config.strategy6),
     }
     const res = await updateConfig(payload)

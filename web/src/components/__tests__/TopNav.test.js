@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { mount } from '@vue/test-utils'
 
-const mockRoute = { path: '/strategy3/results' }
+const mockRoute = { path: '/strategy6/results' }
 
 vi.mock('vue-router', () => ({
   useRoute: () => mockRoute,
@@ -24,18 +24,23 @@ function mountNav() {
 
 describe('TopNav', () => {
   beforeEach(() => {
-    mockRoute.path = '/strategy3/results'
+    mockRoute.path = '/strategy6/results'
     global.fetch = vi.fn().mockResolvedValue({
       json: () => Promise.resolve({ tasks: [] }),
     })
   })
 
-  it('shows a dedicated strategy3 candidate tab', () => {
+  it('shows only the Strategy6 business navigation', () => {
     const wrapper = mountNav()
 
-    const strategy3Tab = wrapper.findAll('a').find(a => a.text() === '策略3候选')
-    expect(strategy3Tab).toBeTruthy()
-    expect(strategy3Tab.attributes('href')).toBe('/strategy3/results')
-    expect(strategy3Tab.classes()).toContain('active')
+    const strategy6Tab = wrapper.findAll('a').find(a => a.text() === '策略6候选')
+    expect(strategy6Tab).toBeTruthy()
+    expect(strategy6Tab.attributes('href')).toBe('/strategy6/results')
+    expect(strategy6Tab.classes()).toContain('active')
+    expect(wrapper.text()).not.toContain('策略1')
+    expect(wrapper.text()).not.toContain('策略2')
+    expect(wrapper.text()).not.toContain('策略3')
+    expect(wrapper.text()).not.toContain('策略4')
+    expect(wrapper.text()).not.toContain('策略5')
   })
 })

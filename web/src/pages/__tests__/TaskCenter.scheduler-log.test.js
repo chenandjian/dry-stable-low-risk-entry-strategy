@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { nextTick } from 'vue'
 
@@ -6,13 +6,7 @@ const mockRouter = { push: vi.fn() }
 vi.mock('vue-router', () => ({ useRouter: () => mockRouter }))
 
 const api = {
-  getScanTasks: vi.fn(),
-  getStrategy2Tasks: vi.fn(),
-  getStrategy3Tasks: vi.fn(),
-  getStrategy4Tasks: vi.fn(),
-  reEvaluateTask: vi.fn(),
-  reEvaluateStrategy2Task: vi.fn(),
-  reEvaluateStrategy3Task: vi.fn(),
+  getStrategy6Tasks: vi.fn(),
   getSchedulerLogs: vi.fn(),
 }
 vi.mock('../../composables/useApi.js', () => ({ useApi: () => api }))
@@ -26,86 +20,58 @@ async function flushUi() {
   await nextTick()
 }
 
-describe('TaskCenter scheduler logs', () => {
+describe('Strategy6 task center', () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    api.getScanTasks.mockResolvedValue({ tasks: [] })
-    api.getStrategy2Tasks.mockResolvedValue({ tasks: [] })
-    api.getStrategy3Tasks.mockResolvedValue({ tasks: [] })
-    api.getStrategy4Tasks.mockResolvedValue({ tasks: [] })
+    api.getStrategy6Tasks.mockResolvedValue({
+      tasks: [{
+        id: 's6-20260730-151500',
+        date: '2026-07-30 15:15:00',
+        status: 'completed',
+        candidates: 3,
+        failed: 1,
+      }],
+    })
     api.getSchedulerLogs.mockResolvedValue({
       scheduler: {
         enabled: true,
-        serial_dual_scan: {
-          enabled: true,
-          cron: '50 15 * * 1-5',
-          strategy1_failed_retry_rounds: 3,
-        },
+        serial_dual_scan: { enabled: true, cron: '15 15 * * 1-5' },
       },
       runtime: {
         running: true,
-        jobs: [
-          {
-            id: 'serial_dual_strategy_scan',
-            next_run_time: '2026-06-17 15:50:00',
-          },
-        ],
+        jobs: [{ id: 'strategy6_scan', next_run_time: '2026-07-31 15:15:00' }],
       },
-      events: [
-        {
-          time: '2026-06-16 15:15:00',
-          level: 'info',
-          stage: 'strategy1_full',
-          task_id: 'sched-s1-1',
-          message: '策略1全量扫描开始',
-          details: { stocks: 5000 },
-        },
-        {
-          time: '2026-06-16 15:20:00',
-          level: 'warning',
-          stage: 'strategy1_remaining_failed',
-          task_id: 'sched-s1-1',
-          message: '策略1重试后仍有失败股票',
-          details: { remaining_failed: 2 },
-        },
-      ],
-    })
-  })
-
-  it('shows scheduler config and recent scheduler events', async () => {
-    const wrapper = mount(TaskCenter)
-    await flushUi()
-
-    expect(api.getSchedulerLogs).toHaveBeenCalled()
-    expect(wrapper.text()).toContain('定时任务日志')
-    expect(wrapper.text()).toContain('配置已启用')
-    expect(wrapper.text()).toContain('实际运行中')
-    expect(wrapper.text()).toContain('串行三策略：开启')
-    expect(wrapper.text()).toContain('50 15 * * 1-5')
-    expect(wrapper.text()).toContain('下次 2026-06-17 15:50:00')
-    expect(wrapper.text()).toContain('重试 3 轮')
-    expect(wrapper.text()).toContain('策略1全量扫描开始')
-    expect(wrapper.text()).toContain('策略1重试后仍有失败股票')
-    expect(wrapper.text()).toContain('sched-s1-1')
-  })
-
-  it('loads and displays strategy4 scan tasks in task center', async () => {
-    api.getStrategy4Tasks.mockResolvedValue({
-      tasks: [{
-        id: 's4-20260701-200420',
-        date: '2026-07-01 20:04:20',
-        status: 'completed',
-        candidates: 0,
-        failed: 0,
-        strategy_type: 'STRATEGY_4_HOT_LEADER_SECOND_WAVE',
+      events: [{
+        time: '2026-07-30 15:15:00',
+        level: 'info',
+        stage: 'strategy6_full',
+        task_id: 'sched-s6-20260730-151500',
+        message: '策略6定时扫描开始',
       }],
     })
+  })
 
+  it('loads only Strategy6 tasks and scheduler state', async () => {
     const wrapper = mount(TaskCenter)
     await flushUi()
 
-    expect(api.getStrategy4Tasks).toHaveBeenCalled()
-    expect(wrapper.text()).toContain('s4-20260701-200420')
-    expect(wrapper.text()).toContain('S4')
+    expect(api.getStrategy6Tasks).toHaveBeenCalled()
+    expect(wrapper.text()).toContain('策略6扫描任务')
+    expect(wrapper.text()).toContain('策略6定时扫描：开启')
+    expect(wrapper.text()).toContain('s6-20260730-151500')
+    expect(wrapper.text()).toContain('策略6定时扫描开始')
+    expect(wrapper.text()).not.toContain('串行三策略')
+    expect(wrapper.text()).not.toContain('策略1')
+    expect(wrapper.text()).not.toContain('策略2')
+    expect(wrapper.text()).not.toContain('策略3')
+    expect(wrapper.text()).not.toContain('策略4')
+    expect(wrapper.text()).not.toContain('策略5')
+  })
+
+  it('opens Strategy6 results for the selected task', async () => {
+    const wrapper = mount(TaskCenter)
+    await flushUi()
+    await wrapper.find('.action-btn').trigger('click')
+    expect(mockRouter.push).toHaveBeenCalledWith('/strategy6/results?task=s6-20260730-151500')
   })
 })

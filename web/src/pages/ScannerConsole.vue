@@ -12,10 +12,10 @@
     <!-- Metrics Row -->
     <div class="metrics-row">
       <MetricCard label="今日候选" :value="metrics.candidates" sub="扫描结果" color="blue" />
-      <MetricCard label="A级信号 ≥80" :value="metrics.aGrade" :sub="topSignalSub" color="gold" />
-      <MetricCard label="突破确认" :value="metrics.breakout" sub="放量突破" color="red" />
-      <MetricCard label="接近突破" :value="metrics.nearBreakout" sub="距突破 &lt; 5%" color="orange" />
-      <MetricCard label="量能确认" :value="metrics.volumeOk" sub="柄部缩量 · 突破放量" />
+      <MetricCard label="就绪候选" :value="metrics.breakout" sub="READY / BUY_ZONE" color="red" />
+      <MetricCard label="重点候选" :value="metrics.nearBreakout" sub="KEY_CANDIDATE" color="gold" />
+      <MetricCard label="观察候选" :value="metrics.volumeOk" sub="WATCH_CANDIDATE" color="orange" />
+      <MetricCard label="高分候选 ≥80" :value="metrics.aGrade" :sub="topSignalSub" />
       <MetricCard label="最高评分" :value="metrics.topScore" :sub="topScoreSub" color="gold" />
     </div>
 
@@ -29,17 +29,17 @@
       <!-- Discovery Panel -->
       <div class="panel">
         <div class="panel-header">
-          <span>◉ 最新发现 · 候选信号</span>
+          <span>◉ 策略6最新发现</span>
           <span class="sub-title">按发现时间排序</span>
         </div>
         <div v-if="discoveries.length === 0" class="empty-state">
           <template v-if="scanning">
-            扫描进行中，当前暂未发现符合条件的杯柄结构候选<br/>
-            <span class="empty-sub">系统将持续识别形态评分、突破位与量能确认信号</span>
+            扫描进行中，当前暂未发现符合条件的策略6候选<br/>
+            <span class="empty-sub">系统将持续检查强势启动、整理尾部、支撑和盈亏比</span>
           </template>
           <template v-else>
             暂无扫描结果<br/>
-            <span class="empty-sub">点击右侧「开始扫描」，启动全市场杯柄结构识别</span>
+            <span class="empty-sub">点击右侧「启动策略6扫描」，开始全市场筛选</span>
           </template>
         </div>
         <DiscoveryItem
@@ -73,11 +73,6 @@
         :indexProcessed="scanProgress.indexProcessed"
         :indexTotal="scanProgress.indexTotal"
         :logLines="logLines"
-        @start="handleStartScan"
-        @start-strategy2="handleStartStrategy2Scan"
-        @start-strategy3="handleStartStrategy3Scan"
-        @start-strategy4="handleStartStrategy4Scan"
-        @start-strategy5="handleStartStrategy5Scan"
         @start-strategy6="handleStartStrategy6Scan"
       />
     </div>
@@ -861,9 +856,9 @@ function updateMetrics() {
   const list = discoveries.value
   metrics.candidates = list.length
   metrics.aGrade = list.filter(d => d.score >= 80).length
-  metrics.breakout = list.filter(d => d.status === 'breakout').length
-  metrics.nearBreakout = list.filter(d => d.status === 'near').length
-  metrics.volumeOk = list.filter(d => d.detail.includes('量干7') || d.detail.includes('量干8') || d.detail.includes('量干9') || d.detail.includes('量干10')).length
+  metrics.breakout = list.filter(d => ['READY_CANDIDATE', 'BUY_ZONE'].includes(d.status)).length
+  metrics.nearBreakout = list.filter(d => d.status === 'KEY_CANDIDATE').length
+  metrics.volumeOk = list.filter(d => d.status === 'WATCH_CANDIDATE').length
   metrics.topScore = list.reduce((max, d) => Math.max(max, d.score), 0)
 }
 

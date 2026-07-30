@@ -1,19 +1,11 @@
 <template>
   <nav class="topnav">
     <div class="topnav-brand">
-      CupHandle<span class="accent">Scan</span>
+      Strategy<span class="accent">6</span>
     </div>
     <div class="topnav-tabs">
-      <router-link to="/" class="topnav-tab" :class="{ active: isActive('/') }">机会雷达</router-link>
-      <router-link to="/results" class="topnav-tab" :class="{ active: isActive('/results') }">候选列表</router-link>
-      <router-link to="/strategy2/results" class="topnav-tab" :class="{ active: isActive('/strategy2/results') }">策略2</router-link>
-      <router-link to="/strategy3/results" class="topnav-tab" :class="{ active: isActive('/strategy3/results') }">策略3候选</router-link>
-      <router-link to="/strategy4/results" class="topnav-tab" :class="{ active: isActive('/strategy4/results') }">策略4热点</router-link>
-      <router-link to="/strategy5/results" class="topnav-tab" :class="{ active: isActive('/strategy5/results') }">策略5冲刺</router-link>
-      <router-link to="/strategy6/results" class="topnav-tab" :class="{ active: isActive('/strategy6/results') }">策略6强VCP</router-link>
-      <router-link to="/strategy1/backtest" class="topnav-tab" :class="{ active: isActive('/strategy1/backtest') }">策略1回测</router-link>
-      <router-link to="/strategy2/backtest" class="topnav-tab" :class="{ active: isActive('/strategy2/backtest') }">策略2回测</router-link>
-      <router-link to="/backtest/cup-handle" class="topnav-tab" :class="{ active: isActive('/backtest/cup-handle') }">单股回测</router-link>
+      <router-link to="/" class="topnav-tab" :class="{ active: isActive('/') }">策略6扫描</router-link>
+      <router-link to="/strategy6/results" class="topnav-tab" :class="{ active: isActive('/strategy6/results') }">策略6候选</router-link>
       <router-link to="/data/kline-history" class="topnav-tab" :class="{ active: isActive('/data/kline-history') }">K线数据</router-link>
       <router-link to="/tasks" class="topnav-tab" :class="{ active: isActive('/tasks') }">任务中心</router-link>
       <router-link to="/config" class="topnav-tab" :class="{ active: isActive('/config') }">策略配置</router-link>
@@ -38,11 +30,11 @@ function isActive(path) {
 
 onMounted(async () => {
   try {
-    const res = await fetch('/api/scan/tasks')
+    const res = await fetch('/api/strategy6/tasks')
     const data = await res.json()
     const tasks = data.tasks || []
     if (tasks.length) {
-      const d = tasks[0].date
+      const d = tasks[0].date || tasks[0].started_at
       lastScan.value = d ? d.slice(5, 16) : d
     }
   } catch (e) {
