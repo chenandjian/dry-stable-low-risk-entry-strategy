@@ -29,6 +29,7 @@ from strategy6.backtest.optimization import (
 )
 from strategy6.backtest.portfolio import simulate_portfolio
 from strategy6.backtest.report import write_backtest_report
+from strategy6.backtest.selection_optimization import build_selection_trial_configs
 from strategy6.backtest.selector import build_selection_metrics
 from strategy6.backtest.service import run_parameter_research
 from strategy6.backtest.snapshot import path_metadata, signal_to_record
@@ -173,6 +174,32 @@ def run_cli_research(args, coverage) -> int:
             coverage=coverage,
             args=args,
         )
+        write_backtest_report(result, args.output)
+        return 0
+    if args.command == "selection-optimize":
+        from strategy6.validation import resolve_strategy6_config
+
+        base = resolve_strategy6_config({
+            "strategy6": _formal_strategy_config(root_config.get("strategy6") or {}),
+        })
+        trials = build_selection_trial_configs(base)
+        trial_index = int(args.trial_index)
+        if not 1 <= trial_index <= len(trials):
+            raise ValueError(f"selection trial index must be 1..{len(trials)}")
+        trial = trials[trial_index - 1]
+        args.run_mode = "SELECTION_OPTIMIZATION"
+        result = run_local_parameter_set(
+            experiment_id=trial["experiment_id"],
+            strategy_config=trial["config"],
+            backtest_config=backtest_config,
+            coverage=coverage,
+            args=args,
+        )
+        result["recommendation"] = {
+            "decision": "RESEARCH_ONLY_MANUAL_APPROVAL_REQUIRED",
+            "production_config_modified": False,
+            "trial_index": trial_index,
+        }
         write_backtest_report(result, args.output)
         return 0
     if args.command == "experiments":

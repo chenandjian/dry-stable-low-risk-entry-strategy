@@ -10,6 +10,7 @@ from strategy6.models import (
     Strategy6Phase,
     Strategy6Pattern,
     Strategy6Score,
+    Strategy6SelectionDiagnostics,
     Strategy6SetupQuality,
     Strategy6Start,
     Strategy6Support,
@@ -18,6 +19,50 @@ from strategy6.models import (
 from strategy6.brooks.models import BrooksTailResult
 from strategy6.strong_start import PASSING_START_TYPES
 from strategy6.validation import is_strategy6_research_profile
+
+
+def selection_hard_filter_reasons(
+    diagnostics: Strategy6SelectionDiagnostics,
+    config: dict,
+) -> list[str]:
+    experiment = config["selection_optimization"]
+    reasons: list[str] = []
+    if (
+        experiment["support_confirmation_enabled"]
+        and diagnostics.support_confirmation_status == "FAILED"
+    ):
+        reasons.append("SUPPORT_CONFIRMATION_FAILED")
+    if (
+        experiment["tail_deterioration_filter_enabled"]
+        and diagnostics.recent_tail_status == "DETERIORATING"
+    ):
+        reasons.append("RECENT_TAIL_DETERIORATING")
+    return reasons
+
+
+def selection_blocks_ready(
+    diagnostics: Strategy6SelectionDiagnostics,
+    config: dict,
+) -> bool:
+    experiment = config["selection_optimization"]
+    return any((
+        experiment["support_confirmation_enabled"]
+        and diagnostics.support_confirmation_status != "CONFIRMED",
+        experiment["rs_fading_downgrade_enabled"]
+        and diagnostics.relative_strength_trend == "FADING",
+        experiment["matched_market_downgrade_enabled"]
+        and diagnostics.matched_market_status in {"MARKET_WEAK", "MARKET_RISK"},
+    ))
+
+
+def selection_rr(
+    trade_plan: Strategy6TradePlan,
+    diagnostics: Strategy6SelectionDiagnostics,
+    config: dict,
+) -> float:
+    if config["selection_optimization"]["conservative_rr_enabled"]:
+        return diagnostics.conservative_rr
+    return trade_plan.objective_rr_2
 
 
 def hard_filter_reasons(
@@ -34,6 +79,7 @@ def hard_filter_reasons(
     box_tail: Strategy6BoxTail | None = None,
     brooks_tail: BrooksTailResult | None = None,
     setup_quality: Strategy6SetupQuality | None = None,
+    selection_diagnostics: Strategy6SelectionDiagnostics | None = None,
 ) -> list[str]:
     reasons: list[str] = []
     if not phase.valid and phase.status != "START_TOO_RECENT":
@@ -100,9 +146,17 @@ def hard_filter_reasons(
         reasons.append("DISTRIBUTION_PRESSURE_HIGH")
     if research_profile and "SUPPORT_VOLUME_BREAK_UNRECOVERED" in support.support_reaction_risk_tags:
         reasons.append("SUPPORT_VOLUME_BREAK_UNRECOVERED")
-    if trade_plan.objective_rr_2 < config["rr2_min_watch"]:
+    diagnostics = selection_diagnostics or Strategy6SelectionDiagnostics()
+    reasons.extend(selection_hard_filter_reasons(diagnostics, config))
+    effective_rr = selection_rr(trade_plan, diagnostics, config)
+    if effective_rr < config["rr2_min_watch"]:
         threshold = str(config["rr2_min_watch"]).replace(".", "_")
-        reasons.append(f"RR2_LT_{threshold}")
+        prefix = (
+            "CONSERVATIVE_RR_LT"
+            if config["selection_optimization"]["conservative_rr_enabled"]
+            else "RR2_LT"
+        )
+        reasons.append(f"{prefix}_{threshold}")
     return _dedupe(reasons)
 
 
@@ -120,6 +174,7 @@ def classify_candidate(
     *,
     box_tail: Strategy6BoxTail | None = None,
     brooks_tail: BrooksTailResult | None = None,
+    selection_diagnostics: Strategy6SelectionDiagnostics | None = None,
 ) -> tuple[str, str, str, str]:
     research_profile = is_strategy6_research_profile(config)
     lifecycle = _lifecycle_status(
@@ -130,7 +185,12 @@ def classify_candidate(
     if reject_reasons:
         return "REJECTED", "rejected", lifecycle, "排除：存在硬性风险或盈亏比不足"
     major_risk = any(tag in ind.risk_tags for tag in {"BIG_DOWN_VOLUME"})
-    environment_blocks_ready = _environment_blocks_ready(ind)
+    diagnostics = selection_diagnostics or Strategy6SelectionDiagnostics()
+    effective_rr = selection_rr(trade_plan, diagnostics, config)
+    environment_blocks_ready = (
+        _environment_blocks_ready(ind)
+        or selection_blocks_ready(diagnostics, config)
+    )
     tactical_blocks_ready = _tactical_blocks_ready(ind, start, support)
     if phase.status == "START_TOO_RECENT":
         return "WATCH_CANDIDATE", "observe", "START_CONFIRMED", "观察：强势启动已确认，等待独立整理阶段"
@@ -163,7 +223,7 @@ def classify_candidate(
         return "WATCH_CANDIDATE", "observe", lifecycle, "观察：形态尚未明确"
     if (
         score.total_score >= config["ready_min_score"]
-        and trade_plan.objective_rr_2 >= config["rr2_min_ready"]
+        and effective_rr >= config["rr2_min_ready"]
         and support.support_zone_low <= ind.current_price <= support.support_zone_high
         and dry_tail.tail_volume_ratio <= config["tail_strong_volume_ratio_5_20"]
         and support.support_status in {"PATTERN_SUPPORT", "MA20_SUPPORT", "KEY_SUPPORT_VALID"}
@@ -186,7 +246,7 @@ def classify_candidate(
         return "READY_CANDIDATE", "ready", lifecycle, "低吸候选：支撑区内，量干价稳，盈亏比较好"
     if (
         score.total_score >= config["key_min_score"]
-        and trade_plan.objective_rr_2 >= config["rr2_min_key"]
+        and effective_rr >= config["rr2_min_key"]
         and support.support_status in {"PATTERN_SUPPORT", "MA20_SUPPORT", "KEY_SUPPORT_VALID"}
         and (
             score.tail_score >= 15
@@ -228,6 +288,7 @@ def classify_candidate_before_market_downgrade(
     *,
     box_tail: Strategy6BoxTail | None = None,
     brooks_tail: BrooksTailResult | None = None,
+    selection_diagnostics: Strategy6SelectionDiagnostics | None = None,
 ) -> str:
     """Return the tier before weak-market downgrade without mutating indicators."""
     audit_indicators = replace(
@@ -251,6 +312,7 @@ def classify_candidate_before_market_downgrade(
         config,
         box_tail=box_tail,
         brooks_tail=brooks_tail,
+        selection_diagnostics=selection_diagnostics,
     )
     return candidate_type
 

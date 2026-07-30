@@ -150,6 +150,26 @@ class Strategy6SetupQuality:
 
 
 @dataclass
+class Strategy6SelectionDiagnostics:
+    """Independent facts used by Strategy6 selection experiments."""
+
+    model_version: str = "S6_SELECTION_DIAGNOSTICS_V1"
+    relative_strength_5: float = 0.0
+    relative_strength_10: float = 0.0
+    relative_strength_20: float = 0.0
+    relative_strength_60: float = 0.0
+    relative_strength_periods_observed: list[int] = field(default_factory=list)
+    relative_strength_trend: str = "UNKNOWN"
+    matched_market_symbol: str = ""
+    matched_market_status: str = "UNKNOWN"
+    support_confirmation_status: str = "PENDING"
+    recent_tail_status: str = "UNKNOWN"
+    conservative_rr: float = 0.0
+    reasons: list[str] = field(default_factory=list)
+    risk_tags: list[str] = field(default_factory=list)
+
+
+@dataclass
 class Strategy6DryTail:
     dry_stable_score: int = 0
     dry_tail_pass: bool = False
@@ -387,6 +407,7 @@ class Strategy6Evaluation:
     ranking_score: int = 0
     setup_quality: Strategy6SetupQuality = field(default_factory=Strategy6SetupQuality)
     tail_regime: Strategy6TailRegime = field(default_factory=Strategy6TailRegime)
+    selection_diagnostics: Strategy6SelectionDiagnostics = field(default_factory=Strategy6SelectionDiagnostics)
     vcp_observation: Strategy6VcpObservation = field(default_factory=Strategy6VcpObservation)
     strategy_version: str = ""
     config_hash: str = ""
@@ -417,6 +438,7 @@ class Strategy6Evaluation:
         tail = self.tail_paths
         quality = self.setup_quality
         regime = self.tail_regime
+        diagnostics = self.selection_diagnostics
         ttm = self.ttm_squeeze
         vcp = self.vcp_observation
         vcp_quality = vcp.quality
@@ -448,6 +470,19 @@ class Strategy6Evaluation:
             "return_20": ind.return_20,
             "relative_strength_20": ind.relative_strength_20,
             "relative_strength_20_observed": ind.relative_strength_20_observed,
+            "selection_diagnostics_version": diagnostics.model_version,
+            "relative_strength_5": diagnostics.relative_strength_5,
+            "relative_strength_10": diagnostics.relative_strength_10,
+            "relative_strength_60": diagnostics.relative_strength_60,
+            "relative_strength_periods_observed": diagnostics.relative_strength_periods_observed,
+            "relative_strength_trend": diagnostics.relative_strength_trend,
+            "matched_market_symbol": diagnostics.matched_market_symbol,
+            "matched_market_status": diagnostics.matched_market_status,
+            "support_confirmation_status": diagnostics.support_confirmation_status,
+            "recent_tail_status": diagnostics.recent_tail_status,
+            "conservative_rr": diagnostics.conservative_rr,
+            "selection_diagnostic_reasons": diagnostics.reasons,
+            "selection_diagnostic_risk_tags": diagnostics.risk_tags,
             "amount_avg_10": ind.amount_avg_10,
             "amount_avg_30": ind.amount_avg_30,
             "amount_avg_60": ind.amount_avg_60,

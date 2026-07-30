@@ -325,6 +325,15 @@ def test_engine_outputs_full_candidate_trade_plan():
     assert candidate["setup_quality_score"] >= 0
     assert candidate["support_reaction_score"] >= 0
     assert candidate["path_evidence_score"] >= 0
+    assert candidate["selection_diagnostics_version"] == "S6_SELECTION_DIAGNOSTICS_V1"
+    assert candidate["support_confirmation_status"] in {
+        "CONFIRMED", "PARTIAL", "PENDING", "FAILED",
+    }
+    assert candidate["recent_tail_status"] in {
+        "STABLE", "FORMING", "DETERIORATING", "UNKNOWN",
+    }
+    assert candidate["matched_market_symbol"] == "sz399001"
+    assert candidate["conservative_rr"] == candidate["objective_rr_1"]
     assert candidate["entry_archetype"] in {
         "SUPPORT_PULLBACK", "PIVOT_BREAKOUT", "FAILED_BREAKOUT_RECLAIM",
         "WAIT_BREAKOUT", "NONE",

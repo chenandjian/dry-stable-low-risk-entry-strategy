@@ -133,14 +133,37 @@ def compute_relative_strength_periods(
     *,
     expected_trade_date: str = "",
 ) -> dict[int, float] | None:
-    """Return stock minus same-day HS300 returns for 5/10/20 days."""
+    """Return stock minus same-day HS300 returns for 5/10/20/60 days."""
     market_rows = _hs300_rows(market_data_by_symbol or {}, expected_trade_date)
-    if not market_rows or len(stock_rows) <= 20:
+    if not market_rows or len(stock_rows) <= 20 or len(market_rows) <= 20:
         return None
-    return {
+    periods = {
         days: round(_return(stock_rows, days) - _return(market_rows, days), 6)
         for days in (5, 10, 20)
     }
+    if len(stock_rows) > 60 and len(market_rows) > 60:
+        periods[60] = round(_return(stock_rows, 60) - _return(market_rows, 60), 6)
+    return periods
+
+
+def evaluate_single_index_context(
+    symbol: str,
+    market_data_by_symbol: dict[str, list[dict]] | None,
+    *,
+    expected_trade_date: str = "",
+) -> str:
+    """Evaluate one broad index for board-matched diagnostic use."""
+    rows = (market_data_by_symbol or {}).get(symbol) or []
+    status = _index_status(rows, expected_trade_date=expected_trade_date)
+    if not status["observed"]:
+        return "UNKNOWN"
+    if status["volume_down_risk"]:
+        return "MARKET_RISK"
+    if status["weak"]:
+        return "MARKET_WEAK"
+    if status["above_ma20"] and status["ma20_above_ma50"]:
+        return "MARKET_STRONG"
+    return "MARKET_NEUTRAL"
 
 
 def _market_return_20(data: dict[str, list[dict]], *, expected_trade_date: str = "") -> float:

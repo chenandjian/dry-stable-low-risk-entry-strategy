@@ -19,6 +19,7 @@ from strategy6.phase import segment_phases
 from strategy6.pattern import detect_pattern
 from strategy6.pressure import apply_pressure_tags
 from strategy6.scorer import score_strategy6
+from strategy6.selection_diagnostics import evaluate_selection_diagnostics
 from strategy6.setup_quality import evaluate_setup_quality
 from strategy6.strong_start import evaluate_strong_start
 from strategy6.support import evaluate_support
@@ -199,6 +200,16 @@ class StrongVcpTailEngine:
             entry_archetype=entry_archetype,
             entry_trigger_price=brooks_tail.trade_trigger.trigger_price,
         )
+        selection_diagnostics = evaluate_selection_diagnostics(
+            rows,
+            code=code,
+            support=support,
+            tail_regime=tail_regime,
+            trade_plan=trade_plan,
+            setup_quality=setup_quality,
+            market_data_by_symbol=market_data_by_symbol,
+            expected_trade_date=indicators.evaluation_date,
+        )
         score = score_strategy6(
             indicators, start, phase, pattern, support, dry_tail, trade_plan, self.config,
             box_tail=box_tail,
@@ -211,6 +222,7 @@ class StrongVcpTailEngine:
             box_tail=box_tail,
             brooks_tail=brooks_tail,
             setup_quality=setup_quality,
+            selection_diagnostics=selection_diagnostics,
         )
         normalized_quote_status = str(quote_status or "").lower()
         if normalized_quote_status == "suspended":
@@ -231,6 +243,7 @@ class StrongVcpTailEngine:
             self.config,
             box_tail=box_tail,
             brooks_tail=brooks_tail,
+            selection_diagnostics=selection_diagnostics,
         )
         pre_market_candidate_type = ""
         if (
@@ -252,6 +265,7 @@ class StrongVcpTailEngine:
                 self.config,
                 box_tail=box_tail,
                 brooks_tail=brooks_tail,
+                selection_diagnostics=selection_diagnostics,
             )
             if audited_type in {"READY_CANDIDATE", "KEY_CANDIDATE"}:
                 pre_market_candidate_type = audited_type
@@ -279,6 +293,7 @@ class StrongVcpTailEngine:
             ranking_score=ranking_score,
             setup_quality=setup_quality,
             tail_regime=tail_regime,
+            selection_diagnostics=selection_diagnostics,
             vcp_observation=vcp_observation,
             strategy_version=STRATEGY6_VERSION,
             config_hash=strategy6_config_hash(self.config),

@@ -21,6 +21,7 @@ def build_parser() -> argparse.ArgumentParser:
     for command in (
         "audit-data", "fetch-index", "baseline", "experiments", "optimize",
         "brooks-optimize", "brooks-validate",
+        "selection-optimize",
         "tail-regime-full",
         "comprehensive-plan", "comprehensive-run", "comprehensive-status",
         "comprehensive-report",

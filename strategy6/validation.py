@@ -106,6 +106,13 @@ DEFAULT_STRATEGY6_CONFIG = {
     "setup_quality_min_ready": 18,
     "support_reaction_min_key": 3,
     "support_reaction_min_ready": 5,
+    "selection_optimization": {
+        "support_confirmation_enabled": False,
+        "conservative_rr_enabled": False,
+        "rs_fading_downgrade_enabled": False,
+        "tail_deterioration_filter_enabled": False,
+        "matched_market_downgrade_enabled": False,
+    },
     "ttm_squeeze": {
         "enabled": True,
         "bb_period": 20,
@@ -263,7 +270,7 @@ def resolve_strategy6_config(config: dict | None) -> dict:
                         for nested_key, nested_value in compact_override.items()
                         if nested_key in raw["box_tail"]["compact_kline"]
                     })
-            elif key in {"brooks_tail", "ttm_squeeze"} and isinstance(value, dict):
+            elif key in {"brooks_tail", "ttm_squeeze", "selection_optimization"} and isinstance(value, dict):
                 _merge_known_dict(raw[key], value)
             else:
                 raw[key] = value
@@ -346,6 +353,14 @@ def resolve_strategy6_config(config: dict | None) -> dict:
     raw["pattern_filter_enabled"] = bool(raw.get("pattern_filter_enabled", True))
     if raw.get("pattern_filter_mode") not in {"strict", "downgrade", "score_only"}:
         raise ValueError("pattern_filter_mode must be one of strict/downgrade/score_only")
+    for key in (
+        "support_confirmation_enabled",
+        "conservative_rr_enabled",
+        "rs_fading_downgrade_enabled",
+        "tail_deterioration_filter_enabled",
+        "matched_market_downgrade_enabled",
+    ):
+        raw["selection_optimization"][key] = bool(raw["selection_optimization"].get(key, False))
     _validate_between(raw, "normal_start_self_amount_percentile", 0, 1)
     _validate_between(raw, "vcp_contraction_range_ratio", 0, 1)
     _validate_between(raw, "vcp_contraction_volume_ratio", 0, 1)
