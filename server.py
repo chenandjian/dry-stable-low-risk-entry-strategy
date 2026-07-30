@@ -1338,21 +1338,38 @@ def _invalid_ohlc_reason(row: dict | None) -> str | None:
     return None
 
 
-def _load_kline_health_inputs(config: dict | None = None) -> tuple[dict[str, dict], dict[str, dict]]:
+def _load_kline_health_inputs(
+    config: dict | None = None,
+    *,
+    target_trade_date: str,
+) -> tuple[dict[str, dict], dict[str, dict]]:
     conn = db.get_conn()
-    latest_rows = conn.execute(
-        """SELECT o.code, o.date, o.open, o.high, o.low, o.close, o.volume, o.turnover
-           FROM daily_ohlc o
-           JOIN (
-                SELECT code, MAX(date) AS latest_date
-                FROM daily_ohlc
-                GROUP BY code
-           ) latest
-             ON latest.code = o.code AND latest.latest_date = o.date"""
+    pool_rows = conn.execute("SELECT code, name, market FROM stock_pool").fetchall()
+    pool_stocks = [
+        {"code": row[0], "name": row[1] or "", "market": row[2] or ""}
+        for row in pool_rows
+    ]
+    if config is not None:
+        pool_stocks = filter_stock_pool_for_scan(
+            [stock.copy() for stock in pool_stocks], config
+        )
+    pool_codes = {stock["code"] for stock in pool_stocks}
+
+    metadata_rows = conn.execute(
+        """SELECT m.code, m.latest_date, o.open, o.high, o.low, o.close,
+                  o.volume, o.turnover, m.fetched_at
+           FROM daily_ohlc_metadata m
+           LEFT JOIN daily_ohlc o
+             ON o.code=m.code AND o.date=m.latest_date"""
     ).fetchall()
-    latest_by_code = {
-        row[0]: {
-            "code": row[0],
+    latest_by_code: dict[str, dict] = {}
+    fetched_at_by_code: dict[str, str | None] = {}
+    for row in metadata_rows:
+        code = row[0]
+        if code not in pool_codes:
+            continue
+        latest_by_code[code] = {
+            "code": code,
             "date": row[1],
             "open": row[2],
             "high": row[3],
@@ -1361,23 +1378,54 @@ def _load_kline_health_inputs(config: dict | None = None) -> tuple[dict[str, dic
             "volume": row[6],
             "turnover": row[7],
         }
-        for row in latest_rows
-    }
+        fetched_at_by_code[code] = row[8]
+
+    # Compatibility for old rows written before provenance metadata existed.
+    missing_metadata_codes = sorted(pool_codes - set(latest_by_code))
+    for start in range(0, len(missing_metadata_codes), 500):
+        chunk = missing_metadata_codes[start:start + 500]
+        if not chunk:
+            continue
+        placeholders = ",".join("?" for _ in chunk)
+        legacy_rows = conn.execute(
+            f"""SELECT o.code, o.date, o.open, o.high, o.low, o.close,
+                       o.volume, o.turnover
+                FROM daily_ohlc o
+                JOIN (
+                    SELECT code, MAX(date) AS latest_date
+                    FROM daily_ohlc
+                    WHERE code IN ({placeholders})
+                    GROUP BY code
+                ) latest
+                  ON latest.code=o.code AND latest.latest_date=o.date""",
+            chunk,
+        ).fetchall()
+        for row in legacy_rows:
+            latest_by_code[row[0]] = {
+                "code": row[0],
+                "date": row[1],
+                "open": row[2],
+                "high": row[3],
+                "low": row[4],
+                "close": row[5],
+                "volume": row[6],
+                "turnover": row[7],
+            }
 
     task_rows = conn.execute(
         """SELECT code, name, market, status, status_reason, error_detail,
                   source_errors, kline_latest_date, kline_fetched_at,
                   kline_target_trade_date, quote_status, updated_at
            FROM task_stocks
-           WHERE kline_fetched_at IS NOT NULL
-              OR kline_latest_date IS NOT NULL
-              OR status = 'failed'
-           ORDER BY COALESCE(kline_fetched_at, updated_at) DESC, updated_at DESC"""
+           WHERE kline_target_trade_date = ?
+           ORDER BY COALESCE(kline_fetched_at, updated_at) DESC,
+                    updated_at DESC, rowid DESC""",
+        (target_trade_date,),
     ).fetchall()
     task_by_code: dict[str, dict] = {}
     for row in task_rows:
         code = row[0]
-        if code in task_by_code:
+        if code not in pool_codes or code in task_by_code:
             continue
         task_by_code[code] = {
             "code": code,
@@ -1393,14 +1441,23 @@ def _load_kline_health_inputs(config: dict | None = None) -> tuple[dict[str, dic
             "quote_status": row[10] or "not_requested",
         }
 
-    pool_rows = conn.execute("SELECT code, name, market FROM stock_pool").fetchall()
-    pool_stocks = [
-        {"code": row[0], "name": row[1] or "", "market": row[2] or ""}
-        for row in pool_rows
-    ]
-    if config is not None:
-        # Match the scan universe without refreshing the external stock pool.
-        pool_stocks = filter_stock_pool_for_scan([stock.copy() for stock in pool_stocks], config)
+    for code, latest_row in latest_by_code.items():
+        if code in task_by_code:
+            continue
+        task_by_code[code] = {
+            "code": code,
+            "name": "",
+            "market": "",
+            "task_status": None,
+            "status_reason": None,
+            "error_detail": None,
+            "source_errors": None,
+            "kline_latest_date": latest_row.get("date"),
+            "kline_fetched_at": fetched_at_by_code.get(code),
+            "kline_target_trade_date": target_trade_date,
+            "quote_status": "not_requested",
+        }
+
     for stock in pool_stocks:
         code = stock["code"]
         meta = task_by_code.setdefault(
@@ -1505,7 +1562,10 @@ def _filter_kline_health_items(items: list[dict], status: str) -> list[dict]:
 
 def _build_kline_health_items(config: dict) -> tuple[dict, list[dict]]:
     context = build_cache_freshness_context(now=_now())
-    latest_by_code, task_by_code = _load_kline_health_inputs(config)
+    latest_by_code, task_by_code = _load_kline_health_inputs(
+        config,
+        target_trade_date=context.target_trade_date,
+    )
     codes = sorted(set(latest_by_code) | set(task_by_code))
     items = [
         _classify_kline_health_item(
@@ -1533,7 +1593,7 @@ def _build_kline_health_items(config: dict) -> tuple[dict, list[dict]]:
 async def get_kline_health(status: str = "problem", page: int = 1, page_size: int = 100):
     """Return market-wide local K-line freshness and anomaly diagnostics."""
     config = _ensure_db_initialized_from_config()
-    summary, items = _build_kline_health_items(config)
+    summary, items = await asyncio.to_thread(_build_kline_health_items, config)
     filtered = _filter_kline_health_items(items, status)
 
     page = max(1, int(page or 1))
@@ -1555,7 +1615,7 @@ async def refresh_kline_health(payload: dict | None = None):
     status = payload.get("status") or "problem"
     limit = min(500, max(1, int(payload.get("limit") or 200)))
     config = _ensure_db_initialized_from_config()
-    _, items = _build_kline_health_items(config)
+    _, items = await asyncio.to_thread(_build_kline_health_items, config)
     filtered = _filter_kline_health_items(items, status)
     targets = [item for item in filtered if item.get("needs_refetch")][:limit]
     skipped_count = sum(1 for item in filtered if not item.get("needs_refetch"))
@@ -1794,12 +1854,16 @@ async def refresh_stock_kline(code: str):
         skipped=1 if no_trade else 0,
     )
 
-    latest_by_code, task_by_code = _load_kline_health_inputs(config)
+    health_context = build_cache_freshness_context(now=_now())
+    latest_by_code, task_by_code = _load_kline_health_inputs(
+        config,
+        target_trade_date=health_context.target_trade_date,
+    )
     summary = _classify_kline_health_item(
         code,
         latest_by_code.get(code),
         task_by_code.get(code, stock),
-        build_cache_freshness_context(now=_now()),
+        health_context,
     )
     return {
         "code": code,

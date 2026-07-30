@@ -889,6 +889,10 @@ def _ensure_task_stocks_table(conn: sqlite3.Connection):
         "CREATE INDEX IF NOT EXISTS idx_task_stocks_code_target_fetch "
         "ON task_stocks(code, kline_target_trade_date, kline_fetched_at DESC, updated_at DESC)"
     )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_task_stocks_target_fetch "
+        "ON task_stocks(kline_target_trade_date, kline_fetched_at DESC, updated_at DESC)"
+    )
 
 
 
@@ -945,6 +949,9 @@ def save_ohlc(code: str, data: list[dict]):
     """Insert or replace OHLC data for a stock."""
     conn = get_conn()
     conn.execute("DELETE FROM daily_ohlc WHERE code = ?", (code,))
+    # This legacy writer has no source/fetch metadata; retaining an older row
+    # would make diagnostics report a stale date after the OHLC replacement.
+    conn.execute("DELETE FROM daily_ohlc_metadata WHERE code = ?", (code,))
     conn.executemany(
         """INSERT INTO daily_ohlc (code, date, open, high, low, close, volume, turnover)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",

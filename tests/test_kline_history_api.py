@@ -1,5 +1,7 @@
+import asyncio
 from datetime import datetime
 import json
+import threading
 
 import pytest
 from fastapi.testclient import TestClient
@@ -630,3 +632,97 @@ def test_tickflow_freshness_api_returns_structured_gateway_error(monkeypatch, tm
     assert response.status_code == 502
     assert response.json()["error"] == "TICKFLOW_FRESHNESS_CHECK_FAILED"
     assert "SDK unavailable" in response.json()["message"]
+
+
+def test_kline_health_ignores_failed_attempts_for_an_old_target_date(monkeypatch, tmp_path):
+    db_path = tmp_path / "cuphandle.db"
+    db.init_db(str(db_path))
+    db.save_stock_pool([{"code": "000001", "name": "正常股份", "market": "SZ"}])
+    db.replace_ohlc_with_metadata(
+        "000001",
+        [_row("2026-06-16", 11)],
+        source="tickflow",
+        fetched_at="2026-06-16 15:12:00",
+    )
+    db.create_scan_task("old-failed-task", "2026-06-15 15:20:00", total_stocks=1)
+    db.save_task_stocks(
+        "old-failed-task",
+        [{"code": "000001", "name": "正常股份", "market": "SZ"}],
+    )
+    db.update_task_stock(
+        "old-failed-task",
+        "000001",
+        status="failed",
+        status_reason="OLD_FETCH_FAILED",
+        kline_fetched_at="2026-06-15 15:12:00",
+        kline_target_trade_date="2026-06-15",
+    )
+    monkeypatch.setattr(
+        server,
+        "load_config",
+        lambda path="config.yaml": {"data": {"database_path": str(db_path)}},
+    )
+    monkeypatch.setattr(server, "_now", lambda: datetime(2026, 6, 16, 15, 20, 0))
+
+    response = TestClient(server.app).get("/api/kline-health", params={"status": "all"})
+
+    assert response.status_code == 200
+    item = response.json()["items"][0]
+    assert item["health_status"] == "fresh"
+    assert item["needs_refetch"] is False
+
+
+def test_kline_health_does_not_use_stale_metadata_after_legacy_replacement(monkeypatch, tmp_path):
+    db_path = tmp_path / "cuphandle.db"
+    db.init_db(str(db_path))
+    db.save_stock_pool([{"code": "000001", "name": "正常股份", "market": "SZ"}])
+    db.replace_ohlc_with_metadata(
+        "000001",
+        [_row("2026-06-15", 10)],
+        source="tickflow",
+        fetched_at="2026-06-15 15:12:00",
+    )
+    db.save_ohlc("000001", [_row("2026-06-15", 10), _row("2026-06-16", 11)])
+    db.create_scan_task("current-task", "2026-06-16 15:20:00", total_stocks=1)
+    db.save_task_stocks(
+        "current-task",
+        [{"code": "000001", "name": "正常股份", "market": "SZ"}],
+    )
+    db.update_task_stock(
+        "current-task",
+        "000001",
+        status="scanned",
+        kline_latest_date="2026-06-16",
+        kline_fetched_at="2026-06-16 15:12:00",
+        kline_target_trade_date="2026-06-16",
+    )
+    monkeypatch.setattr(
+        server,
+        "load_config",
+        lambda path="config.yaml": {"data": {"database_path": str(db_path)}},
+    )
+    monkeypatch.setattr(server, "_now", lambda: datetime(2026, 6, 16, 15, 20, 0))
+
+    response = TestClient(server.app).get("/api/kline-health", params={"status": "all"})
+
+    assert response.status_code == 200
+    item = response.json()["items"][0]
+    assert item["latest_kline_date"] == "2026-06-16"
+    assert item["health_status"] == "fresh"
+
+
+def test_kline_health_build_runs_outside_the_async_event_loop(monkeypatch):
+    caller_thread = threading.get_ident()
+    worker_threads = []
+    monkeypatch.setattr(server, "_ensure_db_initialized_from_config", lambda: {})
+
+    def fake_build(_config):
+        worker_threads.append(threading.get_ident())
+        return ({"total": 0}, [])
+
+    monkeypatch.setattr(server, "_build_kline_health_items", fake_build)
+
+    result = asyncio.run(server.get_kline_health())
+
+    assert result["summary"]["total"] == 0
+    assert worker_threads and worker_threads[0] != caller_thread
