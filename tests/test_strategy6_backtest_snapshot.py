@@ -1,9 +1,12 @@
 from strategy6.backtest.snapshot import (
+    annotate_candidate_events,
     authoritative_tail_paths,
+    build_candidate_event_id,
     build_setup_id,
     is_trade_ready_snapshot,
     rebuild_stock_signals,
 )
+from strategy6.backtest.models import BacktestSignal
 from strategy6.engine import StrongVcpTailEngine
 from strategy6.ttm_squeeze import calculate_ttm_squeeze
 
@@ -145,6 +148,53 @@ def test_wait_breakout_snapshot_is_observable_but_not_trade_ready():
     assert authoritative_tail_paths(waiting) == ["BOX"]
     assert is_trade_ready_snapshot(waiting) is False
     assert is_trade_ready_snapshot(FakeEvaluation("2025-01-05").to_candidate_dict()) is True
+
+
+def test_candidate_event_identity_uses_strong_start_cycle_not_mutable_setup_details():
+    first = FakeEvaluation(
+        "2025-01-05", entry_archetype="WAIT_BREAKOUT", start_date="2025-01-01",
+    ).to_candidate_dict()
+    second = FakeEvaluation(
+        "2025-01-06", entry_archetype="SUPPORT_PULLBACK", start_date="2025-01-01",
+        pivot_price=10.7, box_start_date="2025-01-04",
+    ).to_candidate_dict()
+
+    assert build_setup_id(first) != build_setup_id(second)
+    assert build_candidate_event_id(first, fallback_setup_id="setup-a") == build_candidate_event_id(
+        second, fallback_setup_id="setup-b",
+    )
+
+
+def test_candidate_event_annotation_marks_first_candidate_and_first_executable_signal():
+    snapshots = [
+        FakeEvaluation("2025-01-05", entry_archetype="WAIT_BREAKOUT").to_candidate_dict(),
+        FakeEvaluation("2025-01-06", entry_archetype="SUPPORT_PULLBACK").to_candidate_dict(),
+        FakeEvaluation("2025-01-07", entry_archetype="SUPPORT_PULLBACK").to_candidate_dict(),
+        FakeEvaluation("2025-01-08", entry_archetype="PIVOT_BREAKOUT").to_candidate_dict(),
+    ]
+    signals = [
+        BacktestSignal(
+            parameter_set_id="s6ps-a", code="000001", name="样本",
+            evaluation_date=snapshot["evaluation_date"], setup_id=f"setup-{index}",
+            tail_path="BOX", candidate_type="KEY_CANDIDATE", snapshot=snapshot,
+        )
+        for index, snapshot in enumerate(snapshots, start=1)
+    ]
+
+    annotated = annotate_candidate_events(signals)
+
+    assert len({signal.snapshot["candidate_event_id"] for signal in annotated}) == 1
+    assert [signal.snapshot["candidate_event_sequence"] for signal in annotated] == [1, 2, 3, 4]
+    assert annotated[0].snapshot["is_first_candidate_event"] is True
+    assert annotated[0].snapshot["first_candidate_date"] == "2025-01-05"
+    assert annotated[0].snapshot["is_first_executable_event"] is False
+    assert annotated[0].snapshot["first_executable_date"] == ""
+    assert annotated[1].snapshot["is_first_executable_event"] is True
+    assert annotated[1].snapshot["first_executable_date"] == "2025-01-06"
+    assert annotated[1].snapshot["is_first_entry_archetype_event"] is True
+    assert annotated[2].snapshot["is_first_entry_archetype_event"] is False
+    assert annotated[3].snapshot["is_first_entry_archetype_event"] is False
+    assert annotated[3].snapshot["first_entry_archetype_date"] == "2025-01-06"
 
 
 def test_setup_id_is_stable_but_parameter_set_keeps_snapshots_independent():

@@ -6,7 +6,7 @@ from dataclasses import asdict
 
 from strategy6.backtest.execution import simulate_frozen_trade
 from strategy6.backtest.metrics import calculate_trade_metrics
-from strategy6.backtest.snapshot import is_trade_ready_snapshot
+from strategy6.backtest.snapshot import is_trade_ready_snapshot, signal_selection_key
 
 
 MIN_STRESS_CLOSED_TRADE_RETENTION = 0.50
@@ -111,12 +111,14 @@ def replay_stress_scenarios(signals, *, load_rows, market_dates: list[str], base
         orders = 0
         trades = []
         seen: set[str] = set()
+        selection_mode = str(scenario["config"].get("signal_selection_mode") or "LEGACY_SETUP_ID")
         for signal in sorted(signals, key=lambda item: (item.evaluation_date, item.code)):
             if not is_trade_ready_snapshot({"tail_path": signal.tail_path, **signal.snapshot}):
                 continue
-            if signal.setup_id in seen:
+            selection_key = signal_selection_key(signal, selection_mode)
+            if selection_key in seen:
                 continue
-            seen.add(signal.setup_id)
+            seen.add(selection_key)
             outcome = simulate_frozen_trade(signal, load_rows(signal.code), market_dates, scenario["config"])
             orders += 1
             if outcome.trade is None:
@@ -139,12 +141,14 @@ def replay_frozen_signals(signals, *, load_rows, market_dates: list[str], config
     trades = []
     setup_ids = []
     seen: set[str] = set()
+    selection_mode = str(config.get("signal_selection_mode") or "LEGACY_SETUP_ID")
     for signal in sorted(signals, key=lambda item: (item.evaluation_date, item.code)):
         if not is_trade_ready_snapshot({"tail_path": signal.tail_path, **signal.snapshot}):
             continue
-        if signal.setup_id in seen:
+        selection_key = signal_selection_key(signal, selection_mode)
+        if selection_key in seen:
             continue
-        seen.add(signal.setup_id)
+        seen.add(selection_key)
         setup_ids.append(signal.setup_id)
         outcome = simulate_frozen_trade(signal, load_rows(signal.code), market_dates, config)
         orders += 1

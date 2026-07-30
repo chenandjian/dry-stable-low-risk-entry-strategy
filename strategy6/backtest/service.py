@@ -13,6 +13,7 @@ from strategy6.backtest.snapshot import (
     path_metadata,
     quality_score_band,
     rebuild_stock_signals,
+    signal_selection_key,
 )
 
 
@@ -35,7 +36,8 @@ def run_parameter_research(
     signals = []
     orders = []
     trades = []
-    seen_setups: set[str] = set()
+    seen_signal_events: set[str] = set()
+    signal_selection_mode = str(backtest_config.get("signal_selection_mode") or "LEGACY_SETUP_ID")
     for code in sorted(data_by_code):
         item = data_by_code[code]
         stock_rows = list(item.get("rows") or [])
@@ -75,9 +77,10 @@ def run_parameter_research(
                 trade_ready = is_trade_ready_snapshot(signal.snapshot)
             if not trade_ready:
                 continue
-            if signal.setup_id in seen_setups:
+            signal_event_key = signal_selection_key(signal, signal_selection_mode)
+            if signal_event_key in seen_signal_events:
                 continue
-            seen_setups.add(signal.setup_id)
+            seen_signal_events.add(signal_event_key)
             outcome = simulate_frozen_trade(signal, stock_rows, market_dates, backtest_config)
             order_record = {
                 "order_id": outcome.order.order_id,
@@ -92,6 +95,12 @@ def run_parameter_research(
                 "expire_date": outcome.order.expire_date,
                 "audit_tags": outcome.audit_tags,
                 "entry_archetype": signal.snapshot.get("entry_archetype", ""),
+                "candidate_event_id": signal.snapshot.get("candidate_event_id", signal.setup_id),
+                "candidate_event_sequence": signal.snapshot.get("candidate_event_sequence", 0),
+                "first_candidate_date": signal.snapshot.get("first_candidate_date", ""),
+                "first_executable_date": signal.snapshot.get("first_executable_date", ""),
+                "signal_selection_mode": signal_selection_mode,
+                "entry_mode": backtest_config["execution"].get("entry_mode", "FROZEN_TRADE_PLAN"),
             }
             orders.append(order_record)
             if outcome.trade is None:
@@ -112,6 +121,12 @@ def run_parameter_research(
                 "net_profit": round(outcome.trade.net_return * outcome.trade.entry_price * 100, 6),
                 "stop_loss_price": signal.snapshot.get("stop_loss_price", 0),
                 "entry_archetype": signal.snapshot.get("entry_archetype", ""),
+                "candidate_event_id": signal.snapshot.get("candidate_event_id", signal.setup_id),
+                "candidate_event_sequence": signal.snapshot.get("candidate_event_sequence", 0),
+                "first_candidate_date": signal.snapshot.get("first_candidate_date", ""),
+                "first_executable_date": signal.snapshot.get("first_executable_date", ""),
+                "signal_selection_mode": signal_selection_mode,
+                "entry_mode": backtest_config["execution"].get("entry_mode", "FROZEN_TRADE_PLAN"),
                 "setup_quality_score": signal.snapshot.get("setup_quality_score", 0),
                 "support_reaction_score": signal.snapshot.get("support_reaction_score", 0),
                 "start_event_quality_score": signal.snapshot.get("start_event_quality_score", 0),

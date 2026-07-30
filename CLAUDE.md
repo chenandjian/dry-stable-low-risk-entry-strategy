@@ -124,6 +124,7 @@ npm --prefix web run preview
 - **策略6执行调优：** 信号参数冻结后，买入有效期和最大持有期仅对冻结信号重放。费用不得低于BASE，T+1、一字涨跌停、缺失K线和STOP_FIRST固定；高成本、70%成交率和延迟一天必须实际重放。
 - **策略6入场质量研究：** `strategy6/entry_quality.py` 输出入场时机状态和本股历史路径概率修正RR，字段可持久化、前端查看和导出；`entry_quality.entry_timing_enabled` 与 `probability_rr_enabled` 默认关闭，未通过训练/验证前不得影响正式候选。
 - **策略6入场质量结论：** 冻结任务 `s6bt-772c046cb6c982f61fc5` 的2023-2025真实指数重放中，时机、概率RR及组合方案均未同时达到正期望/PF门禁，结论为 `KEEP_CURRENT_RULES / NO_TRIAL_PASSED_SCREEN`，生产配置未修改。
+- **策略6首次事件与分原型成交研究：** 回测支持默认关闭的 `FIRST_EVENT_PER_START` 与 `ARCHETYPE_TRIGGERED`，旧模式继续使用 `LEGACY_SETUP_ID + FROZEN_TRADE_PLAN`。同一冻结任务的E0-E3真实重放均未通过训练/验证门禁；首次事件方案仅改善2025期望但PF和训练期不合格，分原型样本只覆盖支撑低吸且结果更差，生产配置未修改。
 - **策略6全面调优CLI：** `comprehensive-plan` 创建身份，`comprehensive-run` 串行推进一层，`comprehensive-status` 查看恢复状态，`comprehensive-report` 输出Markdown/JSON及参数、候选、订单、交易CSV。所有结论只供人工审批，禁止自动写生产配置。
 - **策略6 VCP持续观察池（V4.4）：** `strategy6/vcp_observer.py` 继续独立识别VCP形成、近支点、突破后和延伸状态，不参与评分、硬过滤或正式候选分类；`strategy6/vcp_history.py` 使用当前正式参数、真实个股日线和真实指数日线，从当前VCP强势起点到评估日逐日 `as-of` 重放。前端“VCP形态候选”只展示当前VCP有效且本轮曾产生正式非 `REJECTED` 候选的股票；起点前候选、纯VCP观察和过期/失效VCP均不构成资格。纯观察记录仍为 `REJECTED/observation`，不得赋予虚假的交易入池日期或买入语义。
 - **策略6 VCP形态质量分（V4.5）：** `strategy6/vcp_quality.py` 使用当前VCP收缩证据按收缩层次、振幅、成交量、低点、时间和支点六维计算固定绝对分 `VCP_QUALITY_V1`。该分数只用于“VCP形态候选”板块排序、解释和导出，禁止进入策略总分、候选资格、硬过滤、交易分类、生命周期或交易计划。旧任务评分字段保持NULL并显示“未评分”，不得伪造为0分或删除旧候选。
