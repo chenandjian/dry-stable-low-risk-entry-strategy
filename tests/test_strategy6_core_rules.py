@@ -334,6 +334,17 @@ def test_engine_outputs_full_candidate_trade_plan():
     }
     assert candidate["matched_market_symbol"] == "sz399001"
     assert candidate["conservative_rr"] == candidate["objective_rr_1"]
+    assert candidate["entry_timing_version"] == "S6_ENTRY_TIMING_V1"
+    assert candidate["entry_timing_state"] in {
+        "INVALID", "WAITING_BREAKOUT", "SUPPORT_FORMING", "SUPPORT_CONFIRMED",
+        "BREAKOUT_CONFIRMED", "RECLAIM_CONFIRMED", "NOT_APPLICABLE",
+    }
+    assert isinstance(candidate["entry_timing_executable"], bool)
+    assert candidate["probability_rr_version"] == "S6_PROBABILITY_RR_V1"
+    assert candidate["probability_rr_status"] in {
+        "RELIABLE", "INSUFFICIENT_SAMPLE", "INVALID_TRADE_PLAN", "NOT_EVALUATED",
+    }
+    assert candidate["probability_rr_sample_count"] >= 0
     assert candidate["entry_archetype"] in {
         "SUPPORT_PULLBACK", "PIVOT_BREAKOUT", "FAILED_BREAKOUT_RECLAIM",
         "WAIT_BREAKOUT", "NONE",

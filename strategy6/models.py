@@ -170,6 +170,33 @@ class Strategy6SelectionDiagnostics:
 
 
 @dataclass
+class Strategy6EntryTiming:
+    model_version: str = "S6_ENTRY_TIMING_V1"
+    state: str = "NOT_APPLICABLE"
+    executable: bool = False
+    evidence_count: int = 0
+    reasons: list[str] = field(default_factory=list)
+    risk_tags: list[str] = field(default_factory=list)
+
+
+@dataclass
+class Strategy6ProbabilityAdjustedRR:
+    model_version: str = "S6_PROBABILITY_RR_V1"
+    status: str = "NOT_EVALUATED"
+    reliable: bool = False
+    sample_count: int = 0
+    lookback_days: int = 0
+    horizon_days: int = 0
+    risk_atr: float = 0.0
+    target_1_atr: float = 0.0
+    target_2_atr: float = 0.0
+    target_1_hit_probability: float = 0.0
+    target_2_hit_probability: float = 0.0
+    probability_adjusted_r: float = 0.0
+    reasons: list[str] = field(default_factory=list)
+
+
+@dataclass
 class Strategy6DryTail:
     dry_stable_score: int = 0
     dry_tail_pass: bool = False
@@ -408,6 +435,8 @@ class Strategy6Evaluation:
     setup_quality: Strategy6SetupQuality = field(default_factory=Strategy6SetupQuality)
     tail_regime: Strategy6TailRegime = field(default_factory=Strategy6TailRegime)
     selection_diagnostics: Strategy6SelectionDiagnostics = field(default_factory=Strategy6SelectionDiagnostics)
+    entry_timing: Strategy6EntryTiming = field(default_factory=Strategy6EntryTiming)
+    probability_rr: Strategy6ProbabilityAdjustedRR = field(default_factory=Strategy6ProbabilityAdjustedRR)
     vcp_observation: Strategy6VcpObservation = field(default_factory=Strategy6VcpObservation)
     strategy_version: str = ""
     config_hash: str = ""
@@ -439,6 +468,8 @@ class Strategy6Evaluation:
         quality = self.setup_quality
         regime = self.tail_regime
         diagnostics = self.selection_diagnostics
+        entry_timing = self.entry_timing
+        probability_rr = self.probability_rr
         ttm = self.ttm_squeeze
         vcp = self.vcp_observation
         vcp_quality = vcp.quality
@@ -483,6 +514,25 @@ class Strategy6Evaluation:
             "conservative_rr": diagnostics.conservative_rr,
             "selection_diagnostic_reasons": diagnostics.reasons,
             "selection_diagnostic_risk_tags": diagnostics.risk_tags,
+            "entry_timing_version": entry_timing.model_version,
+            "entry_timing_state": entry_timing.state,
+            "entry_timing_executable": entry_timing.executable,
+            "entry_timing_evidence_count": entry_timing.evidence_count,
+            "entry_timing_reasons": entry_timing.reasons,
+            "entry_timing_risk_tags": entry_timing.risk_tags,
+            "probability_rr_version": probability_rr.model_version,
+            "probability_rr_status": probability_rr.status,
+            "probability_rr_reliable": probability_rr.reliable,
+            "probability_rr_sample_count": probability_rr.sample_count,
+            "probability_rr_lookback_days": probability_rr.lookback_days,
+            "probability_rr_horizon_days": probability_rr.horizon_days,
+            "probability_rr_risk_atr": probability_rr.risk_atr,
+            "probability_rr_target_1_atr": probability_rr.target_1_atr,
+            "probability_rr_target_2_atr": probability_rr.target_2_atr,
+            "probability_rr_target_1_hit_probability": probability_rr.target_1_hit_probability,
+            "probability_rr_target_2_hit_probability": probability_rr.target_2_hit_probability,
+            "probability_adjusted_r": probability_rr.probability_adjusted_r,
+            "probability_rr_reasons": probability_rr.reasons,
             "amount_avg_10": ind.amount_avg_10,
             "amount_avg_30": ind.amount_avg_30,
             "amount_avg_60": ind.amount_avg_60,

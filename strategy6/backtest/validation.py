@@ -50,6 +50,12 @@ def build_evaluation_schedule(
         all_dates = sorted({date for date in market_calendar if effective_start <= date <= effective_end})
         dates = _sample_trigger_windows(all_dates, evaluation_step)
         final_eligible = False
+    elif mode in {"SELECTION_OPTIMIZATION", "ENTRY_QUALITY_OPTIMIZATION"}:
+        effective_start = max(start, "2023-01-01")
+        effective_end = min(end, "2025-12-31", _day_before(oos_start))
+        all_dates = sorted({date for date in market_calendar if effective_start <= date <= effective_end})
+        dates = tuple(all_dates[::evaluation_step])
+        final_eligible = False
     elif mode == "FULL_CONFIRMATION":
         if evaluation_step != 1:
             raise ValueError("full confirmation must use a daily evaluation step")
@@ -60,7 +66,8 @@ def build_evaluation_schedule(
     else:
         raise ValueError(
             "mode must be COARSE_TRAIN, BROOKS_COARSE, "
-            "BROOKS_VALIDATION or FULL_CONFIRMATION"
+            "BROOKS_VALIDATION, SELECTION_OPTIMIZATION, "
+            "ENTRY_QUALITY_OPTIMIZATION or FULL_CONFIRMATION"
         )
     if effective_start > effective_end:
         raise ValueError("evaluation schedule has no legal date range")

@@ -1,0 +1,505 @@
+{
+  "experiments": [
+    {
+      "enabled_rules": [],
+      "experiment_id": "S6_ENTRY_E0_BASELINE",
+      "full": {
+        "actionable_trade_metrics": {
+          "avg_loss_r": 1.0138929538461539,
+          "avg_net_return": -0.03559358037974684,
+          "avg_win_r": 2.6543268571428573,
+          "expectancy_r": -0.3638286835443038,
+          "losses": 65,
+          "median_net_return": -0.07039075,
+          "net_profit": -16746.996597,
+          "profit_factor": 0.30342163165769015,
+          "trades": 79,
+          "win_rate": 0.17721518987341772,
+          "wins": 14
+        },
+        "candidate_counts": {
+          "KEY_CANDIDATE": 328,
+          "READY_CANDIDATE": 3,
+          "WATCH_CANDIDATE": 789
+        },
+        "downgraded_count": 0,
+        "reason_counts": {},
+        "removed_count": 0,
+        "signals": 1120,
+        "trade_metrics": {
+          "avg_loss_r": 1.0315334338624338,
+          "avg_net_return": -0.023822400041666667,
+          "avg_win_r": 2.6764815294117645,
+          "expectancy_r": -0.24358025416666665,
+          "losses": 189,
+          "median_net_return": -0.06488424000000001,
+          "net_profit": -24430.032547,
+          "profit_factor": 0.5628142268155811,
+          "trades": 240,
+          "win_rate": 0.2125,
+          "wins": 51
+        }
+      },
+      "train": {
+        "actionable_trade_metrics": {
+          "avg_loss_r": 1.0335406,
+          "avg_net_return": -0.04695970411764706,
+          "avg_win_r": 4.244721,
+          "expectancy_r": -0.4125686470588235,
+          "losses": 15,
+          "median_net_return": -0.08252241,
+          "net_profit": -155.22049900000002,
+          "profit_factor": 0.9367377516071059,
+          "trades": 17,
+          "win_rate": 0.11764705882352941,
+          "wins": 2
+        },
+        "candidate_counts": {
+          "KEY_CANDIDATE": 64,
+          "WATCH_CANDIDATE": 130
+        },
+        "downgraded_count": 0,
+        "reason_counts": {},
+        "removed_count": 0,
+        "signals": 194,
+        "trade_metrics": {
+          "avg_loss_r": 1.0422726097560975,
+          "avg_net_return": -0.03756424265306123,
+          "avg_win_r": 2.8204263750000003,
+          "expectancy_r": -0.41162787755102037,
+          "losses": 41,
+          "median_net_return": -0.07904008,
+          "net_profit": -4416.998148,
+          "profit_factor": 0.5150612291699892,
+          "trades": 49,
+          "win_rate": 0.16326530612244897,
+          "wins": 8
+        }
+      },
+      "validation": {
+        "actionable_trade_metrics": {
+          "avg_loss_r": 1.00799866,
+          "avg_net_return": -0.03247706258064516,
+          "avg_win_r": 2.3892611666666665,
+          "expectancy_r": -0.3504645,
+          "losses": 50,
+          "median_net_return": -0.06839390000000001,
+          "net_profit": -16591.776098,
+          "profit_factor": 0.23144215656050673,
+          "trades": 62,
+          "win_rate": 0.1935483870967742,
+          "wins": 12
+        },
+        "candidate_counts": {
+          "KEY_CANDIDATE": 264,
+          "READY_CANDIDATE": 3,
+          "WATCH_CANDIDATE": 659
+        },
+        "downgraded_count": 0,
+        "reason_counts": {},
+        "removed_count": 0,
+        "signals": 926,
+        "trade_metrics": {
+          "avg_loss_r": 1.028558391891892,
+          "avg_net_return": -0.020297005863874347,
+          "avg_win_r": 2.6497010930232556,
+          "expectancy_r": -0.20046856020942408,
+          "losses": 148,
+          "median_net_return": -0.06193758,
+          "net_profit": -20013.034399,
+          "profit_factor": 0.572113658970544,
+          "trades": 191,
+          "win_rate": 0.225130890052356,
+          "wins": 43
+        }
+      }
+    },
+    {
+      "enabled_rules": [
+        "entry_timing_enabled"
+      ],
+      "experiment_id": "S6_ENTRY_E1_TIMING",
+      "full": {
+        "actionable_trade_metrics": {
+          "avg_loss_r": 1.00957325,
+          "avg_net_return": -0.036905494117647056,
+          "avg_win_r": 2.619202666666667,
+          "expectancy_r": -0.3692010294117647,
+          "losses": 56,
+          "median_net_return": -0.07535196,
+          "net_profit": -10782.360505,
+          "profit_factor": 0.3872449395736414,
+          "trades": 68,
+          "win_rate": 0.17647058823529413,
+          "wins": 12
+        },
+        "candidate_counts": {
+          "KEY_CANDIDATE": 201,
+          "READY_CANDIDATE": 2,
+          "WATCH_CANDIDATE": 916
+        },
+        "downgraded_count": 127,
+        "reason_counts": {
+          "ENTRY_TIMING_INVALID": 1
+        },
+        "removed_count": 1,
+        "signals": 1119,
+        "trade_metrics": {
+          "avg_loss_r": 1.0315334338624338,
+          "avg_net_return": -0.023822400041666667,
+          "avg_win_r": 2.6764815294117645,
+          "expectancy_r": -0.24358025416666665,
+          "losses": 189,
+          "median_net_return": -0.06488424000000001,
+          "net_profit": -24430.032547,
+          "profit_factor": 0.5628142268155811,
+          "trades": 240,
+          "win_rate": 0.2125,
+          "wins": 51
+        }
+      },
+      "train": {
+        "actionable_trade_metrics": {
+          "avg_loss_r": 1.0210954285714287,
+          "avg_net_return": -0.04647322375,
+          "avg_win_r": 4.244721,
+          "expectancy_r": -0.362868375,
+          "losses": 14,
+          "median_net_return": -0.08317793000000001,
+          "net_profit": -0.3061760000000291,
+          "profit_factor": 0.9998668041114108,
+          "trades": 16,
+          "win_rate": 0.125,
+          "wins": 2
+        },
+        "candidate_counts": {
+          "KEY_CANDIDATE": 43,
+          "WATCH_CANDIDATE": 150
+        },
+        "downgraded_count": 20,
+        "reason_counts": {
+          "ENTRY_TIMING_INVALID": 1
+        },
+        "removed_count": 1,
+        "signals": 193,
+        "trade_metrics": {
+          "avg_loss_r": 1.0422726097560975,
+          "avg_net_return": -0.03756424265306123,
+          "avg_win_r": 2.8204263750000003,
+          "expectancy_r": -0.41162787755102037,
+          "losses": 41,
+          "median_net_return": -0.07904008,
+          "net_profit": -4416.998148,
+          "profit_factor": 0.5150612291699892,
+          "trades": 49,
+          "win_rate": 0.16326530612244897,
+          "wins": 8
+        }
+      },
+      "validation": {
+        "actionable_trade_metrics": {
+          "avg_loss_r": 1.0057325238095238,
+          "avg_net_return": -0.03396157730769231,
+          "avg_win_r": 2.294099,
+          "expectancy_r": -0.3711495384615385,
+          "losses": 42,
+          "median_net_return": -0.069272745,
+          "net_profit": -10782.054329,
+          "profit_factor": 0.2951909112413391,
+          "trades": 52,
+          "win_rate": 0.19230769230769232,
+          "wins": 10
+        },
+        "candidate_counts": {
+          "KEY_CANDIDATE": 158,
+          "READY_CANDIDATE": 2,
+          "WATCH_CANDIDATE": 766
+        },
+        "downgraded_count": 107,
+        "reason_counts": {},
+        "removed_count": 0,
+        "signals": 926,
+        "trade_metrics": {
+          "avg_loss_r": 1.028558391891892,
+          "avg_net_return": -0.020297005863874347,
+          "avg_win_r": 2.6497010930232556,
+          "expectancy_r": -0.20046856020942408,
+          "losses": 148,
+          "median_net_return": -0.06193758,
+          "net_profit": -20013.034399,
+          "profit_factor": 0.572113658970544,
+          "trades": 191,
+          "win_rate": 0.225130890052356,
+          "wins": 43
+        }
+      }
+    },
+    {
+      "enabled_rules": [
+        "probability_rr_enabled"
+      ],
+      "experiment_id": "S6_ENTRY_E2_PROBABILITY_RR",
+      "full": {
+        "actionable_trade_metrics": {
+          "avg_loss_r": 1.0127044032258063,
+          "avg_net_return": -0.033702656184210526,
+          "avg_win_r": 2.6543268571428573,
+          "expectancy_r": -0.3371986447368421,
+          "losses": 62,
+          "median_net_return": -0.07006090000000001,
+          "net_profit": -15945.069967,
+          "profit_factor": 0.31389165018976123,
+          "trades": 76,
+          "win_rate": 0.18421052631578946,
+          "wins": 14
+        },
+        "candidate_counts": {
+          "KEY_CANDIDATE": 321,
+          "READY_CANDIDATE": 3,
+          "WATCH_CANDIDATE": 791
+        },
+        "downgraded_count": 3,
+        "reason_counts": {
+          "PROBABILITY_ADJUSTED_R_LT_0_0": 5
+        },
+        "removed_count": 5,
+        "signals": 1115,
+        "trade_metrics": {
+          "avg_loss_r": 1.0316802085561498,
+          "avg_net_return": -0.02349550411764706,
+          "avg_win_r": 2.6764815294117645,
+          "expectancy_r": -0.2370741218487395,
+          "losses": 187,
+          "median_net_return": -0.06488424000000001,
+          "net_profit": -24187.553208999998,
+          "profit_factor": 0.5652670734901774,
+          "trades": 238,
+          "win_rate": 0.21428571428571427,
+          "wins": 51
+        }
+      },
+      "train": {
+        "actionable_trade_metrics": {
+          "avg_loss_r": 1.0315296923076924,
+          "avg_net_return": -0.039829786666666665,
+          "avg_win_r": 4.244721,
+          "expectancy_r": -0.3280296,
+          "losses": 13,
+          "median_net_return": -0.08252241,
+          "net_profit": 546.765196,
+          "profit_factor": 1.3121486156698694,
+          "trades": 15,
+          "win_rate": 0.13333333333333333,
+          "wins": 2
+        },
+        "candidate_counts": {
+          "KEY_CANDIDATE": 59,
+          "WATCH_CANDIDATE": 132
+        },
+        "downgraded_count": 3,
+        "reason_counts": {
+          "PROBABILITY_ADJUSTED_R_LT_0_0": 3
+        },
+        "removed_count": 3,
+        "signals": 191,
+        "trade_metrics": {
+          "avg_loss_r": 1.042992575,
+          "avg_net_return": -0.036767180625,
+          "avg_win_r": 2.8204263750000003,
+          "expectancy_r": -0.39908941666666664,
+          "losses": 40,
+          "median_net_return": -0.080169625,
+          "net_profit": -4274.459745,
+          "profit_factor": 0.523249657105003,
+          "trades": 48,
+          "win_rate": 0.16666666666666666,
+          "wins": 8
+        }
+      },
+      "validation": {
+        "actionable_trade_metrics": {
+          "avg_loss_r": 1.0077099387755102,
+          "avg_net_return": -0.032195984754098364,
+          "avg_win_r": 2.3892611666666665,
+          "expectancy_r": -0.33945332786885246,
+          "losses": 49,
+          "median_net_return": -0.06881444,
+          "net_profit": -16491.835163,
+          "profit_factor": 0.23251858399608732,
+          "trades": 61,
+          "win_rate": 0.19672131147540983,
+          "wins": 12
+        },
+        "candidate_counts": {
+          "KEY_CANDIDATE": 262,
+          "READY_CANDIDATE": 3,
+          "WATCH_CANDIDATE": 659
+        },
+        "downgraded_count": 0,
+        "reason_counts": {
+          "PROBABILITY_ADJUSTED_R_LT_0_0": 2
+        },
+        "removed_count": 2,
+        "signals": 924,
+        "trade_metrics": {
+          "avg_loss_r": 1.0286020136054421,
+          "avg_net_return": -0.02014265952631579,
+          "avg_win_r": 2.6497010930232556,
+          "expectancy_r": -0.19614394210526315,
+          "losses": 147,
+          "median_net_return": -0.062277139999999995,
+          "net_profit": -19913.093463999998,
+          "profit_factor": 0.5733387551589163,
+          "trades": 190,
+          "win_rate": 0.22631578947368422,
+          "wins": 43
+        }
+      }
+    },
+    {
+      "enabled_rules": [
+        "entry_timing_enabled",
+        "probability_rr_enabled"
+      ],
+      "experiment_id": "S6_ENTRY_E3_COMBINED",
+      "full": {
+        "actionable_trade_metrics": {
+          "avg_loss_r": 1.0079383584905661,
+          "avg_net_return": -0.03475511723076923,
+          "avg_win_r": 2.619202666666667,
+          "expectancy_r": -0.33831232307692305,
+          "losses": 53,
+          "median_net_return": -0.0748807,
+          "net_profit": -9980.433875,
+          "profit_factor": 0.4057355280021695,
+          "trades": 65,
+          "win_rate": 0.18461538461538463,
+          "wins": 12
+        },
+        "candidate_counts": {
+          "KEY_CANDIDATE": 194,
+          "READY_CANDIDATE": 2,
+          "WATCH_CANDIDATE": 918
+        },
+        "downgraded_count": 130,
+        "reason_counts": {
+          "ENTRY_TIMING_INVALID": 1,
+          "PROBABILITY_ADJUSTED_R_LT_0_0": 5
+        },
+        "removed_count": 6,
+        "signals": 1114,
+        "trade_metrics": {
+          "avg_loss_r": 1.0316802085561498,
+          "avg_net_return": -0.02349550411764706,
+          "avg_win_r": 2.6764815294117645,
+          "expectancy_r": -0.2370741218487395,
+          "losses": 187,
+          "median_net_return": -0.06488424000000001,
+          "net_profit": -24187.553208999998,
+          "profit_factor": 0.5652670734901774,
+          "trades": 238,
+          "win_rate": 0.21428571428571427,
+          "wins": 51
+        }
+      },
+      "train": {
+        "actionable_trade_metrics": {
+          "avg_loss_r": 1.01684275,
+          "avg_net_return": -0.038764529285714285,
+          "avg_win_r": 4.244721,
+          "expectancy_r": -0.2651907857142857,
+          "losses": 12,
+          "median_net_return": -0.08317793000000001,
+          "net_profit": 701.6795189999999,
+          "profit_factor": 1.4394550107549184,
+          "trades": 14,
+          "win_rate": 0.14285714285714285,
+          "wins": 2
+        },
+        "candidate_counts": {
+          "KEY_CANDIDATE": 38,
+          "WATCH_CANDIDATE": 152
+        },
+        "downgraded_count": 23,
+        "reason_counts": {
+          "ENTRY_TIMING_INVALID": 1,
+          "PROBABILITY_ADJUSTED_R_LT_0_0": 3
+        },
+        "removed_count": 4,
+        "signals": 190,
+        "trade_metrics": {
+          "avg_loss_r": 1.042992575,
+          "avg_net_return": -0.036767180625,
+          "avg_win_r": 2.8204263750000003,
+          "expectancy_r": -0.39908941666666664,
+          "losses": 40,
+          "median_net_return": -0.080169625,
+          "net_profit": -4274.459745,
+          "profit_factor": 0.523249657105003,
+          "trades": 48,
+          "win_rate": 0.16666666666666666,
+          "wins": 8
+        }
+      },
+      "validation": {
+        "actionable_trade_metrics": {
+          "avg_loss_r": 1.0053321951219512,
+          "avg_net_return": -0.03365449431372549,
+          "avg_win_r": 2.294099,
+          "expectancy_r": -0.3583849019607843,
+          "losses": 41,
+          "median_net_return": -0.06973105,
+          "net_profit": -10682.113394,
+          "profit_factor": 0.2971320783720947,
+          "trades": 51,
+          "win_rate": 0.19607843137254902,
+          "wins": 10
+        },
+        "candidate_counts": {
+          "KEY_CANDIDATE": 156,
+          "READY_CANDIDATE": 2,
+          "WATCH_CANDIDATE": 766
+        },
+        "downgraded_count": 107,
+        "reason_counts": {
+          "PROBABILITY_ADJUSTED_R_LT_0_0": 2
+        },
+        "removed_count": 2,
+        "signals": 924,
+        "trade_metrics": {
+          "avg_loss_r": 1.0286020136054421,
+          "avg_net_return": -0.02014265952631579,
+          "avg_win_r": 2.6497010930232556,
+          "expectancy_r": -0.19614394210526315,
+          "losses": 147,
+          "median_net_return": -0.062277139999999995,
+          "net_profit": -19913.093463999998,
+          "profit_factor": 0.5733387551589163,
+          "trades": 190,
+          "win_rate": 0.22631578947368422,
+          "wins": 43
+        }
+      }
+    }
+  ],
+  "index_status": "READY",
+  "oos_status": "LOCKED_2026_PLUS",
+  "parameter_set_id": "s6ps-f03199f3e7189f9b",
+  "production_config_modified": false,
+  "rebuild_failed": [
+    {
+      "code": "002759",
+      "evaluation_date": "2025-10-27",
+      "reason": "INSUFFICIENT_OR_MISSING_SIGNAL_DATE_HISTORY"
+    }
+  ],
+  "rebuilt_signal_count": 1120,
+  "recommendation": {
+    "decision": "KEEP_CURRENT_RULES",
+    "qualified_experiments": [],
+    "reason": "NO_TRIAL_PASSED_SCREEN"
+  },
+  "source_run_id": "s6bt-772c046cb6c982f61fc5",
+  "source_signal_count": 1121,
+  "source_trade_count": 245
+}

@@ -282,6 +282,8 @@
         <div><span>战术价格</span><strong>支撑 {{ fmt(selected.key_support_price) }} · 前置支撑 {{ fmt(selected.prior_key_support_price) }} · 止损 {{ fmt(selected.stop_loss_price) }}</strong></div>
         <div data-test="detail-execution-zone"><span>{{ isExecutionWaiting(selected) ? '入场状态' : '买入区' }}</span><strong>{{ executionZoneText(selected) }}</strong></div>
         <div data-test="detail-entry-archetype"><span>入场类型</span><strong>{{ entryArchetypeText(selected) }}</strong></div>
+        <div data-test="detail-entry-timing"><span>入场时机</span><strong>{{ entryTimingDetail(selected) }}</strong></div>
+        <div data-test="detail-probability-rr"><span>概率修正RR</span><strong>{{ probabilityRrDetail(selected) }}</strong></div>
         <div><span>阶段</span><strong>{{ label('phaseStatus', selected.phase_status) }} · 整理 {{ selected.consolidation_start_date || '--' }} · 尾段 {{ selected.tail_start_date || '--' }} · {{ hasTailSegmentation(selected) ? label('tailSegmentationStatus', selected.tail_segmentation_status) : '--' }}</strong></div>
         <div><span>形态</span><strong>{{ label('patternType', selected.pattern_type || 'UNKNOWN') }} · {{ label('pivotSource', selected.pivot_source) }} · 收缩{{ selected.contraction_count ?? 0 }}次</strong></div>
         <div data-test="detail-consecutive-down-structure"><span>连续收跌结构</span><strong>{{ consecutiveDownStructureDetail(selected) }}</strong></div>
@@ -746,6 +748,34 @@ export default {
     entryArchetypeText(candidate) {
       return this.hasQualityDiagnostics(candidate) ? this.label('entryArchetype', candidate?.entry_archetype || 'NONE') : '--'
     },
+    entryTimingText(candidate) {
+      return ({
+        INVALID: '入场失效',
+        WAITING_BREAKOUT: '等待突破',
+        SUPPORT_FORMING: '支撑止跌形成中',
+        SUPPORT_CONFIRMED: '支撑止跌已确认',
+        BREAKOUT_CONFIRMED: '突破已确认',
+        RECLAIM_CONFIRMED: '失败突破回收已确认',
+        NOT_APPLICABLE: '不适用',
+      })[candidate?.entry_timing_state] || '旧任务无数据'
+    },
+    entryTimingDetail(candidate) {
+      if (!candidate?.entry_timing_version) return '旧任务无数据'
+      const executable = candidate?.entry_timing_executable ? '可执行' : '等待确认'
+      return `${this.entryTimingText(candidate)} · ${executable} · 证据 ${candidate?.entry_timing_evidence_count ?? 0}`
+    },
+    probabilityRrStatusText(candidate) {
+      return ({
+        RELIABLE: '可靠',
+        INSUFFICIENT_SAMPLE: '样本不足',
+        INVALID_TRADE_PLAN: '交易计划无效',
+        NOT_EVALUATED: '未评估',
+      })[candidate?.probability_rr_status] || '旧任务无数据'
+    },
+    probabilityRrDetail(candidate) {
+      if (!candidate?.probability_rr_version) return '旧任务无数据'
+      return `${this.probabilityRrStatusText(candidate)} · 期望R ${this.fmt(candidate?.probability_adjusted_r)} · 目标1 ${this.pct(candidate?.probability_rr_target_1_hit_probability)} · 目标2 ${this.pct(candidate?.probability_rr_target_2_hit_probability)} · 样本 ${candidate?.probability_rr_sample_count ?? 0}`
+    },
     effectiveCandidateType(candidate) {
       if (this.isObservationRecord(candidate)) return 'REJECTED'
       return this.isExecutionWaiting(candidate) ? 'WATCH_CANDIDATE' : (candidate?.candidate_type || 'WATCH_CANDIDATE')
@@ -974,6 +1004,16 @@ export default {
           { header: '整理质量分', value: c => this.hasQualityDiagnostics(c) ? (c.setup_quality_score ?? '') : '' },
           { header: '支撑反应分', value: c => this.hasQualityDiagnostics(c) ? (c.support_reaction_score ?? '') : '' },
           { header: '路径证据分', value: c => this.hasQualityDiagnostics(c) ? (c.path_evidence_score ?? '') : '' },
+          { header: '入场时机', value: c => c.entry_timing_version ? this.entryTimingText(c) : '' },
+          { header: '入场时机原始值', value: c => c.entry_timing_state || '' },
+          { header: '当前可执行', value: c => c.entry_timing_version ? (c.entry_timing_executable ? '是' : '否') : '' },
+          { header: '入场证据数', value: c => c.entry_timing_version ? (c.entry_timing_evidence_count ?? 0) : '' },
+          { header: '概率RR状态', value: c => c.probability_rr_version ? this.probabilityRrStatusText(c) : '' },
+          { header: '概率RR状态原始值', value: c => c.probability_rr_status || '' },
+          { header: '概率RR样本', value: c => c.probability_rr_version ? (c.probability_rr_sample_count ?? 0) : '' },
+          { header: '目标1命中率', value: c => c.probability_rr_version ? this.pct(c.probability_rr_target_1_hit_probability) : '' },
+          { header: '目标2命中率', value: c => c.probability_rr_version ? this.pct(c.probability_rr_target_2_hit_probability) : '' },
+          { header: '概率修正期望R', value: c => c.probability_rr_version ? this.fmt(c.probability_adjusted_r) : '' },
           { header: '尾段划分', value: c => this.hasTailSegmentation(c) ? this.label('tailSegmentationStatus', c.tail_segmentation_status) : '' },
           { header: '尾段划分原始值', value: c => this.hasTailSegmentation(c) ? c.tail_segmentation_status : '' },
           { header: '尾段划分分数', value: c => this.hasTailSegmentation(c) ? (c.tail_segmentation_score ?? '') : '' },

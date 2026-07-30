@@ -12,7 +12,15 @@ from strategy6.filters import (
     selection_blocks_ready,
     selection_hard_filter_reasons,
 )
-from strategy6.models import Strategy6SelectionDiagnostics
+from strategy6.entry_quality import (
+    entry_quality_blocks_tier,
+    entry_quality_hard_filter_reasons,
+)
+from strategy6.models import (
+    Strategy6EntryTiming,
+    Strategy6ProbabilityAdjustedRR,
+    Strategy6SelectionDiagnostics,
+)
 
 
 SCORE_COMPONENTS = (
@@ -58,6 +66,25 @@ SELECTION_DIAGNOSTIC_FIELDS = (
     "conservative_rr",
     "selection_diagnostic_reasons",
     "selection_diagnostic_risk_tags",
+    "entry_timing_version",
+    "entry_timing_state",
+    "entry_timing_executable",
+    "entry_timing_evidence_count",
+    "entry_timing_reasons",
+    "entry_timing_risk_tags",
+    "probability_rr_version",
+    "probability_rr_status",
+    "probability_rr_reliable",
+    "probability_rr_sample_count",
+    "probability_rr_lookback_days",
+    "probability_rr_horizon_days",
+    "probability_rr_risk_atr",
+    "probability_rr_target_1_atr",
+    "probability_rr_target_2_atr",
+    "probability_rr_target_1_hit_probability",
+    "probability_rr_target_2_hit_probability",
+    "probability_adjusted_r",
+    "probability_rr_reasons",
 )
 
 
@@ -81,6 +108,25 @@ def build_selection_trial_configs(base_config: dict) -> list[dict]:
     combined["selection_optimization"] = {key: True for key in SELECTION_RULE_KEYS}
     trials.append({"experiment_id": "S6_SELECT_E6_COMBINED", "config": combined})
     return trials
+
+
+def build_entry_quality_trial_configs(base_config: dict) -> list[dict]:
+    baseline = copy.deepcopy(base_config)
+    baseline["entry_quality"]["entry_timing_enabled"] = False
+    baseline["entry_quality"]["probability_rr_enabled"] = False
+    timing = copy.deepcopy(baseline)
+    timing["entry_quality"]["entry_timing_enabled"] = True
+    probability = copy.deepcopy(baseline)
+    probability["entry_quality"]["probability_rr_enabled"] = True
+    combined = copy.deepcopy(baseline)
+    combined["entry_quality"]["entry_timing_enabled"] = True
+    combined["entry_quality"]["probability_rr_enabled"] = True
+    return [
+        {"experiment_id": "S6_ENTRY_E0_BASELINE", "config": baseline},
+        {"experiment_id": "S6_ENTRY_E1_TIMING", "config": timing},
+        {"experiment_id": "S6_ENTRY_E2_PROBABILITY_RR", "config": probability},
+        {"experiment_id": "S6_ENTRY_E3_COMBINED", "config": combined},
+    ]
 
 
 def rebuild_frozen_selection_diagnostics(
@@ -159,7 +205,14 @@ def replay_selection_trial(signals: list[dict], trades: list[dict], config: dict
         snapshot = dict(signal.get("snapshot") or {})
         original_type = str(signal.get("candidate_type") or snapshot.get("candidate_type") or "REJECTED")
         diagnostics = _diagnostics_from_snapshot(snapshot)
+        entry_timing = _entry_timing_from_snapshot(snapshot)
+        probability_rr = _probability_rr_from_snapshot(snapshot)
         reasons = selection_hard_filter_reasons(diagnostics, config)
+        reasons.extend(entry_quality_hard_filter_reasons(
+            entry_timing,
+            probability_rr,
+            config,
+        ))
         effective_rr = (
             diagnostics.conservative_rr
             if config["selection_optimization"]["conservative_rr_enabled"]
@@ -182,6 +235,12 @@ def replay_selection_trial(signals: list[dict], trades: list[dict], config: dict
         ):
             candidate_type = "WATCH_CANDIDATE"
             reasons.append("SELECTION_DIAGNOSTIC_DOWNGRADED")
+        candidate_type = _entry_quality_adjusted_candidate_type(
+            candidate_type,
+            entry_timing,
+            probability_rr,
+            config,
+        )
         if candidate_type != original_type:
             downgraded_count += 1
         setup_id = str(signal.get("setup_id") or snapshot.get("setup_id") or "")
@@ -271,6 +330,9 @@ def evaluate_frozen_selection_trials(
             "enabled_rules": [
                 key for key, enabled in config["selection_optimization"].items()
                 if enabled
+            ] + [
+                key for key in ("entry_timing_enabled", "probability_rr_enabled")
+                if config.get("entry_quality", {}).get(key)
             ],
             "full": full,
             "train": replay_selection_trial(train_signals, train_trades, config),
@@ -334,6 +396,41 @@ def _diagnostics_from_snapshot(snapshot: dict) -> Strategy6SelectionDiagnostics:
         recent_tail_status=str(snapshot.get("recent_tail_status") or "UNKNOWN"),
         conservative_rr=float(snapshot.get("conservative_rr") or 0.0),
     )
+
+
+def _entry_timing_from_snapshot(snapshot: dict) -> Strategy6EntryTiming:
+    return Strategy6EntryTiming(
+        state=str(snapshot.get("entry_timing_state") or "NOT_APPLICABLE"),
+        executable=bool(snapshot.get("entry_timing_executable")),
+        evidence_count=int(snapshot.get("entry_timing_evidence_count") or 0),
+    )
+
+
+def _probability_rr_from_snapshot(snapshot: dict) -> Strategy6ProbabilityAdjustedRR:
+    return Strategy6ProbabilityAdjustedRR(
+        status=str(snapshot.get("probability_rr_status") or "NOT_EVALUATED"),
+        reliable=bool(snapshot.get("probability_rr_reliable")),
+        sample_count=int(snapshot.get("probability_rr_sample_count") or 0),
+        probability_adjusted_r=float(snapshot.get("probability_adjusted_r") or 0.0),
+    )
+
+
+def _entry_quality_adjusted_candidate_type(
+    candidate_type: str,
+    timing: Strategy6EntryTiming,
+    probability_rr: Strategy6ProbabilityAdjustedRR,
+    config: dict,
+) -> str:
+    if not entry_quality_blocks_tier(candidate_type, timing, probability_rr, config):
+        return candidate_type
+    if (
+        candidate_type == "READY_CANDIDATE"
+        and not entry_quality_blocks_tier(
+            "KEY_CANDIDATE", timing, probability_rr, config,
+        )
+    ):
+        return "KEY_CANDIDATE"
+    return "WATCH_CANDIDATE"
 
 
 def _rr_adjusted_candidate_type(candidate_type: str, effective_rr: float, config: dict) -> str:

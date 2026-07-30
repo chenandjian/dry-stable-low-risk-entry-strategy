@@ -22,6 +22,7 @@ def build_parser() -> argparse.ArgumentParser:
         "audit-data", "fetch-index", "baseline", "experiments", "optimize",
         "brooks-optimize", "brooks-validate",
         "selection-optimize",
+        "entry-quality-optimize",
         "tail-regime-full",
         "comprehensive-plan", "comprehensive-run", "comprehensive-status",
         "comprehensive-report",

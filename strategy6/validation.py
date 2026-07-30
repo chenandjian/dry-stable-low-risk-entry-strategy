@@ -113,6 +113,16 @@ DEFAULT_STRATEGY6_CONFIG = {
         "tail_deterioration_filter_enabled": False,
         "matched_market_downgrade_enabled": False,
     },
+    "entry_quality": {
+        "entry_timing_enabled": False,
+        "probability_rr_enabled": False,
+        "probability_lookback_days": 250,
+        "probability_horizon_days": 20,
+        "probability_minimum_samples": 60,
+        "probability_min_watch_r": 0.0,
+        "probability_min_key_r": 0.10,
+        "probability_min_ready_r": 0.20,
+    },
     "ttm_squeeze": {
         "enabled": True,
         "bb_period": 20,
@@ -270,7 +280,7 @@ def resolve_strategy6_config(config: dict | None) -> dict:
                         for nested_key, nested_value in compact_override.items()
                         if nested_key in raw["box_tail"]["compact_kline"]
                     })
-            elif key in {"brooks_tail", "ttm_squeeze", "selection_optimization"} and isinstance(value, dict):
+            elif key in {"brooks_tail", "ttm_squeeze", "selection_optimization", "entry_quality"} and isinstance(value, dict):
                 _merge_known_dict(raw[key], value)
             else:
                 raw[key] = value
@@ -361,6 +371,29 @@ def resolve_strategy6_config(config: dict | None) -> dict:
         "matched_market_downgrade_enabled",
     ):
         raw["selection_optimization"][key] = bool(raw["selection_optimization"].get(key, False))
+    entry_quality = raw["entry_quality"]
+    entry_quality["entry_timing_enabled"] = bool(entry_quality.get("entry_timing_enabled", False))
+    entry_quality["probability_rr_enabled"] = bool(entry_quality.get("probability_rr_enabled", False))
+    _validate_int_range(entry_quality, "probability_lookback_days", 60, 1000)
+    _validate_int_range(entry_quality, "probability_horizon_days", 5, 60)
+    _validate_int_range(
+        entry_quality,
+        "probability_minimum_samples",
+        20,
+        entry_quality["probability_lookback_days"],
+    )
+    for key in (
+        "probability_min_watch_r",
+        "probability_min_key_r",
+        "probability_min_ready_r",
+    ):
+        _validate_number_range(entry_quality, key, -1.0, 5.0)
+    if not (
+        entry_quality["probability_min_watch_r"]
+        <= entry_quality["probability_min_key_r"]
+        <= entry_quality["probability_min_ready_r"]
+    ):
+        raise ValueError("probability RR thresholds must be ordered watch <= key <= ready")
     _validate_between(raw, "normal_start_self_amount_percentile", 0, 1)
     _validate_between(raw, "vcp_contraction_range_ratio", 0, 1)
     _validate_between(raw, "vcp_contraction_volume_ratio", 0, 1)

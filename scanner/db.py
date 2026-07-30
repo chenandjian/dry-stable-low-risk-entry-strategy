@@ -3059,6 +3059,25 @@ def _ensure_strategy6_candidates_table(conn: sqlite3.Connection):
         "vcp_quality_reasons": "TEXT",
         "vcp_quality_warnings": "TEXT",
         "vcp_quality_model_version": "TEXT",
+        "entry_timing_version": "TEXT",
+        "entry_timing_state": "TEXT",
+        "entry_timing_executable": "INTEGER DEFAULT 0",
+        "entry_timing_evidence_count": "INTEGER DEFAULT 0",
+        "entry_timing_reasons": "TEXT",
+        "entry_timing_risk_tags": "TEXT",
+        "probability_rr_version": "TEXT",
+        "probability_rr_status": "TEXT",
+        "probability_rr_reliable": "INTEGER DEFAULT 0",
+        "probability_rr_sample_count": "INTEGER DEFAULT 0",
+        "probability_rr_lookback_days": "INTEGER DEFAULT 0",
+        "probability_rr_horizon_days": "INTEGER DEFAULT 0",
+        "probability_rr_risk_atr": "REAL",
+        "probability_rr_target_1_atr": "REAL",
+        "probability_rr_target_2_atr": "REAL",
+        "probability_rr_target_1_hit_probability": "REAL",
+        "probability_rr_target_2_hit_probability": "REAL",
+        "probability_adjusted_r": "REAL",
+        "probability_rr_reasons": "TEXT",
     }.items():
         _ensure_column(conn, "strategy6_candidates", column, col_type)
     conn.execute(
@@ -4126,6 +4145,15 @@ def upsert_strategy6_candidate(
         "ttm_bb_upper", "ttm_bb_lower", "ttm_kc_upper", "ttm_kc_lower",
         "ttm_squeeze_score", "ranking_score", "ttm_reasons", "ttm_risk_tags",
         "ttm_model_version",
+        "entry_timing_version", "entry_timing_state", "entry_timing_executable",
+        "entry_timing_evidence_count", "entry_timing_reasons", "entry_timing_risk_tags",
+        "probability_rr_version", "probability_rr_status", "probability_rr_reliable",
+        "probability_rr_sample_count", "probability_rr_lookback_days",
+        "probability_rr_horizon_days", "probability_rr_risk_atr",
+        "probability_rr_target_1_atr", "probability_rr_target_2_atr",
+        "probability_rr_target_1_hit_probability",
+        "probability_rr_target_2_hit_probability", "probability_adjusted_r",
+        "probability_rr_reasons",
     ]
     extra_values = [
         "" if observation_only else d.get("first_seen_date", first_pool_date),
@@ -4352,6 +4380,25 @@ def upsert_strategy6_candidate(
         _json_any(d.get("ttm_reasons", [])),
         _json_any(d.get("ttm_risk_tags", [])),
         d.get("ttm_model_version"),
+        d.get("entry_timing_version"),
+        d.get("entry_timing_state"),
+        1 if d.get("entry_timing_executable") else 0,
+        d.get("entry_timing_evidence_count", 0),
+        _json_any(d.get("entry_timing_reasons", [])),
+        _json_any(d.get("entry_timing_risk_tags", [])),
+        d.get("probability_rr_version"),
+        d.get("probability_rr_status"),
+        1 if d.get("probability_rr_reliable") else 0,
+        d.get("probability_rr_sample_count", 0),
+        d.get("probability_rr_lookback_days", 0),
+        d.get("probability_rr_horizon_days", 0),
+        d.get("probability_rr_risk_atr"),
+        d.get("probability_rr_target_1_atr"),
+        d.get("probability_rr_target_2_atr"),
+        d.get("probability_rr_target_1_hit_probability"),
+        d.get("probability_rr_target_2_hit_probability"),
+        d.get("probability_adjusted_r"),
+        _json_any(d.get("probability_rr_reasons", [])),
     ]
     columns.extend(extra_columns)
     values.extend(extra_values)
@@ -5699,6 +5746,8 @@ def _deserialize_strategy6_row(row: dict) -> dict:
         "vcp_contractions", "vcp_observation_reasons", "vcp_observation_risk_tags",
         "vcp_quality_reasons", "vcp_quality_warnings",
         "ttm_reasons", "ttm_risk_tags",
+        "entry_timing_reasons", "entry_timing_risk_tags",
+        "probability_rr_reasons",
     ):
         value = row.get(field)
         if isinstance(value, str) and value:
@@ -5728,6 +5777,7 @@ def _deserialize_strategy6_row(row: dict) -> dict:
         "brooks_trade_ready", "multi_path_confirmed",
         "vcp_observation_eligible", "vcp_exit_audit", "vcp_history_qualified",
         "ttm_squeeze_on", "ttm_fired",
+        "entry_timing_executable", "probability_rr_reliable",
     ):
         if field in row:
             row[field] = _strategy6_safe_bool(row.get(field))

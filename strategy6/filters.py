@@ -11,10 +11,16 @@ from strategy6.models import (
     Strategy6Pattern,
     Strategy6Score,
     Strategy6SelectionDiagnostics,
+    Strategy6EntryTiming,
+    Strategy6ProbabilityAdjustedRR,
     Strategy6SetupQuality,
     Strategy6Start,
     Strategy6Support,
     Strategy6TradePlan,
+)
+from strategy6.entry_quality import (
+    entry_quality_blocks_tier,
+    entry_quality_hard_filter_reasons,
 )
 from strategy6.brooks.models import BrooksTailResult
 from strategy6.strong_start import PASSING_START_TYPES
@@ -80,6 +86,8 @@ def hard_filter_reasons(
     brooks_tail: BrooksTailResult | None = None,
     setup_quality: Strategy6SetupQuality | None = None,
     selection_diagnostics: Strategy6SelectionDiagnostics | None = None,
+    entry_timing: Strategy6EntryTiming | None = None,
+    probability_rr: Strategy6ProbabilityAdjustedRR | None = None,
 ) -> list[str]:
     reasons: list[str] = []
     if not phase.valid and phase.status != "START_TOO_RECENT":
@@ -148,6 +156,11 @@ def hard_filter_reasons(
         reasons.append("SUPPORT_VOLUME_BREAK_UNRECOVERED")
     diagnostics = selection_diagnostics or Strategy6SelectionDiagnostics()
     reasons.extend(selection_hard_filter_reasons(diagnostics, config))
+    reasons.extend(entry_quality_hard_filter_reasons(
+        entry_timing or Strategy6EntryTiming(),
+        probability_rr or Strategy6ProbabilityAdjustedRR(),
+        config,
+    ))
     effective_rr = selection_rr(trade_plan, diagnostics, config)
     if effective_rr < config["rr2_min_watch"]:
         threshold = str(config["rr2_min_watch"]).replace(".", "_")
@@ -175,6 +188,8 @@ def classify_candidate(
     box_tail: Strategy6BoxTail | None = None,
     brooks_tail: BrooksTailResult | None = None,
     selection_diagnostics: Strategy6SelectionDiagnostics | None = None,
+    entry_timing: Strategy6EntryTiming | None = None,
+    probability_rr: Strategy6ProbabilityAdjustedRR | None = None,
 ) -> tuple[str, str, str, str]:
     research_profile = is_strategy6_research_profile(config)
     lifecycle = _lifecycle_status(
@@ -186,6 +201,8 @@ def classify_candidate(
         return "REJECTED", "rejected", lifecycle, "排除：存在硬性风险或盈亏比不足"
     major_risk = any(tag in ind.risk_tags for tag in {"BIG_DOWN_VOLUME"})
     diagnostics = selection_diagnostics or Strategy6SelectionDiagnostics()
+    timing = entry_timing or Strategy6EntryTiming()
+    adjusted_probability = probability_rr or Strategy6ProbabilityAdjustedRR()
     effective_rr = selection_rr(trade_plan, diagnostics, config)
     environment_blocks_ready = (
         _environment_blocks_ready(ind)
@@ -242,6 +259,9 @@ def classify_candidate(
         and not major_risk
         and not environment_blocks_ready
         and not tactical_blocks_ready
+        and not entry_quality_blocks_tier(
+            "READY_CANDIDATE", timing, adjusted_probability, config,
+        )
     ):
         return "READY_CANDIDATE", "ready", lifecycle, "低吸候选：支撑区内，量干价稳，盈亏比较好"
     if (
@@ -267,6 +287,9 @@ def classify_candidate(
         and not major_risk
         and not environment_blocks_ready
         and not tactical_blocks_ready
+        and not entry_quality_blocks_tier(
+            "KEY_CANDIDATE", timing, adjusted_probability, config,
+        )
     ):
         return "KEY_CANDIDATE", "highlight", lifecycle, "重点观察：等待支撑低吸或突破确认"
     if score.total_score >= config["watch_min_score"]:
@@ -289,6 +312,8 @@ def classify_candidate_before_market_downgrade(
     box_tail: Strategy6BoxTail | None = None,
     brooks_tail: BrooksTailResult | None = None,
     selection_diagnostics: Strategy6SelectionDiagnostics | None = None,
+    entry_timing: Strategy6EntryTiming | None = None,
+    probability_rr: Strategy6ProbabilityAdjustedRR | None = None,
 ) -> str:
     """Return the tier before weak-market downgrade without mutating indicators."""
     audit_indicators = replace(
@@ -313,6 +338,8 @@ def classify_candidate_before_market_downgrade(
         box_tail=box_tail,
         brooks_tail=brooks_tail,
         selection_diagnostics=selection_diagnostics,
+        entry_timing=entry_timing,
+        probability_rr=probability_rr,
     )
     return candidate_type
 

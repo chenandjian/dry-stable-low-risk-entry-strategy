@@ -202,6 +202,25 @@ def _candidate():
         "path_evidence_score": 13,
         "entry_archetype": "SUPPORT_PULLBACK",
         "score_model_version": "S6_QUALITY_V2",
+        "entry_timing_version": "S6_ENTRY_TIMING_V1",
+        "entry_timing_state": "SUPPORT_CONFIRMED",
+        "entry_timing_executable": True,
+        "entry_timing_evidence_count": 4,
+        "entry_timing_reasons": ["ENTRY_NO_NEW_LOW"],
+        "entry_timing_risk_tags": [],
+        "probability_rr_version": "S6_PROBABILITY_RR_V1",
+        "probability_rr_status": "RELIABLE",
+        "probability_rr_reliable": True,
+        "probability_rr_sample_count": 230,
+        "probability_rr_lookback_days": 250,
+        "probability_rr_horizon_days": 20,
+        "probability_rr_risk_atr": 1.2,
+        "probability_rr_target_1_atr": 2.0,
+        "probability_rr_target_2_atr": 3.5,
+        "probability_rr_target_1_hit_probability": 0.48,
+        "probability_rr_target_2_hit_probability": 0.31,
+        "probability_adjusted_r": 0.27,
+        "probability_rr_reasons": ["PROBABILITY_RR_ASOF_HISTORY"],
     }
 
 
@@ -284,6 +303,14 @@ def test_strategy6_candidate_table_is_independent(tmp_path):
     assert detail["support_reaction_reasons"] == ["LOW_VOLUME_RECOVERY"]
     assert detail["path_evidence_score"] == 13
     assert detail["entry_archetype"] == "SUPPORT_PULLBACK"
+    assert detail["entry_timing_state"] == "SUPPORT_CONFIRMED"
+    assert detail["entry_timing_executable"] is True
+    assert detail["entry_timing_reasons"] == ["ENTRY_NO_NEW_LOW"]
+    assert detail["probability_rr_status"] == "RELIABLE"
+    assert detail["probability_rr_reliable"] is True
+    assert detail["probability_rr_sample_count"] == 230
+    assert detail["probability_adjusted_r"] == 0.27
+    assert detail["probability_rr_reasons"] == ["PROBABILITY_RR_ASOF_HISTORY"]
     assert detail["score_model_version"] == "S6_QUALITY_V2"
     assert detail["ranking_score"] == detail["total_score"]
     assert detail["ttm_squeeze_status"] == ""

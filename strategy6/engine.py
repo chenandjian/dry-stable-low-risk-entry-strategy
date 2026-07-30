@@ -3,6 +3,10 @@ from __future__ import annotations
 
 from strategy6.dry_tail import evaluate_dry_tail
 from strategy6.entry import identify_entry_archetype
+from strategy6.entry_quality import (
+    evaluate_entry_timing,
+    evaluate_probability_adjusted_rr,
+)
 from strategy6.box_tail import combine_tail_paths, evaluate_box_tail, evaluate_compact_kline
 from strategy6.brooks.tail import analyze_brooks_tail
 from strategy6.brooks.models import BrooksTailResult
@@ -14,7 +18,12 @@ from strategy6.filters import (
 )
 from strategy6.indicators import _atr, calculate_indicators
 from strategy6.market import compute_relative_strength_20, evaluate_market_context, has_relative_strength_20_market
-from strategy6.models import Strategy6BoxTail, Strategy6Evaluation, Strategy6TailRegime
+from strategy6.models import (
+    Strategy6BoxTail,
+    Strategy6Evaluation,
+    Strategy6ProbabilityAdjustedRR,
+    Strategy6TailRegime,
+)
 from strategy6.phase import segment_phases
 from strategy6.pattern import detect_pattern
 from strategy6.pressure import apply_pressure_tags
@@ -200,6 +209,12 @@ class StrongVcpTailEngine:
             entry_archetype=entry_archetype,
             entry_trigger_price=brooks_tail.trade_trigger.trigger_price,
         )
+        entry_timing = evaluate_entry_timing(
+            rows,
+            indicators,
+            support,
+            entry_archetype=entry_archetype,
+        )
         selection_diagnostics = evaluate_selection_diagnostics(
             rows,
             code=code,
@@ -245,6 +260,60 @@ class StrongVcpTailEngine:
             brooks_tail=brooks_tail,
             selection_diagnostics=selection_diagnostics,
         )
+        probability_rr = Strategy6ProbabilityAdjustedRR()
+        if candidate_type != "REJECTED":
+            probability_config = self.config["entry_quality"]
+            probability_rr = evaluate_probability_adjusted_rr(
+                rows,
+                indicators,
+                trade_plan,
+                lookback_days=probability_config["probability_lookback_days"],
+                horizon_days=probability_config["probability_horizon_days"],
+                minimum_samples=probability_config["probability_minimum_samples"],
+            )
+        if (
+            self.config["entry_quality"]["entry_timing_enabled"]
+            or self.config["entry_quality"]["probability_rr_enabled"]
+        ):
+            reject_reasons = hard_filter_reasons(
+                rows,
+                indicators,
+                start,
+                phase,
+                pattern,
+                support,
+                dry_tail,
+                trade_plan,
+                self.config,
+                box_tail=box_tail,
+                brooks_tail=brooks_tail,
+                setup_quality=setup_quality,
+                selection_diagnostics=selection_diagnostics,
+                entry_timing=entry_timing,
+                probability_rr=probability_rr,
+            )
+            if normalized_quote_status == "suspended":
+                reject_reasons.append("LATEST_TRADE_SUSPENDED")
+            elif normalized_quote_status == "no_trade":
+                reject_reasons.append("LATEST_TRADE_NO_TRADE")
+            apply_vcp_base_filters(vcp_observation, reject_reasons)
+            candidate_type, classification, lifecycle_status, suggestion = classify_candidate(
+                indicators,
+                start,
+                phase,
+                pattern,
+                support,
+                dry_tail,
+                trade_plan,
+                score,
+                reject_reasons,
+                self.config,
+                box_tail=box_tail,
+                brooks_tail=brooks_tail,
+                selection_diagnostics=selection_diagnostics,
+                entry_timing=entry_timing,
+                probability_rr=probability_rr,
+            )
         pre_market_candidate_type = ""
         if (
             candidate_type == "WATCH_CANDIDATE"
@@ -266,6 +335,8 @@ class StrongVcpTailEngine:
                 box_tail=box_tail,
                 brooks_tail=brooks_tail,
                 selection_diagnostics=selection_diagnostics,
+                entry_timing=entry_timing,
+                probability_rr=probability_rr,
             )
             if audited_type in {"READY_CANDIDATE", "KEY_CANDIDATE"}:
                 pre_market_candidate_type = audited_type
@@ -294,6 +365,8 @@ class StrongVcpTailEngine:
             setup_quality=setup_quality,
             tail_regime=tail_regime,
             selection_diagnostics=selection_diagnostics,
+            entry_timing=entry_timing,
+            probability_rr=probability_rr,
             vcp_observation=vcp_observation,
             strategy_version=STRATEGY6_VERSION,
             config_hash=strategy6_config_hash(self.config),

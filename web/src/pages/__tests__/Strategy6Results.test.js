@@ -68,6 +68,17 @@ describe('Strategy6Results', () => {
           decision_profile: 'research_quality_v2',
           score_model_version: 'S6_QUALITY_V2',
           entry_archetype: 'SUPPORT_PULLBACK',
+          entry_timing_version: 'S6_ENTRY_TIMING_V1',
+          entry_timing_state: 'SUPPORT_CONFIRMED',
+          entry_timing_executable: true,
+          entry_timing_evidence_count: 4,
+          probability_rr_version: 'S6_PROBABILITY_RR_V1',
+          probability_rr_status: 'RELIABLE',
+          probability_rr_reliable: true,
+          probability_rr_sample_count: 230,
+          probability_rr_target_1_hit_probability: 0.48,
+          probability_rr_target_2_hit_probability: 0.31,
+          probability_adjusted_r: 0.27,
           start_event_quality_score: 17,
           setup_quality_score: 21,
           setup_quality_reasons: ['gain_retention=0.820'],
@@ -495,6 +506,11 @@ describe('Strategy6Results', () => {
     expect(wrapper.text()).toContain('下沿测试2次')
     expect(wrapper.text()).toContain('紧密排列')
     expect(wrapper.text()).toContain('支撑低吸')
+    expect(wrapper.find('[data-test="detail-entry-timing"]').text()).toContain('支撑止跌已确认')
+    expect(wrapper.find('[data-test="detail-entry-timing"]').text()).toContain('可执行')
+    expect(wrapper.find('[data-test="detail-probability-rr"]').text()).toContain('期望R 0.27')
+    expect(wrapper.find('[data-test="detail-probability-rr"]').text()).toContain('目标1 48.00%')
+    expect(wrapper.find('[data-test="detail-probability-rr"]').text()).toContain('样本 230')
     expect(wrapper.text()).toContain('整理质量 21')
     expect(wrapper.text()).toContain('支撑反应 8')
     expect(wrapper.find('[data-test="candidate-ttm-000001"]').text()).toContain('多头挤压释放')
@@ -1105,6 +1121,8 @@ describe('Strategy6Results', () => {
     expect(legacyRow[csvHeaders.indexOf('守住5日参考低')]).toBe('')
     expect(csv).toContain('固定窗口,FIXED_WINDOW,0')
     expect(csv).toContain('S6_QUALITY_V2,支撑低吸,SUPPORT_PULLBACK,17,21,8,13')
+    expect(csv).toContain('入场时机,入场时机原始值,当前可执行,入场证据数,概率RR状态,概率RR状态原始值,概率RR样本,目标1命中率,目标2命中率,概率修正期望R')
+    expect(csv).toContain('支撑止跌已确认,SUPPORT_CONFIRMED,是,4,可靠,RELIABLE,230,48.00%,31.00%,0.27')
     expect(csv).toContain('S6_FORMAL_ORIGINAL_V1,支撑低吸,SUPPORT_PULLBACK,18,12,10,0')
     expect(csv).toContain('客观目标1,客观目标2,客观RR1,客观RR2')
     expect(csv).toContain('权威路径汇总,权威路径汇总原始值,主路径,主路径原始值,通过路径')
