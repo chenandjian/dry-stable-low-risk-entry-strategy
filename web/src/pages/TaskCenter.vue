@@ -1,7 +1,13 @@
 <template>
   <div class="page-content">
-    <h2 class="page-title">策略6扫描任务</h2>
-    <p class="page-sub">仅展示策略6的手动与定时扫描记录</p>
+    <div class="page-heading">
+      <div>
+        <span class="terminal-kicker">STRATEGY 6 / TASK LEDGER</span>
+        <h2 class="page-title">策略6扫描任务</h2>
+        <p class="page-sub">手动扫描、定时运行与异常状态统一审计</p>
+      </div>
+      <span class="task-count">任务 {{ tasks.length }}</span>
+    </div>
 
     <div class="panel scheduler-panel">
       <div class="panel-header scheduler-header">
@@ -31,6 +37,7 @@
     </div>
 
     <div class="panel">
+      <div class="task-table-scroll">
       <div class="task-header">
         <span></span><span>任务ID</span><span>扫描日期</span><span>状态</span>
         <span>耗时</span><span>候选</span><span>失败</span><span>来源</span><span>最新日</span><span>操作</span>
@@ -50,6 +57,7 @@
           <button v-if="!task.running" class="action-btn" @click="viewResults(task.id)">查看结果</button>
           <span v-else class="st-running">扫描中</span>
         </span>
+      </div>
       </div>
     </div>
   </div>
@@ -125,26 +133,31 @@ onUnmounted(() => { if (pollTimer) clearInterval(pollTimer) })
 </script>
 
 <style scoped>
-.page-content { padding: 20px 24px; max-width: 1200px; margin: 0 auto; }
-.page-title { font-size: 24px; font-weight: 700; color: var(--text-primary); }
-.page-sub { font-size: 13px; color: var(--text-muted); margin-bottom: 20px; }
-.panel { background: var(--bg-panel); border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
+.page-content { padding: 22px 24px 40px; max-width: 1600px; margin: 0 auto; }
+.page-heading { display: flex; align-items: flex-end; justify-content: space-between; gap: 20px; margin-bottom: 16px; padding-bottom: 14px; border-bottom: 1px solid var(--border); }
+.terminal-kicker { color: var(--gold); font: 10px/1 var(--font-mono); letter-spacing: 0.16em; }
+.page-title { margin: 7px 0 3px; font-size: 23px; font-weight: 700; color: var(--text-primary); }
+.page-sub { margin: 0; font-size: 12px; color: var(--text-muted); }
+.task-count { color: var(--text-secondary); font: 11px/1 var(--font-mono); }
+.panel { background: var(--bg-panel); border: 1px solid var(--border); border-radius: var(--radius-sm); overflow: hidden; }
 .scheduler-panel { margin-bottom: 16px; }
-.panel-header { display: flex; justify-content: space-between; padding: 12px 16px; border-bottom: 1px solid var(--border); }
+.panel-header { display: flex; justify-content: space-between; padding: 11px 16px; border-bottom: 1px solid var(--border); font-size: 11px; letter-spacing: 0.05em; }
 .scheduler-status { font-size: 11px; color: var(--text-muted); }
 .scheduler-status.enabled, .runtime-running, .st-done { color: var(--down-green); }
 .runtime-stopped, .st-failed, .red { color: var(--up-red); }
 .scheduler-meta { display: flex; gap: 16px; padding: 10px 16px; border-bottom: 1px solid var(--border); font-size: 12px; color: var(--text-muted); }
 .scheduler-empty, .empty-state { padding: 32px 16px; text-align: center; color: var(--text-muted); }
 .scheduler-log-lines { max-height: 180px; overflow-y: auto; padding: 6px 0; }
-.scheduler-log-line { display: grid; grid-template-columns: 150px 60px 150px 180px 1fr; gap: 8px; padding: 4px 16px; font-family: var(--font-mono); font-size: 11px; }
+.scheduler-log-line { display: grid; grid-template-columns: 150px 60px 150px 180px 1fr; gap: 8px; padding: 5px 16px; font-family: var(--font-mono); font-size: 11px; border-bottom: 1px solid rgba(28,41,56,0.5); }
 .log-level.info { color: var(--accent); }
 .log-level.warning { color: var(--warn-orange); }
 .log-level.error { color: var(--up-red); }
 .log-stage { color: var(--gold); }
-.task-header, .task-row { display: grid; grid-template-columns: 20px 160px 150px 70px 70px 60px 60px 90px 90px 100px; align-items: center; padding: 11px 16px; gap: 4px; }
-.task-header { border-bottom: 2px solid var(--border-light); font-size: 11px; color: var(--text-muted); }
-.task-row { border-bottom: 1px solid var(--border); font-size: 12px; }
+.task-table-scroll { overflow-x: auto; }
+.task-header, .task-row { min-width: 1160px; display: grid; grid-template-columns: 20px 190px 170px 80px 80px 60px 60px 100px 100px 110px; align-items: center; padding: 10px 16px; gap: 4px; }
+.task-header { position: sticky; top: 0; z-index: 2; background: #0d1520; border-bottom: 1px solid var(--border-light); font-size: 10px; letter-spacing: 0.04em; color: var(--text-muted); }
+.task-row { border-bottom: 1px solid var(--border); font-size: 12px; font-variant-numeric: tabular-nums; }
+.task-row:hover { background: var(--bg-hover); }
 .task-dot { width: 8px; height: 8px; border-radius: 50%; }
 .task-dot.running { background: var(--warn-orange); }
 .task-dot.done { background: var(--down-green); }
@@ -155,4 +168,8 @@ onUnmounted(() => { if (pollTimer) clearInterval(pollTimer) })
 .actions { display: flex; gap: 6px; }
 .action-btn { font-size: 11px; padding: 4px 10px; border: 1px solid var(--border); background: transparent; color: var(--text-secondary); cursor: pointer; border-radius: 3px; }
 .action-btn:hover { border-color: var(--accent); color: var(--accent); }
+@media (max-width: 720px) {
+  .page-content { padding: 16px 12px 30px; }
+  .scheduler-meta { align-items: flex-start; flex-direction: column; gap: 6px; }
+}
 </style>

@@ -19,14 +19,6 @@
         </div>
         <div class="panel-actions">
           <button
-            class="btn-primary tickflow-action"
-            :disabled="tickFlowStarting || tickFlowStatus?.running"
-            data-test="tickflow-full-refresh"
-            @click="startTickFlowRefresh"
-          >
-            {{ tickFlowStatus?.running ? 'TickFlow 全量拉取中...' : 'TickFlow 全市场重新拉取' }}
-          </button>
-          <button
             class="btn-secondary danger-action"
             :disabled="bulkRefreshing || healthLoading || !bulkRefreshableCount"
             data-test="bulk-refresh-health"
@@ -40,10 +32,24 @@
         </div>
       </div>
 
+      <div class="maintenance-divider">
+        <span>数据维护工具</span>
+        <small>行情重拉与远端新鲜度验证</small>
+      </div>
       <div class="tickflow-box" data-test="tickflow-status">
-        <div>
-          <strong>TickFlow 全市场重新拉取</strong>
-          <p>固定参数：整个股票池 · 约 1100 根前复权日线 · 四个宽基指数（不复权）· 每批 100 只 · 5 个并发工作线程</p>
+        <div class="tickflow-box-head">
+          <div>
+            <strong>TickFlow 全市场重新拉取</strong>
+            <p>固定参数：整个股票池 · 约 1100 根前复权日线 · 四个宽基指数（不复权）· 每批 100 只 · 5 个并发工作线程</p>
+          </div>
+          <button
+            class="btn-secondary maintenance-action"
+            :disabled="tickFlowStarting || tickFlowStatus?.running"
+            data-test="tickflow-full-refresh"
+            @click="startTickFlowRefresh"
+          >
+            {{ tickFlowStatus?.running ? 'TickFlow 全量拉取中...' : '启动全市场重拉' }}
+          </button>
         </div>
         <div v-if="tickFlowStatus?.status && tickFlowStatus.status !== 'idle'" class="tickflow-progress">
           <strong>{{ tickFlowStatusLabel }}</strong>
@@ -638,27 +644,30 @@ onBeforeUnmount(clearTickFlowPoll)
 
 <style scoped>
 .kline-page {
-  padding: 20px;
+  padding: 22px 24px 40px;
+  max-width: 1600px;
+  margin: 0 auto;
   color: var(--text-primary);
 }
 .panel {
   background: var(--bg-panel);
   border: 1px solid var(--border);
-  border-radius: 10px;
-  padding: 18px;
+  border-radius: var(--radius-sm);
+  padding: 16px 18px;
 }
 .hero {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  margin-bottom: 16px;
+  margin-bottom: 12px;
+  border-left: 2px solid var(--gold);
 }
 .eyebrow {
   margin: 0 0 6px;
-  color: var(--accent);
-  font-size: 12px;
-  letter-spacing: 0.08em;
+  color: var(--gold);
+  font: 10px/1 var(--font-mono);
+  letter-spacing: 0.16em;
 }
 h1, h2, p {
   margin: 0;
@@ -677,18 +686,21 @@ h2 {
 }
 .status-pill {
   border: 1px solid var(--border);
-  border-radius: 999px;
-  padding: 10px 16px;
+  border-radius: var(--radius-sm);
+  padding: 8px 12px;
   color: var(--text-secondary);
   white-space: nowrap;
+  font: 11px/1 var(--font-mono);
 }
 .status-pill.fresh {
-  color: var(--up-red);
-  border-color: rgba(239, 68, 68, 0.35);
+  color: var(--success);
+  border-color: rgba(32, 173, 114, 0.35);
+  background: var(--success-glow);
 }
 .status-pill.stale {
-  color: var(--down-green);
-  border-color: rgba(34, 197, 94, 0.35);
+  color: var(--danger);
+  border-color: rgba(239, 91, 91, 0.35);
+  background: rgba(239, 91, 91, 0.08);
 }
 .summary-grid {
   display: grid;
@@ -699,7 +711,7 @@ h2 {
 .summary-card {
   background: var(--bg-panel);
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: var(--radius-sm);
   padding: 14px;
 }
 .summary-card span {
@@ -723,23 +735,32 @@ h2 {
   grid-column: span 2;
 }
 .summary-card.ok {
-  border-color: rgba(239, 68, 68, 0.35);
+  border-color: rgba(32, 173, 114, 0.35);
 }
 .summary-card.warning {
-  border-color: rgba(34, 197, 94, 0.35);
+  border-color: rgba(239, 91, 91, 0.35);
 }
 .health-panel {
   margin-bottom: 16px;
 }
+.maintenance-divider {
+  display: flex; align-items: baseline; gap: 10px; margin: 16px 0 8px;
+  padding-top: 13px; border-top: 1px solid var(--border);
+}
+.maintenance-divider span { color: var(--text-secondary); font-size: 11px; font-weight: 700; letter-spacing: 0.08em; }
+.maintenance-divider small { color: var(--text-muted); font-size: 10px; }
 .tickflow-box {
   display: grid;
   gap: 10px;
   margin: 14px 0 16px;
   padding: 14px;
-  border: 1px solid rgba(59, 130, 246, 0.35);
-  border-radius: 8px;
-  background: rgba(59, 130, 246, 0.06);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: rgba(16,24,36,0.42);
 }
+.tickflow-box-head { display: flex; align-items: center; justify-content: space-between; gap: 20px; }
+.maintenance-action { flex-shrink: 0; color: var(--text-secondary) !important; }
+.maintenance-action:hover:not(:disabled) { border-color: var(--warn-orange) !important; color: var(--warn-orange) !important; }
 .tickflow-box p {
   margin-top: 6px;
   color: var(--text-secondary);
@@ -758,15 +779,15 @@ h2 {
 .tickflow-failures {
   margin: 0;
   padding-left: 20px;
-  color: var(--down-green);
+  color: var(--danger);
   font-size: 12px;
 }
 .tickflow-probe {
   margin: 0 0 16px;
   padding: 14px;
-  border: 1px solid rgba(59, 130, 246, 0.35);
-  border-radius: 8px;
-  background: rgba(59, 130, 246, 0.04);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: rgba(16,24,36,0.42);
 }
 .probe-actions,
 .probe-summary {
@@ -797,7 +818,7 @@ h2 {
   text-align: left;
   background: var(--bg-card);
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: var(--radius-sm);
   color: var(--text-primary);
   padding: 14px;
 }
@@ -815,13 +836,13 @@ button.health-card {
   font-size: 18px;
 }
 .health-card.ok {
-  border-color: rgba(239, 68, 68, 0.35);
+  border-color: rgba(32, 173, 114, 0.35);
 }
 .health-card.warning {
   border-color: rgba(234, 179, 8, 0.45);
 }
 .health-card.danger {
-  border-color: rgba(34, 197, 94, 0.45);
+  border-color: rgba(239, 91, 91, 0.42);
 }
 .sub-head {
   margin-top: 8px;
@@ -836,7 +857,7 @@ button.health-card {
 .link-button {
   height: 32px;
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: var(--bg-card);
   color: var(--text-primary);
   padding: 0 12px;
@@ -864,21 +885,21 @@ button.health-card {
   align-items: center;
   min-width: 44px;
   justify-content: center;
-  border-radius: 999px;
-  padding: 4px 8px;
+  border-radius: 2px;
+  padding: 3px 7px;
   font-size: 12px;
 }
 .health-badge.ok {
-  color: var(--up-red);
-  background: rgba(239, 68, 68, 0.10);
+  color: var(--success);
+  background: var(--success-glow);
 }
 .health-badge.warning {
   color: #eab308;
   background: rgba(234, 179, 8, 0.12);
 }
 .health-badge.danger {
-  color: var(--down-green);
-  background: rgba(34, 197, 94, 0.12);
+  color: var(--danger);
+  background: rgba(239, 91, 91, 0.10);
 }
 .link-button {
   color: var(--accent);
@@ -897,8 +918,8 @@ button.health-card {
   gap: 8px;
 }
 .danger-action {
-  color: var(--down-green);
-  border-color: rgba(34, 197, 94, 0.35);
+  color: var(--danger);
+  border-color: rgba(239, 91, 91, 0.35);
 }
 .query-panel {
   display: grid;
@@ -917,7 +938,7 @@ input,
 select {
   height: 34px;
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: var(--bg-card);
   color: var(--text-primary);
   padding: 0 10px;
@@ -926,7 +947,7 @@ select {
 .pager button {
   height: 34px;
   border: none;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: var(--accent);
   color: #fff;
   padding: 0 14px;
@@ -938,11 +959,11 @@ button:disabled {
 }
 .error-line {
   margin: 0 0 16px;
-  color: var(--down-green);
+  color: var(--danger);
 }
 .success-line {
   margin: 0 0 16px;
-  color: var(--up-red);
+  color: var(--success);
 }
 .table-head {
   display: flex;
@@ -973,6 +994,10 @@ td:first-child {
   text-align: left;
 }
 th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: #0d1520;
   color: var(--text-secondary);
   font-weight: 500;
 }

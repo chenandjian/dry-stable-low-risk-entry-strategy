@@ -1,13 +1,19 @@
 <template>
   <div class="page-content">
-    <!-- Market Status Bar -->
-    <div class="status-bar">
-      <span class="market-status">
-        <span class="status-dot" :class="marketStatusClass"></span>
-        {{ marketStatusText }}
-      </span>
-      <span class="status-sep">|</span>
-      <span class="current-time">{{ currentTime }}</span>
+    <div class="terminal-heading">
+      <div>
+        <span class="terminal-kicker">STRATEGY 6 / MARKET SCANNER</span>
+        <h1>强势 VCP 扫描控制台</h1>
+        <p>全市场行情准备、策略计算与候选发现统一监控</p>
+      </div>
+      <div class="status-bar">
+        <span class="market-status">
+          <span class="status-dot" :class="marketStatusClass"></span>
+          {{ marketStatusText }}
+        </span>
+        <span class="status-sep">/</span>
+        <span class="current-time">{{ currentTime }}</span>
+      </div>
     </div>
     <!-- Metrics Row -->
     <div class="metrics-row">
@@ -15,8 +21,12 @@
       <MetricCard label="就绪候选" :value="metrics.breakout" sub="READY / BUY_ZONE" color="red" />
       <MetricCard label="重点候选" :value="metrics.nearBreakout" sub="KEY_CANDIDATE" color="gold" />
       <MetricCard label="观察候选" :value="metrics.volumeOk" sub="WATCH_CANDIDATE" color="orange" />
-      <MetricCard label="高分候选 ≥80" :value="metrics.aGrade" :sub="topSignalSub" />
-      <MetricCard label="最高评分" :value="metrics.topScore" :sub="topScoreSub" color="gold" />
+    </div>
+    <div class="signal-strip">
+      <span>高分候选 ≥80 <strong>{{ metrics.aGrade }}</strong></span>
+      <span>最高评分 <strong>{{ metrics.topScore || '--' }}</strong></span>
+      <span>领先标的 <strong>{{ topScoreSub }}</strong></span>
+      <span class="signal-note">{{ topSignalSub === '--' ? '等待下一次扫描发现' : topSignalSub }}</span>
     </div>
 
     <!-- Error message -->
@@ -925,20 +935,34 @@ watch(
 </script>
 
 <style scoped>
-.page-content { padding: 20px 24px; max-width: 1440px; margin: 0 auto; }
-.metrics-row {
-  display: grid; grid-template-columns: repeat(6, 1fr); gap: 12px; margin-bottom: 20px;
+.page-content { padding: 22px 24px 36px; max-width: 1600px; margin: 0 auto; }
+.terminal-heading {
+  display: flex; align-items: flex-end; justify-content: space-between; gap: 24px;
+  margin-bottom: 16px; padding-bottom: 14px; border-bottom: 1px solid var(--border);
 }
-@media (max-width: 1200px) { .metrics-row { grid-template-columns: repeat(3, 1fr); } }
-.two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.terminal-kicker { color: var(--gold); font: 10px/1 var(--font-mono); letter-spacing: 0.16em; }
+.terminal-heading h1 { margin: 7px 0 3px; font-size: 23px; line-height: 1.2; letter-spacing: 0.01em; }
+.terminal-heading p { margin: 0; color: var(--text-muted); font-size: 12px; }
+.metrics-row {
+  display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 8px;
+}
+@media (max-width: 1000px) { .metrics-row { grid-template-columns: repeat(2, 1fr); } }
+.signal-strip {
+  display: flex; align-items: center; gap: 20px; min-height: 34px; margin-bottom: 14px;
+  padding: 7px 12px; border: 1px solid var(--border); background: rgba(11,17,27,0.72);
+  color: var(--text-muted); font: 11px/1.4 var(--font-mono);
+}
+.signal-strip strong { color: var(--text-primary); }
+.signal-strip .signal-note { margin-left: auto; color: var(--text-secondary); }
+.two-col { display: grid; grid-template-columns: minmax(0, 1.08fr) minmax(420px, 0.92fr); gap: 10px; }
 @media (max-width: 960px) { .two-col { grid-template-columns: 1fr; } }
 .panel {
-  background: var(--bg-panel); border: 1px solid var(--border); border-radius: 6px; overflow: hidden;
+  background: var(--bg-panel); border: 1px solid var(--border); border-radius: var(--radius-sm); overflow: hidden;
 }
 .panel-header {
   display: flex; align-items: center; justify-content: space-between;
-  padding: 12px 16px; border-bottom: 1px solid var(--border);
-  font-size: 12px; font-weight: 600; color: var(--text-secondary);
+  padding: 11px 16px; border-bottom: 1px solid var(--border);
+  font-size: 11px; font-weight: 650; letter-spacing: 0.05em; color: var(--text-secondary);
 }
 .sub-title { font-weight: 400; font-size: 11px; }
 .empty-state {
@@ -959,16 +983,16 @@ watch(
 .retry-btn { background: transparent; color: var(--accent); border: 1px solid var(--accent); border-radius: 4px; padding: 4px 10px; cursor: pointer; }
 .retry-btn:disabled { opacity: 0.4; cursor: not-allowed; }
 .failure-row { display: grid; grid-template-columns: 90px 120px 1fr 140px 30px; gap: 8px; padding: 8px 16px; border-top: 1px solid var(--border); font-size: 12px; cursor: pointer; }
-.failure-row:hover { background: #1a1a1a; }
+.failure-row:hover { background: var(--bg-hover); }
 .failure-row .code { color: var(--accent); font-family: var(--font-mono); }
 .failure-row .reason { color: #e88; }
 .expand-icon { color: #666; text-align: center; }
-.failure-detail { padding: 10px 16px 10px 40px; background: #111; border-top: 1px solid #222; font-size: 11px; color: #aaa; line-height: 1.6; }
-.failure-detail strong { color: #ccc; }
+.failure-detail { padding: 10px 16px 10px 40px; background: #080d14; border-top: 1px solid var(--border); font-size: 11px; color: var(--text-secondary); line-height: 1.6; }
+.failure-detail strong { color: var(--text-primary); }
 .muted { color: var(--text-muted); }
 .status-bar {
   display: flex; align-items: center; justify-content: flex-end; gap: 10px;
-  margin-bottom: 12px; font-size: 13px;
+  font: 12px/1 var(--font-mono); color: var(--text-secondary);
 }
 .status-dot {
   display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px;
@@ -976,6 +1000,12 @@ watch(
 .status-dot.open { background: var(--down-green); box-shadow: 0 0 6px rgba(34,197,94,0.4); }
 .status-dot.closed { background: var(--gold); }
 .status-dot.pre { background: var(--text-muted); }
-.status-sep { color: var(--border); }
-.current-time { color: var(--text-primary); font-family: var(--font-mono); font-size: 14px; }
+.status-sep { color: var(--border-light); }
+.current-time { color: var(--text-primary); font-family: var(--font-mono); font-size: 13px; }
+@media (max-width: 720px) {
+  .page-content { padding: 16px 12px 28px; }
+  .terminal-heading { align-items: flex-start; flex-direction: column; }
+  .signal-strip { align-items: flex-start; flex-direction: column; gap: 5px; }
+  .signal-strip .signal-note { margin-left: 0; }
+}
 </style>

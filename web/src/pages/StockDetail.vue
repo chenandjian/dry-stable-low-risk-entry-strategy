@@ -445,12 +445,12 @@ async function initChart() {
 
   const chart = createChart(chartRef.value, {
     layout: {
-      background: { color: '#070B14' },
-      textColor: '#5A6A7E',
+      background: { color: '#060a10' },
+      textColor: '#627386',
     },
     grid: {
-      vertLines: { color: '#1F2A3A' },
-      horzLines: { color: '#1F2A3A' },
+      vertLines: { color: '#1c2938' },
+      horzLines: { color: '#1c2938' },
     },
     crosshair: { mode: 0 },
     timeScale: {
@@ -607,7 +607,7 @@ onUnmounted(() => {
 
 <style scoped>
 .detail-layout {
-  display: grid; grid-template-columns: 280px 1fr 280px; height: calc(100vh - 48px);
+  display: grid; grid-template-columns: 300px minmax(520px, 1fr) 290px; height: calc(100vh - 54px);
 }
 @media (max-width: 1280px) { .detail-layout { grid-template-columns: 260px 1fr 0; } .right-panel { display: none; } }
 .left-panel, .right-panel {
@@ -616,7 +616,7 @@ onUnmounted(() => {
 .left-panel { border-right: 1px solid var(--border); }
 .right-panel { border-left: 1px solid var(--border); display: flex; flex-direction: column; }
 
-.stock-id { padding: 16px; border-bottom: 1px solid var(--border); }
+.stock-id { padding: 18px 16px; border-bottom: 1px solid var(--border); border-top: 2px solid var(--gold); }
 .name { font-size: 20px; font-weight: 700; }
 .code { font-size: 13px; color: var(--accent); font-family: var(--font-mono); margin-top: 2px; }
 .price-row { display: flex; align-items: baseline; gap: 10px; margin-top: 10px; }
@@ -631,7 +631,7 @@ onUnmounted(() => {
   border: 1px solid var(--accent);
   background: rgba(79, 125, 255, 0.12);
   color: var(--accent);
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   padding: 8px 10px;
   cursor: pointer;
   font-size: 12px;
@@ -640,8 +640,8 @@ onUnmounted(() => {
 .backtest-link:hover { background: rgba(79, 125, 255, 0.2); }
 
 .section-label {
-  font-size: 11px; font-weight: 600; color: var(--text-muted);
-  text-transform: uppercase; letter-spacing: 0.8px; padding: 14px 16px 6px;
+  font-size: 10px; font-weight: 700; color: var(--text-secondary);
+  text-transform: uppercase; letter-spacing: 0.1em; padding: 14px 16px 6px;
 }
 .score-section { padding: 0 16px 12px; }
 .score-total {
@@ -689,7 +689,7 @@ onUnmounted(() => {
 .structure-readout { padding: 12px 16px; background: var(--bg-panel); border-top: 1px solid var(--border); }
 .structure-title { font-size: 12px; font-weight: 600; color: var(--text-secondary); margin-bottom: 8px; }
 .structure-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; }
-.sc { background: var(--bg-card); border: 1px solid var(--border); border-radius: 4px; padding: 8px; }
+.sc { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 8px; }
 .phase { font-size: 10px; color: var(--text-muted); margin-bottom: 2px; }
 .val { font-size: 12px; font-family: var(--font-mono); color: var(--text-primary); font-weight: 600; }
 .vrd { font-size: 10px; margin-top: 2px; }
@@ -712,7 +712,7 @@ onUnmounted(() => {
   padding: 10px 14px; border-bottom: 1px solid rgba(31,42,58,0.5);
   cursor: pointer; transition: background 0.1s;
 }
-.wl-item:hover { background: rgba(79,125,255,0.03); }
+.wl-item:hover { background: var(--bg-hover); }
 .wl-item.active { background: rgba(79,125,255,0.12); border-left: 3px solid var(--accent); padding-left: 11px; }
 .wl-item.active .wl-code { color: #fff; }
 .wl-item.active .wl-score { color: var(--gold); }

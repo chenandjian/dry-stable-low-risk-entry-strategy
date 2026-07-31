@@ -113,13 +113,13 @@ const sourceText = computed(() => props.stockPoolSource ? `股票池 ${props.sto
 
 <style scoped>
 .panel {
-  background: var(--bg-panel); border: 1px solid var(--border); border-radius: 6px; overflow: hidden;
+  background: var(--bg-panel); border: 1px solid var(--border); border-radius: var(--radius-sm); overflow: hidden;
 }
 .panel-header {
   display: flex; align-items: center; justify-content: space-between;
-  padding: 12px 16px; border-bottom: 1px solid var(--border);
-  font-size: 12px; font-weight: 600; color: var(--text-secondary);
-  text-transform: uppercase; letter-spacing: 0.5px;
+  padding: 11px 16px; border-bottom: 1px solid var(--border);
+  font-size: 11px; font-weight: 650; color: var(--text-secondary);
+  text-transform: uppercase; letter-spacing: 0.08em;
 }
 .panel-header.sub { text-transform: none; letter-spacing: 0; font-weight: 500; }
 .status { font-size: 11px; color: var(--text-muted); }
@@ -136,9 +136,9 @@ const sourceText = computed(() => props.stockPoolSource ? `股票池 ${props.sto
 .title { font-size: 14px; font-weight: 600; color: var(--text-primary); }
 .sub { font-size: 12px; color: var(--text-muted); }
 .progress-row { display: flex; align-items: center; gap: 10px; margin: 12px 0; }
-.progress-bar { flex: 1; height: 4px; background: var(--border); border-radius: 2px; overflow: hidden; }
+.progress-bar { flex: 1; height: 3px; background: var(--border); overflow: hidden; }
 .progress-pct { font-family: var(--font-mono); font-size: 11px; color: var(--accent); min-width: 32px; text-align: right; }
-.progress-fill { height: 100%; background: linear-gradient(90deg, var(--accent), #79A0FF); border-radius: 2px; transition: width 0.3s; }
+.progress-fill { height: 100%; background: linear-gradient(90deg, var(--gold), var(--accent)); transition: width 0.3s; }
 .current-stock { display: flex; align-items: center; gap: 8px; font-size: 13px; }
 .scan-meta { display: flex; justify-content: space-between; margin-top: 8px; font-size: 11px; color: var(--text-muted); }
 .label { color: var(--text-muted); }
@@ -153,8 +153,8 @@ const sourceText = computed(() => props.stockPoolSource ? `股票池 ${props.sto
 .log-line .error { color: var(--up-red); }
 .scan-controls { padding: 10px 16px; display: flex; gap: 8px; }
 .btn-primary {
-  background: var(--accent); color: #fff; border: none;
-  padding: 8px 20px; border-radius: 4px; font-size: 13px; font-weight: 600; cursor: pointer;
+  background: var(--accent); color: #fff; border: 1px solid var(--accent);
+  padding: 8px 20px; border-radius: var(--radius-sm); font-size: 13px; font-weight: 600; cursor: pointer;
   transition: background 0.15s;
 }
 .btn-primary:hover { background: #3D6BEE; }

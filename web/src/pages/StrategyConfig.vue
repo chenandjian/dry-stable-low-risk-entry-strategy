@@ -1,7 +1,10 @@
 <template>
   <div class="page-content">
-    <h2 class="page-title">策略配置</h2>
-    <p class="page-sub">配置策略6扫描、行情数据与定时任务，保存后立即生效</p>
+    <div class="page-heading">
+      <span class="terminal-kicker">STRATEGY 6 / CONTROL PARAMETERS</span>
+      <h2 class="page-title">策略配置</h2>
+      <p class="page-sub">策略6扫描、行情数据与定时任务参数，保存后立即生效</p>
+    </div>
 
     <!-- 市场范围 -->
     <section class="section">
@@ -2265,17 +2268,20 @@ onMounted(async () => {
 </script>
 
 <style scoped>
-.page-content { padding: 20px 24px; max-width: 900px; margin: 0 auto; }
-.page-title { font-size: 24px; font-weight: 700; color: var(--text-primary); }
-.page-sub { font-size: 13px; color: var(--text-muted); margin-bottom: 24px; }
+.page-content { padding: 22px 24px 48px; max-width: 1180px; margin: 0 auto; }
+.page-heading { margin-bottom: 16px; padding-bottom: 14px; border-bottom: 1px solid var(--border); }
+.terminal-kicker { color: var(--gold); font: 10px/1 var(--font-mono); letter-spacing: 0.16em; }
+.page-title { margin: 7px 0 3px; font-size: 23px; font-weight: 700; color: var(--text-primary); }
+.page-sub { margin: 0; font-size: 12px; color: var(--text-muted); }
 
 .section {
   background: var(--bg-panel); border: 1px solid var(--border);
-  border-radius: 8px; padding: 20px; margin-bottom: 16px;
+  border-radius: var(--radius-sm); padding: 18px 20px; margin-bottom: 12px;
+  box-shadow: var(--shadow-panel);
 }
 .section-title {
-  font-size: 14px; font-weight: 600; color: var(--text-primary);
-  margin-bottom: 16px; padding-bottom: 10px; border-bottom: 1px solid var(--border);
+  font-size: 12px; font-weight: 700; letter-spacing: 0.05em; color: var(--text-secondary);
+  margin: 0 0 16px; padding-bottom: 10px; border-bottom: 1px solid var(--border);
 }
 
 .toggle-grid { display: flex; gap: 12px; flex-wrap: wrap; }
@@ -2284,7 +2290,8 @@ onMounted(async () => {
 .secret-input-row input { flex: 1; min-width: 0; }
 .key-status { margin-left: 8px; color: var(--text-muted); font-size: 12px; }
 .key-status.configured { color: var(--success, #22a06b); }
-.mode-option { display: flex; gap: 10px; align-items: flex-start; padding: 12px; border: 1px solid var(--border-color); border-radius: 8px; cursor: pointer; }
+.mode-option { display: flex; gap: 10px; align-items: flex-start; padding: 12px; border: 1px solid var(--border); border-radius: var(--radius-sm); cursor: pointer; background: rgba(16,24,36,0.45); }
+.mode-option:hover { border-color: var(--border-light); background: var(--bg-hover); }
 .mode-option input { margin-top: 3px; accent-color: var(--accent); }
 .mode-option span { display: flex; flex-direction: column; gap: 4px; }
 .mode-option small { color: var(--text-muted); line-height: 1.45; }
@@ -2316,8 +2323,9 @@ onMounted(async () => {
 .actions-bar {
   display: flex; align-items: center; justify-content: space-between;
   background: var(--bg-panel); border: 1px solid var(--border);
-  border-radius: 8px; padding: 16px 20px; margin-top: 20px;
+  border-radius: var(--radius-sm); padding: 13px 16px; margin-top: 16px;
   position: sticky; bottom: 20px;
+  box-shadow: 0 10px 30px rgba(0,0,0,0.35);
 }
 .saved-msg { color: var(--down-green); font-size: 13px; font-weight: 600; }
 .error-msg { color: var(--up-red); font-size: 13px; }
@@ -2332,6 +2340,11 @@ onMounted(async () => {
 }
 .btn-save.dirty {
   background: var(--accent); color: #fff;
+}
+@media (max-width: 720px) {
+  .page-content { padding: 16px 12px 38px; }
+  .section { padding: 15px 14px; }
+  .actions-bar { bottom: 8px; }
 }
 
 /* Strategy2 section */

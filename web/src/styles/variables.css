@@ -1,39 +1,83 @@
 :root {
-  --bg-root: #070B14;
-  --bg-panel: #0D1320;
-  --bg-card: #111827;
-  --border: #1F2A3A;
-  --border-light: #2A3548;
+  --bg-root: #060a10;
+  --bg-panel: #0b111b;
+  --bg-card: #101824;
+  --bg-elevated: #141e2c;
+  --bg-hover: #151f2d;
+  --border: #1c2938;
+  --border-light: #2a394b;
 
-  --text-primary: #E8ECF1;
-  --text-secondary: #8896A6;
-  --text-muted: #5A6A7E;
+  --text-primary: #edf2f7;
+  --text-secondary: #9aa8b8;
+  --text-muted: #627386;
 
-  --accent: #4F7DFF;
-  --accent-glow: rgba(79, 125, 255, 0.15);
+  --accent: #4c8dff;
+  --accent-strong: #72a5ff;
+  --accent-glow: rgba(76, 141, 255, 0.12);
 
-  --up-red: #EF4444;
-  --up-red-glow: rgba(239, 68, 68, 0.15);
-  --down-green: #22C55E;
-  --gold: #F59E0B;
-  --gold-glow: rgba(245, 158, 11, 0.15);
-  --warn-orange: #F97316;
-  --warn-orange-glow: rgba(249, 115, 22, 0.15);
+  --up-red: #f04444;
+  --up-red-glow: rgba(240, 68, 68, 0.12);
+  --down-green: #20ad72;
+  --success: #20ad72;
+  --success-glow: rgba(32, 173, 114, 0.12);
+  --gold: #d6a84a;
+  --gold-glow: rgba(214, 168, 74, 0.12);
+  --warn-orange: #e8903f;
+  --warn-orange-glow: rgba(232, 144, 63, 0.12);
+  --danger: #ef5b5b;
 
   --font-mono: 'SF Mono', 'Cascadia Code', 'Consolas', 'Microsoft YaHei', monospace;
   --font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  --radius-sm: 3px;
+  --radius-md: 5px;
+  --shadow-panel: 0 8px 30px rgba(0, 0, 0, 0.16);
 }
 
 /* Global styles */
+* { box-sizing: border-box; }
+
+html, body, #app, #cuphandle-app { min-height: 100%; }
+
 body {
+  margin: 0;
   background: var(--bg-root);
   color: var(--text-primary);
   font-family: var(--font-sans);
   font-size: 14px;
+  line-height: 1.45;
+  -webkit-font-smoothing: antialiased;
 }
 
 a { color: var(--accent); text-decoration: none; }
 a:hover { text-decoration: underline; }
+
+button,
+input,
+select,
+textarea { font: inherit; }
+
+button:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: 1px;
+}
+
+input,
+select,
+textarea {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: #0a1019;
+  color: var(--text-primary);
+}
+
+table { font-variant-numeric: tabular-nums; }
+th { letter-spacing: 0.02em; }
+td, .code, .score, .rr { font-variant-numeric: tabular-nums; }
+
+::selection { background: rgba(76, 141, 255, 0.28); color: #fff; }
 
 /* Scrollbar */
 ::-webkit-scrollbar { width: 6px; height: 6px; }

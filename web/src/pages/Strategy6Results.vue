@@ -1,10 +1,12 @@
 <template>
   <div class="strategy6-results">
     <div class="page-header">
-      <div>
+      <div class="page-title-block">
+        <span class="terminal-kicker">STRATEGY 6 / SIGNAL DESK</span>
         <h1>策略6 · 强势 VCP 尾部候选池</h1>
         <p>强势启动后有支撑横盘，尾部价稳量干且盈亏比合格的候选池。</p>
       </div>
+      <div class="header-controls">
       <div ref="taskPicker" class="task-picker" @click.stop>
         <button
           data-test="strategy6-task-trigger"
@@ -54,6 +56,7 @@
         :disabled="!selectedTaskId"
         @click="exportExcelReport"
       >导出日报Excel</button>
+      </div>
     </div>
 
     <div v-if="error" class="error-banner">{{ error }}</div>
@@ -72,13 +75,34 @@
     <div class="empty" v-else-if="!loading && selectedTaskId && !candidates.length">当前任务没有策略6候选。</div>
 
     <section v-if="marketSnapshot" class="panel market-panel">
-      <div class="panel-header">市场过滤数据</div>
+      <div class="panel-header">
+        <span>市场过滤数据</span>
+        <strong class="market-state">{{ label('marketStatus', marketSnapshot.market_status || 'UNKNOWN') }}</strong>
+      </div>
       <div class="market-summary">
-        <span>状态 <strong>{{ label('marketStatus', marketSnapshot.market_status || 'UNKNOWN') }}</strong></span>
         <span>20日市场涨幅 <strong>{{ pct(marketSnapshot.market_return_20) }}</strong></span>
         <span v-for="reason in marketSnapshot.market_reasons || []" :key="reason" class="tag info">{{ label('marketReason', reason) }}</span>
       </div>
-      <div class="table-scroll">
+      <div class="market-index-grid">
+        <article v-for="idx in marketIndexes" :key="`pulse-${idx.symbol}`" class="market-index-card">
+          <div class="index-card-head">
+            <div><strong>{{ idx.name || idx.symbol }}</strong><span>{{ idx.symbol }}</span></div>
+            <span class="data-state" :class="{ fresh: idx.data_status === 'FRESH' }">{{ marketDataStatusText(idx.data_status) }}</span>
+          </div>
+          <div class="index-price">{{ fmt(idx.latest_close) }}</div>
+          <div class="index-return" :class="{ up: Number(idx.return_20) >= 0, down: Number(idx.return_20) < 0 }">
+            20日 {{ pct(idx.return_20) }}
+          </div>
+          <div class="index-meta">
+            <span>MA20 {{ fmt(idx.ma20) }}</span>
+            <span>MA50 {{ fmt(idx.ma50) }}</span>
+            <span>{{ idx.latest_date || '--' }}</span>
+          </div>
+        </article>
+      </div>
+      <details class="market-raw-data">
+        <summary>查看四指数原始数据与抓取审计</summary>
+        <div class="table-scroll">
         <table class="market-table">
           <thead>
             <tr>
@@ -104,11 +128,12 @@
             </tr>
           </tbody>
         </table>
-      </div>
+        </div>
+      </details>
     </section>
 
     <section v-for="group in candidateGroups" :key="group.type" class="panel">
-      <div class="panel-header">{{ group.title }}</div>
+      <div class="panel-header"><span>{{ group.title }}</span><span class="panel-count">{{ group.items.length }}</span></div>
       <div class="table-scroll">
         <table class="candidate-table">
           <thead>
@@ -169,7 +194,7 @@
     </section>
 
     <section v-for="group in vcpGroups" :key="group.key" class="panel vcp-panel">
-      <div class="panel-header">{{ group.title }}</div>
+      <div class="panel-header"><span>{{ group.title }}</span><span class="panel-count">{{ group.rows.length }}</span></div>
       <template v-if="group.rows.length">
         <div class="panel-note">仅跟踪本轮VCP起点后曾进入策略6正式候选的股票；过度延伸只保留跟踪，不代表立即买入。</div>
         <div v-if="vcpQualityNotice" class="panel-note">{{ vcpQualityNotice }}</div>
@@ -1248,37 +1273,59 @@ export default {
 </script>
 
 <style scoped>
-.strategy6-results { padding: 20px; color: var(--text-primary); }
-.page-header { display: flex; justify-content: space-between; gap: 16px; align-items: flex-start; margin-bottom: 16px; }
-h1 { margin: 0 0 6px; font-size: 22px; }
-p { margin: 0; color: var(--text-secondary); }
-.task-picker { position: relative; min-width: 380px; }
-.task-select-trigger { width: 100%; display: flex; align-items: center; justify-content: space-between; gap: 12px; background: var(--bg-panel); color: var(--text-primary); border: 1px solid var(--border); border-radius: 4px; padding: 8px 10px; cursor: pointer; text-align: left; }
+.strategy6-results { padding: 22px 24px 40px; color: var(--text-primary); }
+.page-header { display: flex; justify-content: space-between; gap: 24px; align-items: flex-end; margin-bottom: 12px; padding-bottom: 14px; border-bottom: 1px solid var(--border); }
+.page-title-block { min-width: 320px; }
+.terminal-kicker { display: block; margin-bottom: 7px; color: var(--gold); font: 10px/1 var(--font-mono); letter-spacing: 0.16em; }
+h1 { margin: 0 0 5px; font-size: 23px; line-height: 1.2; }
+p { margin: 0; color: var(--text-muted); font-size: 12px; }
+.header-controls { display: flex; align-items: center; justify-content: flex-end; gap: 8px; flex: 1; }
+.task-picker { position: relative; min-width: 350px; }
+.task-select-trigger { width: 100%; height: 34px; display: flex; align-items: center; justify-content: space-between; gap: 12px; background: var(--bg-panel); color: var(--text-primary); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 7px 10px; cursor: pointer; text-align: left; font: 11px/1 var(--font-mono); }
 .task-select-trigger:hover, .task-select-trigger[aria-expanded="true"] { border-color: var(--accent); }
 .task-select-arrow { color: var(--text-secondary); font-size: 10px; }
-.task-dropdown { position: absolute; z-index: 40; top: calc(100% + 6px); left: 0; right: 0; overflow: hidden; background: var(--bg-panel); border: 1px solid var(--border); border-radius: 6px; box-shadow: 0 12px 32px rgba(0, 0, 0, 0.38); }
+.task-dropdown { position: absolute; z-index: 40; top: calc(100% + 5px); left: 0; right: 0; overflow: hidden; background: var(--bg-elevated); border: 1px solid var(--border-light); border-radius: var(--radius-sm); box-shadow: 0 12px 32px rgba(0, 0, 0, 0.42); }
 .task-options { display: flex; flex-direction: column; padding: 5px; }
-.task-option { width: 100%; background: transparent; color: var(--text-primary); border: 0; border-radius: 4px; padding: 8px 10px; cursor: pointer; text-align: left; }
-.task-option:hover { background: rgba(59, 130, 246, 0.12); }
-.task-option.selected { background: rgba(59, 130, 246, 0.2); color: #bfdbfe; }
+.task-option { width: 100%; background: transparent; color: var(--text-primary); border: 0; border-radius: 2px; padding: 8px 10px; cursor: pointer; text-align: left; font: 11px/1.3 var(--font-mono); }
+.task-option:hover { background: var(--bg-hover); }
+.task-option.selected { background: var(--accent-glow); color: var(--accent-strong); }
 .task-option-empty { padding: 12px; color: var(--text-secondary); text-align: center; }
 .task-pagination { display: flex; align-items: center; justify-content: center; gap: 8px; padding: 8px; border-top: 1px solid var(--border); color: var(--text-secondary); font-size: 12px; }
 .task-pagination button { background: transparent; color: var(--text-primary); border: 1px solid var(--border); border-radius: 4px; padding: 4px 9px; cursor: pointer; }
 .task-pagination button:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
 .task-pagination button:disabled { opacity: 0.4; cursor: not-allowed; }
-.export-btn { background: transparent; color: var(--text-primary); border: 1px solid var(--border); border-radius: 4px; padding: 8px 12px; cursor: pointer; }
+.export-btn { height: 34px; background: transparent; color: var(--text-secondary); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 7px 11px; cursor: pointer; font-size: 11px; white-space: nowrap; }
 .export-btn:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
 .export-btn:disabled { opacity: 0.45; cursor: not-allowed; }
-.summary-bar { display: flex; gap: 12px; align-items: center; margin: 12px 0; color: var(--text-secondary); flex-wrap: wrap; }
-.market-summary { padding: 12px 14px; display: flex; gap: 12px; align-items: center; flex-wrap: wrap; color: var(--text-secondary); border-bottom: 1px solid var(--border); }
-.chip, .type-badge, .tag { border-radius: 999px; padding: 2px 8px; font-size: 12px; display: inline-block; margin: 1px 3px 1px 0; }
+.summary-bar { display: flex; gap: 18px; align-items: center; margin: 10px 0 14px; padding: 8px 12px; border: 1px solid var(--border); background: rgba(11,17,27,0.72); color: var(--text-secondary); flex-wrap: wrap; font: 11px/1.3 var(--font-mono); }
+.summary-bar strong { color: var(--text-primary); }
+.market-summary { padding: 9px 14px; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; color: var(--text-secondary); border-bottom: 1px solid var(--border); font-size: 11px; }
+.chip, .type-badge, .tag { border-radius: 2px; padding: 2px 7px; font-size: 11px; display: inline-block; margin: 1px 3px 1px 0; border: 1px solid transparent; }
 .chip.ready, .type-badge.ready { background: rgba(59, 130, 246, 0.18); color: #93c5fd; }
 .chip.key, .type-badge.key { background: rgba(168, 85, 247, 0.18); color: #d8b4fe; }
 .chip.watch, .type-badge.watch { background: rgba(234, 179, 8, 0.15); color: #fde68a; }
 .downgrade-note { margin-top: 5px; color: #fdba74; font-size: 12px; font-weight: 600; white-space: nowrap; }
 .chip.vcp { background: rgba(20, 184, 166, 0.16); color: #99f6e4; }
-.panel { background: var(--bg-panel); border: 1px solid var(--border); border-radius: 6px; margin: 14px 0; overflow: hidden; }
-.panel-header { padding: 12px 14px; border-bottom: 1px solid var(--border); font-weight: 700; color: var(--text-secondary); }
+.panel { background: var(--bg-panel); border: 1px solid var(--border); border-radius: var(--radius-sm); margin: 12px 0; overflow: hidden; box-shadow: var(--shadow-panel); }
+.panel-header { min-height: 39px; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 14px; border-bottom: 1px solid var(--border); font-size: 11px; font-weight: 700; letter-spacing: 0.05em; color: var(--text-secondary); }
+.panel-count { min-width: 24px; padding: 2px 6px; border: 1px solid var(--border-light); color: var(--text-primary); font: 10px/1.2 var(--font-mono); text-align: center; }
+.market-state { color: var(--gold); font-size: 11px; }
+.market-index-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; padding: 12px 14px; }
+.market-index-card { min-width: 0; padding: 11px 12px; border: 1px solid var(--border); background: linear-gradient(180deg, var(--bg-card), rgba(16,24,36,0.6)); }
+.index-card-head { display: flex; justify-content: space-between; gap: 8px; align-items: flex-start; }
+.index-card-head div { display: flex; flex-direction: column; min-width: 0; }
+.index-card-head strong { color: var(--text-primary); font-size: 12px; }
+.index-card-head div span { color: var(--text-muted); font: 9px/1.4 var(--font-mono); }
+.data-state { color: var(--text-muted); font-size: 10px; }
+.data-state.fresh { color: var(--success); }
+.index-price { margin-top: 10px; color: var(--text-primary); font: 700 20px/1 var(--font-mono); }
+.index-return { margin-top: 5px; font: 600 11px/1.2 var(--font-mono); }
+.index-return.up { color: var(--up-red); }
+.index-return.down { color: var(--down-green); }
+.index-meta { display: flex; flex-wrap: wrap; gap: 4px 10px; margin-top: 10px; color: var(--text-muted); font: 9px/1.3 var(--font-mono); }
+.market-raw-data { border-top: 1px solid var(--border); }
+.market-raw-data summary { padding: 9px 14px; cursor: pointer; color: var(--text-muted); font-size: 11px; user-select: none; }
+.market-raw-data summary:hover { color: var(--accent); background: var(--bg-hover); }
 .vcp-panel { border-color: rgba(20, 184, 166, 0.35); }
 .vcp-audit-panel { border-color: rgba(239, 68, 68, 0.28); }
 .panel-note { padding: 9px 14px; color: var(--text-secondary); font-size: 12px; border-bottom: 1px solid var(--border); }
@@ -1288,28 +1335,32 @@ p { margin: 0; color: var(--text-secondary); }
 .candidate-table { width: 100%; min-width: 1520px; border-collapse: collapse; font-size: 13px; }
 .market-table { width: 100%; min-width: 980px; border-collapse: collapse; font-size: 13px; }
 .lifecycle-table { width: 100%; min-width: 980px; border-collapse: collapse; font-size: 13px; }
-th, td { border-bottom: 1px solid var(--border); padding: 9px 10px; text-align: left; }
-th { color: var(--text-secondary); font-weight: 600; }
+th, td { border-bottom: 1px solid var(--border); padding: 8px 10px; text-align: left; }
+th { position: sticky; top: 0; z-index: 2; background: #0d1520; color: var(--text-secondary); font-size: 11px; font-weight: 600; white-space: nowrap; }
 td { vertical-align: top; }
 .clickable { cursor: pointer; }
-.clickable:hover { background: rgba(255,255,255,0.03); }
+.clickable:hover { background: var(--bg-hover); }
+.candidate-table th:first-child, .candidate-table td:first-child,
+.vcp-table th:first-child, .vcp-table td:first-child { position: sticky; left: 0; z-index: 3; background: var(--bg-panel); box-shadow: 1px 0 0 var(--border); }
+.candidate-table th:first-child, .vcp-table th:first-child { z-index: 4; background: #0d1520; }
+.candidate-table .clickable:hover td:first-child, .vcp-table .clickable:hover td:first-child { background: var(--bg-hover); }
 .code { color: var(--accent); font-family: var(--font-mono); }
 .score, .rr { color: var(--gold); font-weight: 700; }
 .tag.risk { background: rgba(239, 68, 68, 0.16); color: #fca5a5; }
 .tag.warn { background: rgba(249, 115, 22, 0.16); color: #fdba74; }
 .tag.info { background: rgba(79,125,255,0.15); color: #93c5fd; }
 .detail-panel { padding-bottom: 12px; }
-.detail-grid { padding: 14px; display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; }
-.detail-grid div { display: flex; flex-direction: column; gap: 3px; }
+.detail-grid { padding: 12px 14px 14px; display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 1px; background: var(--border); }
+.detail-grid div { display: flex; flex-direction: column; gap: 4px; min-height: 58px; padding: 10px 11px; background: var(--bg-panel); }
 .detail-grid span { color: var(--text-secondary); font-size: 12px; }
 .detail-grid strong { color: var(--text-primary); }
-.tail-regime-evidence { margin: 0 14px 14px; padding: 12px; border: 1px solid rgba(74, 144, 226, 0.35); border-radius: 8px; background: rgba(74, 144, 226, 0.06); }
+.tail-regime-evidence { margin: 0 14px 14px; padding: 12px; border: 1px solid rgba(74, 144, 226, 0.35); border-radius: var(--radius-sm); background: rgba(74, 144, 226, 0.06); }
 .tail-regime-note { margin: 6px 0 10px; color: var(--text-secondary); font-size: 12px; }
 .tail-regime-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 10px; }
 .tail-regime-grid div { display: flex; flex-direction: column; gap: 3px; }
 .tail-regime-grid span { color: var(--text-secondary); font-size: 12px; }
-.brooks-evidence { margin: 0 14px 14px; padding: 14px; border: 1px solid rgba(77, 163, 255, 0.25); border-radius: 8px; background: rgba(77, 163, 255, 0.04); }
-.vcp-evidence { margin: 0 14px 14px; padding: 14px; border: 1px solid rgba(20, 184, 166, 0.3); border-radius: 8px; background: rgba(20, 184, 166, 0.04); }
+.brooks-evidence { margin: 0 14px 14px; padding: 14px; border: 1px solid rgba(77, 163, 255, 0.25); border-radius: var(--radius-sm); background: rgba(77, 163, 255, 0.04); }
+.vcp-evidence { margin: 0 14px 14px; padding: 14px; border: 1px solid rgba(20, 184, 166, 0.3); border-radius: var(--radius-sm); background: rgba(20, 184, 166, 0.04); }
 .vcp-contraction-row { padding: 5px 0; color: var(--text-primary); font-family: var(--font-mono); font-size: 13px; }
 .vcp-tags { padding: 8px 0 0; }
 .subsection-title { color: var(--text-primary); font-weight: 700; margin-bottom: 10px; }
@@ -1326,4 +1377,14 @@ td { vertical-align: top; }
 .tags { padding: 0 14px; }
 .empty, .loading, .error-banner { padding: 16px; color: var(--text-secondary); }
 .error-banner { border: 1px solid rgba(239,68,68,0.4); color: #fca5a5; background: rgba(239,68,68,0.08); border-radius: 6px; }
+@media (max-width: 1180px) {
+  .page-header { align-items: flex-start; flex-direction: column; }
+  .header-controls { width: 100%; justify-content: flex-start; flex-wrap: wrap; }
+  .market-index-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 720px) {
+  .strategy6-results { padding: 16px 12px 30px; }
+  .task-picker { min-width: 100%; width: 100%; }
+  .market-index-grid { grid-template-columns: 1fr; }
+}
 </style>
