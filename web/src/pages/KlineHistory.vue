@@ -69,20 +69,22 @@
               <span>{{ cleanLevelText(cleanKResult.window?.level) }}</span>
             </div>
           </div>
-          <div class="clean-k-verdict current" :class="cleanKResult.current?.isClean ? 'clean' : 'not-clean'">
+          <div class="clean-k-verdict current" :class="cleanKResult.current?.available === false ? 'unavailable' : (cleanKResult.current?.isClean ? 'clean' : 'not-clean')">
             <div>
               <span>当前走势干净度</span>
-              <strong>{{ cleanKResult.current?.isClean ? '当前结构有序' : '当前尚未形成干净结构' }}</strong>
-              <p>{{ cleanKResult.current?.startDate }} 至 {{ cleanKResult.current?.endDate }}</p>
-              <em v-if="cleanKResult.current?.isClean">连续 {{ cleanKResult.current?.days }} 个交易日 · {{ structureModeText(cleanKResult.current?.structure) }} · {{ trendDirectionText(cleanKResult.current?.direction) }}</em>
-              <em v-else>最佳观察窗口 {{ cleanKResult.current?.evaluatedDays }} 日 · {{ structureModeText(cleanKResult.current?.structure) }}</em>
+              <strong v-if="cleanKResult.current?.available === false">V2当前结构暂不可用</strong>
+              <strong v-else>{{ cleanKResult.current?.isClean ? '当前结构有序' : '当前尚未形成干净结构' }}</strong>
+              <p v-if="cleanKResult.current?.available === false">后端仍在运行V1，请重启后端以加载V2当前走势分析</p>
+              <p v-else>{{ cleanKResult.current?.startDate }} 至 {{ cleanKResult.current?.endDate }}</p>
+              <em v-if="cleanKResult.current?.available !== false && cleanKResult.current?.isClean">连续 {{ cleanKResult.current?.days }} 个交易日 · {{ structureModeText(cleanKResult.current?.structure) }} · {{ trendDirectionText(cleanKResult.current?.direction) }}</em>
+              <em v-else-if="cleanKResult.current?.available !== false">最佳观察窗口 {{ cleanKResult.current?.evaluatedDays }} 日 · {{ structureModeText(cleanKResult.current?.structure) }}</em>
               <small v-if="!cleanKResult.current?.isClean && cleanKResult.current?.blockingReasons?.length">
                 未通过：{{ cleanKResult.current.blockingReasons.map(cleanKBlockText).join('；') }}
               </small>
             </div>
             <div class="clean-k-score">
-              <strong>{{ number(cleanKResult.current?.score) }}</strong>
-              <span>{{ cleanLevelText(cleanKResult.current?.level) }}</span>
+              <strong>{{ cleanKResult.current?.available === false ? 'V1' : number(cleanKResult.current?.score) }}</strong>
+              <span>{{ cleanKResult.current?.available === false ? '等待后端重载' : cleanLevelText(cleanKResult.current?.level) }}</span>
             </div>
           </div>
         </div>
@@ -653,6 +655,48 @@ function cleanKBlockText(reason) {
   }[reason] || reason
 }
 
+function normalizeCleanKResult(data) {
+  if (data?.window && data?.current) return data
+  return {
+    ...data,
+    modelVersion: 'CLEAN_K_V1_COMPAT',
+    window: {
+      isClean: Boolean(data?.isClean),
+      score: data?.cleanKScore,
+      level: data?.cleanLevel,
+      structure: data?.structureMode,
+      structureScore: data?.structureScore,
+      direction: data?.trendDirection,
+      startDate: data?.startDate,
+      endDate: data?.endDate,
+      blockingReasons: [],
+    },
+    current: {
+      available: false,
+      isClean: null,
+      score: null,
+      level: null,
+      days: null,
+      evaluatedDays: null,
+      structure: null,
+      direction: null,
+      startDate: null,
+      endDate: null,
+      blockingReasons: [],
+    },
+    barStats: {
+      directionalExpansionCount: 0,
+      conflictExpansionCount: 0,
+      gapReversalExpansionCount: 0,
+      microRangeCount: 0,
+      eventBarCount: data?.eventBarCount || 0,
+      dirtyExtremeCount: data?.dirtyExtremeCount || 0,
+    },
+    segments: [],
+    transitions: [],
+  }
+}
+
 async function runCleanKAnalysis() {
   const stockCode = cleanKForm.stockCode.trim()
   if (!/^\d{6}$/.test(stockCode)) {
@@ -672,7 +716,7 @@ async function runCleanKAnalysis() {
   try {
     const data = await analyzeCleanK({ stockCode, period })
     if (data.ok === false) throw new Error(data.message || data.error || '分析失败')
-    cleanKResult.value = data
+    cleanKResult.value = normalizeCleanKResult(data)
   } catch (err) {
     cleanKResult.value = null
     cleanKError.value = `干净K线分析失败：${err?.message || '未知错误'}`
@@ -992,6 +1036,7 @@ h2 {
 }
 .clean-k-verdict.clean { border-left: 3px solid var(--success); }
 .clean-k-verdict.not-clean { border-left: 3px solid var(--danger); }
+.clean-k-verdict.unavailable { border-left: 3px solid var(--warn-orange); }
 .clean-k-verdict.current { background: linear-gradient(135deg, rgba(23, 40, 61, 0.9), rgba(16, 24, 36, 0.68)); }
 .clean-k-verdict span,
 .clean-k-verdict p,

@@ -403,6 +403,33 @@ describe('KlineHistory', () => {
     expect(wrapper.text()).toContain('未确认当前结构切换边界')
   })
 
+  it('shows a truthful V1 compatibility result when the backend has not reloaded V2', async () => {
+    api.analyzeCleanK.mockResolvedValue({
+      ok: true,
+      stockCode: '300604', period: 20,
+      startDate: '2026-07-16', endDate: '2026-08-12',
+      targetTradeDate: '2026-08-13', latestDataDate: '2026-08-12', dataIsFresh: false,
+      isClean: true, cleanKScore: 83.22, cleanLevel: 'CLEAN',
+      structureMode: 'CONTRACTION', trendDirection: 'DOWN', structureScore: 78.13,
+      trendCleanScore: 0, baseCleanScore: 60.37, contractionCleanScore: 78.13,
+      rangeRhythmScore: 91.65, dirtyExtremeCount: 1,
+      eventBarCount: 0, suspendedCount: 0, confidence: 1,
+      reasons: ['最近20日主要表现为有序收缩'], riskFlags: ['STALE_LOCAL_DATA'],
+      barMetrics: [],
+    })
+    const wrapper = mount(KlineHistory)
+    await flushUi()
+
+    await wrapper.find('[data-test="clean-k-analyze"]').trigger('click')
+    await flushUi()
+
+    expect(wrapper.text()).toContain('走势干净')
+    expect(wrapper.text()).toContain('83.22')
+    expect(wrapper.text()).toContain('有序收缩')
+    expect(wrapper.text()).toContain('后端仍在运行V1，请重启后端以加载V2当前走势分析')
+    expect(wrapper.text()).not.toContain('当前尚未形成干净结构')
+  })
+
   it('explains when an incomplete target-date bar was excluded', async () => {
     const base = await api.analyzeCleanK()
     api.analyzeCleanK.mockResolvedValue({
