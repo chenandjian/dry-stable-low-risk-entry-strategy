@@ -79,6 +79,10 @@ def test_clean_k_api_analyzes_local_completed_bars_without_fetching(monkeypatch,
     assert body["dataIsFresh"] is True
     assert body["evaluatedBarCount"] == 20
     assert len(body["barMetrics"]) == 20
+    assert body["modelVersion"] == "CLEAN_K_V2"
+    assert body["cleanKScore"] == body["window"]["score"]
+    assert body["isClean"] == body["window"]["isClean"]
+    assert body["current"]["days"] >= 5
 
 
 def test_clean_k_api_marks_stale_local_data_but_still_returns_analysis(monkeypatch, tmp_path):

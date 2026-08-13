@@ -65,10 +65,9 @@ from scanner.daily_data_service import (
 from scanner.clean_k_analysis import (
     CleanKDataError,
     CleanKInputError,
-    analyze_clean_k,
-    resolve_clean_k_config,
-    resolve_clean_k_period,
 )
+from scanner.clean_k_v2 import analyze_clean_k_v2, resolve_clean_k_v2_config
+from scanner.clean_k_analysis import resolve_clean_k_period
 from scanner.data_source import DataSourceManager
 from scanner.data_acquisition import resolve_acquisition_mode
 from tickflow_data.web_task import TickFlowFullRefreshManager, TickFlowTaskConflict
@@ -1894,7 +1893,7 @@ async def analyze_stock_clean_k(payload: dict):
 
     config = _ensure_db_initialized_from_config()
     try:
-        clean_k_config = resolve_clean_k_config(config.get("clean_k", {}))
+        clean_k_config = resolve_clean_k_v2_config(config.get("clean_k", {}))
         period = resolve_clean_k_period(payload.get("period", 20), clean_k_config)
     except CleanKInputError as exc:
         return JSONResponse(
@@ -1926,7 +1925,7 @@ async def analyze_stock_clean_k(payload: dict):
             row for row in rows if str(row.get("date") or "") < target_trade_date
         ]
     try:
-        result = analyze_clean_k(
+        result = analyze_clean_k_v2(
             analysis_rows,
             period=period,
             config=clean_k_config,

@@ -53,19 +53,55 @@
       <p v-if="cleanKError" class="error-line clean-k-error">{{ cleanKError }}</p>
 
       <div v-if="cleanKResult" class="clean-k-result">
-        <div class="clean-k-verdict" :class="cleanKResult.isClean ? 'clean' : 'not-clean'">
-          <div>
-            <span>{{ cleanKResult.stockCode }} · 最近 {{ cleanKResult.period }} 个有效交易日</span>
-            <strong>{{ cleanKResult.isClean ? '走势干净' : '走势不够干净' }}</strong>
-            <p>{{ cleanKResult.startDate }} 至 {{ cleanKResult.endDate }}</p>
+        <div class="clean-k-verdict-grid">
+          <div class="clean-k-verdict" :class="cleanKResult.window?.isClean ? 'clean' : 'not-clean'">
+            <div>
+              <span>最近{{ cleanKResult.period }}日整体干净度</span>
+              <strong>{{ cleanKResult.window?.isClean ? '走势干净' : '走势不够干净' }}</strong>
+              <p>{{ cleanKResult.window?.startDate }} 至 {{ cleanKResult.window?.endDate }}</p>
+              <em>{{ windowStructureText(cleanKResult.window) }}</em>
+              <small v-if="!cleanKResult.window?.isClean && cleanKResult.window?.blockingReasons?.length">
+                未通过：{{ cleanKResult.window.blockingReasons.map(cleanKBlockText).join('；') }}
+              </small>
+            </div>
+            <div class="clean-k-score">
+              <strong>{{ number(cleanKResult.window?.score) }}</strong>
+              <span>{{ cleanLevelText(cleanKResult.window?.level) }}</span>
+            </div>
           </div>
-          <div class="clean-k-score">
-            <strong>{{ number(cleanKResult.cleanKScore) }}</strong>
-            <span>{{ cleanLevelText(cleanKResult.cleanLevel) }}</span>
+          <div class="clean-k-verdict current" :class="cleanKResult.current?.isClean ? 'clean' : 'not-clean'">
+            <div>
+              <span>当前走势干净度</span>
+              <strong>{{ cleanKResult.current?.isClean ? '当前结构有序' : '当前尚未形成干净结构' }}</strong>
+              <p>{{ cleanKResult.current?.startDate }} 至 {{ cleanKResult.current?.endDate }}</p>
+              <em v-if="cleanKResult.current?.isClean">连续 {{ cleanKResult.current?.days }} 个交易日 · {{ structureModeText(cleanKResult.current?.structure) }} · {{ trendDirectionText(cleanKResult.current?.direction) }}</em>
+              <em v-else>最佳观察窗口 {{ cleanKResult.current?.evaluatedDays }} 日 · {{ structureModeText(cleanKResult.current?.structure) }}</em>
+              <small v-if="!cleanKResult.current?.isClean && cleanKResult.current?.blockingReasons?.length">
+                未通过：{{ cleanKResult.current.blockingReasons.map(cleanKBlockText).join('；') }}
+              </small>
+            </div>
+            <div class="clean-k-score">
+              <strong>{{ number(cleanKResult.current?.score) }}</strong>
+              <span>{{ cleanLevelText(cleanKResult.current?.level) }}</span>
+            </div>
           </div>
         </div>
 
-        <p v-if="cleanKResult.isClean && cleanKResult.trendDirection === 'DOWN'" class="clean-k-direction-warning">
+        <div v-if="cleanKResult.segments?.length" class="clean-k-segments">
+          <div class="clean-k-segment-title">
+            <span>整体结构路径</span>
+            <strong>{{ windowStructureText(cleanKResult.window) }}</strong>
+          </div>
+          <div class="clean-k-segment-list">
+            <div v-for="(segment, index) in cleanKResult.segments" :key="`${segment.startDate}-${segment.endDate}`">
+              <span>{{ index + 1 }}</span>
+              <strong>{{ structureModeText(segment.structureType) }}</strong>
+              <em>{{ segment.startDate }}～{{ segment.endDate }} · {{ segment.days }}日 · {{ number(segment.structureScore) }}分</em>
+            </div>
+          </div>
+        </div>
+
+        <p v-if="(cleanKResult.current?.isClean && cleanKResult.current?.direction === 'DOWN') || (cleanKResult.isClean && cleanKResult.trendDirection === 'DOWN')" class="clean-k-direction-warning">
           K线路径干净，但属于有序下跌；“干净”仅表示价格运行有序，不代表看多或可买入。
         </p>
         <p v-else-if="cleanKResult.trendDirection === 'DOWN'" class="clean-k-direction-warning">
@@ -79,9 +115,9 @@
         </p>
 
         <div class="clean-k-metrics">
-          <div><span>主要结构</span><strong>{{ structureModeText(cleanKResult.structureMode) }}</strong><em>{{ number(cleanKResult.structureScore) }}分</em></div>
+          <div><span>整体结构</span><strong>{{ structureModeText(cleanKResult.window?.structure) }}</strong><em>{{ number(cleanKResult.window?.structureScore) }}分</em></div>
           <div><span>趋势方向</span><strong>{{ trendDirectionText(cleanKResult.trendDirection) }}</strong><em>趋势分 {{ number(cleanKResult.trendCleanScore) }}</em></div>
-          <div><span>序列干净度</span><strong>{{ number(cleanKResult.sequenceCleanScore) }}</strong><em>单根均分 {{ number(cleanKResult.avgBarCleanScore) }}</em></div>
+          <div><span>大幅K分类</span><strong>方向型扩张 {{ cleanKResult.barStats?.directionalExpansionCount || 0 }}</strong><em>冲突型 {{ cleanKResult.barStats?.conflictExpansionCount || 0 }} · Gap反转 {{ cleanKResult.barStats?.gapReversalExpansionCount || 0 }}</em></div>
           <div><span>平台 / 收缩</span><strong>{{ number(cleanKResult.baseCleanScore) }} / {{ number(cleanKResult.contractionCleanScore) }}</strong><em>节奏 {{ number(cleanKResult.rangeRhythmScore) }}</em></div>
           <div><span>异常K线</span><strong>{{ cleanKResult.dirtyExtremeCount }} 根</strong><em>一字事件 {{ cleanKResult.eventBarCount }} · 停牌排除 {{ cleanKResult.suspendedCount }}</em></div>
           <div><span>分析置信度</span><strong>{{ confidenceText(cleanKResult.confidence) }}</strong><em>ATR预热 {{ cleanKResult.warmupBarCount }} 根</em></div>
@@ -549,7 +585,20 @@ function cleanLevelText(level) {
 }
 
 function structureModeText(mode) {
-  return { TREND: '有序趋势', BASE: '稳定平台', CONTRACTION: '有序收缩', MIXED: '混合结构' }[mode] || mode || '--'
+  return {
+    TREND: '有序趋势', TREND_UP: '上涨趋势', TREND_DOWN: '下跌趋势', TREND_FLAT: '横向趋势',
+    BASE: '稳定平台', CONTRACTION: '有序收缩', MIXED: '混合结构', CHAOTIC: '混乱结构',
+    BASE_TO_TREND: '平台 → 趋势', CONTRACTION_TO_TREND: '收缩 → 趋势',
+    TREND_TO_BASE: '趋势 → 平台', TREND_PULLBACK_TREND: '趋势 → 回撤 → 趋势',
+  }[mode] || mode || '--'
+}
+
+function windowStructureText(windowResult) {
+  const structure = windowResult?.structure
+  const direction = trendDirectionText(windowResult?.direction)
+  if (structure === 'BASE_TO_TREND') return `平台 → ${direction}趋势`
+  if (structure === 'CONTRACTION_TO_TREND') return `收缩 → ${direction}趋势`
+  return structureModeText(structure)
 }
 
 function trendDirectionText(direction) {
@@ -568,7 +617,9 @@ function ratioText(value) {
 
 function barStructureText(type) {
   return {
-    MICRO_RANGE: '微幅K线', BODY_DIRECTIONAL: '方向实体',
+    MICRO_RANGE: '微幅K线', BODY_DIRECTIONAL: '方向实体', NORMAL_BAR: '普通K线',
+    DIRECTIONAL_EXPANSION: '方向型扩张', CONFLICT_EXPANSION: '冲突型扩张',
+    GAP_REVERSAL_EXPANSION: '跳空反转扩张',
     ONE_SIDE_UPPER_REJECTION: '上影拒绝', ONE_SIDE_LOWER_REJECTION: '下影拒绝',
     TWO_SIDE_CONFLICT: '双向争夺', BALANCED: '平衡结构', ONE_PRICE_EVENT: '一字事件',
   }[type] || type || '--'
@@ -580,8 +631,26 @@ function cleanKRiskText(flag) {
     MIXED_STRUCTURE: '价格结构混合', DIRTY_EXTREME_BARS: '存在高噪音异常K线',
     ONE_PRICE_EVENTS: '存在一字事件K线', SUSPENDED_BARS_EXCLUDED: '已排除停牌记录',
     CLEAN_DOWNTREND: 'K线干净但趋势向下',
+    CHAOTIC_WINDOW_STRUCTURE: '整体结构存在显著反复破坏',
+    CONFLICT_EXPANSION_BARS: '存在双向冲突型扩张K线',
+    GAP_REVERSAL_EXPANSION_BARS: '存在跳空后反向扩张K线',
+    CURRENT_CLEAN_DOWNTREND: '当前结构干净但方向向下',
     INCOMPLETE_TARGET_BAR_EXCLUDED: '目标日K线在收盘前拉取，已从分析中排除',
   }[flag] || flag
+}
+
+function cleanKBlockText(reason) {
+  return {
+    WINDOW_SCORE_BELOW_THRESHOLD: '整体分不足',
+    WINDOW_STRUCTURE_SCORE_BELOW_THRESHOLD: '整体结构分不足',
+    CURRENT_SCORE_BELOW_THRESHOLD: '当前分不足',
+    CURRENT_STRUCTURE_SCORE_BELOW_THRESHOLD: '当前结构分不足',
+    LOW_CONFIDENCE: '有效K线证据不足', CHAOTIC_STRUCTURE: '结构反复破坏',
+    TOO_MANY_CONFLICT_BARS: '冲突型K线超过容忍线',
+    TOO_MANY_TRAILING_EVENTS: '末端一字事件过多',
+    DIRECTIONAL_STRUCTURE_BREAK: '当前方向存在明显破坏',
+    NO_CONFIRMED_CURRENT_BOUNDARY: '未确认当前结构切换边界',
+  }[reason] || reason
 }
 
 async function runCleanKAnalysis() {
@@ -907,6 +976,11 @@ h2 {
 .clean-k-form input { width: 100%; }
 .clean-k-error { margin-top: 12px; }
 .clean-k-result { display: grid; gap: 14px; margin-top: 16px; }
+.clean-k-verdict-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
 .clean-k-verdict {
   display: flex;
   align-items: center;
@@ -918,14 +992,43 @@ h2 {
 }
 .clean-k-verdict.clean { border-left: 3px solid var(--success); }
 .clean-k-verdict.not-clean { border-left: 3px solid var(--danger); }
+.clean-k-verdict.current { background: linear-gradient(135deg, rgba(23, 40, 61, 0.9), rgba(16, 24, 36, 0.68)); }
 .clean-k-verdict span,
 .clean-k-verdict p,
+.clean-k-verdict em,
 .clean-k-metrics span,
 .clean-k-metrics em { color: var(--text-muted); font-size: 11px; }
 .clean-k-verdict > div:first-child > strong { display: block; margin: 4px 0 2px; font-size: 19px; }
+.clean-k-verdict > div:first-child > em { display: block; margin-top: 6px; color: var(--accent); font-style: normal; }
+.clean-k-verdict > div:first-child > small { display: block; margin-top: 7px; color: var(--warn-orange); font-size: 10px; line-height: 1.45; }
 .clean-k-score { text-align: right; }
 .clean-k-score strong { display: block; color: var(--gold); font: 700 30px/1 var(--font-mono); }
 .clean-k-score span { display: block; margin-top: 5px; }
+.clean-k-segments {
+  display: grid;
+  grid-template-columns: 190px 1fr;
+  gap: 12px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  background: rgba(16, 24, 36, 0.52);
+}
+.clean-k-segment-title span,
+.clean-k-segment-title strong { display: block; }
+.clean-k-segment-title span { color: var(--text-muted); font-size: 11px; }
+.clean-k-segment-title strong { margin-top: 6px; color: var(--gold); }
+.clean-k-segment-list { display: flex; flex-wrap: wrap; gap: 8px; }
+.clean-k-segment-list > div {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 2px 7px;
+  min-width: 210px;
+  padding: 8px 10px;
+  border-left: 2px solid var(--accent);
+  background: rgba(27, 42, 61, 0.7);
+}
+.clean-k-segment-list span { grid-row: span 2; color: var(--gold); font: 700 16px/1 var(--font-mono); }
+.clean-k-segment-list strong { font-size: 12px; }
+.clean-k-segment-list em { color: var(--text-muted); font-size: 10px; font-style: normal; }
 .clean-k-direction-warning {
   padding: 9px 12px;
   border: 1px solid rgba(232, 144, 63, 0.35);
@@ -1277,6 +1380,7 @@ th {
   .clean-k-head { align-items: stretch; flex-direction: column; }
   .clean-k-form { grid-template-columns: 1fr 1fr auto; }
   .clean-k-metrics { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .clean-k-segments { grid-template-columns: 1fr; }
   .summary-grid,
   .query-panel,
   .health-grid {
@@ -1288,6 +1392,7 @@ th {
 }
 @media (max-width: 720px) {
   .clean-k-form,
+  .clean-k-verdict-grid,
   .clean-k-metrics,
   .clean-k-explain { grid-template-columns: 1fr; }
 }

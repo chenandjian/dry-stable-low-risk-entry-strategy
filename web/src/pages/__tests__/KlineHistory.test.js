@@ -98,7 +98,27 @@ describe('KlineHistory', () => {
       startDate: '2026-07-17', endDate: '2026-08-13',
       targetTradeDate: '2026-08-13', latestDataDate: '2026-08-13', dataIsFresh: true,
       isClean: true, cleanKScore: 82.6, cleanLevel: 'CLEAN',
-      structureMode: 'CONTRACTION', trendDirection: 'UP', structureScore: 89.3,
+      modelVersion: 'CLEAN_K_V2',
+      structureMode: 'BASE_TO_TREND', trendDirection: 'UP', structureScore: 89.3,
+      window: {
+        isClean: true, score: 82.6, level: 'CLEAN', structure: 'BASE_TO_TREND',
+        structureScore: 89.3, direction: 'UP', startDate: '2026-07-17', endDate: '2026-08-13',
+      },
+      current: {
+        isClean: true, score: 88.4, level: 'EXTREMELY_CLEAN', days: 8,
+        evaluatedDays: 8, structure: 'TREND_UP', structureScore: 92.1, direction: 'UP',
+        startDate: '2026-08-04', endDate: '2026-08-13',
+      },
+      barStats: {
+        directionalExpansionCount: 2, conflictExpansionCount: 1,
+        gapReversalExpansionCount: 0, microRangeCount: 2,
+        eventBarCount: 0, dirtyExtremeCount: 1,
+      },
+      segments: [
+        { startDate: '2026-07-17', endDate: '2026-07-30', days: 10, structureType: 'BASE', structureScore: 84.2 },
+        { startDate: '2026-07-31', endDate: '2026-08-13', days: 10, structureType: 'TREND_UP', structureScore: 92.5 },
+      ],
+      transitions: ['BASE_TO_TREND'],
       avgBarCleanScore: 84.1, sequenceCleanScore: 82.2,
       trendCleanScore: 72.4, baseCleanScore: 78.6, contractionCleanScore: 89.3,
       rangeRhythmScore: 86.5, extremeControlScore: 91,
@@ -110,7 +130,7 @@ describe('KlineHistory', () => {
         tradeDate: '2026-08-13', atr14Prev: 2.1, intradayRangeAtr: 0.6,
         trueRangeAtr: 0.7, bodyRatio: 0.45, upperWickRatio: 0.2,
         lowerWickRatio: 0.35, barCleanScore: 86.2,
-        barStructureType: 'BALANCED', dirtyExtremeBar: false, eventBar: false,
+        barStructureType: 'NORMAL_BAR', dirtyExtremeBar: false, eventBar: false,
       }],
     })
     api.getKlineHealth.mockResolvedValue(healthResponse())
@@ -285,12 +305,16 @@ describe('KlineHistory', () => {
     expect(wrapper.text()).toContain('干净K线分析')
     expect(wrapper.text()).toContain('走势干净')
     expect(wrapper.text()).toContain('82.60')
-    expect(wrapper.text()).toContain('有序收缩')
+    expect(wrapper.text()).toContain('最近20日整体干净度')
+    expect(wrapper.text()).toContain('当前走势干净度')
+    expect(wrapper.text()).toContain('平台 → 上涨趋势')
+    expect(wrapper.text()).toContain('连续 8 个交易日')
+    expect(wrapper.text()).toContain('方向型扩张 2')
     expect(wrapper.text()).toContain('上涨')
     expect(wrapper.text()).toContain('2026-07-17 至 2026-08-13')
     expect(wrapper.text()).toContain('最近20日主要表现为有序收缩')
     expect(wrapper.text()).toContain('逐根K线诊断')
-    expect(wrapper.text()).toContain('平衡结构')
+    expect(wrapper.text()).toContain('普通K线')
   })
 
   it('rejects invalid clean K-line input without calling the API', async () => {
@@ -345,6 +369,38 @@ describe('KlineHistory', () => {
 
     expect(wrapper.text()).toContain('价格方向向下，且当前未通过干净度门槛')
     expect(wrapper.text()).not.toContain('K线路径干净，但属于有序下跌')
+  })
+
+  it('explains why a high-scoring V2 window still fails its hard gates', async () => {
+    const base = await api.analyzeCleanK()
+    api.analyzeCleanK.mockResolvedValue({
+      ...base,
+      ok: true,
+      isClean: false,
+      cleanKScore: 83.79,
+      window: {
+        ...base.window,
+        isClean: false,
+        score: 83.79,
+        blockingReasons: ['TOO_MANY_CONFLICT_BARS'],
+      },
+      current: {
+        ...base.current,
+        isClean: false,
+        days: 0,
+        blockingReasons: ['NO_CONFIRMED_CURRENT_BOUNDARY'],
+      },
+    })
+    api.analyzeCleanK.mockClear()
+    const wrapper = mount(KlineHistory)
+    await flushUi()
+
+    await wrapper.find('[data-test="clean-k-analyze"]').trigger('click')
+    await flushUi()
+
+    expect(wrapper.text()).toContain('83.79')
+    expect(wrapper.text()).toContain('冲突型K线超过容忍线')
+    expect(wrapper.text()).toContain('未确认当前结构切换边界')
   })
 
   it('explains when an incomplete target-date bar was excluded', async () => {
