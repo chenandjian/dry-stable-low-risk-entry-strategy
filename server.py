@@ -62,6 +62,13 @@ from scanner.daily_data_service import (
     encode_source_errors,
     fetch_with_retry,
 )
+from scanner.clean_k_analysis import (
+    CleanKDataError,
+    CleanKInputError,
+    analyze_clean_k,
+    resolve_clean_k_config,
+    resolve_clean_k_period,
+)
 from scanner.data_source import DataSourceManager
 from scanner.data_acquisition import resolve_acquisition_mode
 from tickflow_data.web_task import TickFlowFullRefreshManager, TickFlowTaskConflict
@@ -1873,6 +1880,76 @@ async def refresh_stock_kline(code: str):
         "source": fetch_result.fallback_source or fetch_result.primary_source,
         "summary": summary,
     }
+
+
+@app.post("/api/stock/clean-k/analyze")
+async def analyze_stock_clean_k(payload: dict):
+    """Analyze recent completed local OHLC bars without fetching external data."""
+    code = str(payload.get("stockCode") or "").strip()
+    if not re.fullmatch(r"\d{6}", code):
+        return JSONResponse(
+            {"error": "INVALID_STOCK_CODE", "message": "stockCode must be a 6-digit code"},
+            status_code=400,
+        )
+
+    config = _ensure_db_initialized_from_config()
+    try:
+        clean_k_config = resolve_clean_k_config(config.get("clean_k", {}))
+        period = resolve_clean_k_period(payload.get("period", 20), clean_k_config)
+    except CleanKInputError as exc:
+        return JSONResponse(
+            {"error": "INVALID_PERIOD", "message": str(exc)},
+            status_code=400,
+        )
+
+    rows = db.get_ohlc(code) or []
+    if not rows:
+        return JSONResponse(
+            {"error": "KLINE_NOT_FOUND", "message": f"no local K-line data for {code}"},
+            status_code=404,
+        )
+    metadata = db.get_ohlc_metadata(code) or {}
+    freshness = build_cache_freshness_context(
+        now=_now(),
+        fetched_at=metadata.get("fetched_at"),
+    )
+    target_trade_date = freshness.target_trade_date
+    analysis_rows = rows
+    excluded_incomplete_date = None
+    if (
+        str(rows[-1].get("date") or "") == target_trade_date
+        and freshness.min_fetch_time
+        and str(freshness.fetched_at or "") < freshness.min_fetch_time
+    ):
+        excluded_incomplete_date = target_trade_date
+        analysis_rows = [
+            row for row in rows if str(row.get("date") or "") < target_trade_date
+        ]
+    try:
+        result = analyze_clean_k(
+            analysis_rows,
+            period=period,
+            config=clean_k_config,
+            stock_code=code,
+            target_trade_date=target_trade_date,
+        )
+        result["excludedIncompleteDate"] = excluded_incomplete_date
+        if excluded_incomplete_date:
+            result["dataIsFresh"] = False
+            risk_flags = result.setdefault("riskFlags", [])
+            if "INCOMPLETE_TARGET_BAR_EXCLUDED" not in risk_flags:
+                risk_flags.append("INCOMPLETE_TARGET_BAR_EXCLUDED")
+        return result
+    except CleanKInputError as exc:
+        return JSONResponse(
+            {"error": "INVALID_PERIOD", "message": str(exc)},
+            status_code=400,
+        )
+    except CleanKDataError as exc:
+        return JSONResponse(
+            {"error": "INSUFFICIENT_KLINE_DATA", "message": str(exc)},
+            status_code=422,
+        )
 
 
 @app.get("/api/stock/{code}/kline-history")

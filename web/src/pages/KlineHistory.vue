@@ -11,6 +11,120 @@
       </div>
     </section>
 
+    <section class="panel clean-k-panel" data-test="clean-k-panel">
+      <div class="table-head clean-k-head">
+        <div>
+          <p class="eyebrow">PRICE PATH QUALITY</p>
+          <h2>干净K线分析</h2>
+          <p>只读取本地前复权日线，判断最近 N 个完整交易日的价格路径是否有序；本结果不等于买入信号。</p>
+        </div>
+        <div class="clean-k-form">
+          <label>
+            股票代码
+            <input
+              v-model.trim="cleanKForm.stockCode"
+              maxlength="6"
+              inputmode="numeric"
+              placeholder="例如 300888"
+              data-test="clean-k-code"
+              @keyup.enter="runCleanKAnalysis"
+            />
+          </label>
+          <label>
+            最近交易日
+            <input
+              v-model.number="cleanKForm.period"
+              type="number"
+              min="10"
+              max="120"
+              data-test="clean-k-period"
+              @keyup.enter="runCleanKAnalysis"
+            />
+          </label>
+          <button
+            class="btn-primary"
+            :disabled="cleanKLoading"
+            data-test="clean-k-analyze"
+            @click="runCleanKAnalysis"
+          >{{ cleanKLoading ? '分析中...' : '开始分析' }}</button>
+        </div>
+      </div>
+
+      <p v-if="cleanKError" class="error-line clean-k-error">{{ cleanKError }}</p>
+
+      <div v-if="cleanKResult" class="clean-k-result">
+        <div class="clean-k-verdict" :class="cleanKResult.isClean ? 'clean' : 'not-clean'">
+          <div>
+            <span>{{ cleanKResult.stockCode }} · 最近 {{ cleanKResult.period }} 个有效交易日</span>
+            <strong>{{ cleanKResult.isClean ? '走势干净' : '走势不够干净' }}</strong>
+            <p>{{ cleanKResult.startDate }} 至 {{ cleanKResult.endDate }}</p>
+          </div>
+          <div class="clean-k-score">
+            <strong>{{ number(cleanKResult.cleanKScore) }}</strong>
+            <span>{{ cleanLevelText(cleanKResult.cleanLevel) }}</span>
+          </div>
+        </div>
+
+        <p v-if="cleanKResult.isClean && cleanKResult.trendDirection === 'DOWN'" class="clean-k-direction-warning">
+          K线路径干净，但属于有序下跌；“干净”仅表示价格运行有序，不代表看多或可买入。
+        </p>
+        <p v-else-if="cleanKResult.trendDirection === 'DOWN'" class="clean-k-direction-warning">
+          价格方向向下，且当前未通过干净度门槛。
+        </p>
+        <p v-if="cleanKResult.excludedIncompleteDate" class="clean-k-direction-warning">
+          {{ cleanKResult.excludedIncompleteDate }} 的目标日K线在收盘前拉取，已从分析中排除。
+        </p>
+        <p v-else-if="!cleanKResult.dataIsFresh" class="clean-k-direction-warning">
+          本地最新日 {{ cleanKResult.latestDataDate || '--' }}，尚未覆盖目标完整交易日 {{ cleanKResult.targetTradeDate || '--' }}。
+        </p>
+
+        <div class="clean-k-metrics">
+          <div><span>主要结构</span><strong>{{ structureModeText(cleanKResult.structureMode) }}</strong><em>{{ number(cleanKResult.structureScore) }}分</em></div>
+          <div><span>趋势方向</span><strong>{{ trendDirectionText(cleanKResult.trendDirection) }}</strong><em>趋势分 {{ number(cleanKResult.trendCleanScore) }}</em></div>
+          <div><span>序列干净度</span><strong>{{ number(cleanKResult.sequenceCleanScore) }}</strong><em>单根均分 {{ number(cleanKResult.avgBarCleanScore) }}</em></div>
+          <div><span>平台 / 收缩</span><strong>{{ number(cleanKResult.baseCleanScore) }} / {{ number(cleanKResult.contractionCleanScore) }}</strong><em>节奏 {{ number(cleanKResult.rangeRhythmScore) }}</em></div>
+          <div><span>异常K线</span><strong>{{ cleanKResult.dirtyExtremeCount }} 根</strong><em>一字事件 {{ cleanKResult.eventBarCount }} · 停牌排除 {{ cleanKResult.suspendedCount }}</em></div>
+          <div><span>分析置信度</span><strong>{{ confidenceText(cleanKResult.confidence) }}</strong><em>ATR预热 {{ cleanKResult.warmupBarCount }} 根</em></div>
+        </div>
+
+        <div class="clean-k-explain">
+          <div>
+            <strong>判断依据</strong>
+            <ul><li v-for="reason in cleanKResult.reasons || []" :key="reason">{{ reason }}</li></ul>
+          </div>
+          <div>
+            <strong>风险提示</strong>
+            <div class="clean-k-flags">
+              <span v-for="flag in cleanKResult.riskFlags || []" :key="flag">{{ cleanKRiskText(flag) }}</span>
+              <span v-if="!(cleanKResult.riskFlags || []).length" class="clean-k-no-risk">未发现额外风险</span>
+            </div>
+          </div>
+        </div>
+
+        <details class="clean-k-details">
+          <summary>逐根K线诊断（{{ cleanKResult.barMetrics?.length || 0 }} 根）</summary>
+          <div class="clean-k-table-scroll">
+            <table v-if="cleanKResult.barMetrics?.length">
+              <thead><tr><th>日期</th><th>结构</th><th>单根分</th><th>日内/ATR</th><th>TR/ATR</th><th>实体占比</th><th>上影</th><th>下影</th><th>异常</th></tr></thead>
+              <tbody>
+                <tr v-for="item in cleanKResult.barMetrics" :key="item.tradeDate">
+                  <td>{{ item.tradeDate }}</td>
+                  <td>{{ barStructureText(item.barStructureType) }}</td>
+                  <td>{{ item.barCleanScore === null ? '事件K' : number(item.barCleanScore) }}</td>
+                  <td>{{ number(item.intradayRangeAtr) }}</td>
+                  <td>{{ number(item.trueRangeAtr) }}</td>
+                  <td>{{ ratioText(item.bodyRatio) }}</td>
+                  <td>{{ ratioText(item.upperWickRatio) }}</td>
+                  <td>{{ ratioText(item.lowerWickRatio) }}</td>
+                  <td :class="item.dirtyExtremeBar ? 'metric-danger' : ''">{{ item.dirtyExtremeBar ? '高噪音' : '--' }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </details>
+      </div>
+    </section>
+
     <section class="panel health-panel">
       <div class="table-head">
         <div>
@@ -341,6 +455,7 @@ import { useApi } from '../composables/useApi.js'
 
 const {
   getKlineHistory,
+  analyzeCleanK,
   getKlineHealth,
   refreshKlineData,
   refreshKlineHealth,
@@ -391,6 +506,10 @@ const bulkRefreshableCount = computed(() => {
   if (healthFilter.value === 'anomaly' || healthFilter.value === 'failed') return healthTotal.value || 0
   return healthItems.value.filter(item => item.needs_refetch).length
 })
+const cleanKForm = reactive({ stockCode: '300888', period: 20 })
+const cleanKResult = ref(null)
+const cleanKLoading = ref(false)
+const cleanKError = ref('')
 const tickFlowStatusLabel = computed(() => {
   const labels = {
     running: '正在全量重新拉取',
@@ -420,6 +539,77 @@ function probeStatusLabel(status) {
 
 function probeStatusClass(status) {
   return status === 'FRESH' ? 'ok' : status === 'STALE' ? 'warning' : 'danger'
+}
+
+function cleanLevelText(level) {
+  return {
+    EXTREMELY_CLEAN: '极致干净', CLEAN: '干净', ACCEPTABLE: '尚可',
+    NOISY: '偏嘈杂', VERY_NOISY: '非常嘈杂',
+  }[level] || level || '--'
+}
+
+function structureModeText(mode) {
+  return { TREND: '有序趋势', BASE: '稳定平台', CONTRACTION: '有序收缩', MIXED: '混合结构' }[mode] || mode || '--'
+}
+
+function trendDirectionText(direction) {
+  return { UP: '上涨', DOWN: '下跌', FLAT: '横向' }[direction] || direction || '--'
+}
+
+function confidenceText(value) {
+  if (value === null || value === undefined) return '--'
+  return `${(Number(value) * 100).toFixed(0)}%`
+}
+
+function ratioText(value) {
+  if (value === null || value === undefined) return '--'
+  return `${(Number(value) * 100).toFixed(1)}%`
+}
+
+function barStructureText(type) {
+  return {
+    MICRO_RANGE: '微幅K线', BODY_DIRECTIONAL: '方向实体',
+    ONE_SIDE_UPPER_REJECTION: '上影拒绝', ONE_SIDE_LOWER_REJECTION: '下影拒绝',
+    TWO_SIDE_CONFLICT: '双向争夺', BALANCED: '平衡结构', ONE_PRICE_EVENT: '一字事件',
+  }[type] || type || '--'
+}
+
+function cleanKRiskText(flag) {
+  return {
+    STALE_LOCAL_DATA: '本地数据未覆盖目标交易日', LOW_CONFIDENCE: '分析置信度不足',
+    MIXED_STRUCTURE: '价格结构混合', DIRTY_EXTREME_BARS: '存在高噪音异常K线',
+    ONE_PRICE_EVENTS: '存在一字事件K线', SUSPENDED_BARS_EXCLUDED: '已排除停牌记录',
+    CLEAN_DOWNTREND: 'K线干净但趋势向下',
+    INCOMPLETE_TARGET_BAR_EXCLUDED: '目标日K线在收盘前拉取，已从分析中排除',
+  }[flag] || flag
+}
+
+async function runCleanKAnalysis() {
+  const stockCode = cleanKForm.stockCode.trim()
+  if (!/^\d{6}$/.test(stockCode)) {
+    cleanKResult.value = null
+    cleanKError.value = '请输入6位股票代码'
+    return
+  }
+  const period = Number(cleanKForm.period)
+  if (!Number.isInteger(period) || period < 10 || period > 120) {
+    cleanKResult.value = null
+    cleanKError.value = '分析周期必须是10至120之间的整数'
+    return
+  }
+  if (cleanKLoading.value) return
+  cleanKLoading.value = true
+  cleanKError.value = ''
+  try {
+    const data = await analyzeCleanK({ stockCode, period })
+    if (data.ok === false) throw new Error(data.message || data.error || '分析失败')
+    cleanKResult.value = data
+  } catch (err) {
+    cleanKResult.value = null
+    cleanKError.value = `干净K线分析失败：${err?.message || '未知错误'}`
+  } finally {
+    cleanKLoading.value = false
+  }
 }
 
 async function runTickFlowProbe() {
@@ -702,6 +892,83 @@ h2 {
   border-color: rgba(239, 91, 91, 0.35);
   background: rgba(239, 91, 91, 0.08);
 }
+.clean-k-panel {
+  margin-bottom: 16px;
+  border-top: 2px solid var(--gold);
+}
+.clean-k-head { align-items: flex-end; }
+.clean-k-form {
+  display: grid;
+  grid-template-columns: 150px 120px auto;
+  align-items: end;
+  gap: 10px;
+}
+.clean-k-form label { min-width: 0; }
+.clean-k-form input { width: 100%; }
+.clean-k-error { margin-top: 12px; }
+.clean-k-result { display: grid; gap: 14px; margin-top: 16px; }
+.clean-k-verdict {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 15px 18px;
+  border: 1px solid var(--border);
+  background: var(--bg-card);
+}
+.clean-k-verdict.clean { border-left: 3px solid var(--success); }
+.clean-k-verdict.not-clean { border-left: 3px solid var(--danger); }
+.clean-k-verdict span,
+.clean-k-verdict p,
+.clean-k-metrics span,
+.clean-k-metrics em { color: var(--text-muted); font-size: 11px; }
+.clean-k-verdict > div:first-child > strong { display: block; margin: 4px 0 2px; font-size: 19px; }
+.clean-k-score { text-align: right; }
+.clean-k-score strong { display: block; color: var(--gold); font: 700 30px/1 var(--font-mono); }
+.clean-k-score span { display: block; margin-top: 5px; }
+.clean-k-direction-warning {
+  padding: 9px 12px;
+  border: 1px solid rgba(232, 144, 63, 0.35);
+  background: var(--warn-orange-glow);
+  color: var(--warn-orange);
+  font-size: 12px;
+}
+.clean-k-metrics {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 8px;
+}
+.clean-k-metrics > div {
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid var(--border);
+  background: rgba(16, 24, 36, 0.55);
+}
+.clean-k-metrics span,
+.clean-k-metrics strong,
+.clean-k-metrics em { display: block; }
+.clean-k-metrics strong { margin: 6px 0 4px; font: 600 14px/1.2 var(--font-mono); }
+.clean-k-metrics em { font-style: normal; line-height: 1.4; }
+.clean-k-explain {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+.clean-k-explain > div { padding: 12px 14px; border: 1px solid var(--border); }
+.clean-k-explain ul { margin: 8px 0 0; padding-left: 18px; color: var(--text-secondary); font-size: 12px; }
+.clean-k-flags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 9px; }
+.clean-k-flags span {
+  padding: 3px 7px;
+  border: 1px solid rgba(232, 144, 63, 0.32);
+  color: var(--warn-orange);
+  font-size: 11px;
+}
+.clean-k-flags .clean-k-no-risk { color: var(--success); border-color: rgba(32, 173, 114, 0.32); }
+.clean-k-details { border-top: 1px solid var(--border); padding-top: 10px; }
+.clean-k-details summary { color: var(--accent); font-size: 12px; cursor: pointer; }
+.clean-k-table-scroll { margin-top: 10px; overflow-x: auto; }
+.clean-k-table-scroll table { min-width: 900px; }
+.metric-danger { color: var(--danger); }
 .summary-grid {
   display: grid;
   grid-template-columns: repeat(6, minmax(0, 1fr));
@@ -1007,6 +1274,9 @@ th {
   color: var(--text-secondary);
 }
 @media (max-width: 1100px) {
+  .clean-k-head { align-items: stretch; flex-direction: column; }
+  .clean-k-form { grid-template-columns: 1fr 1fr auto; }
+  .clean-k-metrics { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .summary-grid,
   .query-panel,
   .health-grid {
@@ -1015,5 +1285,10 @@ th {
   .summary-card.wide {
     grid-column: span 2;
   }
+}
+@media (max-width: 720px) {
+  .clean-k-form,
+  .clean-k-metrics,
+  .clean-k-explain { grid-template-columns: 1fr; }
 }
 </style>

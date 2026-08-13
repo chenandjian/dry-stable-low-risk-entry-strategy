@@ -4,6 +4,7 @@ import { nextTick } from 'vue'
 
 const api = {
   getKlineHistory: vi.fn(),
+  analyzeCleanK: vi.fn(),
   getKlineHealth: vi.fn(),
   refreshKlineData: vi.fn(),
   refreshKlineHealth: vi.fn(),
@@ -91,6 +92,27 @@ describe('KlineHistory', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     api.getKlineHistory.mockResolvedValue(freshResponse())
+    api.analyzeCleanK.mockResolvedValue({
+      ok: true,
+      stockCode: '300888', period: 20,
+      startDate: '2026-07-17', endDate: '2026-08-13',
+      targetTradeDate: '2026-08-13', latestDataDate: '2026-08-13', dataIsFresh: true,
+      isClean: true, cleanKScore: 82.6, cleanLevel: 'CLEAN',
+      structureMode: 'CONTRACTION', trendDirection: 'UP', structureScore: 89.3,
+      avgBarCleanScore: 84.1, sequenceCleanScore: 82.2,
+      trendCleanScore: 72.4, baseCleanScore: 78.6, contractionCleanScore: 89.3,
+      rangeRhythmScore: 86.5, extremeControlScore: 91,
+      dirtyExtremeCount: 1, eventBarCount: 0, suspendedCount: 0,
+      evaluatedBarCount: 20, warmupBarCount: 40, confidence: 0.91,
+      reasons: ['最近20日主要表现为有序收缩', '后段日内振幅明显收缩'],
+      riskFlags: [],
+      barMetrics: [{
+        tradeDate: '2026-08-13', atr14Prev: 2.1, intradayRangeAtr: 0.6,
+        trueRangeAtr: 0.7, bodyRatio: 0.45, upperWickRatio: 0.2,
+        lowerWickRatio: 0.35, barCleanScore: 86.2,
+        barStructureType: 'BALANCED', dirtyExtremeBar: false, eventBar: false,
+      }],
+    })
     api.getKlineHealth.mockResolvedValue(healthResponse())
     api.refreshKlineData.mockResolvedValue({ ok: true, summary: { health_status: 'fresh' } })
     api.refreshKlineHealth.mockResolvedValue({
@@ -248,6 +270,102 @@ describe('KlineHistory', () => {
     expect(api.refreshKlineHealth).toHaveBeenCalledWith({ status: 'problem' })
     expect(wrapper.text()).toContain('批量重拉完成：成功 1，失败 0，跳过 1')
     expect(api.getKlineHealth).toHaveBeenLastCalledWith({ status: 'problem', page: 1, page_size: 100 })
+  })
+
+  it('analyzes clean K-line structure with stock code and period', async () => {
+    const wrapper = mount(KlineHistory)
+    await flushUi()
+
+    await wrapper.find('[data-test="clean-k-code"]').setValue('300888')
+    await wrapper.find('[data-test="clean-k-period"]').setValue(20)
+    await wrapper.find('[data-test="clean-k-analyze"]').trigger('click')
+    await flushUi()
+
+    expect(api.analyzeCleanK).toHaveBeenCalledWith({ stockCode: '300888', period: 20 })
+    expect(wrapper.text()).toContain('干净K线分析')
+    expect(wrapper.text()).toContain('走势干净')
+    expect(wrapper.text()).toContain('82.60')
+    expect(wrapper.text()).toContain('有序收缩')
+    expect(wrapper.text()).toContain('上涨')
+    expect(wrapper.text()).toContain('2026-07-17 至 2026-08-13')
+    expect(wrapper.text()).toContain('最近20日主要表现为有序收缩')
+    expect(wrapper.text()).toContain('逐根K线诊断')
+    expect(wrapper.text()).toContain('平衡结构')
+  })
+
+  it('rejects invalid clean K-line input without calling the API', async () => {
+    const wrapper = mount(KlineHistory)
+    await flushUi()
+
+    await wrapper.find('[data-test="clean-k-code"]').setValue('30088')
+    await wrapper.find('[data-test="clean-k-period"]').setValue(9)
+    await wrapper.find('[data-test="clean-k-analyze"]').trigger('click')
+    await flushUi()
+
+    expect(api.analyzeCleanK).not.toHaveBeenCalled()
+    expect(wrapper.text()).toContain('请输入6位股票代码')
+  })
+
+  it('makes clean downtrends explicit instead of presenting them as bullish', async () => {
+    api.analyzeCleanK.mockResolvedValue({
+      ...await api.analyzeCleanK(),
+      ok: true,
+      isClean: true,
+      structureMode: 'TREND',
+      trendDirection: 'DOWN',
+      riskFlags: ['CLEAN_DOWNTREND'],
+    })
+    api.analyzeCleanK.mockClear()
+    const wrapper = mount(KlineHistory)
+    await flushUi()
+
+    await wrapper.find('[data-test="clean-k-analyze"]').trigger('click')
+    await flushUi()
+
+    expect(wrapper.text()).toContain('下跌')
+    expect(wrapper.text()).toContain('K线路径干净，但属于有序下跌')
+  })
+
+  it('does not call an unclean downward path clean', async () => {
+    const base = await api.analyzeCleanK()
+    api.analyzeCleanK.mockResolvedValue({
+      ...base,
+      ok: true,
+      isClean: false,
+      structureMode: 'BASE',
+      trendDirection: 'DOWN',
+      riskFlags: [],
+    })
+    api.analyzeCleanK.mockClear()
+    const wrapper = mount(KlineHistory)
+    await flushUi()
+
+    await wrapper.find('[data-test="clean-k-analyze"]').trigger('click')
+    await flushUi()
+
+    expect(wrapper.text()).toContain('价格方向向下，且当前未通过干净度门槛')
+    expect(wrapper.text()).not.toContain('K线路径干净，但属于有序下跌')
+  })
+
+  it('explains when an incomplete target-date bar was excluded', async () => {
+    const base = await api.analyzeCleanK()
+    api.analyzeCleanK.mockResolvedValue({
+      ...base,
+      ok: true,
+      dataIsFresh: false,
+      targetTradeDate: '2026-08-13',
+      latestDataDate: '2026-08-12',
+      excludedIncompleteDate: '2026-08-13',
+      riskFlags: ['INCOMPLETE_TARGET_BAR_EXCLUDED'],
+    })
+    api.analyzeCleanK.mockClear()
+    const wrapper = mount(KlineHistory)
+    await flushUi()
+
+    await wrapper.find('[data-test="clean-k-analyze"]').trigger('click')
+    await flushUi()
+
+    expect(wrapper.text()).toContain('目标日K线在收盘前拉取，已从分析中排除')
   })
 
   it('checks remote TickFlow freshness for one stock and four indexes', async () => {

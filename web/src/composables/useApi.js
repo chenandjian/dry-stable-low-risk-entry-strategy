@@ -292,6 +292,16 @@ export function useApi() {
     return { ...body, ok: res.ok, statusCode: res.status }
   }
 
+  async function analyzeCleanK(payload) {
+    const res = await fetch(`${API_BASE}/stock/clean-k/analyze`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    })
+    const body = await res.json().catch(() => ({}))
+    return { ...body, ok: res.ok, statusCode: res.status }
+  }
+
   async function startTickFlowFullRefresh() {
     const res = await fetch(`${API_BASE}/tickflow/full-refresh`, { method: 'POST' })
     const body = await res.json().catch(() => ({}))
@@ -469,7 +479,7 @@ export function useApi() {
 
   return {
     startScan, getScanStatus, getCandidates, getCandidate, getScanTasks,
-    getSchedulerLogs, getKlineHistory, getKlineHealth, refreshKlineData, refreshKlineHealth,
+    getSchedulerLogs, getKlineHistory, analyzeCleanK, getKlineHealth, refreshKlineData, refreshKlineHealth,
     startTickFlowFullRefresh, getTickFlowFullRefreshStatus, checkTickFlowFreshness,
     getTaskStocks, retryFailedStocks, reEvaluateTask, getConfig, updateConfig,
     runCupHandleBacktest,
