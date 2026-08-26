@@ -292,6 +292,16 @@ export function useApi() {
     return { ...body, ok: res.ok, statusCode: res.status }
   }
 
+  async function evaluateStrategy6Batch(codes) {
+    const res = await fetch(`${API_BASE}/strategy6/batch-evaluate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ codes }),
+    })
+    const body = await res.json().catch(() => ({}))
+    return { ...body, ok: res.ok, statusCode: res.status }
+  }
+
   async function analyzeCleanK(payload) {
     const res = await fetch(`${API_BASE}/stock/clean-k/analyze`, {
       method: 'POST',
@@ -495,7 +505,7 @@ export function useApi() {
     getStrategy4TrackingEvents,
     startStrategy5Scan, getStrategy5ScanStatus, getStrategy5Tasks,
     getStrategy5Candidates, getStrategy5Candidate,
-    startStrategy6Scan, getStrategy6ScanStatus, getStrategy6Tasks,
+    startStrategy6Scan, evaluateStrategy6Batch, getStrategy6ScanStatus, getStrategy6Tasks,
     getStrategy6Candidates, getStrategy6MarketSnapshot, getStrategy6Lifecycle, getStrategy6Candidate, downloadStrategy6Report,
     startStrategy2Backtest, getStrategy2BacktestStatus,
     getStrategy2BacktestTasks, getStrategy2BacktestTask,

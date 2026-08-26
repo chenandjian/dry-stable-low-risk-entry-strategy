@@ -8,7 +8,7 @@ import re
 import sys
 import threading
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse, Response
 
 logging.basicConfig(
@@ -39,6 +39,7 @@ from strategy6.report import (
     is_strategy6_visible_record,
 )
 from strategy6.scanner import scan_strategy6_all
+from strategy6.batch_evaluator import evaluate_strategy6_batch
 from strategy6.validation import resolve_strategy6_config
 from scanner.strategy_engine import (
     CupHandleStrategyEngine,
@@ -2714,6 +2715,47 @@ async def strategy5_candidate_detail(task_id: str, code: str):
 
 
 # ====== Strategy6 API ======
+
+@app.post("/api/strategy6/batch-evaluate")
+async def strategy6_batch_evaluate(request: Request):
+    try:
+        payload = await request.json()
+    except Exception:
+        payload = None
+    raw_codes = payload.get("codes") if isinstance(payload, dict) else None
+    if not isinstance(raw_codes, list) or not raw_codes:
+        return JSONResponse(
+            {"error": "EMPTY_STOCK_CODES", "message": "请至少输入一个股票代码"},
+            status_code=400,
+        )
+    codes = list(dict.fromkeys(
+        normalized
+        for code in raw_codes
+        if (normalized := str(code).strip())
+    ))
+    if not codes:
+        return JSONResponse(
+            {"error": "EMPTY_STOCK_CODES", "message": "请至少输入一个股票代码"},
+            status_code=400,
+        )
+    if len(codes) > 200:
+        return JSONResponse(
+            {"error": "TOO_MANY_STOCK_CODES", "message": "单次最多评估200只股票"},
+            status_code=400,
+        )
+    invalid = [code for code in codes if not re.fullmatch(r"\d{6}", code)]
+    if invalid:
+        return JSONResponse(
+            {
+                "error": "INVALID_STOCK_CODES",
+                "message": "股票代码必须为6位数字",
+                "invalidCodes": invalid,
+            },
+            status_code=400,
+        )
+    config = load_config() or {}
+    result = await asyncio.to_thread(evaluate_strategy6_batch, codes, config)
+    return {"requestedCount": len(codes), **result}
 
 @app.post("/api/strategy6/scans")
 async def start_strategy6_scan():

@@ -10,6 +10,7 @@
     <div class="topnav-tabs">
       <router-link to="/" class="topnav-tab" :class="{ active: isActive('/') }">策略6扫描</router-link>
       <router-link to="/strategy6/results" class="topnav-tab" :class="{ active: isActive('/strategy6/results') }">策略6候选</router-link>
+      <router-link to="/strategy6/batch-evaluation" class="topnav-tab" :class="{ active: isActive('/strategy6/batch-evaluation') }">批量评分</router-link>
       <router-link to="/data/kline-history" class="topnav-tab" :class="{ active: isActive('/data/kline-history') }">K线数据</router-link>
       <router-link to="/tasks" class="topnav-tab" :class="{ active: isActive('/tasks') }">任务中心</router-link>
       <router-link to="/config" class="topnav-tab" :class="{ active: isActive('/config') }">策略配置</router-link>

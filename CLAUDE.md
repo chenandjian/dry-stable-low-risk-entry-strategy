@@ -111,6 +111,7 @@ npm --prefix web run preview
 - **策略6价格口径：** 当前生产日线和历史研究均使用前复权价格，策略6输出 `price_basis=FORWARD_ADJUSTED`、`current_price_adj`，`current_price_raw` 保持空值；未复权双价格链仍不在当前范围。成交模拟仅用于本地历史研究，不能伪装成真实成交回报。
 - **策略6市场边界：** 板块过滤已完全移除，`sector_name` 仅用于展示；至少两个同日宽基指数才形成市场状态，RS20只使用同日沪深300。市场过滤开启且沪深300缺失时，最高只允许 WATCH。
 - **策略6主服务模式：** 前端导航、路由、扫描按钮、任务中心和配置页只暴露策略6；旧策略URL重定向到策略6候选页。scheduler只注册 `strategy6_scan` 并创建 `STRATEGY_6_STRONG_VCP_TAIL` 任务，旧 `serial_dual_scan` 配置键仅作为兼容存储。策略1-5后端与历史数据暂时保留，但不得由前端或scheduler主动执行。
+- **策略6批量评分：** `/strategy6/batch-evaluation` 通过 `/api/strategy6/batch-evaluate` 对用户输入的最多200只股票调用正式 `StrongVcpTailEngine.evaluate_at()`；只读本地前复权日线和本地宽基指数，不拉行情、不创建扫描任务、不写候选或生命周期。页面同时展示原始尾部质量分和正式计入总分的尾部分：触发尾部硬条件时后者为0，前者仅用于比较接近合格程度，禁止据此绕过正式候选规则。
 - **策略6生命周期：** 候选按股票维护 START_CONFIRMED/SETUP_FORMING/READY/BUY_ZONE/EXTENDED/FAILED/EXPIRED/COOLDOWN，FAILED 冷却10个交易日、EXPIRED冷却5个交易日，同事件只允许在支撑恢复并重新确认后入池。全局生命周期、任务审计快照和活跃候选必须在同一事务内写入。
 - **策略6稳定箱体双路径（V4.1）：** 原 `evaluate_dry_tail()` 零改动；`strategy6/box_tail.py` 在整理阶段枚举5-30日箱体，结构边界排除最后两日，最后两日用于跌破和当前位置确认。`tail_pass=original OR box`，`BOTH` 取较高路径分，失败箱体不得改变原路径分数。
 - **策略6紧密K线：** 最近配置窗口（默认5日）的实体、收盘集中、相邻重叠、跳空、ATR收缩和现有放量下跌共同生成 `BOX_COMPACT_READY`。该结果不是箱体硬条件，`compact_kline_score` 只参与箱体窗口择优，禁止进入最终 `tail_score`。

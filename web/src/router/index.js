@@ -7,6 +7,7 @@ export const routes = [
   { path: '/data/kline-history', name: 'KlineHistory', component: () => import('../pages/KlineHistory.vue') },
   { path: '/stock/:code', name: 'StockDetail', component: () => import('../pages/StockDetail.vue') },
   { path: '/strategy6/results', name: 'Strategy6Results', component: () => import('../pages/Strategy6Results.vue') },
+  { path: '/strategy6/batch-evaluation', name: 'Strategy6BatchEvaluation', component: () => import('../pages/Strategy6BatchEvaluation.vue') },
   { path: '/:pathMatch(.*)*', redirect: '/strategy6/results' },
 ]
 

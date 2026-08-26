@@ -11,6 +11,7 @@ describe('strategy6-only frontend routes', () => {
     expect(businessPaths).toContain('/tasks')
     expect(businessPaths).toContain('/config')
     expect(businessPaths).toContain('/data/kline-history')
+    expect(businessPaths).toContain('/strategy6/batch-evaluation')
     expect(businessPaths).not.toContain('/results')
     expect(businessPaths).not.toContain('/strategy1/backtest')
     expect(businessPaths).not.toContain('/strategy2/results')
