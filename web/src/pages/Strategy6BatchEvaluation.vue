@@ -59,7 +59,18 @@
             <template v-for="(item, index) in results" :key="item.code">
               <tr class="score-row" @click="toggle(item.code)">
                 <td class="rank">{{ index + 1 }}</td>
-                <td><strong>{{ item.code }}</strong><small>{{ item.name || '名称未收录' }}</small></td>
+                <td>
+                  <button
+                    class="code-copy"
+                    :data-test="`copy-code-${item.code}`"
+                    :title="`复制股票代码 ${item.code}`"
+                    @click.stop="copyCode(item.code)"
+                  >
+                    <strong>{{ item.code }}</strong>
+                    <span v-if="copiedCode === item.code">已复制</span>
+                  </button>
+                  <small>{{ item.name || '名称未收录' }}</small>
+                </td>
                 <td>{{ item.evaluationDate || '--' }}</td>
                 <td><strong class="tail-score" :class="scoreClass(item.tailQualityScore)">{{ item.tailQualityScore }} / 20</strong><small>计入 {{ item.tailScore }} / 20</small></td>
                 <td><span class="status" :class="item.tailPass ? 'pass' : 'fail'">{{ item.tailPass ? '量稳价干通过' : '尾部未通过' }}</span></td>
@@ -114,6 +125,7 @@ const api = useApi()
 const rawCodes = ref('601857\n601899\n002371\n688072\n601898\n300604\n601872\n002353\n002493\n688120\n688361\n000977\n000938\n603296\n002648\n688702\n601958')
 const loading = ref(false)
 const errorMessage = ref('')
+const copiedCode = ref('')
 const response = ref(null)
 const expanded = reactive(new Set())
 
@@ -126,6 +138,7 @@ const tailPassedCount = computed(() => results.value.filter(item => item.tailPas
 
 async function runEvaluation() {
   errorMessage.value = ''
+  copiedCode.value = ''
   response.value = null
   const invalid = parsedCodes.value.filter(code => !/^\d{6}$/.test(code))
   if (!parsedCodes.value.length) {
@@ -154,6 +167,16 @@ async function runEvaluation() {
 
 function toggle(code) {
   expanded.has(code) ? expanded.delete(code) : expanded.add(code)
+}
+async function copyCode(code) {
+  try {
+    errorMessage.value = ''
+    if (!navigator.clipboard?.writeText) throw new Error('当前浏览器不支持剪贴板')
+    await navigator.clipboard.writeText(code)
+    copiedCode.value = code
+  } catch (error) {
+    errorMessage.value = `复制失败：${error?.message || '无法访问剪贴板'}`
+  }
 }
 function pct(value) { return `${(Number(value || 0) * 100).toFixed(2)}%` }
 function signedPct(value) { const n = Number(value || 0) * 100; return `${n >= 0 ? '+' : ''}${n.toFixed(2)}%` }
@@ -211,6 +234,7 @@ button { padding: 9px 22px; color: #111; background: var(--gold); border: 0; bor
 .form-error { color: var(--danger); margin: 10px 0 0; }
 .summary-strip { display: grid; grid-template-columns: repeat(5,1fr); gap: 1px; background: var(--border); border: 1px solid var(--border); margin-bottom: 16px; }.summary-strip div { background: #0c1420; padding: 12px 16px; display: flex; flex-direction: column; }.summary-strip span { color: var(--text-muted); font-size: 11px; }.summary-strip strong { margin-top: 4px; font: 18px var(--font-mono); }
 .table-wrap { overflow-x: auto; }table { width: 100%; border-collapse: collapse; font-size: 12px; }th { padding: 10px 9px; text-align: left; color: var(--text-muted); border-bottom: 1px solid var(--border); white-space: nowrap; }td { padding: 11px 9px; border-bottom: 1px solid rgba(54,70,90,.55); white-space: nowrap; }td small { display: block; color: var(--text-muted); margin-top: 3px; }.score-row { cursor: pointer; }.score-row:hover { background: rgba(255,255,255,.025); }.rank { color: var(--gold); font-family: var(--font-mono); }
+.code-copy { display: inline-flex; align-items: center; gap: 6px; padding: 0; color: #dce7f4; background: transparent; border: 0; font: 12px var(--font-mono); cursor: copy; }.code-copy:hover strong { color: var(--gold); text-decoration: underline; }.code-copy span { color: var(--gold); font: 10px var(--font-mono); }
 .tail-score { font: 700 15px var(--font-mono); }.tail-score.excellent { color: #f2c66d; }.tail-score.good,.positive { color: var(--up-red); }.tail-score.weak,.negative { color: var(--down-green); }
 .status { padding: 3px 7px; border: 1px solid; }.status.pass { color: var(--up-red); border-color: rgba(223,72,72,.45); }.status.fail { color: var(--text-muted); border-color: var(--border); }
 .detail-row td { padding: 0; background: #09111b; }.detail-grid { padding: 14px 18px; display: grid; grid-template-columns: repeat(3,1fr); gap: 24px; white-space: normal; }.detail-grid h3 { color: var(--text-secondary); font-size: 12px; margin: 0 0 8px; }.detail-grid p { margin: 5px 0; }.evidence { color: #d8b35f; }.risk { color: #e57575; }.muted { color: var(--text-muted); }

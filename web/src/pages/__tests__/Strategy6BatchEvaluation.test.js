@@ -17,6 +17,10 @@ async function flushUi() {
 describe('Strategy6BatchEvaluation', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    Object.defineProperty(navigator, 'clipboard', {
+      value: { writeText: vi.fn().mockResolvedValue(undefined) },
+      configurable: true,
+    })
     api.evaluateStrategy6Batch.mockResolvedValue({
       ok: true,
       requestedCount: 3,
@@ -72,5 +76,18 @@ describe('Strategy6BatchEvaluation', () => {
 
     expect(api.evaluateStrategy6Batch).not.toHaveBeenCalled()
     expect(wrapper.text()).toContain('股票代码必须为6位数字')
+  })
+
+  it('copies a result stock code without expanding the row', async () => {
+    const wrapper = mount(Strategy6BatchEvaluation)
+    await wrapper.get('[data-test="batch-submit"]').trigger('click')
+    await flushUi()
+
+    await wrapper.get('[data-test="copy-code-300604"]').trigger('click')
+    await flushUi()
+
+    expect(navigator.clipboard.writeText).toHaveBeenCalledWith('300604')
+    expect(wrapper.text()).toContain('已复制')
+    expect(wrapper.find('.detail-row').exists()).toBe(false)
   })
 })
