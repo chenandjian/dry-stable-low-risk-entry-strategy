@@ -17,6 +17,7 @@ async function flushUi() {
 describe('Strategy6BatchEvaluation', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    localStorage.clear()
     Object.defineProperty(navigator, 'clipboard', {
       value: { writeText: vi.fn().mockResolvedValue(undefined) },
       configurable: true,
@@ -89,5 +90,24 @@ describe('Strategy6BatchEvaluation', () => {
     expect(navigator.clipboard.writeText).toHaveBeenCalledWith('300604')
     expect(wrapper.text()).toContain('已复制')
     expect(wrapper.find('.detail-row').exists()).toBe(false)
+  })
+
+  it('restores the last entered stock pool after the page is reopened', async () => {
+    const first = mount(Strategy6BatchEvaluation)
+    await first.get('[data-test="batch-codes"]').setValue('600162\n300604')
+    await flushUi()
+    first.unmount()
+
+    const reopened = mount(Strategy6BatchEvaluation)
+
+    expect(reopened.get('[data-test="batch-codes"]').element.value).toBe('600162\n300604')
+  })
+
+  it('remembers an intentionally cleared stock pool', () => {
+    localStorage.setItem('strategy6.batchEvaluation.stockPool.v1', '')
+
+    const wrapper = mount(Strategy6BatchEvaluation)
+
+    expect(wrapper.get('[data-test="batch-codes"]').element.value).toBe('')
   })
 })

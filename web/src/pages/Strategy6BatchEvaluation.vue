@@ -16,7 +16,7 @@
     <section class="input-panel terminal-panel">
       <div class="panel-title">
         <div><span>01</span><strong>输入股票池</strong></div>
-        <small>每行、空格或逗号分隔；自动去重，最多200只</small>
+        <small>每行、空格或逗号分隔；自动去重，最多200只；自动记住上次输入</small>
       </div>
       <textarea
         v-model="rawCodes"
@@ -118,11 +118,13 @@
 </template>
 
 <script setup>
-import { computed, reactive, ref } from 'vue'
+import { computed, reactive, ref, watch } from 'vue'
 import { useApi } from '../composables/useApi.js'
 
 const api = useApi()
-const rawCodes = ref('601857\n601899\n002371\n688072\n601898\n300604\n601872\n002353\n002493\n688120\n688361\n000977\n000938\n603296\n002648\n688702\n601958')
+const STOCK_POOL_STORAGE_KEY = 'strategy6.batchEvaluation.stockPool.v1'
+const DEFAULT_STOCK_POOL = '601857\n601899\n002371\n688072\n601898\n300604\n601872\n002353\n002493\n688120\n688361\n000977\n000938\n603296\n002648\n688702\n601958'
+const rawCodes = ref(loadSavedStockPool())
 const loading = ref(false)
 const errorMessage = ref('')
 const copiedCode = ref('')
@@ -135,6 +137,23 @@ const parsedCodes = computed(() => [...new Set(
 const results = computed(() => response.value?.results || [])
 const errors = computed(() => response.value?.errors || [])
 const tailPassedCount = computed(() => results.value.filter(item => item.tailPass).length)
+
+watch(rawCodes, value => {
+  try {
+    localStorage.setItem(STOCK_POOL_STORAGE_KEY, value)
+  } catch (_) {
+    // Storage can be unavailable in privacy modes; evaluation still works.
+  }
+})
+
+function loadSavedStockPool() {
+  try {
+    const saved = localStorage.getItem(STOCK_POOL_STORAGE_KEY)
+    return saved === null ? DEFAULT_STOCK_POOL : saved
+  } catch (_) {
+    return DEFAULT_STOCK_POOL
+  }
+}
 
 async function runEvaluation() {
   errorMessage.value = ''
