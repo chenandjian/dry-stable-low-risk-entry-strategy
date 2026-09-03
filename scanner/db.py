@@ -2920,6 +2920,22 @@ def _ensure_strategy6_candidates_table(conn: sqlite3.Connection):
         "ttm_reasons": "TEXT",
         "ttm_risk_tags": "TEXT",
         "ttm_model_version": "TEXT",
+        "strong_trend_squeeze_pass": "INTEGER",
+        "strong_trend_squeeze_status": "TEXT",
+        "trend_close": "REAL",
+        "trend_low_250": "REAL",
+        "trend_high_250": "REAL",
+        "trend_close_to_low_ratio": "REAL",
+        "trend_close_to_high_ratio": "REAL",
+        "trend_ema150": "REAL",
+        "trend_ema200": "REAL",
+        "trend_squeeze_on": "INTEGER",
+        "trend_bb_upper": "REAL",
+        "trend_bb_lower": "REAL",
+        "trend_kc_upper": "REAL",
+        "trend_kc_lower": "REAL",
+        "strong_trend_squeeze_reasons": "TEXT",
+        "strong_trend_squeeze_model_version": "TEXT",
         "tail_avg_volume": "REAL",
         "pre_tail_avg_volume_20": "REAL",
         "tail_volume_ratio": "REAL",
@@ -4152,6 +4168,12 @@ def upsert_strategy6_candidate(
         "ttm_bb_upper", "ttm_bb_lower", "ttm_kc_upper", "ttm_kc_lower",
         "ttm_squeeze_score", "ranking_score", "ttm_reasons", "ttm_risk_tags",
         "ttm_model_version",
+        "strong_trend_squeeze_pass", "strong_trend_squeeze_status",
+        "trend_close", "trend_low_250", "trend_high_250",
+        "trend_close_to_low_ratio", "trend_close_to_high_ratio",
+        "trend_ema150", "trend_ema200", "trend_squeeze_on",
+        "trend_bb_upper", "trend_bb_lower", "trend_kc_upper", "trend_kc_lower",
+        "strong_trend_squeeze_reasons", "strong_trend_squeeze_model_version",
         "entry_timing_version", "entry_timing_state", "entry_timing_executable",
         "entry_timing_evidence_count", "entry_timing_reasons", "entry_timing_risk_tags",
         "probability_rr_version", "probability_rr_status", "probability_rr_reliable",
@@ -4387,6 +4409,22 @@ def upsert_strategy6_candidate(
         _json_any(d.get("ttm_reasons", [])),
         _json_any(d.get("ttm_risk_tags", [])),
         d.get("ttm_model_version"),
+        None if d.get("strong_trend_squeeze_pass") is None else 1 if d.get("strong_trend_squeeze_pass") else 0,
+        d.get("strong_trend_squeeze_status"),
+        d.get("trend_close"),
+        d.get("trend_low_250"),
+        d.get("trend_high_250"),
+        d.get("trend_close_to_low_ratio"),
+        d.get("trend_close_to_high_ratio"),
+        d.get("trend_ema150"),
+        d.get("trend_ema200"),
+        None if d.get("trend_squeeze_on") is None else 1 if d.get("trend_squeeze_on") else 0,
+        d.get("trend_bb_upper"),
+        d.get("trend_bb_lower"),
+        d.get("trend_kc_upper"),
+        d.get("trend_kc_lower"),
+        _json_any(d.get("strong_trend_squeeze_reasons", [])),
+        d.get("strong_trend_squeeze_model_version"),
         d.get("entry_timing_version"),
         d.get("entry_timing_state"),
         1 if d.get("entry_timing_executable") else 0,
@@ -5752,7 +5790,7 @@ def _deserialize_strategy6_row(row: dict) -> dict:
         "support_reaction_reasons", "support_reaction_risk_tags",
         "vcp_contractions", "vcp_observation_reasons", "vcp_observation_risk_tags",
         "vcp_quality_reasons", "vcp_quality_warnings",
-        "ttm_reasons", "ttm_risk_tags",
+        "ttm_reasons", "ttm_risk_tags", "strong_trend_squeeze_reasons",
         "entry_timing_reasons", "entry_timing_risk_tags",
         "probability_rr_reasons",
     ):
@@ -5803,6 +5841,11 @@ def _deserialize_strategy6_row(row: dict) -> dict:
     row["ttm_momentum_direction"] = row.get("ttm_momentum_direction") or ""
     row["ttm_model_version"] = row.get("ttm_model_version") or ""
     row["ttm_squeeze_score"] = _strategy6_safe_int(row.get("ttm_squeeze_score"))
+    for field in ("strong_trend_squeeze_pass", "trend_squeeze_on"):
+        if row.get(field) is not None:
+            row[field] = _strategy6_safe_bool(row.get(field))
+    row["strong_trend_squeeze_status"] = row.get("strong_trend_squeeze_status") or ""
+    row["strong_trend_squeeze_model_version"] = row.get("strong_trend_squeeze_model_version") or ""
     if row.get("ranking_score") is None:
         row["ranking_score"] = row.get("total_score", 0)
     raw_tail_paths = row.get("tail_paths")

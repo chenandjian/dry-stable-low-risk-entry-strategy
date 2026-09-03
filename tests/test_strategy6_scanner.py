@@ -1,8 +1,24 @@
 import scanner.db as db
 from datetime import date, timedelta
+import pytest
 from scanner.daily_data_service import FetchResult
 from strategy6 import STRATEGY6_TYPE
+from strategy6.models import Strategy6StrongTrendSqueeze
 from strategy6.scanner import scan_strategy6_all
+
+
+@pytest.fixture(autouse=True)
+def _isolate_formal_trend_squeeze_gate(monkeypatch):
+    """Scanner fixtures predate the new gate; engine integration is tested separately."""
+    monkeypatch.setattr(
+        "strategy6.engine.evaluate_strong_trend_squeeze",
+        lambda _rows: Strategy6StrongTrendSqueeze(
+            passed=True,
+            calculable=True,
+            status="PASSED",
+            squeeze_on=True,
+        ),
+    )
 
 
 def _market_rows(closes, start_date=date(2025, 11, 11)):
@@ -38,7 +54,6 @@ def test_strategy6_scan_forwards_progress_callback_to_tickflow_prepare(tmp_path,
 
     monkeypatch.setattr(scanner_mod, "prepare_scan_daily_data", fake_prepare)
 
-    import pytest
     with pytest.raises(RuntimeError, match="preparation boundary"):
         scan_strategy6_all(
             {"data": {"database_path": db_path}, "strategy6": {}},

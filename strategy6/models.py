@@ -370,6 +370,56 @@ class Strategy6TtmSqueeze:
 
 
 @dataclass
+class Strategy6StrongTrendSqueeze:
+    passed: bool = False
+    calculable: bool = False
+    status: str = "INSUFFICIENT_DATA"
+    close: float = 0.0
+    low_250: float = 0.0
+    high_250: float = 0.0
+    close_to_low_ratio: float = 0.0
+    close_to_high_ratio: float = 0.0
+    ema150: float = 0.0
+    ema200: float = 0.0
+    squeeze_on: bool = False
+    bb_upper: float | None = None
+    bb_lower: float | None = None
+    kc_upper: float | None = None
+    kc_lower: float | None = None
+    reasons: list[str] = field(default_factory=list)
+    model_version: str = "S6_STRONG_TREND_SQUEEZE_V1"
+
+    def apply_rules(self) -> None:
+        if not self.calculable:
+            self.passed = False
+            self.status = "INSUFFICIENT_DATA"
+            if not self.reasons:
+                self.reasons = ["TREND_SQUEEZE_DATA_INSUFFICIENT"]
+            return
+
+        reasons: list[str] = []
+        if self.close <= 10:
+            reasons.append("CLOSE_LE_10")
+        if self.low_250 <= 0 or self.close < self.low_250 * 1.30:
+            reasons.append("CLOSE_LT_52W_LOW_1_30")
+        if self.high_250 <= 0 or self.close < self.high_250 * 0.70:
+            reasons.append("CLOSE_LT_52W_HIGH_0_70")
+        if self.high_250 <= 0 or self.close > self.high_250:
+            reasons.append("CLOSE_GT_52W_HIGH")
+        if self.ema150 <= self.ema200:
+            reasons.append("EMA150_LE_EMA200")
+        if self.close <= self.ema150:
+            reasons.append("CLOSE_LE_EMA150")
+        if self.close <= self.ema200:
+            reasons.append("CLOSE_LE_EMA200")
+        if not self.squeeze_on:
+            reasons.append("BB_NOT_INSIDE_KC")
+        self.reasons = reasons
+        self.passed = not reasons
+        self.status = "PASSED" if self.passed else "REJECTED"
+
+
+@dataclass
 class Strategy6VcpQuality:
     scored: bool = False
     score: int | None = None
@@ -431,6 +481,7 @@ class Strategy6Evaluation:
     trade_plan: Strategy6TradePlan
     score: Strategy6Score
     ttm_squeeze: Strategy6TtmSqueeze = field(default_factory=Strategy6TtmSqueeze)
+    strong_trend_squeeze: Strategy6StrongTrendSqueeze = field(default_factory=Strategy6StrongTrendSqueeze)
     ranking_score: int = 0
     setup_quality: Strategy6SetupQuality = field(default_factory=Strategy6SetupQuality)
     tail_regime: Strategy6TailRegime = field(default_factory=Strategy6TailRegime)
@@ -471,6 +522,7 @@ class Strategy6Evaluation:
         entry_timing = self.entry_timing
         probability_rr = self.probability_rr
         ttm = self.ttm_squeeze
+        trend = self.strong_trend_squeeze
         vcp = self.vcp_observation
         vcp_quality = vcp.quality
         return {
@@ -739,6 +791,22 @@ class Strategy6Evaluation:
             "ttm_reasons": ttm.reasons,
             "ttm_risk_tags": ttm.risk_tags,
             "ttm_model_version": ttm.model_version,
+            "strong_trend_squeeze_pass": trend.passed,
+            "strong_trend_squeeze_status": trend.status,
+            "trend_close": trend.close,
+            "trend_low_250": trend.low_250,
+            "trend_high_250": trend.high_250,
+            "trend_close_to_low_ratio": trend.close_to_low_ratio,
+            "trend_close_to_high_ratio": trend.close_to_high_ratio,
+            "trend_ema150": trend.ema150,
+            "trend_ema200": trend.ema200,
+            "trend_squeeze_on": trend.squeeze_on,
+            "trend_bb_upper": trend.bb_upper,
+            "trend_bb_lower": trend.bb_lower,
+            "trend_kc_upper": trend.kc_upper,
+            "trend_kc_lower": trend.kc_lower,
+            "strong_trend_squeeze_reasons": trend.reasons,
+            "strong_trend_squeeze_model_version": trend.model_version,
             "pattern_score_component": score.pattern_score_component,
             "tail_score": score.tail_score,
             "objective_rr_score": score.objective_rr_score,

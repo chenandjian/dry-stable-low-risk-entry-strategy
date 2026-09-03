@@ -103,6 +103,22 @@ def _summarize(evaluation, metadata: dict) -> dict:
         "klineFetchedAt": metadata.get("fetched_at", ""),
         "decisionProfile": row.get("decision_profile", ""),
         "scoreModelVersion": row.get("score_model_version", ""),
+        "strongTrendSqueezePass": row.get("strong_trend_squeeze_pass"),
+        "strongTrendSqueezeStatus": row.get("strong_trend_squeeze_status", ""),
+        "trendClose": row.get("trend_close"),
+        "trendLow250": row.get("trend_low_250"),
+        "trendHigh250": row.get("trend_high_250"),
+        "trendCloseToLowRatio": row.get("trend_close_to_low_ratio"),
+        "trendCloseToHighRatio": row.get("trend_close_to_high_ratio"),
+        "trendEma150": row.get("trend_ema150"),
+        "trendEma200": row.get("trend_ema200"),
+        "trendSqueezeOn": row.get("trend_squeeze_on"),
+        "trendBbUpper": row.get("trend_bb_upper"),
+        "trendBbLower": row.get("trend_bb_lower"),
+        "trendKcUpper": row.get("trend_kc_upper"),
+        "trendKcLower": row.get("trend_kc_lower"),
+        "strongTrendSqueezeReasons": row.get("strong_trend_squeeze_reasons", []),
+        "strongTrendSqueezeModelVersion": row.get("strong_trend_squeeze_model_version", ""),
     }
 
 

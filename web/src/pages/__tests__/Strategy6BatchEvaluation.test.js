@@ -36,6 +36,11 @@ describe('Strategy6BatchEvaluation', () => {
           tailReasons: ['volume:non_overlap_tail_dry', 'price:no_new_low'],
           tailRejects: [], rejectReasons: [],
           scoreBreakdown: { strongStart: 18, pattern: 16, support: 17, tail: 19, objectiveRiskReward: 8, relativeStrengthRisk: 4 },
+          strongTrendSqueezePass: true, trendClose: 20, trendLow250: 12,
+          trendHigh250: 22, trendCloseToHighRatio: 0.9091,
+          trendEma150: 18, trendEma200: 17, trendSqueezeOn: true,
+          trendBbLower: 19.2, trendBbUpper: 20.8, trendKcLower: 19, trendKcUpper: 21,
+          strongTrendSqueezeReasons: [],
         },
         {
           code: '601857', name: '中国石油', evaluationDate: '2026-08-25',
@@ -45,6 +50,10 @@ describe('Strategy6BatchEvaluation', () => {
           tailReasons: [], tailRejects: ['TAIL_VOLUME_NOT_DRY'],
           rejectReasons: ['TAIL_VOLUME_NOT_DRY'],
           scoreBreakdown: { strongStart: 20, pattern: 20, support: 20, tail: 0, objectiveRiskReward: 10, relativeStrengthRisk: 10 },
+          strongTrendSqueezePass: false, trendClose: 9.5, trendLow250: 8,
+          trendHigh250: 15, trendCloseToHighRatio: 0.6333,
+          trendEma150: 10, trendEma200: 10.5, trendSqueezeOn: false,
+          strongTrendSqueezeReasons: ['CLOSE_LE_10', 'EMA150_LE_EMA200'],
         },
       ],
       errors: [{ code: '000000', name: '', error: 'KLINE_NOT_FOUND', message: '本地没有K线数据' }],
@@ -66,6 +75,9 @@ describe('Strategy6BatchEvaluation', () => {
     await wrapper.findAll('.score-row')[1].trigger('click')
     expect(wrapper.text()).toContain('量能明显萎缩')
     expect(wrapper.text()).toContain('尾部量能未充分萎缩')
+    expect(wrapper.text()).toContain('强势趋势收缩初筛')
+    expect(wrapper.text()).toContain('EMA150 18.00')
+    expect(wrapper.text()).toContain('股价不高于10元')
     expect(wrapper.text()).toContain('本地没有K线数据')
   })
 

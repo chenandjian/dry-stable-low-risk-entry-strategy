@@ -250,7 +250,7 @@ def test_strategy6_ttm_config_rejects_non_mapping_value_with_clear_error():
         resolve_strategy6_config({"strategy6": {"ttm_squeeze": "enabled"}})
 
 
-def test_strategy6_ttm_only_changes_new_audit_fields_and_ranking_score():
+def test_strategy6_ttm_is_diagnostic_and_does_not_change_selection_or_ranking():
     rows = _engine_rows()
     enabled = StrongVcpTailEngine({}).evaluate_at(rows, code="000001", name="平安银行")
     disabled = StrongVcpTailEngine({
@@ -262,7 +262,7 @@ def test_strategy6_ttm_only_changes_new_audit_fields_and_ranking_score():
     assert enabled.reject_reasons == disabled.reject_reasons
     assert enabled.lifecycle_status == disabled.lifecycle_status
     assert enabled.trade_plan == disabled.trade_plan
-    assert enabled.ranking_score == enabled.score.total_score + enabled.ttm_squeeze.score
+    assert enabled.ranking_score == enabled.score.total_score
     assert disabled.ranking_score == disabled.score.total_score
 
     candidate = enabled.to_candidate_dict()

@@ -294,6 +294,10 @@
         <div v-if="selected.vcp_observation_eligible"><span>VCP突破</span><strong>{{ selected.vcp_breakout_date || '--' }} · 突破后 {{ selected.vcp_days_since_breakout ?? 0 }} 个交易日</strong></div>
         <div><span>分类</span><strong>{{ candidateTypeText(selected) }} / {{ isExecutionWaiting(selected) ? '观察' : label('classification', selected.classification) }}</strong></div>
         <div data-test="detail-decision-profile"><span>决策规则</span><strong>{{ decisionProfileText(selected) }} · {{ selected.score_model_version || '--' }}</strong></div>
+        <div data-test="detail-strong-trend-squeeze"><span>强势趋势收缩初筛</span><strong>{{ strongTrendSqueezeSummary(selected) }}</strong></div>
+        <div v-if="hasStrongTrendSqueezeData(selected)" data-test="detail-trend-position"><span>52周位置</span><strong>低 {{ fmt(selected.trend_low_250) }} · 现 {{ fmt(selected.trend_close) }} · 高 {{ fmt(selected.trend_high_250) }} · 高位比 {{ pct(selected.trend_close_to_high_ratio) }}</strong></div>
+        <div v-if="hasStrongTrendSqueezeData(selected)" data-test="detail-trend-ema"><span>长期EMA</span><strong>EMA150 {{ fmt(selected.trend_ema150) }} · EMA200 {{ fmt(selected.trend_ema200) }}</strong></div>
+        <div v-if="hasStrongTrendSqueezeData(selected)" data-test="detail-trend-bands"><span>正式收缩通道</span><strong>BB {{ priceRange(selected.trend_bb_lower, selected.trend_bb_upper) }} · Keltner {{ priceRange(selected.trend_kc_lower, selected.trend_kc_upper) }}</strong></div>
         <div data-test="detail-ttm-squeeze"><span>TTM Squeeze</span><strong>{{ ttmDetail(selected) }}</strong></div>
         <div data-test="detail-ttm-bands"><span>TTM波动通道</span><strong>{{ ttmBandsDetail(selected) }}</strong></div>
         <div data-test="detail-ttm-momentum"><span>TTM动量</span><strong>{{ ttmMomentumDetail(selected) }}</strong></div>
@@ -658,16 +662,25 @@ export default {
     hasTtmData(candidate) {
       return Boolean(candidate?.ttm_model_version && candidate?.ttm_squeeze_status)
     },
+    hasStrongTrendSqueezeData(candidate) {
+      return Boolean(candidate?.strong_trend_squeeze_model_version && candidate?.strong_trend_squeeze_status)
+    },
+    strongTrendSqueezeSummary(candidate) {
+      if (!this.hasStrongTrendSqueezeData(candidate)) return '旧任务未计算'
+      const status = candidate.strong_trend_squeeze_pass ? '通过' : '未通过'
+      const reasons = this.joinedLabels('tag', candidate.strong_trend_squeeze_reasons)
+      return reasons === '--' ? `${status} · ${candidate.strong_trend_squeeze_model_version}` : `${status} · ${reasons}`
+    },
     ttmSummary(candidate) {
       if (!this.hasTtmData(candidate)) return '未计算'
       const days = candidate.ttm_squeeze_on && Number(candidate.ttm_squeeze_days) > 0
         ? ` · ${candidate.ttm_squeeze_days}日`
         : ''
-      return `${this.label('ttmSqueezeStatus', candidate.ttm_squeeze_status)} · TTM +${candidate.ttm_squeeze_score ?? 0}${days}`
+      return `${this.label('ttmSqueezeStatus', candidate.ttm_squeeze_status)} · 诊断分 ${candidate.ttm_squeeze_score ?? 0}${days}`
     },
     ttmDetail(candidate) {
       if (!this.hasTtmData(candidate)) return '未计算'
-      return `${this.ttmSummary(candidate)} · 排序分 ${this.candidateRankingScore(candidate)} · ${candidate.ttm_model_version}`
+      return `${this.ttmSummary(candidate)} · 不参与资格与排序 · ${candidate.ttm_model_version}`
     },
     ttmBandsDetail(candidate) {
       if (!this.hasTtmData(candidate)) return '未计算'
@@ -1089,7 +1102,7 @@ export default {
           { header: '总分', value: c => c.total_score ?? '' },
           { header: 'TTM状态', value: c => this.hasTtmData(c) ? this.label('ttmSqueezeStatus', c.ttm_squeeze_status) : '' },
           { header: 'TTM状态原始值', value: c => this.hasTtmData(c) ? c.ttm_squeeze_status : '' },
-          { header: 'TTM加分', value: c => this.hasTtmData(c) ? (c.ttm_squeeze_score ?? 0) : '' },
+          { header: 'TTM诊断分', value: c => this.hasTtmData(c) ? (c.ttm_squeeze_score ?? 0) : '' },
           { header: '排序分', value: c => this.hasTtmData(c) ? this.candidateRankingScore(c) : (c.total_score ?? '') },
           { header: '连续挤压天数', value: c => this.hasTtmData(c) ? (c.ttm_squeeze_days ?? 0) : '' },
           { header: '当前挤压', value: c => this.hasTtmData(c) ? (c.ttm_squeeze_on ? '是' : '否') : '' },
@@ -1104,6 +1117,16 @@ export default {
           { header: 'TTM原因', value: c => this.hasTtmData(c) ? strategy6Labels('tag', c.ttm_reasons).join('|') : '' },
           { header: 'TTM风险', value: c => this.hasTtmData(c) ? strategy6Labels('tag', c.ttm_risk_tags).join('|') : '' },
           { header: 'TTM模型版本', value: c => c.ttm_model_version || '' },
+          { header: '强势趋势收缩初筛', value: c => this.hasStrongTrendSqueezeData(c) ? (c.strong_trend_squeeze_pass ? '通过' : '未通过') : '' },
+          { header: 'EMA150', value: c => c.trend_ema150 ?? '' },
+          { header: 'EMA200', value: c => c.trend_ema200 ?? '' },
+          { header: '52周最低价', value: c => c.trend_low_250 ?? '' },
+          { header: '52周最高价', value: c => c.trend_high_250 ?? '' },
+          { header: '现价/52周最低价', value: c => c.trend_close_to_low_ratio ?? '' },
+          { header: '现价/52周最高价', value: c => c.trend_close_to_high_ratio ?? '' },
+          { header: '正式收缩状态', value: c => this.hasStrongTrendSqueezeData(c) ? (c.trend_squeeze_on ? '是' : '否') : '' },
+          { header: '强势趋势收缩失败原因', value: c => strategy6Labels('tag', c.strong_trend_squeeze_reasons).join('|') },
+          { header: '强势趋势收缩模型', value: c => c.strong_trend_squeeze_model_version || '' },
           { header: '市场过滤', value: c => c.enable_market_filter ? '开启' : '关闭' },
           { header: '市场过滤模式', value: c => this.label('marketFilterMode', c.market_filter_mode) },
           { header: '市场过滤模式原始值', value: c => c.market_filter_mode || '' },

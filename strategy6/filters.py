@@ -14,6 +14,7 @@ from strategy6.models import (
     Strategy6EntryTiming,
     Strategy6ProbabilityAdjustedRR,
     Strategy6SetupQuality,
+    Strategy6StrongTrendSqueeze,
     Strategy6Start,
     Strategy6Support,
     Strategy6TradePlan,
@@ -88,6 +89,7 @@ def hard_filter_reasons(
     selection_diagnostics: Strategy6SelectionDiagnostics | None = None,
     entry_timing: Strategy6EntryTiming | None = None,
     probability_rr: Strategy6ProbabilityAdjustedRR | None = None,
+    strong_trend_squeeze: Strategy6StrongTrendSqueeze | None = None,
 ) -> list[str]:
     reasons: list[str] = []
     if not phase.valid and phase.status != "START_TOO_RECENT":
@@ -102,10 +104,8 @@ def hard_filter_reasons(
         reasons.append(f"TRADING_DAYS_LT_{config['minimum_trading_days']}")
     if min(ind.ma5, ind.ma10, ind.ma20, ind.ma50, ind.ma120, ind.ma250) <= 0:
         reasons.append("MA_CALC_FAILED")
-    if ind.ma250 > 0 and ind.current_price <= ind.ma250:
-        reasons.append("CLOSE_LE_MA250")
-    if ind.ma120 > 0 and ind.ma250 > 0 and ind.ma120 <= ind.ma250:
-        reasons.append("MA120_LE_MA250")
+    if strong_trend_squeeze is not None:
+        reasons.extend(strong_trend_squeeze.reasons)
     if ind.amount_avg_60 < config["min_avg_amount_60d_yi"]:
         reasons.append("AVG60D_LT_MIN")
     if ind.amount_avg_30 < config["min_avg_amount_30d_yi"]:

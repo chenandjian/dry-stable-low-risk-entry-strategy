@@ -1038,10 +1038,10 @@
         </div>
       </div>
 
-      <h4 class="subsection-title">TTM Squeeze 质量排序</h4>
+      <h4 class="subsection-title">TTM Squeeze 附加诊断</h4>
       <div class="toggle-row">
         <div class="toggle-item">
-          <span>启用TTM质量加分</span>
+          <span>启用TTM附加诊断</span>
           <button data-test="strategy6-ttm-enabled" class="toggle" :class="{ active: config.strategy6.ttm_squeeze.enabled }"
             @click="toggleStrategy6Ttm('enabled')">{{ config.strategy6.ttm_squeeze.enabled ? '开' : '关' }}</button>
         </div>
@@ -1054,9 +1054,9 @@
         <div class="param"><label title="Keltner通道ATR倍数">Keltner ATR倍数</label><input data-test="strategy6-ttm-kc-multiplier" type="number" v-model.number="config.strategy6.ttm_squeeze.kc_atr_multiplier" @input="markDirty" min="0.01" max="10" step="0.1" /><span class="default">默认 1.5</span></div>
         <div class="param"><label title="TTM线性回归动量周期">动量周期</label><input data-test="strategy6-ttm-momentum-period" type="number" v-model.number="config.strategy6.ttm_squeeze.momentum_period" @input="markDirty" min="5" max="120" /><span class="default">默认 20</span></div>
         <div class="param"><label title="多头挤压加3分所需的最少连续交易日">多头挤压最少天数</label><input type="number" v-model.number="config.strategy6.ttm_squeeze.bullish_squeeze_min_days" @input="markDirty" min="1" max="20" /><span class="default">默认 3</span></div>
-        <div class="param"><label title="本版本固定为4，避免改变候选资格">最大排序加分</label><input type="number" v-model.number="config.strategy6.ttm_squeeze.max_ranking_bonus" @input="markDirty" min="4" max="4" /><span class="default">固定 4</span></div>
+        <div class="param"><label title="保留旧字段兼容；当前仅为诊断分，不参与资格、总分或排序">TTM诊断分上限</label><input type="number" v-model.number="config.strategy6.ttm_squeeze.max_ranking_bonus" @input="markDirty" min="4" max="4" /><span class="default">固定 4</span></div>
       </div>
-      <p class="section-note">ⓘ TTM只增加独立质量分和同类候选排序，不改变策略6原100分、硬过滤、候选类型和交易计划。</p>
+      <p class="section-note">ⓘ 此处仅控制可配置的TTM动量诊断，不参与资格、总分或排序。正式长期趋势初筛始终固定使用BB20(2σ)完全进入KC20(1.5×ATR20)，不能在此关闭或改写。</p>
 
       <h4 class="subsection-title">稳定箱体尾部路径</h4>
       <div class="toggle-row">

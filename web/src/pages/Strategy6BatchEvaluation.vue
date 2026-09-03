@@ -85,6 +85,16 @@
                 <td colspan="11">
                   <div class="detail-grid">
                     <div>
+                      <h3>强势趋势收缩初筛</h3>
+                      <p :class="item.strongTrendSqueezePass ? 'evidence' : 'risk'">
+                        {{ item.strongTrendSqueezePass ? '全部条件通过' : '未通过' }}
+                      </p>
+                      <p>现价 {{ price(item.trendClose) }} · EMA150 {{ price(item.trendEma150) }} · EMA200 {{ price(item.trendEma200) }}</p>
+                      <p>52周低/高 {{ price(item.trendLow250) }} / {{ price(item.trendHigh250) }} · 高位比 {{ pct(item.trendCloseToHighRatio) }}</p>
+                      <p>BB {{ priceRange(item.trendBbLower, item.trendBbUpper) }} · KC {{ priceRange(item.trendKcLower, item.trendKcUpper) }}</p>
+                      <p v-for="reason in item.strongTrendSqueezeReasons || []" :key="reason" class="risk">{{ trendReasonText(reason) }}</p>
+                    </div>
+                    <div>
                       <h3>尾部依据</h3>
                       <p v-for="reason in item.tailReasons" :key="reason" class="evidence">{{ tailReasonText(reason) }}</p>
                       <p v-if="!item.tailReasons?.length" class="muted">暂无加分依据</p>
@@ -200,6 +210,8 @@ async function copyCode(code) {
 function pct(value) { return `${(Number(value || 0) * 100).toFixed(2)}%` }
 function signedPct(value) { const n = Number(value || 0) * 100; return `${n >= 0 ? '+' : ''}${n.toFixed(2)}%` }
 function ratio(value) { return Number(value || 0).toFixed(2) }
+function price(value) { return value == null || value === '' ? '--' : Number(value).toFixed(2) }
+function priceRange(low, high) { return `${price(low)} - ${price(high)}` }
 function numberClass(value) { return Number(value) >= 0 ? 'positive' : 'negative' }
 function scoreClass(value) { return value >= 18 ? 'excellent' : value >= 14 ? 'good' : 'weak' }
 function candidateText(value) {
@@ -229,6 +241,16 @@ function tailRejectText(value) {
     TAIL_LOW_DECLINING: '尾部低点继续下移', TAIL_CLOSE_RANGE_GT_8PCT: '5日收盘波动过大',
     TAIL_VOLUME_NOT_DRY: '尾部量能未充分萎缩', TAIL_RETURN_5_TOO_WEAK: '5日走势过弱',
     TAIL_SINGLE_DROP_TOO_WEAK: '尾部存在过大的单日下跌', TAIL_VOLUME_BASE_INSUFFICIENT: '尾部量能基准不足',
+  }[value] || value
+}
+function trendReasonText(value) {
+  return {
+    TREND_SQUEEZE_HISTORY_LT_250: '有效历史不足250个交易日',
+    TREND_SQUEEZE_DATA_INSUFFICIENT: '初筛指标无法计算',
+    CLOSE_LE_10: '股价不高于10元', CLOSE_LT_52W_LOW_1_30: '未高于52周最低价30%',
+    CLOSE_LT_52W_HIGH_0_70: '低于52周最高价70%', CLOSE_GT_52W_HIGH: '收盘价异常高于52周最高价',
+    EMA150_LE_EMA200: 'EMA150不高于EMA200', CLOSE_LE_EMA150: '收盘价不高于EMA150',
+    CLOSE_LE_EMA200: '收盘价不高于EMA200', BB_NOT_INSIDE_KC: '布林带未完全进入肯特纳通道',
   }[value] || value
 }
 function breakdownText(score = {}) {

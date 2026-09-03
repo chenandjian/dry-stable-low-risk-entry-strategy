@@ -31,6 +31,7 @@ from strategy6.scorer import score_strategy6
 from strategy6.selection_diagnostics import evaluate_selection_diagnostics
 from strategy6.setup_quality import evaluate_setup_quality
 from strategy6.strong_start import evaluate_strong_start
+from strategy6.strong_trend_squeeze import evaluate_strong_trend_squeeze
 from strategy6.support import evaluate_support
 from strategy6.tail_regime import evaluate_tail_regime
 from strategy6.ttm_squeeze import calculate_ttm_squeeze
@@ -71,6 +72,7 @@ class StrongVcpTailEngine:
             rows_normalized=rows_normalized,
         )
         ttm_squeeze = calculate_ttm_squeeze(rows, self.config["ttm_squeeze"])
+        strong_trend_squeeze = evaluate_strong_trend_squeeze(rows)
         vcp_observation = evaluate_vcp_observation(rows, self.config, code=code)
         market_context = evaluate_market_context(
             market_data_by_symbol,
@@ -231,13 +233,14 @@ class StrongVcpTailEngine:
             brooks_tail=brooks_tail,
             setup_quality=setup_quality,
         )
-        ranking_score = score.total_score + ttm_squeeze.score
+        ranking_score = score.total_score
         reject_reasons = hard_filter_reasons(
             rows, indicators, start, phase, pattern, support, dry_tail, trade_plan, self.config,
             box_tail=box_tail,
             brooks_tail=brooks_tail,
             setup_quality=setup_quality,
             selection_diagnostics=selection_diagnostics,
+            strong_trend_squeeze=strong_trend_squeeze,
         )
         normalized_quote_status = str(quote_status or "").lower()
         if normalized_quote_status == "suspended":
@@ -291,6 +294,7 @@ class StrongVcpTailEngine:
                 selection_diagnostics=selection_diagnostics,
                 entry_timing=entry_timing,
                 probability_rr=probability_rr,
+                strong_trend_squeeze=strong_trend_squeeze,
             )
             if normalized_quote_status == "suspended":
                 reject_reasons.append("LATEST_TRADE_SUSPENDED")
@@ -361,6 +365,7 @@ class StrongVcpTailEngine:
             trade_plan=trade_plan,
             score=score,
             ttm_squeeze=ttm_squeeze,
+            strong_trend_squeeze=strong_trend_squeeze,
             ranking_score=ranking_score,
             setup_quality=setup_quality,
             tail_regime=tail_regime,

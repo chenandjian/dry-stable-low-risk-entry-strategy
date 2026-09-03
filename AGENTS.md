@@ -31,6 +31,8 @@ CupHandleScan 是 Python 3.10+ 的 A 股扫描系统，当前项目包含六套�
 
 策略6必须保持启动、整理、尾段不重叠，使用客观目标计算盈亏比，并将执行R目标单独输出。策略6不得恢复板块过滤，`sector_name` 仅展示。当前策略6价格全部为前复权口径，禁止把 `current_price_raw` 伪填为前复权价格。
 
+策略6正式长期趋势初筛使用固定全条件规则：前复权收盘价大于10元、位于最近250个交易日最高/最低价规定区间、`EMA150 > EMA200`、收盘价同时高于EMA150/200，并且BB20(2倍总体标准差)严格位于KC20(EMA20中轨、1.5倍Wilder ATR20)内。该规则替代旧 `close > MA250` 与 `MA120 > MA250`，不替代强势启动事件；TTM附加诊断分不得再参与资格、总分或排序。
+
 当前产品以策略6为唯一主服务：前端只提供策略6扫描、候选、任务和配置入口，策略1-5页面与启动入口不得恢复；自动定时任务只允许创建并执行 `STRATEGY_6_STRONG_VCP_TAIL`。策略1-5后端代码、历史数据和旧API暂时保留用于兼容与审计，不得由前端或scheduler主动触发。
 
 策略6默认决策画像为 `formal_original`：固定尾段窗口，只有 `strategy6/dry_tail.py::evaluate_dry_tail()` 的 ORIGINAL 路径参与正式评分、过滤与候选分层。`dynamic_tail`、稳定箱体、Brooks 和 `S6_QUALITY_V2` 仅允许在显式 `research_quality_v2` 研究画像中执行，不得绕过 ORIGINAL 风险进入正式候选。旧输出字段继续保留，正式画像填充禁用中性值；生命周期必须按 `decision_profile` 隔离。

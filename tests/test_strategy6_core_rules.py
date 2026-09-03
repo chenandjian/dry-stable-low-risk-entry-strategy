@@ -1,6 +1,8 @@
 from datetime import date, timedelta
 from dataclasses import replace
 
+import pytest
+
 from strategy6.engine import StrongVcpTailEngine
 import strategy6.indicators as strategy6_indicators
 from strategy6.filters import (
@@ -16,6 +18,7 @@ from strategy6.models import (
     Strategy6DryTail,
     Strategy6Indicators,
     Strategy6Score,
+    Strategy6StrongTrendSqueeze,
     Strategy6TradePlan,
     Strategy6VcpObservation,
     Strategy6VcpQuality,
@@ -23,6 +26,20 @@ from strategy6.models import (
 from strategy6.strong_start import evaluate_strong_start
 from strategy6.scorer import _relative_strength_risk_score
 from strategy6.validation import is_strategy6_research_profile, resolve_strategy6_config
+
+
+@pytest.fixture(autouse=True)
+def _isolate_formal_trend_squeeze_gate(monkeypatch):
+    """Core-rule fixtures predate the new gate; its behavior has dedicated tests."""
+    monkeypatch.setattr(
+        "strategy6.engine.evaluate_strong_trend_squeeze",
+        lambda _rows: Strategy6StrongTrendSqueeze(
+            passed=True,
+            calculable=True,
+            status="PASSED",
+            squeeze_on=True,
+        ),
+    )
 
 
 def _row(i, close=10.0, open_price=None, high=None, low=None, volume=1_000_000, amount=600_000_000):

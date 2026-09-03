@@ -65,6 +65,22 @@ describe('Strategy6Results', () => {
           ttm_reasons: ['TTM_FIRED', 'TTM_MOMENTUM_POSITIVE', 'TTM_MOMENTUM_RISING'],
           ttm_risk_tags: [],
           ttm_model_version: 'S6_TTM_SQUEEZE_V1',
+          strong_trend_squeeze_pass: true,
+          strong_trend_squeeze_status: 'PASSED',
+          trend_close: 12.34,
+          trend_low_250: 8.5,
+          trend_high_250: 14.0,
+          trend_close_to_low_ratio: 1.4518,
+          trend_close_to_high_ratio: 0.8814,
+          trend_ema150: 11.2,
+          trend_ema200: 10.8,
+          trend_squeeze_on: true,
+          trend_bb_upper: 12.8,
+          trend_bb_lower: 11.9,
+          trend_kc_upper: 12.9,
+          trend_kc_lower: 11.8,
+          strong_trend_squeeze_reasons: [],
+          strong_trend_squeeze_model_version: 'S6_STRONG_TREND_SQUEEZE_V1',
           decision_profile: 'research_quality_v2',
           score_model_version: 'S6_QUALITY_V2',
           entry_archetype: 'SUPPORT_PULLBACK',
@@ -514,10 +530,13 @@ describe('Strategy6Results', () => {
     expect(wrapper.text()).toContain('整理质量 21')
     expect(wrapper.text()).toContain('支撑反应 8')
     expect(wrapper.find('[data-test="candidate-ttm-000001"]').text()).toContain('多头挤压释放')
-    expect(wrapper.find('[data-test="candidate-ttm-000001"]').text()).toContain('TTM +4')
+    expect(wrapper.find('[data-test="candidate-ttm-000001"]').text()).toContain('诊断分 4')
     expect(wrapper.find('[data-test="candidate-ttm-000003"]').text()).toBe('未计算')
     expect(wrapper.find('[data-test="detail-ttm-squeeze"]').text()).toContain('多头挤压释放')
-    expect(wrapper.find('[data-test="detail-ttm-squeeze"]').text()).toContain('排序分 95')
+    expect(wrapper.find('[data-test="detail-ttm-squeeze"]').text()).toContain('不参与资格与排序')
+    expect(wrapper.find('[data-test="detail-strong-trend-squeeze"]').text()).toContain('通过')
+    expect(wrapper.find('[data-test="detail-trend-position"]').text()).toContain('高位比 88.14%')
+    expect(wrapper.find('[data-test="detail-trend-ema"]').text()).toContain('EMA150 11.20')
     expect(wrapper.find('[data-test="detail-ttm-bands"]').text()).toContain('BB 11.90 - 12.80')
     expect(wrapper.find('[data-test="detail-ttm-momentum"]').text()).toContain('上升')
     expect(wrapper.text()).not.toContain('FIRED_BULLISH')
@@ -1141,7 +1160,8 @@ describe('Strategy6Results', () => {
     expect(csv).toContain('VCP支点,VCP结构低点,距VCP支点,VCP突破日期,VCP突破后天数')
     expect(csv).toContain('VCP形态分,VCP等级,VCP完整轮次分,VCP振幅递减分,VCP下跌量递减分,VCP低点稳定分,VCP启动涨幅保留分,VCP时间结构分,VCP支点收紧分,VCP突破质量分')
     expect(csv).toContain('VCP评分原因,VCP评分警告,VCP评分模型版本')
-    expect(csv).toContain('总分,TTM状态,TTM状态原始值,TTM加分,排序分,连续挤压天数,当前挤压,挤压刚解除,TTM动量,前一日TTM动量,TTM动量方向')
+    expect(csv).toContain('总分,TTM状态,TTM状态原始值,TTM诊断分,排序分,连续挤压天数,当前挤压,挤压刚解除,TTM动量,前一日TTM动量,TTM动量方向')
+    expect(csv).toContain('强势趋势收缩初筛,EMA150,EMA200,52周最低价,52周最高价')
     expect(csv).toContain('当前挤压,挤压刚解除')
     expect(csv).toContain('91,多头挤压释放,FIRED_BULLISH,4,95,0,否,是,0.420,0.310,上升')
   })

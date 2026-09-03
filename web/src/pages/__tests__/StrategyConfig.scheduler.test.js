@@ -289,7 +289,8 @@ describe('StrategyConfig scheduler controls', () => {
     const wrapper = mount(StrategyConfig)
     await flushUi()
 
-    expect(wrapper.text()).toContain('TTM Squeeze 质量排序')
+    expect(wrapper.text()).toContain('TTM Squeeze 附加诊断')
+    expect(wrapper.text()).toContain('不参与资格、总分或排序')
     expect(wrapper.find('[data-test="strategy6-ttm-enabled"]').exists()).toBe(true)
     expect(wrapper.find('[data-test="strategy6-ttm-bb-period"]').element.value).toBe('20')
     expect(wrapper.find('[data-test="strategy6-ttm-kc-multiplier"]').element.value).toBe('1.5')
