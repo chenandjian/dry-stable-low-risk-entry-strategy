@@ -5,6 +5,7 @@ import { nextTick } from 'vue'
 const api = {
   getStrategy6Tasks: vi.fn(),
   getStrategy6Candidates: vi.fn(),
+  getStrategy6TrendSqueezeScreen: vi.fn(),
   getStrategy6MarketSnapshot: vi.fn(),
   getStrategy6Lifecycle: vi.fn(),
   downloadStrategy6Report: vi.fn(),
@@ -357,6 +358,28 @@ describe('Strategy6Results', () => {
         ],
       },
     })
+    api.getStrategy6TrendSqueezeScreen.mockResolvedValue({
+      taskId: 's6-task',
+      total: 2,
+      stocks: [
+        {
+          code: '300604', name: '长川科技', evaluation_date: '2026-09-03',
+          trend_close: 62.5, trend_low_250: 35, trend_high_250: 70,
+          trend_close_to_low_ratio: 1.785714, trend_close_to_high_ratio: 0.892857,
+          trend_ema150: 54.2, trend_ema200: 49.8, trend_squeeze_on: true,
+          trend_bb_lower: 60, trend_bb_upper: 64, trend_kc_lower: 59, trend_kc_upper: 65,
+          downstream_candidate_type: 'REJECTED', downstream_reject_reasons: ['START_NOT_FOUND'],
+        },
+        {
+          code: '000001', name: '平安银行', evaluation_date: '2026-09-03',
+          trend_close: 12.34, trend_low_250: 8.5, trend_high_250: 14,
+          trend_close_to_low_ratio: 1.4518, trend_close_to_high_ratio: 0.8814,
+          trend_ema150: 11.2, trend_ema200: 10.8, trend_squeeze_on: true,
+          trend_bb_lower: 11.9, trend_bb_upper: 12.8, trend_kc_lower: 11.8, trend_kc_upper: 12.9,
+          downstream_candidate_type: 'READY_CANDIDATE', downstream_reject_reasons: [],
+        },
+      ],
+    })
     api.getStrategy6Lifecycle.mockResolvedValue({
       lifecycle: [{
         code: '600001', name: '退出样本', lifecycle_status: 'FAILED',
@@ -399,6 +422,26 @@ describe('Strategy6Results', () => {
     expect(wrapper.find('[data-test="strategy6-task-dropdown"]').text()).toContain('s6-task-20')
     expect(wrapper.find('[data-test="strategy6-task-dropdown"]').text()).not.toContain('s6-task-01')
     expect(wrapper.find('[data-test="strategy6-task-page-info"]').text()).toBe('第 2 / 3 页 · 共 23 个任务')
+  })
+
+  it('renders and downloads the independent trend squeeze screen pool', async () => {
+    const wrapper = mount(Strategy6Results, {
+      global: { mocks: { $route: { query: { task: 's6-task' } } } },
+    })
+    await flushUi()
+
+    expect(api.getStrategy6TrendSqueezeScreen).toHaveBeenCalledWith('s6-task')
+    expect(wrapper.text()).toContain('强势趋势收缩初筛池')
+    expect(wrapper.text()).toContain('长川科技')
+    expect(wrapper.text()).toContain('通过初筛，后续未入选')
+
+    const mocks = installDownloadMocks()
+    await wrapper.get('[data-test="export-trend-squeeze-screen"]').trigger('click')
+    expect(mocks.click).toHaveBeenCalled()
+    const blob = mocks.createObjectURL.mock.calls[0][0]
+    const csv = await blob.text()
+    expect(csv).toContain('300604')
+    expect(csv).toContain('START_NOT_FOUND')
   })
 
   it('keeps the selected task in the trigger without injecting it into another page', async () => {

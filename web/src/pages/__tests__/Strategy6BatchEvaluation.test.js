@@ -2,7 +2,10 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { nextTick } from 'vue'
 
-const api = { evaluateStrategy6Batch: vi.fn() }
+const api = {
+  evaluateStrategy6Batch: vi.fn(),
+  getLatestStrategy6TrendSqueezeScreen: vi.fn(),
+}
 vi.mock('../../composables/useApi.js', () => ({ useApi: () => api }))
 
 import Strategy6BatchEvaluation from '../Strategy6BatchEvaluation.vue'
@@ -57,6 +60,14 @@ describe('Strategy6BatchEvaluation', () => {
         },
       ],
       errors: [{ code: '000000', name: '', error: 'KLINE_NOT_FOUND', message: '本地没有K线数据' }],
+    })
+    api.getLatestStrategy6TrendSqueezeScreen.mockResolvedValue({
+      taskId: 's6-20260903-153000',
+      total: 2,
+      stocks: [
+        { code: '300604', name: '长川科技' },
+        { code: '000001', name: '平安银行' },
+      ],
     })
   })
 
@@ -121,5 +132,18 @@ describe('Strategy6BatchEvaluation', () => {
     const wrapper = mount(Strategy6BatchEvaluation)
 
     expect(wrapper.get('[data-test="batch-codes"]').element.value).toBe('')
+  })
+
+  it('imports the latest independent trend squeeze screen without auto-running evaluation', async () => {
+    const wrapper = mount(Strategy6BatchEvaluation)
+
+    await wrapper.get('[data-test="import-trend-squeeze-screen"]').trigger('click')
+    await flushUi()
+
+    expect(api.getLatestStrategy6TrendSqueezeScreen).toHaveBeenCalledTimes(1)
+    expect(wrapper.get('[data-test="batch-codes"]').element.value).toBe('300604\n000001')
+    expect(wrapper.text()).toContain('来源任务 s6-20260903-153000')
+    expect(wrapper.text()).toContain('已导入 2 只')
+    expect(api.evaluateStrategy6Batch).not.toHaveBeenCalled()
   })
 })

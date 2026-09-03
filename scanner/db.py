@@ -150,6 +150,7 @@ def init_db(path: str = "data/cuphandle.db"):
         _ensure_strategy4_tables(conn)
         _ensure_strategy5_candidates_table(conn)
         _ensure_strategy6_candidates_table(conn)
+        _ensure_strategy6_trend_squeeze_screen_table(conn)
         _ensure_strategy6_market_snapshots_table(conn)
         _ensure_strategy6_lifecycle_table(conn)
         _ensure_strategy6_task_lifecycle_table(conn)
@@ -3147,6 +3148,44 @@ def _ensure_strategy6_market_snapshots_table(conn: sqlite3.Connection):
     _ensure_column(conn, "strategy6_market_snapshots", "data_status", "TEXT DEFAULT 'MISSING'")
 
 
+def _ensure_strategy6_trend_squeeze_screen_table(conn: sqlite3.Connection):
+    """Create the independent task-level Strategy6 trend/squeeze screen pool."""
+    conn.execute('''
+        CREATE TABLE IF NOT EXISTS strategy6_trend_squeeze_screen (
+            task_id TEXT NOT NULL,
+            code TEXT NOT NULL,
+            name TEXT,
+            evaluation_date TEXT,
+            trend_close REAL DEFAULT 0,
+            trend_low_250 REAL DEFAULT 0,
+            trend_high_250 REAL DEFAULT 0,
+            trend_close_to_low_ratio REAL DEFAULT 0,
+            trend_close_to_high_ratio REAL DEFAULT 0,
+            trend_ema150 REAL DEFAULT 0,
+            trend_ema200 REAL DEFAULT 0,
+            trend_squeeze_on INTEGER DEFAULT 0,
+            trend_bb_upper REAL,
+            trend_bb_lower REAL,
+            trend_kc_upper REAL,
+            trend_kc_lower REAL,
+            strong_trend_squeeze_status TEXT,
+            strong_trend_squeeze_model_version TEXT,
+            downstream_candidate_type TEXT,
+            downstream_classification TEXT,
+            downstream_total_score REAL DEFAULT 0,
+            downstream_reject_reasons TEXT,
+            strategy_version TEXT,
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            PRIMARY KEY (task_id, code),
+            FOREIGN KEY (task_id) REFERENCES scan_tasks(id)
+        )
+    ''')
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_strategy6_trend_squeeze_screen_task "
+        "ON strategy6_trend_squeeze_screen(task_id, code)"
+    )
+
+
 def _ensure_strategy6_lifecycle_table(conn: sqlite3.Connection):
     conn.execute('''
         CREATE TABLE IF NOT EXISTS strategy6_candidate_lifecycle (
@@ -4664,6 +4703,143 @@ def get_strategy6_market_snapshot(task_id: str) -> dict:
     }
 
 
+def upsert_strategy6_trend_squeeze_screen(
+    task_id: str,
+    candidate: dict,
+    *,
+    _conn: sqlite3.Connection | None = None,
+    _commit: bool = True,
+) -> None:
+    """Persist one stock that passed the independent formal prefilter."""
+    if candidate.get("strong_trend_squeeze_pass") is not True:
+        raise ValueError("Strategy6 trend squeeze screen only accepts passed rows")
+    conn = _conn or get_conn()
+    if _commit:
+        _ensure_strategy6_trend_squeeze_screen_table(conn)
+    conn.execute(
+        """INSERT INTO strategy6_trend_squeeze_screen (
+               task_id, code, name, evaluation_date, trend_close, trend_low_250,
+               trend_high_250, trend_close_to_low_ratio, trend_close_to_high_ratio,
+               trend_ema150, trend_ema200, trend_squeeze_on, trend_bb_upper,
+               trend_bb_lower, trend_kc_upper, trend_kc_lower,
+               strong_trend_squeeze_status, strong_trend_squeeze_model_version,
+               downstream_candidate_type, downstream_classification,
+               downstream_total_score, downstream_reject_reasons, strategy_version,
+               created_at
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+           ON CONFLICT(task_id, code) DO UPDATE SET
+               name=excluded.name,
+               evaluation_date=excluded.evaluation_date,
+               trend_close=excluded.trend_close,
+               trend_low_250=excluded.trend_low_250,
+               trend_high_250=excluded.trend_high_250,
+               trend_close_to_low_ratio=excluded.trend_close_to_low_ratio,
+               trend_close_to_high_ratio=excluded.trend_close_to_high_ratio,
+               trend_ema150=excluded.trend_ema150,
+               trend_ema200=excluded.trend_ema200,
+               trend_squeeze_on=excluded.trend_squeeze_on,
+               trend_bb_upper=excluded.trend_bb_upper,
+               trend_bb_lower=excluded.trend_bb_lower,
+               trend_kc_upper=excluded.trend_kc_upper,
+               trend_kc_lower=excluded.trend_kc_lower,
+               strong_trend_squeeze_status=excluded.strong_trend_squeeze_status,
+               strong_trend_squeeze_model_version=excluded.strong_trend_squeeze_model_version,
+               downstream_candidate_type=excluded.downstream_candidate_type,
+               downstream_classification=excluded.downstream_classification,
+               downstream_total_score=excluded.downstream_total_score,
+               downstream_reject_reasons=excluded.downstream_reject_reasons,
+               strategy_version=excluded.strategy_version,
+               created_at=datetime('now')""",
+        (
+            task_id,
+            candidate["code"],
+            candidate.get("name", ""),
+            candidate.get("evaluation_date", ""),
+            float(candidate.get("trend_close") or 0.0),
+            float(candidate.get("trend_low_250") or 0.0),
+            float(candidate.get("trend_high_250") or 0.0),
+            float(candidate.get("trend_close_to_low_ratio") or 0.0),
+            float(candidate.get("trend_close_to_high_ratio") or 0.0),
+            float(candidate.get("trend_ema150") or 0.0),
+            float(candidate.get("trend_ema200") or 0.0),
+            1 if candidate.get("trend_squeeze_on") else 0,
+            candidate.get("trend_bb_upper"),
+            candidate.get("trend_bb_lower"),
+            candidate.get("trend_kc_upper"),
+            candidate.get("trend_kc_lower"),
+            candidate.get("strong_trend_squeeze_status", "PASSED"),
+            candidate.get("strong_trend_squeeze_model_version", ""),
+            candidate.get("candidate_type", "REJECTED"),
+            candidate.get("classification", "rejected"),
+            float(candidate.get("total_score") or 0.0),
+            _json_any(candidate.get("reject_reasons", [])),
+            candidate.get("strategy_version", ""),
+        ),
+    )
+    if _commit:
+        conn.commit()
+
+
+def get_strategy6_trend_squeeze_screen(task_id: str) -> list[dict]:
+    """Return every stock that passed the independent prefilter for one task."""
+    conn = get_conn()
+    _ensure_strategy6_trend_squeeze_screen_table(conn)
+    rows = conn.execute(
+        """SELECT task_id, code, name, evaluation_date, trend_close, trend_low_250,
+                  trend_high_250, trend_close_to_low_ratio, trend_close_to_high_ratio,
+                  trend_ema150, trend_ema200, trend_squeeze_on, trend_bb_upper,
+                  trend_bb_lower, trend_kc_upper, trend_kc_lower,
+                  strong_trend_squeeze_status, strong_trend_squeeze_model_version,
+                  downstream_candidate_type, downstream_classification,
+                  downstream_total_score, downstream_reject_reasons, strategy_version
+           FROM strategy6_trend_squeeze_screen
+           WHERE task_id=?
+           ORDER BY downstream_total_score DESC, code ASC""",
+        (task_id,),
+    ).fetchall()
+    columns = [
+        "task_id", "code", "name", "evaluation_date", "trend_close", "trend_low_250",
+        "trend_high_250", "trend_close_to_low_ratio", "trend_close_to_high_ratio",
+        "trend_ema150", "trend_ema200", "trend_squeeze_on", "trend_bb_upper",
+        "trend_bb_lower", "trend_kc_upper", "trend_kc_lower",
+        "strong_trend_squeeze_status", "strong_trend_squeeze_model_version",
+        "downstream_candidate_type", "downstream_classification",
+        "downstream_total_score", "downstream_reject_reasons", "strategy_version",
+    ]
+    result = []
+    for raw in rows:
+        item = dict(zip(columns, raw))
+        item["trend_squeeze_on"] = bool(item.get("trend_squeeze_on"))
+        try:
+            reasons = json.loads(item.get("downstream_reject_reasons") or "[]")
+        except (json.JSONDecodeError, TypeError):
+            reasons = []
+        item["downstream_reject_reasons"] = reasons if isinstance(reasons, list) else []
+        result.append(item)
+    return result
+
+
+def get_latest_strategy6_trend_squeeze_screen() -> tuple[str, list[dict]]:
+    """Return the newest completed Strategy6 task that has a persisted screen pool."""
+    conn = get_conn()
+    _ensure_strategy6_trend_squeeze_screen_table(conn)
+    row = conn.execute(
+        """SELECT t.id
+           FROM scan_tasks t
+           WHERE t.strategy_type='STRATEGY_6_STRONG_VCP_TAIL'
+             AND t.status='completed'
+             AND EXISTS (
+                 SELECT 1 FROM strategy6_trend_squeeze_screen s WHERE s.task_id=t.id
+             )
+           ORDER BY t.started_at DESC, t.id DESC
+           LIMIT 1"""
+    ).fetchone()
+    if not row:
+        return "", []
+    task_id = str(row[0])
+    return task_id, get_strategy6_trend_squeeze_screen(task_id)
+
+
 def get_strategy6_lifecycle(code: str) -> dict | None:
     conn = get_conn()
     _ensure_strategy6_lifecycle_table(conn)
@@ -4960,6 +5136,7 @@ def persist_strategy6_evaluation(
     failed_cooldown_days: int,
     candidate: dict | None,
     observation_candidate: dict | None = None,
+    trend_squeeze_candidate: dict | None = None,
     decision_profile: str = "formal_original",
 ) -> tuple[dict, dict | None]:
     """Atomically persist Strategy6 lifecycle, task audit and active candidate."""
@@ -4990,6 +5167,26 @@ def persist_strategy6_evaluation(
                 candidate_type=candidate_type,
                 lifecycle=lifecycle,
                 reject_reasons=reject_reasons,
+                _conn=conn,
+                _commit=False,
+            )
+
+        conn.execute(
+            "DELETE FROM strategy6_trend_squeeze_screen WHERE task_id=? AND code=?",
+            (task_id, code),
+        )
+        if trend_squeeze_candidate is not None:
+            screen_record = dict(trend_squeeze_candidate)
+            if candidate is not None and lifecycle.get("blocked"):
+                screen_record["candidate_type"] = "REJECTED"
+                screen_record["classification"] = "rejected"
+                screen_record["reject_reasons"] = list(dict.fromkeys([
+                    *screen_record.get("reject_reasons", []),
+                    lifecycle.get("lifecycle_status") or "LIFECYCLE_BLOCKED",
+                ]))
+            upsert_strategy6_trend_squeeze_screen(
+                task_id,
+                screen_record,
                 _conn=conn,
                 _commit=False,
             )

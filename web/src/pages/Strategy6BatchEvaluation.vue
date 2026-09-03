@@ -27,10 +27,19 @@
       />
       <div class="input-actions">
         <span>已识别 <strong>{{ parsedCodes.length }}</strong> 只</span>
-        <button data-test="batch-submit" :disabled="loading" @click="runEvaluation">
-          {{ loading ? '正在评分…' : '开始批量评分' }}
-        </button>
+        <div class="input-buttons">
+          <button
+            data-test="import-trend-squeeze-screen"
+            class="secondary-button"
+            :disabled="importLoading"
+            @click="importTrendSqueezeScreen"
+          >{{ importLoading ? '正在导入…' : '一键导入新初筛股票' }}</button>
+          <button data-test="batch-submit" :disabled="loading" @click="runEvaluation">
+            {{ loading ? '正在评分…' : '开始批量评分' }}
+          </button>
+        </div>
       </div>
+      <p v-if="importMessage" data-test="trend-squeeze-import-message" class="import-message">{{ importMessage }}</p>
       <p v-if="errorMessage" class="form-error">{{ errorMessage }}</p>
     </section>
 
@@ -136,6 +145,8 @@ const STOCK_POOL_STORAGE_KEY = 'strategy6.batchEvaluation.stockPool.v1'
 const DEFAULT_STOCK_POOL = '601857\n601899\n002371\n688072\n601898\n300604\n601872\n002353\n002493\n688120\n688361\n000977\n000938\n603296\n002648\n688702\n601958'
 const rawCodes = ref(loadSavedStockPool())
 const loading = ref(false)
+const importLoading = ref(false)
+const importMessage = ref('')
 const errorMessage = ref('')
 const copiedCode = ref('')
 const response = ref(null)
@@ -191,6 +202,25 @@ async function runEvaluation() {
     errorMessage.value = error?.message || '批量评分失败'
   } finally {
     loading.value = false
+  }
+}
+
+async function importTrendSqueezeScreen() {
+  errorMessage.value = ''
+  importMessage.value = ''
+  importLoading.value = true
+  try {
+    const data = await api.getLatestStrategy6TrendSqueezeScreen()
+    const stocks = Array.isArray(data.stocks) ? data.stocks : []
+    if (!data.taskId || !stocks.length) {
+      throw new Error('暂无已完成任务的新初筛股票，请先重新扫描策略6')
+    }
+    rawCodes.value = stocks.map(item => item.code).filter(Boolean).join('\n')
+    importMessage.value = `来源任务 ${data.taskId} · 已导入 ${stocks.length} 只；请确认后开始评分`
+  } catch (error) {
+    errorMessage.value = error?.message || '新初筛股票导入失败'
+  } finally {
+    importLoading.value = false
   }
 }
 
@@ -271,6 +301,7 @@ h1 { margin: 8px 0; font-size: 26px; } .page-header p { color: var(--text-second
 .panel-title div { display: flex; gap: 10px; align-items: center; }.panel-title div span { color: var(--gold); font: 12px var(--font-mono); }.panel-title strong { color: var(--text-primary); }
 textarea { width: 100%; box-sizing: border-box; resize: vertical; padding: 13px; color: #dce7f4; background: #080f18; border: 1px solid #273648; font: 13px/1.7 var(--font-mono); }
 .input-actions { display: flex; justify-content: space-between; align-items: center; margin-top: 12px; color: var(--text-muted); }.input-actions strong { color: var(--gold); }
+.input-buttons { display: flex; gap: 10px; align-items: center; }.secondary-button { color: var(--gold); background: transparent; border: 1px solid rgba(214,168,74,.6); }.import-message { color: var(--gold); margin: 10px 0 0; font: 12px var(--font-mono); }
 button { padding: 9px 22px; color: #111; background: var(--gold); border: 0; border-radius: 3px; font-weight: 700; cursor: pointer; }button:disabled { opacity: .55; }
 .form-error { color: var(--danger); margin: 10px 0 0; }
 .summary-strip { display: grid; grid-template-columns: repeat(5,1fr); gap: 1px; background: var(--border); border: 1px solid var(--border); margin-bottom: 16px; }.summary-strip div { background: #0c1420; padding: 12px 16px; display: flex; flex-direction: column; }.summary-strip span { color: var(--text-muted); font-size: 11px; }.summary-strip strong { margin-top: 4px; font: 18px var(--font-mono); }

@@ -2892,6 +2892,21 @@ async def strategy6_candidate_detail(task_id: str, code: str):
     return {"taskId": task_id, "candidate": candidate}
 
 
+@app.get("/api/strategy6/tasks/{task_id}/trend-squeeze-screen")
+async def strategy6_trend_squeeze_screen(task_id: str):
+    _, err = _require_task_strategy(task_id, STRATEGY6_TYPE)
+    if err:
+        return err
+    stocks = db.get_strategy6_trend_squeeze_screen(task_id)
+    return {"taskId": task_id, "stocks": stocks, "total": len(stocks)}
+
+
+@app.get("/api/strategy6/trend-squeeze-screen/latest")
+async def latest_strategy6_trend_squeeze_screen():
+    task_id, stocks = db.get_latest_strategy6_trend_squeeze_screen()
+    return {"taskId": task_id, "stocks": stocks, "total": len(stocks)}
+
+
 @app.get("/api/strategy6/tasks/{task_id}/market-snapshot")
 async def strategy6_market_snapshot(task_id: str):
     _, err = _require_task_strategy(task_id, STRATEGY6_TYPE)

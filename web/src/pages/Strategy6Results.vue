@@ -72,7 +72,7 @@
     </div>
 
     <div class="empty" v-if="!loading && !selectedTaskId">请选择一个策略6任务查看结果。</div>
-    <div class="empty" v-else-if="!loading && selectedTaskId && !candidates.length">当前任务没有策略6候选。</div>
+    <div class="empty" v-else-if="!loading && selectedTaskId && !candidates.length && !trendSqueezeScreen.length">当前任务没有策略6候选。</div>
 
     <section v-if="marketSnapshot" class="panel market-panel">
       <div class="panel-header">
@@ -130,6 +130,46 @@
         </table>
         </div>
       </details>
+    </section>
+
+    <section v-if="selectedTaskId" class="panel trend-squeeze-screen-panel">
+      <div class="panel-header">
+        <span>强势趋势收缩初筛池</span>
+        <div class="panel-header-actions">
+          <span class="panel-count">{{ trendSqueezeScreen.length }}</span>
+          <button
+            data-test="export-trend-squeeze-screen"
+            class="export-btn"
+            :disabled="!trendSqueezeScreen.length"
+            @click="exportTrendSqueezeScreen"
+          >下载初筛股票</button>
+        </div>
+      </div>
+      <div class="panel-note">独立保存通过“强势趋势 + 高位波动收缩”七项门槛的全部股票；不代表已通过强势启动、尾部、支撑和盈亏比主链。</div>
+      <div v-if="trendSqueezeScreen.length" class="table-scroll">
+        <table class="trend-screen-table">
+          <thead>
+            <tr>
+              <th>股票</th><th>评价日</th><th>现价</th><th>EMA150 / EMA200</th><th>52周低 / 高</th>
+              <th>距低点 / 高位比</th><th>BB / KC</th><th>后续主链结果</th><th>后续拦截原因</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="stock in trendSqueezeScreen" :key="`trend-screen-${stock.code}`" :data-test="`trend-screen-row-${stock.code}`">
+              <td><span class="code">{{ stock.code }}</span> {{ stock.name }}</td>
+              <td>{{ stock.evaluation_date || '--' }}</td>
+              <td>{{ fmt(stock.trend_close) }}</td>
+              <td>{{ fmt(stock.trend_ema150) }} / {{ fmt(stock.trend_ema200) }}</td>
+              <td>{{ fmt(stock.trend_low_250) }} / {{ fmt(stock.trend_high_250) }}</td>
+              <td>{{ pct(Number(stock.trend_close_to_low_ratio || 0) - 1) }} / {{ pct(stock.trend_close_to_high_ratio) }}</td>
+              <td>BB {{ priceRange(stock.trend_bb_lower, stock.trend_bb_upper) }}<br><span class="muted">KC {{ priceRange(stock.trend_kc_lower, stock.trend_kc_upper) }}</span></td>
+              <td>{{ trendScreenOutcomeText(stock) }}</td>
+              <td>{{ joinedLabels('tag', stock.downstream_reject_reasons) }}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <div v-else class="panel-empty">该任务未生成独立初筛池；旧任务需要重新扫描策略6。</div>
     </section>
 
     <section v-for="group in candidateGroups" :key="group.type" class="panel">
@@ -462,6 +502,7 @@ export default {
       taskPageSize: 10,
       taskDropdownOpen: false,
       candidates: [],
+      trendSqueezeScreen: [],
       selectedTaskId: '',
       selected: null,
       marketSnapshot: null,
@@ -860,6 +901,7 @@ export default {
     async loadCandidates() {
       if (!this.selectedTaskId) {
         this.candidates = []
+        this.trendSqueezeScreen = []
         this.selected = null
         this.marketSnapshot = null
         this.lifecycleRows = []
@@ -881,19 +923,26 @@ export default {
         }
         return
       }
-      try {
-        const snapshotRes = await api.getStrategy6MarketSnapshot(taskId)
-        if (this.selectedTaskId !== taskId) return
-        this.marketSnapshot = snapshotRes.snapshot || null
-      } catch (e) {
-        if (this.selectedTaskId === taskId) this.error = '市场指数快照加载失败，候选数据已保留'
+      const [screenResult, snapshotResult, lifecycleResult] = await Promise.allSettled([
+        api.getStrategy6TrendSqueezeScreen(taskId),
+        api.getStrategy6MarketSnapshot(taskId),
+        api.getStrategy6Lifecycle(taskId),
+      ])
+      if (this.selectedTaskId !== taskId) return
+      if (screenResult.status === 'fulfilled') {
+        this.trendSqueezeScreen = screenResult.value.stocks || []
+      } else {
+        this.error = '新初筛股票池加载失败，候选数据已保留'
       }
-      try {
-        const lifecycleRes = await api.getStrategy6Lifecycle(taskId)
-        if (this.selectedTaskId !== taskId) return
-        this.lifecycleRows = lifecycleRes.lifecycle || []
-      } catch (e) {
-        if (this.selectedTaskId === taskId) this.error = '生命周期审计加载失败，候选数据已保留'
+      if (snapshotResult.status === 'fulfilled') {
+        this.marketSnapshot = snapshotResult.value.snapshot || null
+      } else {
+        this.error = '市场指数快照加载失败，候选数据已保留'
+      }
+      if (lifecycleResult.status === 'fulfilled') {
+        this.lifecycleRows = lifecycleResult.value.lifecycle || []
+      } else {
+        this.error = '生命周期审计加载失败，候选数据已保留'
       }
       if (this.selectedTaskId === taskId) this.loading = false
     },
@@ -1019,6 +1068,37 @@ export default {
         ...(row.vcp_observation_risk_tags || []),
       ].filter(Boolean)
       return this.joinedLabels('tag', [...new Set(reasons)], ' / ')
+    },
+    trendScreenOutcomeText(stock) {
+      if (stock?.downstream_candidate_type && stock.downstream_candidate_type !== 'REJECTED') {
+        return `进入${this.label('candidateType', stock.downstream_candidate_type)}`
+      }
+      return '通过初筛，后续未入选'
+    },
+    exportTrendSqueezeScreen() {
+      downloadCsv({
+        filename: `strategy6-trend-squeeze-screen-${this.selectedTaskId || 'latest'}.csv`,
+        columns: [
+          { header: '代码', value: row => row.code },
+          { header: '名称', value: row => row.name },
+          { header: '评价日', value: row => row.evaluation_date || '' },
+          { header: '现价', value: row => row.trend_close ?? '' },
+          { header: 'EMA150', value: row => row.trend_ema150 ?? '' },
+          { header: 'EMA200', value: row => row.trend_ema200 ?? '' },
+          { header: '52周最低价', value: row => row.trend_low_250 ?? '' },
+          { header: '52周最高价', value: row => row.trend_high_250 ?? '' },
+          { header: '现价相对52周低', value: row => row.trend_close_to_low_ratio ?? '' },
+          { header: '现价相对52周高', value: row => row.trend_close_to_high_ratio ?? '' },
+          { header: 'BB下轨', value: row => row.trend_bb_lower ?? '' },
+          { header: 'BB上轨', value: row => row.trend_bb_upper ?? '' },
+          { header: 'KC下轨', value: row => row.trend_kc_lower ?? '' },
+          { header: 'KC上轨', value: row => row.trend_kc_upper ?? '' },
+          { header: '后续主链结果', value: row => this.trendScreenOutcomeText(row) },
+          { header: '后续拦截原因', value: row => (row.downstream_reject_reasons || []).join('|') },
+          { header: '模型版本', value: row => row.strong_trend_squeeze_model_version || '' },
+        ],
+        rows: this.trendSqueezeScreen,
+      })
     },
     exportCandidates() {
       downloadCsv({
@@ -1331,6 +1411,7 @@ p { margin: 0; color: var(--text-muted); font-size: 12px; }
 .chip.vcp { background: rgba(20, 184, 166, 0.16); color: #99f6e4; }
 .panel { background: var(--bg-panel); border: 1px solid var(--border); border-radius: var(--radius-sm); margin: 12px 0; overflow: hidden; box-shadow: var(--shadow-panel); }
 .panel-header { min-height: 39px; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 14px; border-bottom: 1px solid var(--border); font-size: 11px; font-weight: 700; letter-spacing: 0.05em; color: var(--text-secondary); }
+.panel-header-actions { display: flex; align-items: center; gap: 10px; }
 .panel-count { min-width: 24px; padding: 2px 6px; border: 1px solid var(--border-light); color: var(--text-primary); font: 10px/1.2 var(--font-mono); text-align: center; }
 .market-state { color: var(--gold); font-size: 11px; }
 .market-index-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; padding: 12px 14px; }
@@ -1356,6 +1437,9 @@ p { margin: 0; color: var(--text-muted); font-size: 12px; }
 .vcp-table { min-width: 1120px; }
 .table-scroll { overflow-x: auto; }
 .candidate-table { width: 100%; min-width: 1520px; border-collapse: collapse; font-size: 13px; }
+.trend-screen-table { width: 100%; min-width: 1180px; border-collapse: collapse; font-size: 12px; }
+.trend-screen-table th, .trend-screen-table td { padding: 10px 12px; border-bottom: 1px solid var(--border); text-align: left; vertical-align: middle; white-space: nowrap; }
+.trend-screen-table th { color: var(--text-muted); font-size: 11px; font-weight: 600; background: #0d1520; }
 .market-table { width: 100%; min-width: 980px; border-collapse: collapse; font-size: 13px; }
 .lifecycle-table { width: 100%; min-width: 980px; border-collapse: collapse; font-size: 13px; }
 th, td { border-bottom: 1px solid var(--border); padding: 8px 10px; text-align: left; }

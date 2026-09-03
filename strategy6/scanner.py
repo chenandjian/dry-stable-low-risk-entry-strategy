@@ -266,7 +266,6 @@ def scan_strategy6_all(
                     vcp.history_origin_start_date = history.origin_start_date
                     if vcp.history_qualified:
                         vcp.quality = evaluate_vcp_quality(normalize_rows(data), vcp)
-                candidate = evaluation.to_candidate_dict() if evaluation.passed else None
                 vcp_exit_audit = (
                     bool(prior_vcp_states.get(code, {}).get("vcp_observation_eligible"))
                     and bool(prior_vcp_states.get(code, {}).get("vcp_history_qualified"))
@@ -276,10 +275,22 @@ def scan_strategy6_all(
                         or (bool(vcp.origin_start_date) and "VCP_BASE_FILTER_FAILED" in vcp.risk_tags)
                     )
                 )
+                needs_observation = (vcp.eligible and vcp.history_qualified) or vcp_exit_audit
+                evaluation_record = (
+                    evaluation.to_candidate_dict()
+                    if evaluation.passed or evaluation.strong_trend_squeeze.passed or needs_observation
+                    else None
+                )
+                candidate = evaluation_record if evaluation.passed else None
+                trend_squeeze_candidate = (
+                    dict(evaluation_record)
+                    if evaluation.strong_trend_squeeze.passed
+                    else None
+                )
                 if candidate is not None and vcp_exit_audit:
                     candidate["vcp_exit_audit"] = True
-                if (vcp.eligible and vcp.history_qualified) or vcp_exit_audit:
-                    observation = evaluation.to_candidate_dict()
+                if needs_observation:
+                    observation = dict(evaluation_record)
                     observation.update({
                         "candidate_type": "REJECTED",
                         "classification": "observation",
@@ -304,6 +315,7 @@ def scan_strategy6_all(
                     failed_cooldown_days=int(cfg["failed_cooldown_days"]),
                     candidate=candidate,
                     observation_candidate=observation,
+                    trend_squeeze_candidate=trend_squeeze_candidate,
                     decision_profile=cfg["decision_profile"],
                 )
                 if lifecycle["blocked"] and evaluation.passed:

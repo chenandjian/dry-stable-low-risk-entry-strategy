@@ -326,6 +326,99 @@ def test_strategy6_candidate_table_is_independent(tmp_path):
     assert db.get_strategy5_candidates("s6-task") == []
 
 
+def test_strategy6_trend_squeeze_screen_is_independent_from_candidates(tmp_path):
+    db.init_db(str(tmp_path / "s6-screen.db"))
+    db.create_scan_task("s6-screen", "2026-09-03 15:30:00", strategy_type=STRATEGY6_TYPE)
+    screened = _candidate()
+    screened.update({
+        "code": "300604", "name": "长川科技",
+        "strong_trend_squeeze_pass": True,
+        "strong_trend_squeeze_status": "PASSED",
+        "trend_close": 62.5, "trend_low_250": 35.0, "trend_high_250": 70.0,
+        "trend_close_to_low_ratio": 1.785714,
+        "trend_close_to_high_ratio": 0.892857,
+        "trend_ema150": 54.2, "trend_ema200": 49.8,
+        "trend_squeeze_on": True,
+        "trend_bb_upper": 64.0, "trend_bb_lower": 60.0,
+        "trend_kc_upper": 65.0, "trend_kc_lower": 59.0,
+        "strong_trend_squeeze_reasons": [],
+        "strong_trend_squeeze_model_version": "S6_STRONG_TREND_SQUEEZE_V1",
+        "reject_reasons": ["START_NOT_FOUND"],
+        "candidate_type": "REJECTED", "classification": "rejected",
+    })
+
+    db.upsert_strategy6_trend_squeeze_screen("s6-screen", screened)
+
+    assert db.get_strategy6_candidates("s6-screen") == []
+    rows = db.get_strategy6_trend_squeeze_screen("s6-screen")
+    assert len(rows) == 1
+    assert rows[0]["code"] == "300604"
+    assert rows[0]["trend_close"] == 62.5
+    assert rows[0]["trend_squeeze_on"] is True
+    assert rows[0]["downstream_reject_reasons"] == ["START_NOT_FOUND"]
+
+
+def test_strategy6_evaluation_replaces_stale_trend_squeeze_screen_row(tmp_path):
+    db.init_db(str(tmp_path / "s6-screen-replace.db"))
+    db.create_scan_task("s6-screen", "2026-09-03 15:30:00", strategy_type=STRATEGY6_TYPE)
+    screened = _candidate()
+    screened.update({
+        "strong_trend_squeeze_pass": True,
+        "strong_trend_squeeze_status": "PASSED",
+        "trend_squeeze_on": True,
+        "strong_trend_squeeze_model_version": "S6_STRONG_TREND_SQUEEZE_V1",
+        "candidate_type": "REJECTED",
+        "classification": "rejected",
+    })
+    common = {
+        "task_id": "s6-screen", "code": "000001", "name": "平安银行",
+        "evaluation_date": "2026-09-03", "candidate_type": "REJECTED",
+        "lifecycle_status": "REJECTED", "event_key": "screen-replace",
+        "reject_reasons": ["START_NOT_FOUND"], "max_watch_days": 20,
+        "expired_cooldown_days": 5, "failed_cooldown_days": 10,
+        "candidate": None,
+    }
+
+    db.persist_strategy6_evaluation(**common, trend_squeeze_candidate=screened)
+    assert len(db.get_strategy6_trend_squeeze_screen("s6-screen")) == 1
+
+    db.persist_strategy6_evaluation(**common, trend_squeeze_candidate=None)
+    assert db.get_strategy6_trend_squeeze_screen("s6-screen") == []
+
+
+def test_strategy6_trend_squeeze_screen_api_supports_task_and_latest(tmp_path, monkeypatch):
+    db_path = str(tmp_path / "s6-screen-api.db")
+    db.init_db(db_path)
+    monkeypatch.setattr(server_mod, "load_config", lambda: {"data": {"database_path": db_path}})
+    db.create_scan_task("s6-old", "2026-09-02 15:30:00", strategy_type=STRATEGY6_TYPE)
+    db.finish_scan_task("s6-old", "2026-09-02 16:00:00", 0, 1.0)
+    db.create_scan_task("s6-latest", "2026-09-03 15:30:00", strategy_type=STRATEGY6_TYPE)
+    screened = _candidate()
+    screened.update({
+        "strong_trend_squeeze_pass": True,
+        "strong_trend_squeeze_status": "PASSED",
+        "trend_squeeze_on": True,
+        "strong_trend_squeeze_model_version": "S6_STRONG_TREND_SQUEEZE_V1",
+    })
+    db.upsert_strategy6_trend_squeeze_screen("s6-latest", screened)
+    db.finish_scan_task("s6-latest", "2026-09-03 16:00:00", 0, 1.0)
+    db.create_scan_task("s1-task", "2026-09-03 16:10:00", strategy_type="STRATEGY_1_CUP_HANDLE")
+
+    client = TestClient(server_mod.app)
+    task_response = client.get("/api/strategy6/tasks/s6-latest/trend-squeeze-screen")
+    latest_response = client.get("/api/strategy6/trend-squeeze-screen/latest")
+
+    assert task_response.status_code == 200
+    assert task_response.json()["total"] == 1
+    assert task_response.json()["stocks"][0]["code"] == "000001"
+    assert latest_response.status_code == 200
+    assert latest_response.json()["taskId"] == "s6-latest"
+    assert latest_response.json()["total"] == 1
+    mismatch = client.get("/api/strategy6/tasks/s1-task/trend-squeeze-screen")
+    assert mismatch.status_code == 400
+    assert mismatch.json()["error"] == "TASK_STRATEGY_MISMATCH"
+
+
 def test_strategy6_candidate_schema_contains_all_box_tail_output_fields(tmp_path):
     db.init_db(str(tmp_path / "s6-box-schema.db"))
     columns = {
@@ -1011,6 +1104,12 @@ def test_strategy6_atomic_persist_rolls_back_lifecycle_when_candidate_write_fail
     def fail_candidate_write(*args, **kwargs):
         raise RuntimeError("candidate write failed")
 
+    screened = _candidate()
+    screened.update({
+        "strong_trend_squeeze_pass": True,
+        "strong_trend_squeeze_status": "PASSED",
+        "trend_squeeze_on": True,
+    })
     monkeypatch.setattr(db, "upsert_strategy6_candidate", fail_candidate_write)
     with pytest.raises(RuntimeError, match="candidate write failed"):
         db.persist_strategy6_evaluation(
@@ -1026,11 +1125,13 @@ def test_strategy6_atomic_persist_rolls_back_lifecycle_when_candidate_write_fail
             expired_cooldown_days=5,
             failed_cooldown_days=10,
             candidate=_candidate(),
+            trend_squeeze_candidate=screened,
         )
 
     assert db.get_strategy6_lifecycle("000001") is None
     assert db.get_strategy6_task_lifecycle("s6-atomic") == []
     assert db.get_strategy6_candidates("s6-atomic") == []
+    assert db.get_strategy6_trend_squeeze_screen("s6-atomic") == []
 
 
 def test_strategy6_atomic_persist_rolls_back_lifecycle_when_observation_write_fails(tmp_path, monkeypatch):

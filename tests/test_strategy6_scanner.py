@@ -368,6 +368,10 @@ def test_strategy6_scan_persists_observer_only_row_without_counting_trade_candid
     assert rows[0]["vcp_history_candidate_date"] == "2026-01-20"
     assert db.get_task_stocks("s6-observer-only")[0]["status"] == "scanned"
     assert db.get_strategy6_lifecycle("000001") is None
+    screened = db.get_strategy6_trend_squeeze_screen("s6-observer-only")
+    assert len(screened) == 1
+    assert screened[0]["code"] == "000001"
+    assert screened[0]["strong_trend_squeeze_status"] == "PASSED"
 
 
 def test_strategy6_scan_does_not_persist_vcp_without_formal_candidate_history(tmp_path, monkeypatch):
