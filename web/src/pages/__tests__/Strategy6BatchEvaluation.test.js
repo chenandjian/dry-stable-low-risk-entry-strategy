@@ -134,7 +134,7 @@ describe('Strategy6BatchEvaluation', () => {
     expect(wrapper.get('[data-test="batch-codes"]').element.value).toBe('')
   })
 
-  it('imports the latest independent trend squeeze screen without auto-running evaluation', async () => {
+  it('imports the latest independent trend squeeze screen and immediately evaluates it', async () => {
     const wrapper = mount(Strategy6BatchEvaluation)
 
     await wrapper.get('[data-test="import-trend-squeeze-screen"]').trigger('click')
@@ -142,8 +142,9 @@ describe('Strategy6BatchEvaluation', () => {
 
     expect(api.getLatestStrategy6TrendSqueezeScreen).toHaveBeenCalledTimes(1)
     expect(wrapper.get('[data-test="batch-codes"]').element.value).toBe('300604\n000001')
+    expect(api.evaluateStrategy6Batch).toHaveBeenCalledWith(['300604', '000001'])
     expect(wrapper.text()).toContain('来源任务 s6-20260903-153000')
-    expect(wrapper.text()).toContain('已导入 2 只')
-    expect(api.evaluateStrategy6Batch).not.toHaveBeenCalled()
+    expect(wrapper.text()).toContain('已导入并完成评分 2 只')
+    expect(wrapper.text()).toContain('评分结果')
   })
 })

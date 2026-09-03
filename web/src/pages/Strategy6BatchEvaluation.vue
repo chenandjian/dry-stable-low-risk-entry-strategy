@@ -31,9 +31,9 @@
           <button
             data-test="import-trend-squeeze-screen"
             class="secondary-button"
-            :disabled="importLoading"
+            :disabled="importLoading || loading"
             @click="importTrendSqueezeScreen"
-          >{{ importLoading ? '正在导入…' : '一键导入新初筛股票' }}</button>
+          >{{ importLoading ? (loading ? '正在评分…' : '正在导入…') : '一键导入并评分' }}</button>
           <button data-test="batch-submit" :disabled="loading" @click="runEvaluation">
             {{ loading ? '正在评分…' : '开始批量评分' }}
           </button>
@@ -183,23 +183,25 @@ async function runEvaluation() {
   const invalid = parsedCodes.value.filter(code => !/^\d{6}$/.test(code))
   if (!parsedCodes.value.length) {
     errorMessage.value = '请至少输入一个股票代码'
-    return
+    return false
   }
   if (invalid.length) {
     errorMessage.value = `股票代码必须为6位数字：${invalid.join('、')}`
-    return
+    return false
   }
   if (parsedCodes.value.length > 200) {
     errorMessage.value = '单次最多评估200只股票'
-    return
+    return false
   }
   loading.value = true
   try {
     const data = await api.evaluateStrategy6Batch(parsedCodes.value)
     if (!data.ok) throw new Error(data.message || '批量评分失败')
     response.value = data
+    return true
   } catch (error) {
     errorMessage.value = error?.message || '批量评分失败'
+    return false
   } finally {
     loading.value = false
   }
@@ -216,7 +218,11 @@ async function importTrendSqueezeScreen() {
       throw new Error('暂无已完成任务的新初筛股票，请先重新扫描策略6')
     }
     rawCodes.value = stocks.map(item => item.code).filter(Boolean).join('\n')
-    importMessage.value = `来源任务 ${data.taskId} · 已导入 ${stocks.length} 只；请确认后开始评分`
+    importMessage.value = `来源任务 ${data.taskId} · 已导入 ${stocks.length} 只，正在评分`
+    const succeeded = await runEvaluation()
+    importMessage.value = succeeded
+      ? `来源任务 ${data.taskId} · 已导入并完成评分 ${stocks.length} 只`
+      : `来源任务 ${data.taskId} · 已导入 ${stocks.length} 只，但评分失败`
   } catch (error) {
     errorMessage.value = error?.message || '新初筛股票导入失败'
   } finally {
