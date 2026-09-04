@@ -18,5 +18,5 @@ def test_candidate_output_contains_strategy_version_and_config_hash():
     )
 
     candidate = result.to_candidate_dict()
-    assert candidate["strategy_version"] == "4.10.0"
+    assert candidate["strategy_version"] == "4.11.0"
     assert len(candidate["config_hash"]) == 64

@@ -221,6 +221,36 @@ def _candidate():
         "probability_rr_target_2_hit_probability": 0.31,
         "probability_adjusted_r": 0.27,
         "probability_rr_reasons": ["PROBABILITY_RR_ASOF_HISTORY"],
+        "body_support_pass": True,
+        "body_support_type": "FAILED_BREAK_BODY_FLOOR",
+        "body_support_floor_price": 11.9,
+        "body_support_zone_low": 11.7,
+        "body_support_zone_high": 12.1,
+        "body_support_pivot_count": 2,
+        "body_support_independent_touch_count": 2,
+        "body_support_floor_migration": 0.015,
+        "body_support_cluster_width": 0.008,
+        "body_support_body_hold_pass": True,
+        "body_support_recovery_pass": True,
+        "body_support_recovery_atr": 1.2,
+        "body_support_low_rejection": True,
+        "body_support_failed_breakout": True,
+        "body_support_rejection_ratio": 0.75,
+        "body_support_bear_follow_through_failure": True,
+        "body_support_confluence": True,
+        "body_support_volume_quality_pass": True,
+        "body_support_score": 8,
+        "body_support_status": "BODY_SUPPORT_STRONG",
+        "body_support_reasons": ["FAILED_BREAK_BODY_FLOOR"],
+        "body_support_risks": [],
+        "body_support_model_version": "S6_BODY_SUPPORT_V1",
+        "latest_bar_patterns": [{
+            "code": "VALID_BODY_LOW",
+            "name": "有效实体低点",
+            "matched": True,
+            "status": "CONFIRMING",
+            "signal_type": "FAILED_BREAK_RECLAIM",
+        }],
     }
 
 
@@ -257,6 +287,13 @@ def test_strategy6_candidate_table_is_independent(tmp_path):
     assert detail["risk_reward_ratio_2"] == 2.5
     assert detail["strategy_version"] == "4.0.0"
     assert detail["decision_profile"] == "research_quality_v2"
+    assert detail["body_support_score"] == 8
+    assert detail["body_support_status"] == "BODY_SUPPORT_STRONG"
+    assert detail["body_support_reasons"] == ["FAILED_BREAK_BODY_FLOOR"]
+    assert detail["body_support_rejection_ratio"] == 0.75
+    assert detail["body_support_body_hold_pass"] is True
+    assert detail["latest_bar_patterns"][0]["name"] == "有效实体低点"
+    assert detail["latest_bar_patterns"][0]["matched"] is True
     assert detail["pre_market_candidate_type"] == "KEY_CANDIDATE"
     assert detail["pattern_type"] == "VCP"
     assert detail["support_cluster_sources"] == ["MA10", "PATTERN_LOW"]

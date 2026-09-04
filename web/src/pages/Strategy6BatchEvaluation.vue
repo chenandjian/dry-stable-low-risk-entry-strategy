@@ -61,7 +61,7 @@
           <thead>
             <tr>
               <th>排名</th><th>股票</th><th>评价日</th><th>尾部质量</th><th>尾部结论</th><th>量比</th>
-              <th>量能趋势</th><th>5日收盘波动</th><th>5日涨跌</th><th>策略总分</th><th>当前分类</th>
+              <th>量能趋势</th><th>5日收盘波动</th><th>5日涨跌</th><th>实体支撑底评分</th><th>最新交易日K线形态</th><th>策略总分</th><th>当前分类</th>
             </tr>
           </thead>
           <tbody>
@@ -87,11 +87,13 @@
                 <td :class="item.volumeSlope10 < 0 ? 'positive' : 'negative'">{{ item.volumeSlope10 < 0 ? '缩量' : '未缩量' }}</td>
                 <td>{{ pct(item.closeRange5) }}</td>
                 <td :class="numberClass(item.return5)">{{ signedPct(item.return5) }}</td>
+                <td><strong>{{ item.bodySupportScore ?? 0 }} / 10</strong><small>{{ bodySupportStatusText(item.bodySupportStatus) }}</small></td>
+                <td>{{ latestBarPatternSummary(item) }}</td>
                 <td><strong>{{ item.totalScore }} / 100</strong></td>
                 <td>{{ candidateText(item.candidateType) }}</td>
               </tr>
               <tr v-if="expanded.has(item.code)" class="detail-row">
-                <td colspan="11">
+                <td colspan="13">
                   <div class="detail-grid">
                     <div>
                       <h3>强势趋势收缩初筛</h3>
@@ -102,6 +104,23 @@
                       <p>52周低/高 {{ price(item.trendLow250) }} / {{ price(item.trendHigh250) }} · 高位比 {{ pct(item.trendCloseToHighRatio) }}</p>
                       <p>BB {{ priceRange(item.trendBbLower, item.trendBbUpper) }} · KC {{ priceRange(item.trendKcLower, item.trendKcUpper) }}</p>
                       <p v-for="reason in item.strongTrendSqueezeReasons || []" :key="reason" class="risk">{{ trendReasonText(reason) }}</p>
+                    </div>
+                    <div>
+                      <h3>实体支撑底评分</h3>
+                      <p><strong>{{ item.bodySupportScore ?? 0 }} / 10</strong> · {{ bodySupportStatusText(item.bodySupportStatus) }} · {{ bodySupportTypeText(item.bodySupportType) }}</p>
+                      <p>支撑 {{ price(item.bodySupportFloorPrice) }} · 区间 {{ priceRange(item.bodySupportZoneLow, item.bodySupportZoneHigh) }}</p>
+                      <p>有效拐点 {{ item.bodySupportPivotCount ?? 0 }} · 独立测试 {{ item.bodySupportIndependentTouchCount ?? 0 }}</p>
+                      <p>恢复 {{ item.bodySupportRecoveryPass ? '通过' : '未通过' }} · {{ ratio(item.bodySupportRecoveryAtr) }} ATR · 低价拒绝率 {{ nullablePct(item.bodySupportRejectionRatio) }}</p>
+                      <p class="muted">独立诊断分，不计入策略6总分</p>
+                    </div>
+                    <div>
+                      <h3>最新交易日K线形态</h3>
+                      <template v-for="pattern in latestBarPatternItems(item)" :key="pattern.code">
+                        <p :class="pattern.matched ? 'evidence' : 'muted'">{{ pattern.name }} · {{ pattern.matched ? '命中' : '未命中' }} · {{ latestPatternStatusText(pattern.status) }}</p>
+                        <p>路径 {{ latestPatternTypeText(pattern.signal_type) }} · 实体 {{ priceRange(pattern.body_bottom, pattern.body_top) }}</p>
+                        <p>支撑区 {{ priceRange(pattern.zone_low, pattern.zone_high) }} · 距支撑 {{ nullablePct(pattern.distance_to_floor_pct) }}</p>
+                        <p v-for="reason in pattern.reasons || []" :key="reason" :class="pattern.matched ? 'evidence' : 'muted'">{{ bodyEvidenceText(reason) }}</p>
+                      </template>
                     </div>
                     <div>
                       <h3>尾部依据</h3>
@@ -248,6 +267,7 @@ function signedPct(value) { const n = Number(value || 0) * 100; return `${n >= 0
 function ratio(value) { return Number(value || 0).toFixed(2) }
 function price(value) { return value == null || value === '' ? '--' : Number(value).toFixed(2) }
 function priceRange(low, high) { return `${price(low)} - ${price(high)}` }
+function nullablePct(value) { return value == null ? '--' : signedPct(value) }
 function numberClass(value) { return Number(value) >= 0 ? 'positive' : 'negative' }
 function scoreClass(value) { return value >= 18 ? 'excellent' : value >= 14 ? 'good' : 'weak' }
 function candidateText(value) {
@@ -291,6 +311,24 @@ function trendReasonText(value) {
 }
 function breakdownText(score = {}) {
   return `启动 ${score.strongStart || 0} + 形态 ${score.pattern || 0} + 支撑 ${score.support || 0} + 尾部 ${score.tail || 0} + 盈亏比 ${score.objectiveRiskReward || 0} + 强弱风险 ${score.relativeStrengthRisk || 0}`
+}
+function latestBarPatternItems(item) { return Array.isArray(item.latestBarPatterns) ? item.latestBarPatterns : [] }
+function latestBarPatternSummary(item) {
+  const matched = latestBarPatternItems(item).filter(pattern => pattern.matched)
+  return matched.length ? matched.map(pattern => pattern.name).join(' / ') : '未识别到配置形态'
+}
+function bodySupportStatusText(value) {
+  return { BODY_SUPPORT_STRONG: '强实体支撑', BODY_SUPPORT_CONFIRMED: '实体支撑已确认', BODY_SUPPORT_FORMING: '实体支撑形成中', BODY_SUPPORT_WEAKENED: '实体支撑转弱', BODY_SUPPORT_BROKEN: '实体支撑失效', BODY_SUPPORT_NONE: '无有效实体支撑', DISABLED: '未启用' }[value] || value || '--'
+}
+function bodySupportTypeText(value) {
+  return { SINGLE_BODY_PIVOT: '单实体拐点', FLAT_BODY_FLOOR: '水平实体底', RISING_BODY_FLOOR: '抬高实体底', FAILED_BREAK_BODY_FLOOR: '假跌破实体底', COMPOSITE_BODY_FLOOR: '复合实体底', NONE: '未识别' }[value] || value || '--'
+}
+function latestPatternStatusText(value) { return { CONFIRMING: '后续确认中', CONFIRMED: '已确认', NOT_MATCHED: '未命中' }[value] || value || '--' }
+function latestPatternTypeText(value) {
+  return { FAILED_BREAK_RECLAIM: '假跌破收回', BODY_FLOOR_HOLD: '守住实体支撑', POTENTIAL_BODY_PIVOT: '潜在实体拐点', HIGHER_BODY_LOW: '更高实体低点', NONE: '无' }[value] || value || '--'
+}
+function bodyEvidenceText(value) {
+  return { LATEST_LOW_BREAK_RECLAIMED_BY_BODY: '盘中跌破后实体收回', LATEST_BODY_HELD_SUPPORT_ZONE: '实体守住支撑区', LATEST_BODY_POTENTIAL_PIVOT: '最新实体形成潜在低点', LATEST_BAR_NO_VALID_BODY_LOW: '最新K线未形成有效实体低点' }[value] || value
 }
 </script>
 

@@ -420,6 +420,55 @@ class Strategy6StrongTrendSqueeze:
 
 
 @dataclass
+class Strategy6LatestBarPattern:
+    code: str = ""
+    name: str = ""
+    matched: bool = False
+    status: str = "NOT_MATCHED"
+    signal_type: str = "NONE"
+    evaluation_date: str = ""
+    body_bottom: float | None = None
+    body_top: float | None = None
+    body_direction: str = "UNKNOWN"
+    floor_price: float | None = None
+    zone_low: float | None = None
+    zone_high: float | None = None
+    distance_to_floor_pct: float | None = None
+    reasons: list[str] = field(default_factory=list)
+    risks: list[str] = field(default_factory=list)
+
+
+@dataclass
+class Strategy6BodySupport:
+    enabled: bool = True
+    passed: bool = False
+    support_type: str = "NONE"
+    floor_price: float | None = None
+    zone_low: float | None = None
+    zone_high: float | None = None
+    pivot_count: int = 0
+    independent_touch_count: int = 0
+    body_pivot_slope: float | None = None
+    body_floor_migration: float | None = None
+    cluster_width: float | None = None
+    body_hold_pass: bool = False
+    recovery_pass: bool = False
+    recovery_atr: float | None = None
+    low_rejection: bool = False
+    failed_breakout: bool = False
+    rejection_ratio: float | None = None
+    bear_follow_through_failure: bool = False
+    support_confluence: bool = False
+    volume_quality_pass: bool = False
+    score: int = 0
+    status: str = "BODY_SUPPORT_NONE"
+    reasons: list[str] = field(default_factory=list)
+    risks: list[str] = field(default_factory=list)
+    latest_bar_patterns: list[Strategy6LatestBarPattern] = field(default_factory=list)
+    model_version: str = "S6_BODY_SUPPORT_V1"
+
+
+@dataclass
 class Strategy6VcpQuality:
     scored: bool = False
     score: int | None = None
@@ -482,6 +531,7 @@ class Strategy6Evaluation:
     score: Strategy6Score
     ttm_squeeze: Strategy6TtmSqueeze = field(default_factory=Strategy6TtmSqueeze)
     strong_trend_squeeze: Strategy6StrongTrendSqueeze = field(default_factory=Strategy6StrongTrendSqueeze)
+    body_support: Strategy6BodySupport = field(default_factory=Strategy6BodySupport)
     ranking_score: int = 0
     setup_quality: Strategy6SetupQuality = field(default_factory=Strategy6SetupQuality)
     tail_regime: Strategy6TailRegime = field(default_factory=Strategy6TailRegime)
@@ -523,6 +573,7 @@ class Strategy6Evaluation:
         probability_rr = self.probability_rr
         ttm = self.ttm_squeeze
         trend = self.strong_trend_squeeze
+        body_support = self.body_support
         vcp = self.vcp_observation
         vcp_quality = vcp.quality
         return {
@@ -807,6 +858,51 @@ class Strategy6Evaluation:
             "trend_kc_lower": trend.kc_lower,
             "strong_trend_squeeze_reasons": trend.reasons,
             "strong_trend_squeeze_model_version": trend.model_version,
+            "body_support_enabled": body_support.enabled,
+            "body_support_pass": body_support.passed,
+            "body_support_type": body_support.support_type,
+            "body_support_floor_price": body_support.floor_price,
+            "body_support_zone_low": body_support.zone_low,
+            "body_support_zone_high": body_support.zone_high,
+            "body_support_pivot_count": body_support.pivot_count,
+            "body_support_independent_touch_count": body_support.independent_touch_count,
+            "body_support_body_pivot_slope": body_support.body_pivot_slope,
+            "body_support_floor_migration": body_support.body_floor_migration,
+            "body_support_cluster_width": body_support.cluster_width,
+            "body_support_body_hold_pass": body_support.body_hold_pass,
+            "body_support_recovery_pass": body_support.recovery_pass,
+            "body_support_recovery_atr": body_support.recovery_atr,
+            "body_support_low_rejection": body_support.low_rejection,
+            "body_support_failed_breakout": body_support.failed_breakout,
+            "body_support_rejection_ratio": body_support.rejection_ratio,
+            "body_support_bear_follow_through_failure": body_support.bear_follow_through_failure,
+            "body_support_confluence": body_support.support_confluence,
+            "body_support_volume_quality_pass": body_support.volume_quality_pass,
+            "body_support_score": body_support.score,
+            "body_support_status": body_support.status,
+            "body_support_reasons": body_support.reasons,
+            "body_support_risks": body_support.risks,
+            "body_support_model_version": body_support.model_version,
+            "latest_bar_patterns": [
+                {
+                    "code": item.code,
+                    "name": item.name,
+                    "matched": item.matched,
+                    "status": item.status,
+                    "signal_type": item.signal_type,
+                    "evaluation_date": item.evaluation_date,
+                    "body_bottom": item.body_bottom,
+                    "body_top": item.body_top,
+                    "body_direction": item.body_direction,
+                    "floor_price": item.floor_price,
+                    "zone_low": item.zone_low,
+                    "zone_high": item.zone_high,
+                    "distance_to_floor_pct": item.distance_to_floor_pct,
+                    "reasons": item.reasons,
+                    "risks": item.risks,
+                }
+                for item in body_support.latest_bar_patterns
+            ],
             "pattern_score_component": score.pattern_score_component,
             "tail_score": score.tail_score,
             "objective_rr_score": score.objective_rr_score,

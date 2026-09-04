@@ -82,6 +82,25 @@ describe('Strategy6Results', () => {
           trend_kc_lower: 11.8,
           strong_trend_squeeze_reasons: [],
           strong_trend_squeeze_model_version: 'S6_STRONG_TREND_SQUEEZE_V1',
+          body_support_score: 8,
+          body_support_status: 'BODY_SUPPORT_STRONG',
+          body_support_type: 'FAILED_BREAK_BODY_FLOOR',
+          body_support_floor_price: 11.9,
+          body_support_zone_low: 11.7,
+          body_support_zone_high: 12.1,
+          body_support_pivot_count: 2,
+          body_support_reasons: ['FAILED_BREAK_BODY_FLOOR'],
+          body_support_risks: [],
+          body_support_model_version: 'S6_BODY_SUPPORT_V1',
+          latest_bar_patterns: [{
+            code: 'VALID_BODY_LOW', name: '有效实体低点', matched: true,
+            status: 'CONFIRMING', signal_type: 'FAILED_BREAK_RECLAIM',
+            evaluation_date: '2026-07-09', body_bottom: 11.95, body_top: 12.34,
+            floor_price: 11.9, zone_low: 11.7, zone_high: 12.1,
+            distance_to_floor_pct: 0.0042,
+            reasons: ['LATEST_LOW_BREAK_RECLAIMED_BY_BODY'],
+            risks: ['REQUIRES_TWO_COMPLETED_BARS_TO_CONFIRM_PIVOT'],
+          }],
           decision_profile: 'research_quality_v2',
           score_model_version: 'S6_QUALITY_V2',
           entry_archetype: 'SUPPORT_PULLBACK',
@@ -578,6 +597,12 @@ describe('Strategy6Results', () => {
     expect(wrapper.find('[data-test="detail-ttm-squeeze"]').text()).toContain('多头挤压释放')
     expect(wrapper.find('[data-test="detail-ttm-squeeze"]').text()).toContain('不参与资格与排序')
     expect(wrapper.find('[data-test="detail-strong-trend-squeeze"]').text()).toContain('通过')
+    expect(wrapper.find('[data-test="candidate-body-support-000001"]').text()).toContain('8/10')
+    expect(wrapper.find('[data-test="candidate-latest-pattern-000001"]').text()).toContain('有效实体低点')
+    expect(wrapper.find('[data-test="candidate-latest-pattern-000002"]').text()).toContain('旧任务未计算')
+    expect(wrapper.find('[data-test="detail-body-support"]').text()).toContain('诊断分不计入总分')
+    expect(wrapper.find('[data-test="detail-latest-bar-pattern"]').text()).toContain('假跌破收回')
+    expect(wrapper.find('[data-test="detail-latest-bar-pattern"]').text()).toContain('后续确认中')
     expect(wrapper.find('[data-test="detail-trend-position"]').text()).toContain('高位比 88.14%')
     expect(wrapper.find('[data-test="detail-trend-ema"]').text()).toContain('EMA150 11.20')
     expect(wrapper.find('[data-test="detail-ttm-bands"]').text()).toContain('BB 11.90 - 12.80')

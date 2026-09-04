@@ -180,7 +180,7 @@
             <tr>
               <th>股票</th><th>现价</th><th>总分</th><th>TTM状态</th><th>入场/质量</th><th>分类</th><th>生命周期</th>
               <th>启动类型/等级</th><th>支撑状态</th><th>关键/前置支撑</th><th>执行区间/状态</th>
-              <th>止损</th><th>客观目标1/2</th><th>客观RR2</th><th>形态</th><th>权威路径/Brooks</th><th>尾段/前20量比</th><th>连续收跌结构</th><th>市场/RS</th><th>入池</th><th>风险/警告</th><th>数据日</th>
+              <th>止损</th><th>客观目标1/2</th><th>客观RR2</th><th>形态</th><th>实体支撑底评分</th><th>最新交易日K线形态</th><th>权威路径/Brooks</th><th>尾段/前20量比</th><th>连续收跌结构</th><th>市场/RS</th><th>入池</th><th>风险/警告</th><th>数据日</th>
             </tr>
           </thead>
           <tbody>
@@ -206,6 +206,8 @@
               <td>{{ fmt(c.objective_target_1 ?? c.target_price_1) }} / {{ fmt(c.objective_target_2 ?? c.target_price_2) }}</td>
               <td class="rr">{{ fmt(c.objective_rr_2 ?? c.risk_reward_ratio_2) }}</td>
               <td>{{ label('patternType', c.pattern_type || 'UNKNOWN') }}</td>
+              <td :data-test="`candidate-body-support-${c.code}`">{{ bodySupportSummary(c) }}</td>
+              <td :data-test="`candidate-latest-pattern-${c.code}`">{{ latestBarPatternSummary(c) }}</td>
               <td>
                 <div>{{ label('tailPathSummary', authoritativeSummary(c)) }}</div>
                 <div class="muted">主路径 {{ label('tailPrimaryPath', authoritativePrimary(c)) }}</div>
@@ -243,7 +245,7 @@
           <thead>
             <tr>
               <th>股票</th><th>VCP形态分/等级</th><th>VCP状态</th><th>收缩次数</th><th>VCP支点</th><th>结构低点</th>
-              <th>距支点</th><th>突破日期</th><th>连续收跌结构</th><th>历史正式候选</th><th>策略总分</th><th>TTM状态</th><th>原交易分类</th><th>风险提示</th>
+              <th>距支点</th><th>突破日期</th><th>实体支撑底评分</th><th>最新交易日K线形态</th><th>连续收跌结构</th><th>历史正式候选</th><th>策略总分</th><th>TTM状态</th><th>原交易分类</th><th>风险提示</th>
             </tr>
           </thead>
           <tbody>
@@ -268,6 +270,8 @@
               <td>{{ fmt(c.vcp_structure_low) }}</td>
               <td>{{ pct(c.vcp_distance_to_pivot_pct) }}</td>
               <td>{{ c.vcp_breakout_date || '--' }}</td>
+              <td :data-test="`vcp-body-support-${c.code}`">{{ bodySupportSummary(c) }}</td>
+              <td :data-test="`vcp-latest-pattern-${c.code}`">{{ latestBarPatternSummary(c) }}</td>
               <td :data-test="`vcp-consecutive-down-${c.code}`">{{ consecutiveDownStructureText(c) }}</td>
               <td>
                 <div>{{ c.vcp_history_candidate_date || '--' }} · {{ label('candidateType', c.vcp_history_candidate_type) }}</div>
@@ -335,6 +339,8 @@
         <div><span>分类</span><strong>{{ candidateTypeText(selected) }} / {{ isExecutionWaiting(selected) ? '观察' : label('classification', selected.classification) }}</strong></div>
         <div data-test="detail-decision-profile"><span>决策规则</span><strong>{{ decisionProfileText(selected) }} · {{ selected.score_model_version || '--' }}</strong></div>
         <div data-test="detail-strong-trend-squeeze"><span>强势趋势收缩初筛</span><strong>{{ strongTrendSqueezeSummary(selected) }}</strong></div>
+        <div data-test="detail-body-support"><span>实体支撑底评分</span><strong>{{ bodySupportDetail(selected) }}</strong></div>
+        <div data-test="detail-latest-bar-pattern"><span>最新交易日K线形态</span><strong>{{ latestBarPatternDetail(selected) }}</strong></div>
         <div v-if="hasStrongTrendSqueezeData(selected)" data-test="detail-trend-position"><span>52周位置</span><strong>低 {{ fmt(selected.trend_low_250) }} · 现 {{ fmt(selected.trend_close) }} · 高 {{ fmt(selected.trend_high_250) }} · 高位比 {{ pct(selected.trend_close_to_high_ratio) }}</strong></div>
         <div v-if="hasStrongTrendSqueezeData(selected)" data-test="detail-trend-ema"><span>长期EMA</span><strong>EMA150 {{ fmt(selected.trend_ema150) }} · EMA200 {{ fmt(selected.trend_ema200) }}</strong></div>
         <div v-if="hasStrongTrendSqueezeData(selected)" data-test="detail-trend-bands"><span>正式收缩通道</span><strong>BB {{ priceRange(selected.trend_bb_lower, selected.trend_bb_upper) }} · Keltner {{ priceRange(selected.trend_kc_lower, selected.trend_kc_upper) }}</strong></div>
@@ -711,6 +717,38 @@ export default {
       const status = candidate.strong_trend_squeeze_pass ? '通过' : '未通过'
       const reasons = this.joinedLabels('tag', candidate.strong_trend_squeeze_reasons)
       return reasons === '--' ? `${status} · ${candidate.strong_trend_squeeze_model_version}` : `${status} · ${reasons}`
+    },
+    bodySupportStatusText(value) {
+      return { BODY_SUPPORT_STRONG: '强实体支撑', BODY_SUPPORT_CONFIRMED: '实体支撑已确认', BODY_SUPPORT_FORMING: '实体支撑形成中', BODY_SUPPORT_WEAKENED: '实体支撑转弱', BODY_SUPPORT_BROKEN: '实体支撑失效', BODY_SUPPORT_NONE: '无有效实体支撑', DISABLED: '未启用' }[value] || value || '--'
+    },
+    bodySupportTypeText(value) {
+      return { SINGLE_BODY_PIVOT: '单实体拐点', FLAT_BODY_FLOOR: '水平实体底', RISING_BODY_FLOOR: '抬高实体底', FAILED_BREAK_BODY_FLOOR: '假跌破实体底', COMPOSITE_BODY_FLOOR: '复合实体底', NONE: '未识别' }[value] || value || '--'
+    },
+    bodySupportSummary(candidate) {
+      if (!candidate?.body_support_model_version) return '旧任务未计算'
+      return `${candidate.body_support_score ?? 0}/10 · ${this.bodySupportStatusText(candidate.body_support_status)}`
+    },
+    bodySupportDetail(candidate) {
+      if (!candidate?.body_support_model_version) return '旧任务未计算'
+      return `${this.bodySupportSummary(candidate)} · ${this.bodySupportTypeText(candidate.body_support_type)} · 支撑 ${this.fmt(candidate.body_support_floor_price)} · 区间 ${this.priceRange(candidate.body_support_zone_low, candidate.body_support_zone_high)} · 诊断分不计入总分`
+    },
+    latestBarPatternItems(candidate) {
+      return Array.isArray(candidate?.latest_bar_patterns) ? candidate.latest_bar_patterns : []
+    },
+    latestPatternTypeText(value) {
+      return { FAILED_BREAK_RECLAIM: '假跌破收回', BODY_FLOOR_HOLD: '守住实体支撑', POTENTIAL_BODY_PIVOT: '潜在实体拐点', HIGHER_BODY_LOW: '更高实体低点', NONE: '无' }[value] || value || '--'
+    },
+    latestBarPatternSummary(candidate) {
+      if (!candidate?.body_support_model_version) return '旧任务未计算'
+      const matched = this.latestBarPatternItems(candidate).filter(item => item.matched)
+      return matched.length ? matched.map(item => item.name).join(' / ') : '未识别到配置形态'
+    },
+    latestBarPatternDetail(candidate) {
+      const items = this.latestBarPatternItems(candidate)
+      if (!items.length) return '旧任务未计算'
+      const matched = items.filter(item => item.matched)
+      if (!matched.length) return '未识别到配置形态'
+      return matched.map(item => `${item.name} · ${this.latestPatternTypeText(item.signal_type)} · 后续确认中 · 实体 ${this.priceRange(item.body_bottom, item.body_top)} · 支撑区 ${this.priceRange(item.zone_low, item.zone_high)}`).join(' / ')
     },
     ttmSummary(candidate) {
       if (!this.hasTtmData(candidate)) return '未计算'
@@ -1122,6 +1160,15 @@ export default {
           { header: '整理质量分', value: c => this.hasQualityDiagnostics(c) ? (c.setup_quality_score ?? '') : '' },
           { header: '支撑反应分', value: c => this.hasQualityDiagnostics(c) ? (c.support_reaction_score ?? '') : '' },
           { header: '路径证据分', value: c => this.hasQualityDiagnostics(c) ? (c.path_evidence_score ?? '') : '' },
+          { header: '实体支撑底评分', value: c => c.body_support_model_version ? (c.body_support_score ?? 0) : '' },
+          { header: '实体支撑底状态', value: c => c.body_support_model_version ? this.bodySupportStatusText(c.body_support_status) : '' },
+          { header: '实体支撑底类型', value: c => c.body_support_model_version ? this.bodySupportTypeText(c.body_support_type) : '' },
+          { header: '实体支撑价格', value: c => c.body_support_floor_price ?? '' },
+          { header: '实体支撑区下沿', value: c => c.body_support_zone_low ?? '' },
+          { header: '实体支撑区上沿', value: c => c.body_support_zone_high ?? '' },
+          { header: '最新交易日K线形态', value: c => this.latestBarPatternSummary(c) },
+          { header: '最新K线形态明细', value: c => this.latestBarPatternItems(c).map(item => `${item.name}:${this.latestPatternTypeText(item.signal_type)}:${item.status}`).join('|') },
+          { header: '实体支撑模型版本', value: c => c.body_support_model_version || '' },
           { header: '入场时机', value: c => c.entry_timing_version ? this.entryTimingText(c) : '' },
           { header: '入场时机原始值', value: c => c.entry_timing_state || '' },
           { header: '当前可执行', value: c => c.entry_timing_version ? (c.entry_timing_executable ? '是' : '否') : '' },

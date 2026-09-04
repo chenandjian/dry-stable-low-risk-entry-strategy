@@ -44,6 +44,20 @@ describe('Strategy6BatchEvaluation', () => {
           trendEma150: 18, trendEma200: 17, trendSqueezeOn: true,
           trendBbLower: 19.2, trendBbUpper: 20.8, trendKcLower: 19, trendKcUpper: 21,
           strongTrendSqueezeReasons: [],
+          bodySupportScore: 8, bodySupportStatus: 'BODY_SUPPORT_STRONG',
+          bodySupportType: 'FAILED_BREAK_BODY_FLOOR', bodySupportFloorPrice: 19.5,
+          bodySupportZoneLow: 19.3, bodySupportZoneHigh: 19.7,
+          bodySupportPivotCount: 2, bodySupportIndependentTouchCount: 2,
+          bodySupportReasons: ['FAILED_BREAK_BODY_FLOOR'], bodySupportRisks: [],
+          latestBarPatterns: [{
+            code: 'VALID_BODY_LOW', name: '有效实体低点', matched: true,
+            status: 'CONFIRMING', signal_type: 'FAILED_BREAK_RECLAIM',
+            evaluation_date: '2026-08-25', body_bottom: 19.45, body_top: 20,
+            floor_price: 19.5, zone_low: 19.3, zone_high: 19.7,
+            distance_to_floor_pct: -0.0026,
+            reasons: ['LATEST_LOW_BREAK_RECLAIMED_BY_BODY'],
+            risks: ['REQUIRES_TWO_COMPLETED_BARS_TO_CONFIRM_PIVOT'],
+          }],
         },
         {
           code: '601857', name: '中国石油', evaluationDate: '2026-08-25',
@@ -89,6 +103,11 @@ describe('Strategy6BatchEvaluation', () => {
     expect(wrapper.text()).toContain('强势趋势收缩初筛')
     expect(wrapper.text()).toContain('EMA150 18.00')
     expect(wrapper.text()).toContain('股价不高于10元')
+    expect(wrapper.text()).toContain('实体支撑底评分')
+    expect(wrapper.text()).toContain('8 / 10')
+    expect(wrapper.text()).toContain('最新交易日K线形态')
+    expect(wrapper.text()).toContain('有效实体低点')
+    expect(wrapper.text()).toContain('假跌破收回')
     expect(wrapper.text()).toContain('本地没有K线数据')
   })
 

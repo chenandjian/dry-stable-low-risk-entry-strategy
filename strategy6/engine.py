@@ -8,6 +8,7 @@ from strategy6.entry_quality import (
     evaluate_probability_adjusted_rr,
 )
 from strategy6.box_tail import combine_tail_paths, evaluate_box_tail, evaluate_compact_kline
+from strategy6.body_support import evaluate_body_support
 from strategy6.brooks.tail import analyze_brooks_tail
 from strategy6.brooks.models import BrooksTailResult
 from strategy6.brooks.trigger import evaluate_brooks_trade_trigger
@@ -94,6 +95,12 @@ class StrongVcpTailEngine:
         phase = segment_phases(rows, start, self.config)
         pattern = detect_pattern(rows, phase, self.config)
         support = evaluate_support(rows, indicators, start, pattern, self.config)
+        body_support = evaluate_body_support(
+            rows,
+            phase,
+            support,
+            self.config["body_support"],
+        )
         previous_consolidation_start_index = None
         previous_key_support_price = None
         previous_phase_valid = False
@@ -366,6 +373,7 @@ class StrongVcpTailEngine:
             score=score,
             ttm_squeeze=ttm_squeeze,
             strong_trend_squeeze=strong_trend_squeeze,
+            body_support=body_support,
             ranking_score=ranking_score,
             setup_quality=setup_quality,
             tail_regime=tail_regime,

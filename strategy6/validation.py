@@ -134,6 +134,29 @@ DEFAULT_STRATEGY6_CONFIG = {
         "bullish_squeeze_min_days": 3,
         "max_ranking_bonus": 4,
     },
+    "body_support": {
+        "enabled": True,
+        "reference_window_days": 30,
+        "pivot_left_days": 2,
+        "confirm_days": 2,
+        "body_hold_max_break_pct": 0.015,
+        "body_hold_max_break_atr": 0.30,
+        "recovery_window_days": 3,
+        "recovery_valid_atr": 0.80,
+        "recovery_premium_atr": 1.50,
+        "lower_shadow_ratio_min": 0.30,
+        "flat_min_pivot_count": 2,
+        "flat_valid_width": 0.020,
+        "flat_strong_width": 0.015,
+        "flat_premium_width": 0.008,
+        "rising_max_lower_tolerance_pct": 0.015,
+        "independent_rebound_pct": 0.02,
+        "independent_rebound_atr": 0.80,
+        "zone_min_width_pct": 0.008,
+        "zone_atr_width": 0.25,
+        "support_confluence_pct": 0.01,
+        "support_confluence_atr": 0.50,
+    },
     "box_tail": {
         "enabled": True,
         "min_box_days": 5,
@@ -280,7 +303,7 @@ def resolve_strategy6_config(config: dict | None) -> dict:
                         for nested_key, nested_value in compact_override.items()
                         if nested_key in raw["box_tail"]["compact_kline"]
                     })
-            elif key in {"brooks_tail", "ttm_squeeze", "selection_optimization", "entry_quality"} and isinstance(value, dict):
+            elif key in {"brooks_tail", "ttm_squeeze", "body_support", "selection_optimization", "entry_quality"} and isinstance(value, dict):
                 _merge_known_dict(raw[key], value)
             else:
                 raw[key] = value
@@ -432,6 +455,7 @@ def resolve_strategy6_config(config: dict | None) -> dict:
     _validate_box_tail_config(raw["box_tail"])
     _validate_brooks_tail_config(raw["brooks_tail"])
     _validate_ttm_squeeze_config(raw["ttm_squeeze"])
+    _validate_body_support_config(raw["body_support"])
     return raw
 
 
@@ -492,6 +516,43 @@ def _validate_ttm_squeeze_config(config: dict) -> None:
     _validate_between(config, "kc_atr_multiplier", 0, 10, lower_exclusive=True)
     _validate_int_range(config, "bullish_squeeze_min_days", 1, 20)
     _validate_int_range(config, "max_ranking_bonus", 4, 4)
+
+
+def _validate_body_support_config(config: dict) -> None:
+    if not isinstance(config, dict):
+        raise ValueError("body_support must be a mapping")
+    config["enabled"] = bool(config.get("enabled", True))
+    _validate_int_range(config, "reference_window_days", 10, 60)
+    _validate_int_range(config, "pivot_left_days", 1, 5)
+    _validate_int_range(config, "confirm_days", 1, 5)
+    _validate_int_range(config, "recovery_window_days", 1, 10)
+    _validate_int_range(config, "flat_min_pivot_count", 2, 5)
+    for key, upper in (
+        ("body_hold_max_break_pct", 0.10),
+        ("body_hold_max_break_atr", 2.0),
+        ("recovery_valid_atr", 5.0),
+        ("recovery_premium_atr", 8.0),
+        ("lower_shadow_ratio_min", 1.0),
+        ("flat_valid_width", 0.10),
+        ("flat_strong_width", 0.10),
+        ("flat_premium_width", 0.10),
+        ("rising_max_lower_tolerance_pct", 0.10),
+        ("independent_rebound_pct", 0.20),
+        ("independent_rebound_atr", 5.0),
+        ("zone_min_width_pct", 0.10),
+        ("zone_atr_width", 2.0),
+        ("support_confluence_pct", 0.10),
+        ("support_confluence_atr", 3.0),
+    ):
+        _validate_between(config, key, 0, upper, lower_exclusive=True)
+    if config["recovery_premium_atr"] < config["recovery_valid_atr"]:
+        raise ValueError("body_support recovery premium must be >= valid")
+    if not (
+        config["flat_premium_width"]
+        <= config["flat_strong_width"]
+        <= config["flat_valid_width"]
+    ):
+        raise ValueError("body_support flat widths must satisfy premium <= strong <= valid")
 
 
 def _validate_box_tail_config(config: dict) -> None:

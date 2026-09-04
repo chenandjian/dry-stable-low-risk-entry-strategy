@@ -108,6 +108,7 @@ npm --prefix web run preview
 - **策略6决策画像（V4.8）：** 默认 `formal_original` 使用固定尾段和 `S6_FORMAL_ORIGINAL_V1` 评分，只有 ORIGINAL 量干价稳路径参与正式评分、拒绝与分层。`research_quality_v2` 才执行动态尾段、BOX、Brooks 和 `S6_QUALITY_V2`；研究路径不得通过默认配置进入正式扫描。候选、SQLite、CSV/Excel和前端详情必须输出 `decision_profile`，旧记录标记 `legacy_unspecified`。
 - **策略6正式评分（V4.8）：** 启动20 + 形态20 + 支撑20 + ORIGINAL尾段20 + 客观RR10 + RS/风险10。setup质量和支撑反应在正式画像仅作诊断，不参与总分或KEY/READY门槛；真实Quality V2零分不得按缺失值绕过研究门槛。成熟WATCH必须同时通过RR硬底线和 `watch_min_score`。
 - **策略6强势趋势收缩初筛（V4.10）：** 正式入口固定要求前复权收盘价大于10元、相对最近250日最低价至少上涨30%、不低于最近250日最高价70%、`EMA150 > EMA200`、收盘价高于EMA150/200，并且BB20(2倍总体标准差)严格位于KC20(EMA20、1.5倍Wilder ATR20)内。它替代旧 `close > MA250` 与 `MA120 > MA250`，保留强势启动事件。可配置TTM模块仅作附加诊断，诊断分不再进入排序。
+- **策略6实体支撑诊断（V4.11）：** `strategy6/body_support.py` 只在现有尾部窗口内确认实体支撑，可向前30日读取锚点但旧锚点不得脱离当前尾部证据单独得分。`body_support_score` 和可扩展的 `latest_bar_patterns` 仅用于诊断、前端展示和导出，不得进入总分、排序、硬过滤、候选分类或生命周期；最新交易日“有效实体低点”必须标记后续确认中，禁止使用未来K线提前确认。
 - **策略6跨画像状态（V4.8）：** `strategy6_candidate_lifecycle.decision_profile` 隔离池龄、失效和冷却；正式/研究画像切换时建立新周期，禁止旧研究候选状态阻塞正式候选。原始基线回测强制正式画像，BOX/Brooks/全面研究命令显式使用研究画像。
 - **策略6价格口径：** 当前生产日线和历史研究均使用前复权价格，策略6输出 `price_basis=FORWARD_ADJUSTED`、`current_price_adj`，`current_price_raw` 保持空值；未复权双价格链仍不在当前范围。成交模拟仅用于本地历史研究，不能伪装成真实成交回报。
 - **策略6市场边界：** 板块过滤已完全移除，`sector_name` 仅用于展示；至少两个同日宽基指数才形成市场状态，RS20只使用同日沪深300。市场过滤开启且沪深300缺失时，最高只允许 WATCH。
