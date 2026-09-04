@@ -48,8 +48,8 @@
           <small>{{ pct(recent5?.startBreadthMA5) }} → {{ pct(recent5?.endBreadthMA5) }} · <b :style="{ color: trendColor(currentRow.breadthTrend) }">{{ currentRow.breadthTrend.label }}</b></small>
         </article>
         <article class="metric terminal-panel">
-          <span>{{ primaryIndexDefinition.name }}</span><strong :class="numberClass(primaryIndexData?.dailyReturn)">{{ signedPct(primaryIndexData?.dailyReturn) }}</strong>
-          <small>收盘 {{ price(primaryIndexData?.close) }}</small>
+          <span>四指数综合</span><strong :class="numberClass(compositeIndexData?.dailyReturn)">{{ signedPct(compositeIndexData?.dailyReturn) }}</strong>
+          <small>四个宽基指数当日涨跌等权平均</small>
         </article>
         <article class="metric terminal-panel relation-state">
           <span>市场状态</span><strong :style="{ color: relationColor(marketRelation) }">{{ marketRelation.label }}</strong>
@@ -58,7 +58,7 @@
       </section>
 
       <section class="terminal-panel index-panel">
-        <div class="panel-title"><div><span>01</span><strong>四个真实宽基指数</strong></div><small>选择主指数后，结论和下方图表同步更新</small></div>
+        <div class="panel-title"><div><span>01</span><strong>四个真实宽基指数</strong></div><small>点击只切换图表主线，市场结论始终使用四指数综合</small></div>
         <div class="index-grid">
           <button
             v-for="definition in indexDefinitions"
@@ -78,7 +78,7 @@
         <article class="terminal-panel insight-card">
           <div class="panel-title"><div><span>02</span><strong>最近5个交易日</strong></div></div>
           <dl>
-            <div><dt>{{ primaryIndexDefinition.name }}累计</dt><dd :class="numberClass(recent5?.indexCumulativeReturn)">{{ signedPct(recent5?.indexCumulativeReturn) }}</dd></div>
+            <div><dt>四指数综合累计</dt><dd :class="numberClass(recent5?.indexCumulativeReturn)">{{ signedPct(recent5?.indexCumulativeReturn) }}</dd></div>
             <div><dt>平均上涨占比</dt><dd>{{ pct(recent5?.averageBreadthRate) }}</dd></div>
             <div><dt>上涨占比</dt><dd>{{ pct(recent5?.startBreadthRate) }} → {{ pct(recent5?.endBreadthRate) }}</dd></div>
             <div><dt>MA5</dt><dd>{{ pct(recent5?.startBreadthMA5) }} → {{ pct(recent5?.endBreadthMA5) }}</dd></div>
@@ -129,13 +129,13 @@
         <div class="panel-title"><div><span>05</span><strong>上涨占比最低的交易日</strong></div><small>仅统计可靠日期</small></div>
         <div class="table-wrap">
           <table>
-            <thead><tr><th>日期</th><th>上涨 / 下跌</th><th>上涨占比</th><th>MA5</th><th>宽度状态</th><th>{{ primaryIndexDefinition.name }}</th><th>指数 × 个股</th><th>策略6信号</th><th>覆盖率</th></tr></thead>
+            <thead><tr><th>日期</th><th>上涨 / 下跌</th><th>上涨占比</th><th>MA5</th><th>宽度状态</th><th>四指数综合</th><th>指数 × 个股</th><th>策略6信号</th><th>覆盖率</th></tr></thead>
             <tbody>
               <tr v-for="row in weakestRows" :key="row.date">
                 <td>{{ row.date }}</td>
                 <td><span class="up-text">{{ row.upCount }}</span> / <span class="down-text">{{ row.downCount }}</span></td>
                 <td>{{ pct(row.breadthRate) }}</td><td>{{ pct(row.breadthMA5) }}</td><td>{{ row.breadthLevel.label }}</td>
-                <td :class="numberClass(row.indexes?.[primaryIndex]?.dailyReturn)">{{ signedPct(row.indexes?.[primaryIndex]?.dailyReturn) }}</td>
+                <td :class="numberClass(row.indexes?.[compositeIndexSymbol]?.dailyReturn)">{{ signedPct(row.indexes?.[compositeIndexSymbol]?.dailyReturn) }}</td>
                 <td>{{ relationFor(row).label }}</td>
                 <td>
                   <template v-if="row.strategy6Signal">
@@ -163,6 +163,7 @@ import { useApi } from '../composables/useApi.js'
 import {
   buildMarketConclusion,
   calcBreadthPercentile,
+  calcCompositeIndexChange,
   countBreadthLevels,
   enrichBreadthRows,
   getMarketRelation,
@@ -183,6 +184,7 @@ const indexChartElement = ref(null)
 let breadthChart = null
 let indexChart = null
 const chartGroup = 'market-breadth-linked'
+const compositeIndexSymbol = '__broad_index_composite__'
 
 const indexDefinitions = [
   { symbol: 'sh000001', name: '上证指数', color: '#e75b5b' },
@@ -221,19 +223,27 @@ function normalizeRow(item = {}) {
 }
 
 const reliableRows = computed(() => rows.value.filter(item => item.dataQuality === 'RELIABLE'))
-const enrichedRows = computed(() => enrichBreadthRows(reliableRows.value))
+const enrichedRows = computed(() => enrichBreadthRows(reliableRows.value).map(row => ({
+  ...row,
+  indexes: {
+    ...row.indexes,
+    [compositeIndexSymbol]: {
+      name: '四指数综合',
+      dailyReturn: calcCompositeIndexChange(row.indexes),
+    },
+  },
+})))
 const visibleRows = computed(() => range.value ? enrichedRows.value.slice(-range.value) : enrichedRows.value)
 const currentRow = computed(() => enrichedRows.value.at(-1) || null)
-const primaryIndexDefinition = computed(() => indexDefinitions.find(item => item.symbol === primaryIndex.value) || indexDefinitions[0])
-const primaryIndexData = computed(() => currentRow.value?.indexes?.[primaryIndex.value] || null)
-const marketRelation = computed(() => getMarketRelation(primaryIndexData.value?.dailyReturn, currentRow.value?.breadthRate))
+const compositeIndexData = computed(() => currentRow.value?.indexes?.[compositeIndexSymbol] || null)
+const marketRelation = computed(() => getMarketRelation(compositeIndexData.value?.dailyReturn, currentRow.value?.breadthRate))
 const marketConclusion = computed(() => buildMarketConclusion(currentRow.value, marketRelation.value))
-const recent5 = computed(() => summarizeRecentBreadth(enrichedRows.value, primaryIndex.value, 5))
+const recent5 = computed(() => summarizeRecentBreadth(enrichedRows.value, compositeIndexSymbol, 5))
 const levelCounts20 = computed(() => countBreadthLevels(enrichedRows.value, 20))
 const breadthPercentile = computed(() => calcBreadthPercentile(enrichedRows.value.map(row => row.breadthRate), currentRow.value?.breadthRate, 120))
 const weakestRows = computed(() => [...visibleRows.value].sort((a, b) => (a.breadthRate ?? 1) - (b.breadthRate ?? 1)).slice(0, 30))
 
-function relationFor(row) { return getMarketRelation(row.indexes?.[primaryIndex.value]?.dailyReturn, row.breadthRate) }
+function relationFor(row) { return getMarketRelation(row.indexes?.[compositeIndexSymbol]?.dailyReturn, row.breadthRate) }
 function pct(value) { return typeof value === 'number' && Number.isFinite(value) ? `${(value * 100).toFixed(1)}%` : '--' }
 function signedPct(value) { return typeof value === 'number' && Number.isFinite(value) ? `${value >= 0 ? '+' : ''}${(value * 100).toFixed(2)}%` : '--' }
 function price(value) { return typeof value === 'number' && Number.isFinite(value) ? value.toFixed(2) : '--' }
@@ -273,20 +283,26 @@ function tooltipHtml(dataIndex) {
   const row = visibleRows.value[dataIndex]
   if (!row) return ''
   const relation = relationFor(row)
-  const index = row.indexes?.[primaryIndex.value]
+  const index = row.indexes?.[compositeIndexSymbol]
   const signal = row.strategy6Signal
   const indexColor = Number(index?.dailyReturn) > 0 ? '#e75b5b' : Number(index?.dailyReturn) < 0 ? '#20ad72' : '#9ba8bb'
   const widthColor = breadthColor(row.breadthLevel)
   const widthTrendColor = trendColor(row.breadthTrend)
   const structureColor = relationColor(relation)
+  const indexDetails = indexDefinitions.map(definition => {
+    const item = row.indexes?.[definition.symbol]
+    const color = Number(item?.dailyReturn) > 0 ? '#e75b5b' : Number(item?.dailyReturn) < 0 ? '#20ad72' : '#9ba8bb'
+    return `${escapeHtml(definition.name)} <b style="color:${color}">${signedPct(item?.dailyReturn)}</b>`
+  }).join(' · ')
   return `<div style="min-width:250px;line-height:1.7">
     <strong>${escapeHtml(row.date)} · <span style="color:${structureColor}">${escapeHtml(relation.label)}</span></strong><br>
     <span style="color:#9ba8bb">市场宽度</span><br>
     上涨占比 <b style="color:${widthColor}">${pct(row.breadthRate)}</b> · MA5 <b style="color:${widthTrendColor}">${pct(row.breadthMA5)}</b><br>
     <span style="color:#e75b5b">上涨 ${row.upCount}</span> · <span style="color:#20ad72">下跌 ${row.downCount}</span> · 平盘 ${row.flatCount}<br>
     状态 <b style="color:${widthColor}">${escapeHtml(row.breadthLevel.label)}</b> · <b style="color:${widthTrendColor}">${escapeHtml(row.breadthTrend.label)}</b><br>
-    <span style="color:#9ba8bb">${escapeHtml(primaryIndexDefinition.value.name)}</span><br>
-    涨跌 <b style="color:${indexColor}">${signedPct(index?.dailyReturn)}</b> · 收盘 ${price(index?.close)}<br>
+    <span style="color:#9ba8bb">四指数综合</span><br>
+    涨跌 <b style="color:${indexColor}">${signedPct(index?.dailyReturn)}</b><br>
+    ${indexDetails}<br>
     ${signal ? `<span style="color:#d6a84a">策略6正式候选 ${signal.total} · ${escapeHtml(signal.taskId)}</span>` : '策略6信号：无'}
   </div>`
 }

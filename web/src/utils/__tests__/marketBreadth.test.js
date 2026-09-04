@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest'
 import {
   calcBreadthPercentile,
   calcBreadthRate,
+  calcCompositeIndexChange,
   enrichBreadthRows,
   getBreadthLevel,
   getBreadthTrend,
@@ -15,6 +16,17 @@ describe('market breadth research calculations', () => {
     expect(calcBreadthRate(1753, 3138)).toBeCloseTo(0.3584, 4)
     expect(calcBreadthRate(50, 50, 999)).toBe(0.5)
     expect(calcBreadthRate(0, 0)).toBeNull()
+  })
+
+  it('uses the equal-weight return of available broad indexes for market comparison', () => {
+    const indexes = {
+      sh000001: { dailyReturn: 0.01 },
+      sz399001: { dailyReturn: 0.002 },
+      sz399006: { dailyReturn: -0.001 },
+      hs300: { dailyReturn: 0.003 },
+    }
+    expect(calcCompositeIndexChange(indexes)).toBeCloseTo(0.0035)
+    expect(calcCompositeIndexChange({ sh000001: indexes.sh000001 })).toBeNull()
   })
 
   it.each([
