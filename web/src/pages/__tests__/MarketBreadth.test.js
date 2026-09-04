@@ -94,6 +94,14 @@ describe('MarketBreadth', () => {
     expect(chartMocks.charts[0].setOption).toHaveBeenCalled()
     expect(chartMocks.charts[1].setOption).toHaveBeenCalled()
 
+    const breadthOption = chartMocks.charts[0].setOption.mock.calls.at(-1)[0]
+    const indexOption = chartMocks.charts[1].setOption.mock.calls.at(-1)[0]
+    const tooltip = breadthOption.tooltip.formatter([{ dataIndex: 9 }])
+    expect(indexOption.tooltip.show).toBe(false)
+    expect(tooltip).toContain('color:#e75b5b')
+    expect(tooltip).toContain('color:#20ad72')
+    expect(tooltip).toContain('color:#e6a23c')
+
     wrapper.unmount()
   })
 })

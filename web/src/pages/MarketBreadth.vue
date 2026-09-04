@@ -40,19 +40,19 @@
           <small>前一交易日 {{ currentRow.previousTradeDate || '--' }}</small>
         </article>
         <article class="metric terminal-panel breadth-state">
-          <span>上涨占比</span><strong>{{ pct(currentRow.breadthRate) }}</strong>
-          <small>{{ currentRow.breadthLevel.label }} · 上涨 {{ currentRow.upCount }} / 下跌 {{ currentRow.downCount }}</small>
+          <span>上涨占比</span><strong :style="{ color: breadthColor(currentRow.breadthLevel) }">{{ pct(currentRow.breadthRate) }}</strong>
+          <small><b :style="{ color: breadthColor(currentRow.breadthLevel) }">{{ currentRow.breadthLevel.label }}</b> · <b class="up-text">上涨 {{ currentRow.upCount }}</b> / <b class="down-text">下跌 {{ currentRow.downCount }}</b></small>
         </article>
         <article class="metric terminal-panel trend-state">
-          <span>MA5</span><strong>{{ pct(currentRow.breadthMA5) }}</strong>
-          <small>{{ pct(recent5?.startBreadthMA5) }} → {{ pct(recent5?.endBreadthMA5) }} · {{ currentRow.breadthTrend.label }}</small>
+          <span>MA5</span><strong :style="{ color: trendColor(currentRow.breadthTrend) }">{{ pct(currentRow.breadthMA5) }}</strong>
+          <small>{{ pct(recent5?.startBreadthMA5) }} → {{ pct(recent5?.endBreadthMA5) }} · <b :style="{ color: trendColor(currentRow.breadthTrend) }">{{ currentRow.breadthTrend.label }}</b></small>
         </article>
         <article class="metric terminal-panel">
           <span>{{ primaryIndexDefinition.name }}</span><strong :class="numberClass(primaryIndexData?.dailyReturn)">{{ signedPct(primaryIndexData?.dailyReturn) }}</strong>
           <small>收盘 {{ price(primaryIndexData?.close) }}</small>
         </article>
         <article class="metric terminal-panel relation-state">
-          <span>市场状态</span><strong>{{ marketRelation.label }}</strong>
+          <span>市场状态</span><strong :style="{ color: relationColor(marketRelation) }">{{ marketRelation.label }}</strong>
           <small>指数{{ marketRelation.indexState.label }} · 个股{{ marketRelation.stockState.label }}</small>
         </article>
       </section>
@@ -238,6 +238,22 @@ function pct(value) { return typeof value === 'number' && Number.isFinite(value)
 function signedPct(value) { return typeof value === 'number' && Number.isFinite(value) ? `${value >= 0 ? '+' : ''}${(value * 100).toFixed(2)}%` : '--' }
 function price(value) { return typeof value === 'number' && Number.isFinite(value) ? value.toFixed(2) : '--' }
 function numberClass(value) { return Number(value) > 0 ? 'up-text' : Number(value) < 0 ? 'down-text' : '' }
+function breadthColor(level) {
+  if (['EXTREME_STRONG', 'STRONG'].includes(level?.key)) return '#e75b5b'
+  if (['EXTREME_WEAK', 'WEAK'].includes(level?.key)) return '#20ad72'
+  return '#9ba8bb'
+}
+function trendColor(trend) {
+  if (trend?.direction === 'up') return '#e75b5b'
+  if (trend?.direction === 'down') return '#20ad72'
+  return '#9ba8bb'
+}
+function relationColor(relation) {
+  if (relation?.key === 'STRONG_RESONANCE') return '#e75b5b'
+  if (relation?.key === 'WEAK_RESONANCE') return '#20ad72'
+  if (['INDEX_FALSE_STRENGTH', 'STOCKS_STRONGER'].includes(relation?.key)) return '#e6a23c'
+  return '#9ba8bb'
+}
 function escapeHtml(value) {
   return String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char])
 }
@@ -259,14 +275,18 @@ function tooltipHtml(dataIndex) {
   const relation = relationFor(row)
   const index = row.indexes?.[primaryIndex.value]
   const signal = row.strategy6Signal
+  const indexColor = Number(index?.dailyReturn) > 0 ? '#e75b5b' : Number(index?.dailyReturn) < 0 ? '#20ad72' : '#9ba8bb'
+  const widthColor = breadthColor(row.breadthLevel)
+  const widthTrendColor = trendColor(row.breadthTrend)
+  const structureColor = relationColor(relation)
   return `<div style="min-width:250px;line-height:1.7">
-    <strong>${escapeHtml(row.date)} · ${escapeHtml(relation.label)}</strong><br>
+    <strong>${escapeHtml(row.date)} · <span style="color:${structureColor}">${escapeHtml(relation.label)}</span></strong><br>
     <span style="color:#9ba8bb">市场宽度</span><br>
-    上涨占比 ${pct(row.breadthRate)} · MA5 ${pct(row.breadthMA5)}<br>
-    上涨 ${row.upCount} · 下跌 ${row.downCount} · 平盘 ${row.flatCount}<br>
-    状态 ${escapeHtml(row.breadthLevel.label)} · ${escapeHtml(row.breadthTrend.label)}<br>
+    上涨占比 <b style="color:${widthColor}">${pct(row.breadthRate)}</b> · MA5 <b style="color:${widthTrendColor}">${pct(row.breadthMA5)}</b><br>
+    <span style="color:#e75b5b">上涨 ${row.upCount}</span> · <span style="color:#20ad72">下跌 ${row.downCount}</span> · 平盘 ${row.flatCount}<br>
+    状态 <b style="color:${widthColor}">${escapeHtml(row.breadthLevel.label)}</b> · <b style="color:${widthTrendColor}">${escapeHtml(row.breadthTrend.label)}</b><br>
     <span style="color:#9ba8bb">${escapeHtml(primaryIndexDefinition.value.name)}</span><br>
-    涨跌 ${signedPct(index?.dailyReturn)} · 收盘 ${price(index?.close)}<br>
+    涨跌 <b style="color:${indexColor}">${signedPct(index?.dailyReturn)}</b> · 收盘 ${price(index?.close)}<br>
     ${signal ? `<span style="color:#d6a84a">策略6正式候选 ${signal.total} · ${escapeHtml(signal.taskId)}</span>` : '策略6信号：无'}
   </div>`
 }
@@ -326,7 +346,7 @@ function renderCharts() {
   indexChart.setOption({
     animation: false,
     grid: { left: 58, right: 28, top: 28, bottom: 62 },
-    tooltip: commonTooltip(),
+    tooltip: { show: false, showContent: false, trigger: 'axis', axisPointer: { type: 'cross' } },
     legend: { top: 3, textStyle: { color: '#9ba8bb' }, data: selected.map(item => item.name) },
     xAxis: { type: 'category', data: dates, axisLabel: { color: '#74839a' }, axisLine: { lineStyle: { color: '#2b394e' } }, axisPointer: { show: true } },
     yAxis: { type: 'value', scale: true, axisLabel: { color: '#74839a', formatter: value => `${value.toFixed(1)}%` }, splitLine: { lineStyle: { color: 'rgba(100,120,150,.13)' } } },
