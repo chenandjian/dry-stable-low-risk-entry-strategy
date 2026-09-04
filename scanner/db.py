@@ -152,6 +152,7 @@ def init_db(path: str = "data/cuphandle.db"):
         _ensure_strategy6_candidates_table(conn)
         _ensure_strategy6_trend_squeeze_screen_table(conn)
         _ensure_strategy6_market_snapshots_table(conn)
+        _ensure_market_breadth_daily_table(conn)
         _ensure_strategy6_lifecycle_table(conn)
         _ensure_strategy6_task_lifecycle_table(conn)
         _ensure_strategy6_backtest_tables(conn)
@@ -3171,6 +3172,28 @@ def _ensure_strategy6_market_snapshots_table(conn: sqlite3.Connection):
         "ON strategy6_market_snapshots(task_id)"
     )
     _ensure_column(conn, "strategy6_market_snapshots", "data_status", "TEXT DEFAULT 'MISSING'")
+
+
+def _ensure_market_breadth_daily_table(conn: sqlite3.Connection):
+    """Cache research-only daily breadth reconstructed from local OHLC."""
+    conn.execute('''
+        CREATE TABLE IF NOT EXISTS market_breadth_daily (
+            trade_date TEXT PRIMARY KEY,
+            previous_trade_date TEXT NOT NULL,
+            up_count INTEGER NOT NULL,
+            down_count INTEGER NOT NULL,
+            flat_count INTEGER NOT NULL,
+            source_mode TEXT NOT NULL DEFAULT 'CURRENT_UNIVERSE_RECONSTRUCTION',
+            calculated_at TEXT NOT NULL DEFAULT (datetime('now'))
+        )
+    ''')
+    conn.execute('''
+        CREATE TABLE IF NOT EXISTS market_breadth_cache_state (
+            id INTEGER PRIMARY KEY CHECK (id=1),
+            source_revision TEXT NOT NULL,
+            updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+        )
+    ''')
 
 
 def _ensure_strategy6_trend_squeeze_screen_table(conn: sqlite3.Connection):

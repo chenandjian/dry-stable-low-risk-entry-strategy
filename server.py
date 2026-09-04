@@ -48,6 +48,7 @@ from scanner.strategy_engine import (
     select_strategy_window,
 )
 from scanner.index_source import fetch_market_index_daily
+from scanner.market_breadth import MarketBreadthDataChanging, build_market_breadth_history
 from scanner.pattern_detector import CupHandleResult
 from scanner.single_stock_backtest import (
     DataCoverageError,
@@ -2936,6 +2937,34 @@ async def strategy6_excel_report(task_id: str):
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={"Content-Disposition": f'attachment; filename="strategy6-report-{task_id}.xlsx"'},
     )
+
+
+@app.get("/api/market-breadth/history")
+async def market_breadth_history(
+    start_date: str | None = None,
+    end_date: str | None = None,
+    limit: int = 1500,
+):
+    """Return research-only breadth reconstructed from local real daily bars."""
+    config = load_config()
+    db.init_db(config.get("data", {}).get("database_path", "data/cuphandle.db"))
+    try:
+        return await asyncio.to_thread(
+            build_market_breadth_history,
+            start_date=start_date,
+            end_date=end_date,
+            limit=limit,
+        )
+    except (TypeError, ValueError) as exc:
+        return JSONResponse(
+            {"error": "INVALID_MARKET_BREADTH_QUERY", "message": str(exc)},
+            status_code=400,
+        )
+    except MarketBreadthDataChanging as exc:
+        return JSONResponse(
+            {"error": "MARKET_DATA_UPDATING", "message": str(exc)},
+            status_code=409,
+        )
 
 
 # ====== Strategy2 API ======

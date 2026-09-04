@@ -367,6 +367,16 @@ export function useApi() {
     return res.json().catch(() => ({ snapshot: null }))
   }
 
+  async function getMarketBreadthHistory(params = {}) {
+    const clean = Object.fromEntries(
+      Object.entries(params).filter(([, value]) => value !== '' && value !== null && value !== undefined)
+    )
+    const qs = new URLSearchParams(clean).toString()
+    const res = await fetch(`${API_BASE}/market-breadth/history${qs ? '?' + qs : ''}`)
+    if (!res.ok) throw new Error(`market breadth history failed: ${res.status}`)
+    return res.json().catch(() => ({ meta: {}, summary: null, rows: [] }))
+  }
+
   async function getStrategy6Lifecycle(taskId) {
     const res = await fetch(`${API_BASE}/strategy6/tasks/${encodeURIComponent(taskId)}/lifecycle`)
     if (!res.ok) throw new Error(`strategy6 lifecycle failed: ${res.status}`)
@@ -519,7 +529,7 @@ export function useApi() {
     getStrategy5Candidates, getStrategy5Candidate,
     startStrategy6Scan, evaluateStrategy6Batch, getStrategy6ScanStatus, getStrategy6Tasks,
     getStrategy6Candidates, getStrategy6TrendSqueezeScreen, getLatestStrategy6TrendSqueezeScreen,
-    getStrategy6MarketSnapshot, getStrategy6Lifecycle, getStrategy6Candidate, downloadStrategy6Report,
+    getStrategy6MarketSnapshot, getMarketBreadthHistory, getStrategy6Lifecycle, getStrategy6Candidate, downloadStrategy6Report,
     startStrategy2Backtest, getStrategy2BacktestStatus,
     getStrategy2BacktestTasks, getStrategy2BacktestTask,
     getStrategy2BacktestOpportunities, getStrategy2BacktestInsufficientStocks,

@@ -37,6 +37,7 @@ describe('TopNav', () => {
     expect(strategy6Tab).toBeTruthy()
     expect(strategy6Tab.attributes('href')).toBe('/strategy6/results')
     expect(strategy6Tab.classes()).toContain('active')
+    expect(wrapper.text()).toContain('市场宽度')
     expect(wrapper.text()).not.toContain('策略1')
     expect(wrapper.text()).not.toContain('策略2')
     expect(wrapper.text()).not.toContain('策略3')

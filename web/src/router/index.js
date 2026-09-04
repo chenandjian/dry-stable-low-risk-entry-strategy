@@ -8,6 +8,7 @@ export const routes = [
   { path: '/stock/:code', name: 'StockDetail', component: () => import('../pages/StockDetail.vue') },
   { path: '/strategy6/results', name: 'Strategy6Results', component: () => import('../pages/Strategy6Results.vue') },
   { path: '/strategy6/batch-evaluation', name: 'Strategy6BatchEvaluation', component: () => import('../pages/Strategy6BatchEvaluation.vue') },
+  { path: '/market-breadth', name: 'MarketBreadth', component: () => import('../pages/MarketBreadth.vue') },
   { path: '/:pathMatch(.*)*', redirect: '/strategy6/results' },
 ]
 
