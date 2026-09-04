@@ -1,19 +1,10 @@
 const validNumber = value => typeof value === 'number' && Number.isFinite(value)
-const DEFAULT_BROAD_INDEXES = ['sh000001', 'sz399001', 'sz399006', 'hs300']
 
 export function calcBreadthRate(upCount, downCount) {
   const up = Number(upCount)
   const down = Number(downCount)
   if (!Number.isFinite(up) || !Number.isFinite(down) || up < 0 || down < 0 || up + down === 0) return null
   return up / (up + down)
-}
-
-export function calcCompositeIndexChange(indexes, symbols = DEFAULT_BROAD_INDEXES, minimumAvailable = 2) {
-  const returns = symbols
-    .map(symbol => indexes?.[symbol]?.dailyReturn)
-    .filter(validNumber)
-  if (returns.length < minimumAvailable) return null
-  return returns.reduce((total, value) => total + value, 0) / returns.length
 }
 
 export function getBreadthLevel(rate) {
