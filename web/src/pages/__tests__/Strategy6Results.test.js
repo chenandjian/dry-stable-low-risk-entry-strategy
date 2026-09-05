@@ -128,6 +128,7 @@ describe('Strategy6Results', () => {
           current_price: 12.34,
           start_type: 'VOLUME_LIMIT_UP',
           start_grade: 'S',
+          high_trigger: 'new_120d_high',
           start_low: 11.2,
           days_since_start: 5,
           support_status: 'MA10_SUPPORT',
@@ -543,6 +544,8 @@ describe('Strategy6Results', () => {
     expect(wrapper.text()).toContain('MA10支撑')
     expect(wrapper.text()).toContain('11.80 / 11.60')
     expect(wrapper.text()).toContain('启动后5日')
+    expect(wrapper.text()).toContain('近20日高位确认')
+    expect(wrapper.text()).toContain('近20日创120日收盘新高')
     expect(wrapper.text()).toContain('启动日低点')
     expect(wrapper.text()).toContain('11.80 - 12.20')
     expect(wrapper.text()).toContain('止损')
@@ -1195,7 +1198,7 @@ describe('Strategy6Results', () => {
     expect(csv).toContain('市场状态,市场状态原始值,市场降级前等级,市场降级前等级原始值,RS20')
     expect(csv).not.toContain('板块状态')
     expect(csv).not.toContain('板块RS10')
-    expect(csv).toContain('启动日低点,启动后天数')
+    expect(csv).toContain('启动日低点,启动后天数,近20日高位确认')
     expect(csv).toContain('关键支撑,前置支撑')
     expect(csv).toContain('阶段状态,阶段状态原始值,形态类型,形态类型原始值')
     expect(csv).toContain('决策规则,评分模型版本,入场类型,入场类型原始值,启动事件质量分,整理质量分,支撑反应分,路径证据分')

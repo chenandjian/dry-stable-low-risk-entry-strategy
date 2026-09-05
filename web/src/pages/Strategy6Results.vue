@@ -338,7 +338,7 @@
         <div v-if="selected.vcp_observation_eligible"><span>VCP突破</span><strong>{{ selected.vcp_breakout_date || '--' }} · 突破后 {{ selected.vcp_days_since_breakout ?? 0 }} 个交易日</strong></div>
         <div><span>分类</span><strong>{{ candidateTypeText(selected) }} / {{ isExecutionWaiting(selected) ? '观察' : label('classification', selected.classification) }}</strong></div>
         <div data-test="detail-decision-profile"><span>决策规则</span><strong>{{ decisionProfileText(selected) }} · {{ selected.score_model_version || '--' }}</strong></div>
-        <div data-test="detail-strong-trend-squeeze"><span>强势趋势收缩初筛</span><strong>{{ strongTrendSqueezeSummary(selected) }}</strong></div>
+        <div data-test="detail-strong-trend-squeeze"><span>独立强势趋势收缩初筛</span><strong>{{ strongTrendSqueezeSummary(selected) }}</strong></div>
         <div data-test="detail-body-support"><span>实体支撑底评分</span><strong>{{ bodySupportDetail(selected) }}</strong></div>
         <div data-test="detail-latest-bar-pattern"><span>最新交易日K线形态</span><strong>{{ latestBarPatternDetail(selected) }}</strong></div>
         <div v-if="hasStrongTrendSqueezeData(selected)" data-test="detail-trend-position"><span>52周位置</span><strong>低 {{ fmt(selected.trend_low_250) }} · 现 {{ fmt(selected.trend_close) }} · 高 {{ fmt(selected.trend_high_250) }} · 高位比 {{ pct(selected.trend_close_to_high_ratio) }}</strong></div>
@@ -352,6 +352,7 @@
         <div v-if="marketDowngradeText(selected)" data-test="detail-market-downgrade"><span>市场降级前等级</span><strong>{{ marketDowngradeText(selected) }}</strong></div>
         <div><span>生命周期</span><strong>{{ lifecycleText(selected) }}</strong></div>
         <div><span>强势启动</span><strong>{{ label('startType', selected.start_type) }} / {{ label('startGrade', selected.start_grade) }} / {{ pct(selected.start_day_return) }} · 启动后{{ selected.days_since_start ?? 0 }}日</strong></div>
+        <div><span>近20日高位确认</span><strong>{{ highTriggerText(selected.high_trigger) }}</strong></div>
         <div><span>启动日低点</span><strong>{{ fmt(selected.start_low) }}</strong></div>
         <div><span>支撑</span><strong>{{ label('supportStatus', selected.support_status) }} · {{ selected.main_support_ma || '--' }} · 测试{{ selected.support_test_count ?? 0 }}次</strong></div>
         <div><span>战术价格</span><strong>支撑 {{ fmt(selected.key_support_price) }} · 前置支撑 {{ fmt(selected.prior_key_support_price) }} · 止损 {{ fmt(selected.stop_loss_price) }}</strong></div>
@@ -714,9 +715,14 @@ export default {
     },
     strongTrendSqueezeSummary(candidate) {
       if (!this.hasStrongTrendSqueezeData(candidate)) return '旧任务未计算'
-      const status = candidate.strong_trend_squeeze_pass ? '通过' : '未通过'
+      const status = candidate.strong_trend_squeeze_pass ? '通过独立初筛' : '未通过独立初筛（不直接淘汰主链）'
       const reasons = this.joinedLabels('tag', candidate.strong_trend_squeeze_reasons)
       return reasons === '--' ? `${status} · ${candidate.strong_trend_squeeze_model_version}` : `${status} · ${reasons}`
+    },
+    highTriggerText(value) {
+      if (value === 'new_120d_high') return '近20日创120日收盘新高'
+      if (value === 'near_120d_high') return '近20日接近120日最高收盘价'
+      return '尚未完成近20日高位确认'
     },
     bodySupportStatusText(value) {
       return { BODY_SUPPORT_STRONG: '强实体支撑', BODY_SUPPORT_CONFIRMED: '实体支撑已确认', BODY_SUPPORT_FORMING: '实体支撑形成中', BODY_SUPPORT_WEAKENED: '实体支撑转弱', BODY_SUPPORT_BROKEN: '实体支撑失效', BODY_SUPPORT_NONE: '无有效实体支撑', DISABLED: '未启用' }[value] || value || '--'
@@ -1244,14 +1250,14 @@ export default {
           { header: 'TTM原因', value: c => this.hasTtmData(c) ? strategy6Labels('tag', c.ttm_reasons).join('|') : '' },
           { header: 'TTM风险', value: c => this.hasTtmData(c) ? strategy6Labels('tag', c.ttm_risk_tags).join('|') : '' },
           { header: 'TTM模型版本', value: c => c.ttm_model_version || '' },
-          { header: '强势趋势收缩初筛', value: c => this.hasStrongTrendSqueezeData(c) ? (c.strong_trend_squeeze_pass ? '通过' : '未通过') : '' },
+          { header: '独立强势趋势收缩初筛', value: c => this.hasStrongTrendSqueezeData(c) ? (c.strong_trend_squeeze_pass ? '通过' : '未通过') : '' },
           { header: 'EMA150', value: c => c.trend_ema150 ?? '' },
           { header: 'EMA200', value: c => c.trend_ema200 ?? '' },
           { header: '52周最低价', value: c => c.trend_low_250 ?? '' },
           { header: '52周最高价', value: c => c.trend_high_250 ?? '' },
           { header: '现价/52周最低价', value: c => c.trend_close_to_low_ratio ?? '' },
           { header: '现价/52周最高价', value: c => c.trend_close_to_high_ratio ?? '' },
-          { header: '正式收缩状态', value: c => this.hasStrongTrendSqueezeData(c) ? (c.trend_squeeze_on ? '是' : '否') : '' },
+          { header: '最新日BB/KC收缩状态', value: c => this.hasStrongTrendSqueezeData(c) ? (c.trend_squeeze_on ? '是' : '否') : '' },
           { header: '强势趋势收缩失败原因', value: c => strategy6Labels('tag', c.strong_trend_squeeze_reasons).join('|') },
           { header: '强势趋势收缩模型', value: c => c.strong_trend_squeeze_model_version || '' },
           { header: '市场过滤', value: c => c.enable_market_filter ? '开启' : '关闭' },
@@ -1273,6 +1279,7 @@ export default {
           { header: '启动等级', value: c => c.start_grade || '' },
           { header: '启动日低点', value: c => this.fmt(c.start_low) },
           { header: '启动后天数', value: c => c.days_since_start ?? '' },
+          { header: '近20日高位确认', value: c => this.highTriggerText(c.high_trigger) },
           { header: '支撑状态', value: c => this.label('supportStatus', c.support_status) },
           { header: '支撑状态原始值', value: c => c.support_status || '' },
           { header: '关键支撑', value: c => this.fmt(c.key_support_price) },

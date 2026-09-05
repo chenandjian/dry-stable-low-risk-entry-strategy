@@ -5,12 +5,13 @@ from datetime import date, timedelta
 import scanner.db as db
 from strategy6 import STRATEGY6_TYPE
 from strategy6.engine import StrongVcpTailEngine
-from strategy6.filters import hard_filter_reasons
+from strategy6.filters import classify_candidate, hard_filter_reasons
 from strategy6.models import (
     Strategy6DryTail,
     Strategy6Indicators,
     Strategy6Phase,
     Strategy6Pattern,
+    Strategy6Score,
     Strategy6StrongTrendSqueeze,
     Strategy6Start,
     Strategy6Support,
@@ -148,7 +149,7 @@ def test_hard_filter_uses_new_filter_and_no_longer_applies_old_ma120_ma250_rules
     assert "MA120_LE_MA250" not in reasons
 
 
-def test_strong_trend_squeeze_is_hard_filter_but_does_not_remove_strong_start_requirement():
+def test_main_chain_hard_filter_keeps_trend_rules_but_not_exact_day_squeeze():
     config = StrongVcpTailEngine({}).config
     indicators = Strategy6Indicators(
         trading_days=500,
@@ -166,7 +167,7 @@ def test_strong_trend_squeeze_is_hard_filter_but_does_not_remove_strong_start_re
     trend = Strategy6StrongTrendSqueeze(
         passed=False,
         calculable=True,
-        reasons=["BB_NOT_INSIDE_KC"],
+        reasons=["CLOSE_LE_EMA150", "BB_NOT_INSIDE_KC"],
     )
 
     reasons = hard_filter_reasons(
@@ -177,8 +178,72 @@ def test_strong_trend_squeeze_is_hard_filter_but_does_not_remove_strong_start_re
         strong_trend_squeeze=trend,
     )
 
-    assert "BB_NOT_INSIDE_KC" in reasons
+    assert "CLOSE_LE_EMA150" in reasons
+    assert "BB_NOT_INSIDE_KC" not in reasons
     assert "NO_STRONG_START" in reasons
+
+
+def test_missing_recent_high_confirmation_is_not_a_global_hard_reject():
+    config = StrongVcpTailEngine({}).config
+    indicators = Strategy6Indicators(
+        trading_days=500,
+        current_price=20.0,
+        ma5=20.0,
+        ma10=20.0,
+        ma20=20.0,
+        ma50=20.0,
+        ma120=20.0,
+        ma250=20.0,
+        amount_avg_10=10.0,
+        amount_avg_30=10.0,
+        amount_avg_60=10.0,
+    )
+
+    reasons = hard_filter_reasons(
+        [], indicators,
+        Strategy6Start(start_type="NORMAL_STRONG_BREAKOUT", start_grade="A", high_trigger=""),
+        Strategy6Phase(valid=True, status="VALID"),
+        Strategy6Pattern(pattern_type="PLATFORM"),
+        Strategy6Support(support_status="KEY_SUPPORT_VALID", support_test_count=1),
+        Strategy6DryTail(), Strategy6TradePlan(objective_rr_2=10.0), config,
+        strong_trend_squeeze=Strategy6StrongTrendSqueeze(passed=True, calculable=True),
+    )
+
+    assert "NO_NEW_HIGH_CONFIRMATION" not in reasons
+
+
+def test_recent_high_confirmation_only_blocks_key_and_ready_tiers():
+    config = StrongVcpTailEngine({}).config
+    indicators = Strategy6Indicators(current_price=20.0)
+    phase = Strategy6Phase(valid=True, status="VALID")
+    pattern = Strategy6Pattern(pattern_type="PLATFORM")
+    support = Strategy6Support(
+        support_status="KEY_SUPPORT_VALID",
+        support_zone_low=19.0,
+        support_zone_high=21.0,
+    )
+    dry_tail = Strategy6DryTail(
+        dry_tail_pass=True,
+        dry_stable_score=20,
+        tail_volume_ratio=0.4,
+    )
+    trade_plan = Strategy6TradePlan(objective_rr_2=3.0, suggested_buy_price=20.0)
+    score = Strategy6Score(total_score=90, tail_score=20)
+
+    without_confirmation = classify_candidate(
+        indicators,
+        Strategy6Start(start_grade="A", high_trigger=""),
+        phase, pattern, support, dry_tail, trade_plan, score, [], config,
+    )
+    with_confirmation = classify_candidate(
+        indicators,
+        Strategy6Start(start_grade="A", high_trigger="near_120d_high"),
+        phase, pattern, support, dry_tail, trade_plan, score, [], config,
+    )
+
+    assert without_confirmation[0] == "WATCH_CANDIDATE"
+    assert "高位确认" in without_confirmation[3]
+    assert with_confirmation[0] == "READY_CANDIDATE"
 
 
 def test_ttm_diagnostic_score_is_not_added_to_strategy6_ranking(monkeypatch):

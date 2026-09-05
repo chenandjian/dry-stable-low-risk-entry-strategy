@@ -25,6 +25,7 @@ from strategy6.entry_quality import (
 )
 from strategy6.brooks.models import BrooksTailResult
 from strategy6.strong_start import PASSING_START_TYPES
+from strategy6.strong_trend_squeeze import main_chain_trend_reasons
 from strategy6.validation import is_strategy6_research_profile
 
 
@@ -105,7 +106,7 @@ def hard_filter_reasons(
     if min(ind.ma5, ind.ma10, ind.ma20, ind.ma50, ind.ma120, ind.ma250) <= 0:
         reasons.append("MA_CALC_FAILED")
     if strong_trend_squeeze is not None:
-        reasons.extend(strong_trend_squeeze.reasons)
+        reasons.extend(main_chain_trend_reasons(strong_trend_squeeze))
     if ind.amount_avg_60 < config["min_avg_amount_60d_yi"]:
         reasons.append("AVG60D_LT_MIN")
     if ind.amount_avg_30 < config["min_avg_amount_30d_yi"]:
@@ -119,8 +120,6 @@ def hard_filter_reasons(
         reasons.append(f"RS20_LT_{threshold}")
     if start.start_type not in PASSING_START_TYPES and not (start.start_type == "B_GRADE_MOMENTUM" and start.start_grade == "B"):
         reasons.append("NO_STRONG_START")
-    if not start.high_trigger:
-        reasons.append("NO_NEW_HIGH_CONFIRMATION")
     # A valid start younger than the minimum consolidation age is a lifecycle
     # observation; mature support, tail and objective-target filters do not
     # have an independent phase to evaluate yet.
@@ -240,6 +239,7 @@ def classify_candidate(
         return "WATCH_CANDIDATE", "observe", lifecycle, "观察：形态尚未明确"
     if (
         score.total_score >= config["ready_min_score"]
+        and bool(start.high_trigger)
         and effective_rr >= config["rr2_min_ready"]
         and support.support_zone_low <= ind.current_price <= support.support_zone_high
         and dry_tail.tail_volume_ratio <= config["tail_strong_volume_ratio_5_20"]
@@ -266,6 +266,7 @@ def classify_candidate(
         return "READY_CANDIDATE", "ready", lifecycle, "低吸候选：支撑区内，量干价稳，盈亏比较好"
     if (
         score.total_score >= config["key_min_score"]
+        and bool(start.high_trigger)
         and effective_rr >= config["rr2_min_key"]
         and support.support_status in {"PATTERN_SUPPORT", "MA20_SUPPORT", "KEY_SUPPORT_VALID"}
         and (
@@ -293,7 +294,12 @@ def classify_candidate(
     ):
         return "KEY_CANDIDATE", "highlight", lifecycle, "重点观察：等待支撑低吸或突破确认"
     if score.total_score >= config["watch_min_score"]:
-        return "WATCH_CANDIDATE", "observe", lifecycle, "观察：形态部分满足，等待进一步确认"
+        suggestion = (
+            "观察：尚未完成近20日高位确认，暂不升级重点或就绪候选"
+            if not start.high_trigger
+            else "观察：形态部分满足，等待进一步确认"
+        )
+        return "WATCH_CANDIDATE", "observe", lifecycle, suggestion
     return "REJECTED", "rejected", lifecycle, "排除：评分不足"
 
 

@@ -17,6 +17,13 @@ FORMAL_SQUEEZE_CONFIG = {
     "max_ranking_bonus": 4,
 }
 
+SQUEEZE_DIAGNOSTIC_REASONS = {"BB_NOT_INSIDE_KC"}
+
+
+def main_chain_trend_reasons(result: Strategy6StrongTrendSqueeze) -> list[str]:
+    """Return only the long-term trend failures used by the main chain."""
+    return [reason for reason in result.reasons if reason not in SQUEEZE_DIAGNOSTIC_REASONS]
+
 
 def evaluate_strong_trend_squeeze(rows: list[dict] | None) -> Strategy6StrongTrendSqueeze:
     """Evaluate the fixed all-of formal prefilter as of the last row."""

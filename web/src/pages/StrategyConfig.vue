@@ -1056,7 +1056,7 @@
         <div class="param"><label title="多头挤压加3分所需的最少连续交易日">多头挤压最少天数</label><input type="number" v-model.number="config.strategy6.ttm_squeeze.bullish_squeeze_min_days" @input="markDirty" min="1" max="20" /><span class="default">默认 3</span></div>
         <div class="param"><label title="保留旧字段兼容；当前仅为诊断分，不参与资格、总分或排序">TTM诊断分上限</label><input type="number" v-model.number="config.strategy6.ttm_squeeze.max_ranking_bonus" @input="markDirty" min="4" max="4" /><span class="default">固定 4</span></div>
       </div>
-      <p class="section-note">ⓘ 此处仅控制可配置的TTM动量诊断，不参与资格、总分或排序。正式长期趋势初筛始终固定使用BB20(2σ)完全进入KC20(1.5×ATR20)，不能在此关闭或改写。</p>
+      <p class="section-note">ⓘ 此处仅控制可配置的TTM动量诊断，不参与资格、总分或排序。正式主链固定使用价格位置与EMA150/200长期趋势过滤；BB20完全进入KC20保留为独立初筛池和诊断，不直接淘汰主链候选。</p>
 
       <h4 class="subsection-title">稳定箱体尾部路径</h4>
       <div class="toggle-row">

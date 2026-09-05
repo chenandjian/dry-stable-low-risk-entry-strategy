@@ -139,7 +139,7 @@ const LABELS = {
     RS20_DATA_UNAVAILABLE: 'RS20数据不可用', MARKET_DATA_UNAVAILABLE: '市场数据不可用',
     MARKET_DATA_PARTIAL: '市场指数数据不完整', MARKET_WEAK_STRICT: '市场偏弱，严格过滤',
     MARKET_WEAK_DOWNGRADED: '市场偏弱，候选已降级', ONE_WORD_LIMIT_UP_UNCONFIRMED: '一字涨停启动尚未确认',
-    PATTERN_UNKNOWN: '未识别有效形态', NO_STRONG_START: '未找到强势启动', NO_NEW_HIGH_CONFIRMATION: '缺少新高确认',
+    PATTERN_UNKNOWN: '未识别有效形态', NO_STRONG_START: '未找到强势启动', NO_NEW_HIGH_CONFIRMATION: '缺少近20日高位确认（旧任务）',
     NO_VALID_SUPPORT_TEST: '缺少有效支撑测试', SUPPORT_FAILED: '支撑失效', MA_CALC_FAILED: '均线计算失败',
     STRATEGY_REJECTED: '策略判定排除', MAX_WATCH_DAYS_REACHED: '已达最长观察天数',
     CLOSE_LE_MA250: '收盘价不高于MA250（旧规则）', MA120_LE_MA250: 'MA120不高于MA250（旧规则）',
