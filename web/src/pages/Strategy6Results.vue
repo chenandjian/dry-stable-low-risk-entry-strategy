@@ -334,7 +334,12 @@
     <section class="panel detail-panel" role="dialog" aria-modal="true" :aria-label="`候选详情 ${selected.code} ${selected.name}`">
       <div class="panel-header detail-panel-header">
         <span data-test="candidate-detail-title">候选详情 · {{ selected.code }} {{ selected.name }}</span>
-        <button data-test="candidate-detail-close" class="detail-close" type="button" aria-label="关闭候选详情" @click="closeCandidate">关闭</button>
+        <div class="detail-header-actions">
+          <button data-test="candidate-detail-copy-code" class="detail-action" type="button" @click="copySelectedCode">
+            {{ copiedCode === selected.code ? '已复制' : '复制代码' }}
+          </button>
+          <button data-test="candidate-detail-close" class="detail-action" type="button" aria-label="关闭候选详情" @click="closeCandidate">关闭</button>
+        </div>
       </div>
       <div class="detail-grid">
         <div v-if="selected.vcp_observation_eligible"><span>VCP生命周期</span><strong>{{ label('vcpStatus', selected.vcp_lifecycle_status) }} · {{ selected.vcp_pattern_start_date || '--' }} 至 {{ selected.vcp_pattern_end_date || '--' }}</strong></div>
@@ -517,6 +522,7 @@ export default {
       trendSqueezeScreen: [],
       selectedTaskId: '',
       selected: null,
+      copiedCode: '',
       marketSnapshot: null,
       lifecycleRows: [],
       loading: false,
@@ -949,9 +955,22 @@ export default {
     },
     openCandidate(candidate) {
       this.selected = candidate
+      this.copiedCode = ''
     },
     closeCandidate() {
       this.selected = null
+      this.copiedCode = ''
+    },
+    async copySelectedCode() {
+      const code = String(this.selected?.code || '')
+      if (!code) return
+      try {
+        if (!navigator.clipboard?.writeText) throw new Error('当前浏览器不支持剪贴板')
+        await navigator.clipboard.writeText(code)
+        if (this.selected?.code === code) this.copiedCode = code
+      } catch (error) {
+        this.error = `复制失败：${error?.message || '无法访问剪贴板'}`
+      }
     },
     async loadCandidates() {
       if (!this.selectedTaskId) {
@@ -1525,8 +1544,9 @@ td { vertical-align: top; }
 .detail-overlay { position: fixed; inset: 0; z-index: 100; display: flex; justify-content: flex-end; background: rgba(2, 6, 12, 0.72); backdrop-filter: blur(2px); }
 .detail-panel { width: min(980px, calc(100vw - 32px)); height: 100vh; margin: 0; padding-bottom: 12px; overflow-y: auto; border-top: 0; border-right: 0; border-bottom: 0; border-radius: 0; box-shadow: -18px 0 48px rgba(0, 0, 0, 0.45); }
 .detail-panel-header { position: sticky; top: 0; z-index: 8; background: var(--bg-elevated); }
-.detail-close { height: 30px; padding: 5px 12px; color: var(--text-primary); background: transparent; border: 1px solid var(--border-light); border-radius: var(--radius-sm); cursor: pointer; }
-.detail-close:hover { color: var(--accent); border-color: var(--accent); }
+.detail-header-actions { display: flex; align-items: center; gap: 8px; }
+.detail-action { height: 30px; padding: 5px 12px; color: var(--text-primary); background: transparent; border: 1px solid var(--border-light); border-radius: var(--radius-sm); cursor: pointer; white-space: nowrap; }
+.detail-action:hover { color: var(--accent); border-color: var(--accent); }
 .detail-grid { padding: 12px 14px 14px; display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 1px; background: var(--border); }
 .detail-grid div { display: flex; flex-direction: column; gap: 4px; min-height: 58px; padding: 10px 11px; background: var(--bg-panel); }
 .detail-grid span { color: var(--text-secondary); font-size: 12px; }

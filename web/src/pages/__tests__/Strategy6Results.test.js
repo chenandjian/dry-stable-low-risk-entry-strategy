@@ -40,6 +40,10 @@ function installDownloadMocks() {
 describe('Strategy6Results', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    Object.defineProperty(navigator, 'clipboard', {
+      value: { writeText: vi.fn().mockResolvedValue(undefined) },
+      configurable: true,
+    })
     api.getStrategy6Tasks.mockResolvedValue({ tasks: [{ id: 's6-task', status: 'completed', candidates: 3 }] })
     api.getStrategy6Candidates.mockResolvedValue({
       candidates: [
@@ -693,6 +697,20 @@ describe('Strategy6Results', () => {
 
     expect(wrapper.find('[data-test="candidate-detail-overlay"]').exists()).toBe(false)
     expect(wrapper.vm.selectedTaskId).toBe('s6-task')
+  })
+
+  it('copies the selected stock code from the candidate detail drawer', async () => {
+    const wrapper = mount(Strategy6Results, {
+      global: { mocks: { $route: { query: { task: 's6-task' } } } },
+    })
+    await flushUi()
+
+    await wrapper.find('[data-test="candidate-row-000001"]').trigger('click')
+    await wrapper.find('[data-test="candidate-detail-copy-code"]').trigger('click')
+    await flushUi()
+
+    expect(navigator.clipboard.writeText).toHaveBeenCalledWith('000001')
+    expect(wrapper.find('[data-test="candidate-detail-copy-code"]').text()).toBe('已复制')
   })
 
   it('shows the exact pre-market tier in candidate detail', async () => {
