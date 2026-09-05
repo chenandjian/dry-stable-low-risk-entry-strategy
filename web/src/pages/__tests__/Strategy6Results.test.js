@@ -699,14 +699,13 @@ describe('Strategy6Results', () => {
     expect(wrapper.vm.selectedTaskId).toBe('s6-task')
   })
 
-  it('copies the selected stock code from the candidate detail drawer', async () => {
+  it('copies the stock code while opening the candidate detail drawer', async () => {
     const wrapper = mount(Strategy6Results, {
       global: { mocks: { $route: { query: { task: 's6-task' } } } },
     })
     await flushUi()
 
     await wrapper.find('[data-test="candidate-row-000001"]').trigger('click')
-    await wrapper.find('[data-test="candidate-detail-copy-code"]').trigger('click')
     await flushUi()
 
     expect(navigator.clipboard.writeText).toHaveBeenCalledWith('000001')
