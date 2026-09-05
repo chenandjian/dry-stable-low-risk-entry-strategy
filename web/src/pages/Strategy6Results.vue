@@ -956,6 +956,7 @@ export default {
     openCandidate(candidate) {
       this.selected = candidate
       this.copiedCode = ''
+      void this.copySelectedCode()
     },
     closeCandidate() {
       this.selected = null
