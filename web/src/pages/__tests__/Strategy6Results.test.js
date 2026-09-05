@@ -531,6 +531,12 @@ describe('Strategy6Results', () => {
     })
     await flushUi()
 
+    expect(wrapper.find('[data-test="candidate-detail-overlay"]').exists()).toBe(false)
+    await wrapper.find('[data-test="candidate-row-000001"]').trigger('click')
+    await nextTick()
+    expect(wrapper.find('[data-test="candidate-detail-overlay"]').exists()).toBe(true)
+    expect(wrapper.find('[data-test="candidate-detail-title"]').text()).toContain('000001 平安银行')
+
     expect(api.getStrategy6Candidates).toHaveBeenCalledWith('s6-task')
     expect(wrapper.text()).toContain('策略6')
     expect(wrapper.text()).toContain('就绪候选')
@@ -653,6 +659,40 @@ describe('Strategy6Results', () => {
     expect(wrapper.text()).toContain('生命周期退出/冷却审计')
     expect(wrapper.text()).toContain('退出样本')
     expect(wrapper.text()).toContain('支撑失效')
+  })
+
+  it('places the independent squeeze screen after the candidate pools', async () => {
+    const wrapper = mount(Strategy6Results, {
+      global: { mocks: { $route: { query: { task: 's6-task' } } } },
+    })
+    await flushUi()
+
+    const candidatePanels = [
+      ...wrapper.findAll('[data-test^="candidate-group-"]'),
+      ...wrapper.findAll('[data-test^="vcp-group-"]'),
+    ]
+    const squeezePanel = wrapper.find('[data-test="trend-squeeze-screen"]')
+    const lastCandidatePanel = candidatePanels[candidatePanels.length - 1]
+
+    expect(candidatePanels.length).toBeGreaterThan(0)
+    expect(squeezePanel.exists()).toBe(true)
+    expect(
+      lastCandidatePanel.element.compareDocumentPosition(squeezePanel.element)
+      & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy()
+  })
+
+  it('closes the candidate detail drawer without changing the selected task', async () => {
+    const wrapper = mount(Strategy6Results, {
+      global: { mocks: { $route: { query: { task: 's6-task' } } } },
+    })
+    await flushUi()
+
+    await wrapper.find('[data-test="candidate-row-000001"]').trigger('click')
+    await wrapper.find('[data-test="candidate-detail-close"]').trigger('click')
+
+    expect(wrapper.find('[data-test="candidate-detail-overlay"]').exists()).toBe(false)
+    expect(wrapper.vm.selectedTaskId).toBe('s6-task')
   })
 
   it('shows the exact pre-market tier in candidate detail', async () => {
@@ -1065,6 +1105,7 @@ describe('Strategy6Results', () => {
     expect(wrapper.text()).not.toContain('8.01 - 8.18')
     expect(wrapper.text()).not.toContain('9.01 - 9.18')
     expect(wrapper.text()).not.toContain('10.01 - 10.18')
+    await wrapper.find('[data-test="candidate-row-000010"]').trigger('click')
     expect(wrapper.find('[data-test="detail-execution-zone"]').text()).toContain('等待触发')
     expect(wrapper.find('[data-test="detail-suggestion"]').text()).toContain('观察/等待触发')
 
