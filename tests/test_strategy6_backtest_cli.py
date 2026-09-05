@@ -6,9 +6,18 @@ from strategy6.backtest.cli import audit_database, build_parser
 
 def test_cli_exposes_audit_fetch_baseline_experiments_and_optimize_commands():
     parser = build_parser()
-    for command in ("audit-data", "fetch-index", "baseline", "experiments", "optimize"):
+    for command in (
+        "audit-data", "fetch-index", "baseline", "experiments", "optimize",
+        "selection-optimize",
+        "entry-quality-optimize",
+    ):
         args = parser.parse_args([command])
         assert args.command == command
+
+    selection = parser.parse_args(["selection-optimize", "--trial-index", "7"])
+    assert selection.trial_index == 7
+    entry_quality = parser.parse_args(["entry-quality-optimize", "--trial-index", "4"])
+    assert entry_quality.trial_index == 4
 
 
 def test_cli_accepts_bounded_parallel_worker_count():

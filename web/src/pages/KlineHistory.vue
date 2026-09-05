@@ -4,10 +4,162 @@
       <div>
         <p class="eyebrow">本地数据诊断</p>
         <h1>个股 K 线数据诊断</h1>
-        <p class="hint">核对本地历史 K 线是否覆盖最近一个完整交易日。本页面只读本地数据库，不触发行情源拉取。</p>
+        <p class="hint">核对本地历史 K 线是否覆盖最近一个完整交易日。查询本身只读，重新拉取按钮会明确请求行情源。</p>
       </div>
       <div class="status-pill" :class="{ stale: summary?.needs_refetch, fresh: summary?.is_fresh }">
         {{ summary?.needs_refetch ? '需要重新拉取' : summary?.is_fresh ? '数据最新' : '等待查询' }}
+      </div>
+    </section>
+
+    <section class="panel clean-k-panel" data-test="clean-k-panel">
+      <div class="table-head clean-k-head">
+        <div>
+          <p class="eyebrow">PRICE PATH QUALITY</p>
+          <h2>干净K线分析</h2>
+          <p>只读取本地前复权日线，判断最近 N 个完整交易日的价格路径是否有序；本结果不等于买入信号。</p>
+        </div>
+        <div class="clean-k-form">
+          <label>
+            股票代码
+            <input
+              v-model.trim="cleanKForm.stockCode"
+              maxlength="6"
+              inputmode="numeric"
+              placeholder="例如 300888"
+              data-test="clean-k-code"
+              @keyup.enter="runCleanKAnalysis"
+            />
+          </label>
+          <label>
+            最近交易日
+            <input
+              v-model.number="cleanKForm.period"
+              type="number"
+              min="10"
+              max="120"
+              data-test="clean-k-period"
+              @keyup.enter="runCleanKAnalysis"
+            />
+          </label>
+          <button
+            class="btn-primary"
+            :disabled="cleanKLoading"
+            data-test="clean-k-analyze"
+            @click="runCleanKAnalysis"
+          >{{ cleanKLoading ? '分析中...' : '开始分析' }}</button>
+        </div>
+      </div>
+
+      <p v-if="cleanKError" class="error-line clean-k-error">{{ cleanKError }}</p>
+
+      <div v-if="cleanKResult" class="clean-k-result">
+        <div class="clean-k-verdict-grid">
+          <div class="clean-k-verdict" :class="cleanKResult.window?.isClean ? 'clean' : 'not-clean'">
+            <div>
+              <span>最近{{ cleanKResult.period }}日整体干净度</span>
+              <strong>{{ cleanKResult.window?.isClean ? '走势干净' : '走势不够干净' }}</strong>
+              <p>{{ cleanKResult.window?.startDate }} 至 {{ cleanKResult.window?.endDate }}</p>
+              <em>{{ windowStructureText(cleanKResult.window) }}</em>
+              <small v-if="!cleanKResult.window?.isClean && cleanKResult.window?.blockingReasons?.length">
+                未通过：{{ cleanKResult.window.blockingReasons.map(cleanKBlockText).join('；') }}
+              </small>
+            </div>
+            <div class="clean-k-score">
+              <strong>{{ number(cleanKResult.window?.score) }}</strong>
+              <span>{{ cleanLevelText(cleanKResult.window?.level) }}</span>
+            </div>
+          </div>
+          <div class="clean-k-verdict current" :class="cleanKResult.current?.available === false ? 'unavailable' : (cleanKResult.current?.isClean ? 'clean' : 'not-clean')">
+            <div>
+              <span>当前走势干净度</span>
+              <strong v-if="cleanKResult.current?.available === false">V2当前结构暂不可用</strong>
+              <strong v-else>{{ cleanKResult.current?.isClean ? '当前结构有序' : '当前尚未形成干净结构' }}</strong>
+              <p v-if="cleanKResult.current?.available === false">后端仍在运行V1，请重启后端以加载V2当前走势分析</p>
+              <p v-else>{{ cleanKResult.current?.startDate }} 至 {{ cleanKResult.current?.endDate }}</p>
+              <em v-if="cleanKResult.current?.available !== false && cleanKResult.current?.isClean">连续 {{ cleanKResult.current?.days }} 个交易日 · {{ structureModeText(cleanKResult.current?.structure) }} · {{ trendDirectionText(cleanKResult.current?.direction) }}</em>
+              <em v-else-if="cleanKResult.current?.available !== false">最佳观察窗口 {{ cleanKResult.current?.evaluatedDays }} 日 · {{ structureModeText(cleanKResult.current?.structure) }}</em>
+              <small v-if="!cleanKResult.current?.isClean && cleanKResult.current?.blockingReasons?.length">
+                未通过：{{ cleanKResult.current.blockingReasons.map(cleanKBlockText).join('；') }}
+              </small>
+            </div>
+            <div class="clean-k-score">
+              <strong>{{ cleanKResult.current?.available === false ? 'V1' : number(cleanKResult.current?.score) }}</strong>
+              <span>{{ cleanKResult.current?.available === false ? '等待后端重载' : cleanLevelText(cleanKResult.current?.level) }}</span>
+            </div>
+          </div>
+        </div>
+
+        <div v-if="cleanKResult.segments?.length" class="clean-k-segments">
+          <div class="clean-k-segment-title">
+            <span>整体结构路径</span>
+            <strong>{{ windowStructureText(cleanKResult.window) }}</strong>
+          </div>
+          <div class="clean-k-segment-list">
+            <div v-for="(segment, index) in cleanKResult.segments" :key="`${segment.startDate}-${segment.endDate}`">
+              <span>{{ index + 1 }}</span>
+              <strong>{{ structureModeText(segment.structureType) }}</strong>
+              <em>{{ segment.startDate }}～{{ segment.endDate }} · {{ segment.days }}日 · {{ number(segment.structureScore) }}分</em>
+            </div>
+          </div>
+        </div>
+
+        <p v-if="(cleanKResult.current?.isClean && cleanKResult.current?.direction === 'DOWN') || (cleanKResult.isClean && cleanKResult.trendDirection === 'DOWN')" class="clean-k-direction-warning">
+          K线路径干净，但属于有序下跌；“干净”仅表示价格运行有序，不代表看多或可买入。
+        </p>
+        <p v-else-if="cleanKResult.trendDirection === 'DOWN'" class="clean-k-direction-warning">
+          价格方向向下，且当前未通过干净度门槛。
+        </p>
+        <p v-if="cleanKResult.excludedIncompleteDate" class="clean-k-direction-warning">
+          {{ cleanKResult.excludedIncompleteDate }} 的目标日K线在收盘前拉取，已从分析中排除。
+        </p>
+        <p v-else-if="!cleanKResult.dataIsFresh" class="clean-k-direction-warning">
+          本地最新日 {{ cleanKResult.latestDataDate || '--' }}，尚未覆盖目标完整交易日 {{ cleanKResult.targetTradeDate || '--' }}。
+        </p>
+
+        <div class="clean-k-metrics">
+          <div><span>整体结构</span><strong>{{ structureModeText(cleanKResult.window?.structure) }}</strong><em>{{ number(cleanKResult.window?.structureScore) }}分</em></div>
+          <div><span>趋势方向</span><strong>{{ trendDirectionText(cleanKResult.trendDirection) }}</strong><em>趋势分 {{ number(cleanKResult.trendCleanScore) }}</em></div>
+          <div><span>大幅K分类</span><strong>方向型扩张 {{ cleanKResult.barStats?.directionalExpansionCount || 0 }}</strong><em>冲突型 {{ cleanKResult.barStats?.conflictExpansionCount || 0 }} · Gap反转 {{ cleanKResult.barStats?.gapReversalExpansionCount || 0 }}</em></div>
+          <div><span>平台 / 收缩</span><strong>{{ number(cleanKResult.baseCleanScore) }} / {{ number(cleanKResult.contractionCleanScore) }}</strong><em>节奏 {{ number(cleanKResult.rangeRhythmScore) }}</em></div>
+          <div><span>异常K线</span><strong>{{ cleanKResult.dirtyExtremeCount }} 根</strong><em>一字事件 {{ cleanKResult.eventBarCount }} · 停牌排除 {{ cleanKResult.suspendedCount }}</em></div>
+          <div><span>分析置信度</span><strong>{{ confidenceText(cleanKResult.confidence) }}</strong><em>ATR预热 {{ cleanKResult.warmupBarCount }} 根</em></div>
+        </div>
+
+        <div class="clean-k-explain">
+          <div>
+            <strong>判断依据</strong>
+            <ul><li v-for="reason in cleanKResult.reasons || []" :key="reason">{{ reason }}</li></ul>
+          </div>
+          <div>
+            <strong>风险提示</strong>
+            <div class="clean-k-flags">
+              <span v-for="flag in cleanKResult.riskFlags || []" :key="flag">{{ cleanKRiskText(flag) }}</span>
+              <span v-if="!(cleanKResult.riskFlags || []).length" class="clean-k-no-risk">未发现额外风险</span>
+            </div>
+          </div>
+        </div>
+
+        <details class="clean-k-details">
+          <summary>逐根K线诊断（{{ cleanKResult.barMetrics?.length || 0 }} 根）</summary>
+          <div class="clean-k-table-scroll">
+            <table v-if="cleanKResult.barMetrics?.length">
+              <thead><tr><th>日期</th><th>结构</th><th>单根分</th><th>日内/ATR</th><th>TR/ATR</th><th>实体占比</th><th>上影</th><th>下影</th><th>异常</th></tr></thead>
+              <tbody>
+                <tr v-for="item in cleanKResult.barMetrics" :key="item.tradeDate">
+                  <td>{{ item.tradeDate }}</td>
+                  <td>{{ barStructureText(item.barStructureType) }}</td>
+                  <td>{{ item.barCleanScore === null ? '事件K' : number(item.barCleanScore) }}</td>
+                  <td>{{ number(item.intradayRangeAtr) }}</td>
+                  <td>{{ number(item.trueRangeAtr) }}</td>
+                  <td>{{ ratioText(item.bodyRatio) }}</td>
+                  <td>{{ ratioText(item.upperWickRatio) }}</td>
+                  <td>{{ ratioText(item.lowerWickRatio) }}</td>
+                  <td :class="item.dirtyExtremeBar ? 'metric-danger' : ''">{{ item.dirtyExtremeBar ? '高噪音' : '--' }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </details>
       </div>
     </section>
 
@@ -30,6 +182,109 @@
             {{ healthLoading ? '刷新中...' : '刷新健康状态' }}
           </button>
         </div>
+      </div>
+
+      <div class="maintenance-divider">
+        <span>数据维护工具</span>
+        <small>行情重拉与远端新鲜度验证</small>
+      </div>
+      <div class="tickflow-box" data-test="tickflow-status">
+        <div class="tickflow-box-head">
+          <div>
+            <strong>TickFlow 全市场重新拉取</strong>
+            <p>固定参数：整个股票池 · 约 1100 根前复权日线 · 四个宽基指数（不复权）· 每批 100 只 · 5 个并发工作线程</p>
+          </div>
+          <button
+            class="btn-secondary maintenance-action"
+            :disabled="tickFlowStarting || tickFlowStatus?.running"
+            data-test="tickflow-full-refresh"
+            @click="startTickFlowRefresh"
+          >
+            {{ tickFlowStatus?.running ? 'TickFlow 全量拉取中...' : '启动全市场重拉' }}
+          </button>
+        </div>
+        <div v-if="tickFlowStatus?.status && tickFlowStatus.status !== 'idle'" class="tickflow-progress">
+          <strong>{{ tickFlowStatusLabel }}</strong>
+          <span>{{ tickFlowStatus.processed || 0 }} / {{ tickFlowStatus.total_stocks || 0 }}</span>
+          <span>成功 {{ tickFlowStatus.succeeded || 0 }}，失败 {{ tickFlowStatus.failed || 0 }}</span>
+          <span v-if="tickFlowStatus.total_chunks">批次 {{ tickFlowStatus.current_chunk || 0 }} / {{ tickFlowStatus.total_chunks }}</span>
+          <span v-if="tickFlowStatus.total_indexes">
+            指数 {{ tickFlowStatus.indexes_processed || 0 }} / {{ tickFlowStatus.total_indexes }}，失败 {{ tickFlowStatus.indexes_failed || 0 }}
+          </span>
+        </div>
+        <p v-if="tickFlowError" class="error-line">{{ tickFlowError }}</p>
+        <p v-if="tickFlowStatus?.report_path" class="tickflow-report">
+          任务报告：{{ tickFlowStatus.report_path }}
+        </p>
+        <ul v-if="tickFlowStatus?.failures?.length" class="tickflow-failures">
+          <li v-for="item in tickFlowStatus.failures.slice(0, 10)" :key="item.code">
+            {{ item.code }}：{{ item.error }}
+          </li>
+        </ul>
+        <ul v-if="tickFlowStatus?.index_failures?.length" class="tickflow-failures">
+          <li v-for="item in tickFlowStatus.index_failures" :key="item.symbol">
+            {{ item.symbol }}：{{ item.error }}
+          </li>
+        </ul>
+      </div>
+
+      <div class="tickflow-probe" data-test="tickflow-freshness-panel">
+        <div class="table-head">
+          <div>
+            <h2>TickFlow 数据新鲜度测试</h2>
+            <p>真实读取指定股票的前复权日线和四个宽基指数，不写入本地数据库。</p>
+          </div>
+          <div class="probe-actions">
+            <input
+              v-model.trim="probeCode"
+              maxlength="6"
+              inputmode="numeric"
+              placeholder="6位股票代码"
+              data-test="tickflow-probe-code"
+              @keyup.enter="runTickFlowProbe"
+            />
+            <button
+              class="btn-secondary"
+              :disabled="probeLoading"
+              data-test="tickflow-freshness-check"
+              @click="runTickFlowProbe"
+            >
+              {{ probeLoading ? '测试中...' : '测试远端新鲜度' }}
+            </button>
+          </div>
+        </div>
+        <p v-if="probeError" class="error-line">{{ probeError }}</p>
+        <div v-if="probeResult" class="probe-summary">
+          <span>目标完整交易日：<strong>{{ fmt(probeResult.target_trade_date) }}</strong></span>
+          <span>检测时间：<strong>{{ fmt(probeResult.checked_at) }}</strong></span>
+          <span>整体状态：<strong>{{ probeOverallLabel }}</strong></span>
+        </div>
+        <table v-if="probeItems.length" class="probe-table">
+          <thead>
+            <tr>
+              <th>对象</th>
+              <th>远端最新日</th>
+              <th>本地最新日</th>
+              <th>目标日</th>
+              <th>状态</th>
+              <th>行数</th>
+              <th>耗时</th>
+              <th>错误</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="item in probeItems" :key="`${item.code}-${item.symbol}`">
+              <td>{{ item.code }} {{ item.name || '' }}</td>
+              <td>{{ fmt(item.remote_latest_date) }}</td>
+              <td>{{ fmt(item.local_latest_date) }}</td>
+              <td>{{ fmt(item.target_trade_date) }}</td>
+              <td><span class="health-badge" :class="probeStatusClass(item.status)">{{ probeStatusLabel(item.status) }}</span></td>
+              <td>{{ item.row_count ?? 0 }}</td>
+              <td>{{ item.elapsed_ms ?? 0 }} ms</td>
+              <td class="reason-cell">{{ item.error || '--' }}</td>
+            </tr>
+          </tbody>
+        </table>
       </div>
 
       <div class="health-grid" v-if="healthSummary">
@@ -233,10 +488,19 @@
 </template>
 
 <script setup>
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { useApi } from '../composables/useApi.js'
 
-const { getKlineHistory, getKlineHealth, refreshKlineData, refreshKlineHealth } = useApi()
+const {
+  getKlineHistory,
+  analyzeCleanK,
+  getKlineHealth,
+  refreshKlineData,
+  refreshKlineHealth,
+  startTickFlowFullRefresh,
+  getTickFlowFullRefreshStatus,
+  checkTickFlowFreshness,
+} = useApi()
 
 const form = reactive({
   code: '000831',
@@ -260,6 +524,14 @@ const healthFilter = ref('problem')
 const refreshingCodes = ref({})
 const bulkRefreshing = ref(false)
 const bulkRefreshMessage = ref('')
+const tickFlowStatus = ref(null)
+const tickFlowStarting = ref(false)
+const tickFlowError = ref('')
+const probeCode = ref('000655')
+const probeLoading = ref(false)
+const probeError = ref('')
+const probeResult = ref(null)
+let tickFlowPollTimer = null
 
 const totalPages = computed(() => Math.max(1, Math.ceil(total.value / form.page_size)))
 const healthFilterLabel = computed(() => {
@@ -272,6 +544,261 @@ const bulkRefreshableCount = computed(() => {
   if (healthFilter.value === 'anomaly' || healthFilter.value === 'failed') return healthTotal.value || 0
   return healthItems.value.filter(item => item.needs_refetch).length
 })
+const cleanKForm = reactive({ stockCode: '300888', period: 20 })
+const cleanKResult = ref(null)
+const cleanKLoading = ref(false)
+const cleanKError = ref('')
+const tickFlowStatusLabel = computed(() => {
+  const labels = {
+    running: '正在全量重新拉取',
+    completed: '全量重新拉取完成',
+    completed_with_errors: '全量重拉完成，但有失败股票',
+    failed: '全量重新拉取失败',
+  }
+  return labels[tickFlowStatus.value?.status] || tickFlowStatus.value?.status || '尚未启动'
+})
+const probeItems = computed(() => {
+  if (!probeResult.value) return []
+  return [probeResult.value.stock, ...(probeResult.value.indexes || [])].filter(Boolean)
+})
+const probeOverallLabel = computed(() => {
+  const labels = {
+    FRESH: '全部最新',
+    STALE: '存在落后数据',
+    PARTIAL_FAILURE: '部分请求失败',
+    FAILED: '全部请求失败',
+  }
+  return labels[probeResult.value?.overall_status] || probeResult.value?.overall_status || '--'
+})
+
+function probeStatusLabel(status) {
+  return { FRESH: '最新', STALE: '落后', FAILED: '请求失败' }[status] || status || '--'
+}
+
+function probeStatusClass(status) {
+  return status === 'FRESH' ? 'ok' : status === 'STALE' ? 'warning' : 'danger'
+}
+
+function cleanLevelText(level) {
+  return {
+    EXTREMELY_CLEAN: '极致干净', CLEAN: '干净', ACCEPTABLE: '尚可',
+    NOISY: '偏嘈杂', VERY_NOISY: '非常嘈杂',
+  }[level] || level || '--'
+}
+
+function structureModeText(mode) {
+  return {
+    TREND: '有序趋势', TREND_UP: '上涨趋势', TREND_DOWN: '下跌趋势', TREND_FLAT: '横向趋势',
+    BASE: '稳定平台', CONTRACTION: '有序收缩', MIXED: '混合结构', CHAOTIC: '混乱结构',
+    BASE_TO_TREND: '平台 → 趋势', CONTRACTION_TO_TREND: '收缩 → 趋势',
+    TREND_TO_BASE: '趋势 → 平台', TREND_PULLBACK_TREND: '趋势 → 回撤 → 趋势',
+  }[mode] || mode || '--'
+}
+
+function windowStructureText(windowResult) {
+  const structure = windowResult?.structure
+  const direction = trendDirectionText(windowResult?.direction)
+  if (structure === 'BASE_TO_TREND') return `平台 → ${direction}趋势`
+  if (structure === 'CONTRACTION_TO_TREND') return `收缩 → ${direction}趋势`
+  return structureModeText(structure)
+}
+
+function trendDirectionText(direction) {
+  return { UP: '上涨', DOWN: '下跌', FLAT: '横向' }[direction] || direction || '--'
+}
+
+function confidenceText(value) {
+  if (value === null || value === undefined) return '--'
+  return `${(Number(value) * 100).toFixed(0)}%`
+}
+
+function ratioText(value) {
+  if (value === null || value === undefined) return '--'
+  return `${(Number(value) * 100).toFixed(1)}%`
+}
+
+function barStructureText(type) {
+  return {
+    MICRO_RANGE: '微幅K线', BODY_DIRECTIONAL: '方向实体', NORMAL_BAR: '普通K线',
+    DIRECTIONAL_EXPANSION: '方向型扩张', CONFLICT_EXPANSION: '冲突型扩张',
+    GAP_REVERSAL_EXPANSION: '跳空反转扩张',
+    ONE_SIDE_UPPER_REJECTION: '上影拒绝', ONE_SIDE_LOWER_REJECTION: '下影拒绝',
+    TWO_SIDE_CONFLICT: '双向争夺', BALANCED: '平衡结构', ONE_PRICE_EVENT: '一字事件',
+  }[type] || type || '--'
+}
+
+function cleanKRiskText(flag) {
+  return {
+    STALE_LOCAL_DATA: '本地数据未覆盖目标交易日', LOW_CONFIDENCE: '分析置信度不足',
+    MIXED_STRUCTURE: '价格结构混合', DIRTY_EXTREME_BARS: '存在高噪音异常K线',
+    ONE_PRICE_EVENTS: '存在一字事件K线', SUSPENDED_BARS_EXCLUDED: '已排除停牌记录',
+    CLEAN_DOWNTREND: 'K线干净但趋势向下',
+    CHAOTIC_WINDOW_STRUCTURE: '整体结构存在显著反复破坏',
+    CONFLICT_EXPANSION_BARS: '存在双向冲突型扩张K线',
+    GAP_REVERSAL_EXPANSION_BARS: '存在跳空后反向扩张K线',
+    CURRENT_CLEAN_DOWNTREND: '当前结构干净但方向向下',
+    INCOMPLETE_TARGET_BAR_EXCLUDED: '目标日K线在收盘前拉取，已从分析中排除',
+  }[flag] || flag
+}
+
+function cleanKBlockText(reason) {
+  return {
+    WINDOW_SCORE_BELOW_THRESHOLD: '整体分不足',
+    WINDOW_STRUCTURE_SCORE_BELOW_THRESHOLD: '整体结构分不足',
+    CURRENT_SCORE_BELOW_THRESHOLD: '当前分不足',
+    CURRENT_STRUCTURE_SCORE_BELOW_THRESHOLD: '当前结构分不足',
+    LOW_CONFIDENCE: '有效K线证据不足', CHAOTIC_STRUCTURE: '结构反复破坏',
+    TOO_MANY_CONFLICT_BARS: '冲突型K线超过容忍线',
+    TOO_MANY_TRAILING_EVENTS: '末端一字事件过多',
+    DIRECTIONAL_STRUCTURE_BREAK: '当前方向存在明显破坏',
+    NO_CONFIRMED_CURRENT_BOUNDARY: '未确认当前结构切换边界',
+  }[reason] || reason
+}
+
+function normalizeCleanKResult(data) {
+  if (data?.window && data?.current) return data
+  return {
+    ...data,
+    modelVersion: 'CLEAN_K_V1_COMPAT',
+    window: {
+      isClean: Boolean(data?.isClean),
+      score: data?.cleanKScore,
+      level: data?.cleanLevel,
+      structure: data?.structureMode,
+      structureScore: data?.structureScore,
+      direction: data?.trendDirection,
+      startDate: data?.startDate,
+      endDate: data?.endDate,
+      blockingReasons: [],
+    },
+    current: {
+      available: false,
+      isClean: null,
+      score: null,
+      level: null,
+      days: null,
+      evaluatedDays: null,
+      structure: null,
+      direction: null,
+      startDate: null,
+      endDate: null,
+      blockingReasons: [],
+    },
+    barStats: {
+      directionalExpansionCount: 0,
+      conflictExpansionCount: 0,
+      gapReversalExpansionCount: 0,
+      microRangeCount: 0,
+      eventBarCount: data?.eventBarCount || 0,
+      dirtyExtremeCount: data?.dirtyExtremeCount || 0,
+    },
+    segments: [],
+    transitions: [],
+  }
+}
+
+async function runCleanKAnalysis() {
+  const stockCode = cleanKForm.stockCode.trim()
+  if (!/^\d{6}$/.test(stockCode)) {
+    cleanKResult.value = null
+    cleanKError.value = '请输入6位股票代码'
+    return
+  }
+  const period = Number(cleanKForm.period)
+  if (!Number.isInteger(period) || period < 10 || period > 120) {
+    cleanKResult.value = null
+    cleanKError.value = '分析周期必须是10至120之间的整数'
+    return
+  }
+  if (cleanKLoading.value) return
+  cleanKLoading.value = true
+  cleanKError.value = ''
+  try {
+    const data = await analyzeCleanK({ stockCode, period })
+    if (data.ok === false) throw new Error(data.message || data.error || '分析失败')
+    cleanKResult.value = normalizeCleanKResult(data)
+  } catch (err) {
+    cleanKResult.value = null
+    cleanKError.value = `干净K线分析失败：${err?.message || '未知错误'}`
+  } finally {
+    cleanKLoading.value = false
+  }
+}
+
+async function runTickFlowProbe() {
+  const code = probeCode.value.trim()
+  if (!/^\d{6}$/.test(code)) {
+    probeError.value = '请输入6位股票代码'
+    return
+  }
+  if (probeLoading.value) return
+  probeLoading.value = true
+  probeError.value = ''
+  try {
+    const data = await checkTickFlowFreshness(code)
+    if (data.ok === false) throw new Error(data.message || data.error || '新鲜度测试失败')
+    probeResult.value = data
+  } catch (err) {
+    probeError.value = `TickFlow 新鲜度测试失败：${err?.message || '未知错误'}`
+  } finally {
+    probeLoading.value = false
+  }
+}
+
+function clearTickFlowPoll() {
+  if (tickFlowPollTimer) {
+    clearTimeout(tickFlowPollTimer)
+    tickFlowPollTimer = null
+  }
+}
+
+function scheduleTickFlowPoll() {
+  clearTickFlowPoll()
+  if (!tickFlowStatus.value?.running) return
+  tickFlowPollTimer = setTimeout(async () => {
+    tickFlowPollTimer = null
+    await loadTickFlowStatus(true)
+  }, 2000)
+}
+
+async function loadTickFlowStatus(refreshHealthOnTerminal = false) {
+  try {
+    const data = await getTickFlowFullRefreshStatus()
+    if (data.ok === false) throw new Error(data.message || data.error || 'TickFlow 状态查询失败')
+    const wasRunning = Boolean(tickFlowStatus.value?.running)
+    tickFlowStatus.value = data
+    tickFlowError.value = ''
+    if (data.running) {
+      scheduleTickFlowPoll()
+    } else {
+      clearTickFlowPoll()
+      if (refreshHealthOnTerminal && wasRunning) await loadKlineHealth()
+    }
+  } catch (err) {
+    tickFlowError.value = `TickFlow 状态查询失败：${err?.message || '未知错误'}`
+    if (tickFlowStatus.value?.running) scheduleTickFlowPoll()
+  }
+}
+
+async function startTickFlowRefresh() {
+  if (tickFlowStarting.value || tickFlowStatus.value?.running) return
+  const confirmed = window.confirm(
+    '将先备份数据库，再使用 TickFlow 对整个股票池强制重新拉取约 1100 根前复权日线，并同步重拉四个宽基指数。是否继续？',
+  )
+  if (!confirmed) return
+  tickFlowStarting.value = true
+  tickFlowError.value = ''
+  try {
+    const data = await startTickFlowFullRefresh()
+    if (data.ok === false) throw new Error(data.message || data.error || 'TickFlow 全量任务启动失败')
+    tickFlowStatus.value = data
+    scheduleTickFlowPoll()
+  } catch (err) {
+    tickFlowError.value = `TickFlow 全量任务启动失败：${err?.message || '未知错误'}`
+  } finally {
+    tickFlowStarting.value = false
+  }
+}
 
 function fmt(value) {
   return value || '--'
@@ -412,32 +939,38 @@ function submitQuery() {
 onMounted(() => {
   loadKlineHealth()
   loadPage(1)
+  loadTickFlowStatus()
 })
+
+onBeforeUnmount(clearTickFlowPoll)
 </script>
 
 <style scoped>
 .kline-page {
-  padding: 20px;
+  padding: 22px 24px 40px;
+  max-width: 1600px;
+  margin: 0 auto;
   color: var(--text-primary);
 }
 .panel {
   background: var(--bg-panel);
   border: 1px solid var(--border);
-  border-radius: 10px;
-  padding: 18px;
+  border-radius: var(--radius-sm);
+  padding: 16px 18px;
 }
 .hero {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  margin-bottom: 16px;
+  margin-bottom: 12px;
+  border-left: 2px solid var(--gold);
 }
 .eyebrow {
   margin: 0 0 6px;
-  color: var(--accent);
-  font-size: 12px;
-  letter-spacing: 0.08em;
+  color: var(--gold);
+  font: 10px/1 var(--font-mono);
+  letter-spacing: 0.16em;
 }
 h1, h2, p {
   margin: 0;
@@ -456,19 +989,134 @@ h2 {
 }
 .status-pill {
   border: 1px solid var(--border);
-  border-radius: 999px;
-  padding: 10px 16px;
+  border-radius: var(--radius-sm);
+  padding: 8px 12px;
   color: var(--text-secondary);
   white-space: nowrap;
+  font: 11px/1 var(--font-mono);
 }
 .status-pill.fresh {
-  color: var(--up-red);
-  border-color: rgba(239, 68, 68, 0.35);
+  color: var(--success);
+  border-color: rgba(32, 173, 114, 0.35);
+  background: var(--success-glow);
 }
 .status-pill.stale {
-  color: var(--down-green);
-  border-color: rgba(34, 197, 94, 0.35);
+  color: var(--danger);
+  border-color: rgba(239, 91, 91, 0.35);
+  background: rgba(239, 91, 91, 0.08);
 }
+.clean-k-panel {
+  margin-bottom: 16px;
+  border-top: 2px solid var(--gold);
+}
+.clean-k-head { align-items: flex-end; }
+.clean-k-form {
+  display: grid;
+  grid-template-columns: 150px 120px auto;
+  align-items: end;
+  gap: 10px;
+}
+.clean-k-form label { min-width: 0; }
+.clean-k-form input { width: 100%; }
+.clean-k-error { margin-top: 12px; }
+.clean-k-result { display: grid; gap: 14px; margin-top: 16px; }
+.clean-k-verdict-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+.clean-k-verdict {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 15px 18px;
+  border: 1px solid var(--border);
+  background: var(--bg-card);
+}
+.clean-k-verdict.clean { border-left: 3px solid var(--success); }
+.clean-k-verdict.not-clean { border-left: 3px solid var(--danger); }
+.clean-k-verdict.unavailable { border-left: 3px solid var(--warn-orange); }
+.clean-k-verdict.current { background: linear-gradient(135deg, rgba(23, 40, 61, 0.9), rgba(16, 24, 36, 0.68)); }
+.clean-k-verdict span,
+.clean-k-verdict p,
+.clean-k-verdict em,
+.clean-k-metrics span,
+.clean-k-metrics em { color: var(--text-muted); font-size: 11px; }
+.clean-k-verdict > div:first-child > strong { display: block; margin: 4px 0 2px; font-size: 19px; }
+.clean-k-verdict > div:first-child > em { display: block; margin-top: 6px; color: var(--accent); font-style: normal; }
+.clean-k-verdict > div:first-child > small { display: block; margin-top: 7px; color: var(--warn-orange); font-size: 10px; line-height: 1.45; }
+.clean-k-score { text-align: right; }
+.clean-k-score strong { display: block; color: var(--gold); font: 700 30px/1 var(--font-mono); }
+.clean-k-score span { display: block; margin-top: 5px; }
+.clean-k-segments {
+  display: grid;
+  grid-template-columns: 190px 1fr;
+  gap: 12px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  background: rgba(16, 24, 36, 0.52);
+}
+.clean-k-segment-title span,
+.clean-k-segment-title strong { display: block; }
+.clean-k-segment-title span { color: var(--text-muted); font-size: 11px; }
+.clean-k-segment-title strong { margin-top: 6px; color: var(--gold); }
+.clean-k-segment-list { display: flex; flex-wrap: wrap; gap: 8px; }
+.clean-k-segment-list > div {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 2px 7px;
+  min-width: 210px;
+  padding: 8px 10px;
+  border-left: 2px solid var(--accent);
+  background: rgba(27, 42, 61, 0.7);
+}
+.clean-k-segment-list span { grid-row: span 2; color: var(--gold); font: 700 16px/1 var(--font-mono); }
+.clean-k-segment-list strong { font-size: 12px; }
+.clean-k-segment-list em { color: var(--text-muted); font-size: 10px; font-style: normal; }
+.clean-k-direction-warning {
+  padding: 9px 12px;
+  border: 1px solid rgba(232, 144, 63, 0.35);
+  background: var(--warn-orange-glow);
+  color: var(--warn-orange);
+  font-size: 12px;
+}
+.clean-k-metrics {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 8px;
+}
+.clean-k-metrics > div {
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid var(--border);
+  background: rgba(16, 24, 36, 0.55);
+}
+.clean-k-metrics span,
+.clean-k-metrics strong,
+.clean-k-metrics em { display: block; }
+.clean-k-metrics strong { margin: 6px 0 4px; font: 600 14px/1.2 var(--font-mono); }
+.clean-k-metrics em { font-style: normal; line-height: 1.4; }
+.clean-k-explain {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+.clean-k-explain > div { padding: 12px 14px; border: 1px solid var(--border); }
+.clean-k-explain ul { margin: 8px 0 0; padding-left: 18px; color: var(--text-secondary); font-size: 12px; }
+.clean-k-flags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 9px; }
+.clean-k-flags span {
+  padding: 3px 7px;
+  border: 1px solid rgba(232, 144, 63, 0.32);
+  color: var(--warn-orange);
+  font-size: 11px;
+}
+.clean-k-flags .clean-k-no-risk { color: var(--success); border-color: rgba(32, 173, 114, 0.32); }
+.clean-k-details { border-top: 1px solid var(--border); padding-top: 10px; }
+.clean-k-details summary { color: var(--accent); font-size: 12px; cursor: pointer; }
+.clean-k-table-scroll { margin-top: 10px; overflow-x: auto; }
+.clean-k-table-scroll table { min-width: 900px; }
+.metric-danger { color: var(--danger); }
 .summary-grid {
   display: grid;
   grid-template-columns: repeat(6, minmax(0, 1fr));
@@ -478,7 +1126,7 @@ h2 {
 .summary-card {
   background: var(--bg-panel);
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: var(--radius-sm);
   padding: 14px;
 }
 .summary-card span {
@@ -502,13 +1150,78 @@ h2 {
   grid-column: span 2;
 }
 .summary-card.ok {
-  border-color: rgba(239, 68, 68, 0.35);
+  border-color: rgba(32, 173, 114, 0.35);
 }
 .summary-card.warning {
-  border-color: rgba(34, 197, 94, 0.35);
+  border-color: rgba(239, 91, 91, 0.35);
 }
 .health-panel {
   margin-bottom: 16px;
+}
+.maintenance-divider {
+  display: flex; align-items: baseline; gap: 10px; margin: 16px 0 8px;
+  padding-top: 13px; border-top: 1px solid var(--border);
+}
+.maintenance-divider span { color: var(--text-secondary); font-size: 11px; font-weight: 700; letter-spacing: 0.08em; }
+.maintenance-divider small { color: var(--text-muted); font-size: 10px; }
+.tickflow-box {
+  display: grid;
+  gap: 10px;
+  margin: 14px 0 16px;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: rgba(16,24,36,0.42);
+}
+.tickflow-box-head { display: flex; align-items: center; justify-content: space-between; gap: 20px; }
+.maintenance-action { flex-shrink: 0; color: var(--text-secondary) !important; }
+.maintenance-action:hover:not(:disabled) { border-color: var(--warn-orange) !important; color: var(--warn-orange) !important; }
+.tickflow-box p {
+  margin-top: 6px;
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+.tickflow-progress {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 18px;
+  align-items: center;
+}
+.tickflow-progress span {
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+.tickflow-failures {
+  margin: 0;
+  padding-left: 20px;
+  color: var(--danger);
+  font-size: 12px;
+}
+.tickflow-probe {
+  margin: 0 0 16px;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: rgba(16,24,36,0.42);
+}
+.probe-actions,
+.probe-summary {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px 16px;
+}
+.probe-actions input {
+  width: 140px;
+}
+.probe-summary {
+  margin: 8px 0 14px;
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+.probe-table th,
+.probe-table td {
+  text-align: left;
 }
 .health-grid {
   display: grid;
@@ -520,7 +1233,7 @@ h2 {
   text-align: left;
   background: var(--bg-card);
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: var(--radius-sm);
   color: var(--text-primary);
   padding: 14px;
 }
@@ -538,13 +1251,13 @@ button.health-card {
   font-size: 18px;
 }
 .health-card.ok {
-  border-color: rgba(239, 68, 68, 0.35);
+  border-color: rgba(32, 173, 114, 0.35);
 }
 .health-card.warning {
   border-color: rgba(234, 179, 8, 0.45);
 }
 .health-card.danger {
-  border-color: rgba(34, 197, 94, 0.45);
+  border-color: rgba(239, 91, 91, 0.42);
 }
 .sub-head {
   margin-top: 8px;
@@ -559,7 +1272,7 @@ button.health-card {
 .link-button {
   height: 32px;
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: var(--bg-card);
   color: var(--text-primary);
   padding: 0 12px;
@@ -587,21 +1300,21 @@ button.health-card {
   align-items: center;
   min-width: 44px;
   justify-content: center;
-  border-radius: 999px;
-  padding: 4px 8px;
+  border-radius: 2px;
+  padding: 3px 7px;
   font-size: 12px;
 }
 .health-badge.ok {
-  color: var(--up-red);
-  background: rgba(239, 68, 68, 0.10);
+  color: var(--success);
+  background: var(--success-glow);
 }
 .health-badge.warning {
   color: #eab308;
   background: rgba(234, 179, 8, 0.12);
 }
 .health-badge.danger {
-  color: var(--down-green);
-  background: rgba(34, 197, 94, 0.12);
+  color: var(--danger);
+  background: rgba(239, 91, 91, 0.10);
 }
 .link-button {
   color: var(--accent);
@@ -620,8 +1333,8 @@ button.health-card {
   gap: 8px;
 }
 .danger-action {
-  color: var(--down-green);
-  border-color: rgba(34, 197, 94, 0.35);
+  color: var(--danger);
+  border-color: rgba(239, 91, 91, 0.35);
 }
 .query-panel {
   display: grid;
@@ -640,7 +1353,7 @@ input,
 select {
   height: 34px;
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: var(--bg-card);
   color: var(--text-primary);
   padding: 0 10px;
@@ -649,7 +1362,7 @@ select {
 .pager button {
   height: 34px;
   border: none;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: var(--accent);
   color: #fff;
   padding: 0 14px;
@@ -661,11 +1374,11 @@ button:disabled {
 }
 .error-line {
   margin: 0 0 16px;
-  color: var(--down-green);
+  color: var(--danger);
 }
 .success-line {
   margin: 0 0 16px;
-  color: var(--up-red);
+  color: var(--success);
 }
 .table-head {
   display: flex;
@@ -696,6 +1409,10 @@ td:first-child {
   text-align: left;
 }
 th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: #0d1520;
   color: var(--text-secondary);
   font-weight: 500;
 }
@@ -705,6 +1422,10 @@ th {
   color: var(--text-secondary);
 }
 @media (max-width: 1100px) {
+  .clean-k-head { align-items: stretch; flex-direction: column; }
+  .clean-k-form { grid-template-columns: 1fr 1fr auto; }
+  .clean-k-metrics { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .clean-k-segments { grid-template-columns: 1fr; }
   .summary-grid,
   .query-panel,
   .health-grid {
@@ -713,5 +1434,11 @@ th {
   .summary-card.wide {
     grid-column: span 2;
   }
+}
+@media (max-width: 720px) {
+  .clean-k-form,
+  .clean-k-verdict-grid,
+  .clean-k-metrics,
+  .clean-k-explain { grid-template-columns: 1fr; }
 }
 </style>

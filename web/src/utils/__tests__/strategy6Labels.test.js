@@ -9,6 +9,8 @@ describe('strategy6Labels', () => {
     expect(strategy6Label('startType', 'VOLUME_LIMIT_UP')).toBe('放量涨停启动')
     expect(strategy6Label('supportStatus', 'MA20_SUPPORT')).toBe('MA20支撑')
     expect(strategy6Label('marketStatus', 'MARKET_WEAK')).toBe('市场偏弱')
+    expect(strategy6Label('ttmSqueezeStatus', 'FIRED_BULLISH')).toBe('多头挤压释放')
+    expect(strategy6Label('ttmMomentumDirection', 'RISING')).toBe('上升')
     expect(strategy6Label('tailPath', 'BOX')).toBe('稳定箱体路径')
     expect(strategy6Label('boxStatus', 'BOX_SUPPORT_READY')).toBe('箱体下沿支撑就绪')
     expect(strategy6Label('priceBasis', 'FORWARD_ADJUSTED')).toBe('前复权')

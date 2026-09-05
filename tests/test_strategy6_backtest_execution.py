@@ -71,6 +71,61 @@ def test_open_outside_buy_zone_cancels_conservatively():
     assert low_open.order.fill_reason == "CANCEL_OPEN_BELOW_BUY_ZONE"
 
 
+def test_archetype_support_pullback_waits_for_limit_instead_of_cancelling_first_high_open():
+    rows = [
+        _row("2025-01-02", 10, 10.1, 9.9, 10),
+        _row("2025-01-03", 10.5, 10.6, 10.3, 10.4),
+        _row("2025-01-06", 10.1, 10.2, 9.9, 10.0),
+    ]
+    config = resolve_backtest_config({"execution": {"entry_mode": "ARCHETYPE_TRIGGERED"}})
+
+    outcome = simulate_frozen_trade(
+        _signal(entry_archetype="SUPPORT_PULLBACK"),
+        rows,
+        [row["date"] for row in rows],
+        config,
+    )
+
+    assert outcome.order.status == "FILLED"
+    assert outcome.order.fill_reason == "FILLED_SUPPORT_PULLBACK_LIMIT"
+    assert outcome.trade.entry_date == "2025-01-06"
+
+
+def test_archetype_breakout_fills_only_after_intraday_trigger_is_crossed():
+    rows = [
+        _row("2025-01-02", 10.3, 10.4, 10.2, 10.3),
+        _row("2025-01-03", 10.3, 10.6, 10.2, 10.55),
+    ]
+    config = resolve_backtest_config({"execution": {"entry_mode": "ARCHETYPE_TRIGGERED"}})
+    signal = _signal(
+        entry_archetype="PIVOT_BREAKOUT",
+        buy_zone_low=10.5,
+        buy_zone_high=10.7,
+        suggested_limit_price=10.5,
+        pivot_price=10.5,
+    )
+
+    outcome = simulate_frozen_trade(signal, rows, [row["date"] for row in rows], config)
+
+    assert outcome.order.status == "FILLED"
+    assert outcome.order.fill_reason == "FILLED_PIVOT_BREAKOUT_TRIGGER"
+    assert outcome.trade.entry_price > 10.5
+
+
+def test_archetype_execution_rejects_non_executable_entry_type():
+    config = resolve_backtest_config({"execution": {"entry_mode": "ARCHETYPE_TRIGGERED"}})
+    outcome = simulate_frozen_trade(
+        _signal(entry_archetype="WAIT_BREAKOUT"),
+        [_row("2025-01-02", 10, 10.1, 9.9, 10), _row("2025-01-03", 10, 10.1, 9.9, 10)],
+        ["2025-01-02", "2025-01-03"],
+        config,
+    )
+
+    assert outcome.trade is None
+    assert outcome.order.status == "CANCELLED"
+    assert outcome.order.fill_reason == "CANCEL_ENTRY_ARCHETYPE_NOT_EXECUTABLE"
+
+
 def test_same_day_stop_and_target_after_entry_uses_stop_first():
     rows = [
         _row("2025-01-02", 10, 10, 10, 10),

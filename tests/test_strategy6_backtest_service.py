@@ -71,6 +71,38 @@ def test_service_keeps_daily_signals_but_only_one_order_per_setup_and_skips_oos(
     assert result["setup_quality_metrics"]["20-24"]["trades"] == 1
 
 
+def test_first_event_selection_executes_once_when_setup_id_changes_within_same_start_cycle():
+    class RollingSetupEvaluation(FakeEvaluation):
+        def to_candidate_dict(self):
+            return {
+                **super().to_candidate_dict(),
+                "pivot_price": 10.5 if self.date == "2025-01-03" else 10.7,
+                "box_start_date": "2025-01-01" if self.date == "2025-01-03" else "2025-01-02",
+            }
+
+    class RollingSetupEngine:
+        def evaluate_at(self, rows, **kwargs):
+            return RollingSetupEvaluation(rows[-1]["date"])
+
+    result = run_parameter_research(
+        parameter_set_id="s6ps-first-event",
+        data_by_code={"000001": {"name": "样本", "rows": _rows()}},
+        evaluation_dates=["2025-01-03", "2025-01-04"],
+        market_data_by_symbol={"hs300": _rows(), "sh000001": _rows()},
+        backtest_config=resolve_backtest_config({
+            "signal_selection_mode": "FIRST_EVENT_PER_START",
+            "execution": {"buy_zone_valid_days": 3},
+        }),
+        engine_factory=lambda: RollingSetupEngine(), minimum_history=1, oos_start="2026-01-01",
+    )
+
+    assert len({item["setup_id"] for item in result["signals"]}) == 2
+    assert len({item["candidate_event_id"] for item in result["signals"]}) == 1
+    assert len(result["orders"]) == 1
+    assert result["orders"][0]["signal_selection_mode"] == "FIRST_EVENT_PER_START"
+    assert result["orders"][0]["candidate_event_sequence"] == 1
+
+
 def test_service_keeps_wait_breakout_signal_without_creating_order():
     class WaitingEvaluation(FakeEvaluation):
         def to_candidate_dict(self):

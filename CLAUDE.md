@@ -99,13 +99,22 @@ npm --prefix web run preview
 - **候选去重：** 同一任务内候选按 `(task_id, code)` 唯一；内存层用 code 字典去重，数据库层用唯一索引/upsert，前端按 code 归并。
 - **全局扫描互斥：** server API 启动扫描前同时检查 `_running` 和 DB 中 `status='running'` 的任务；CLI/scheduler 路径未完整纳入这套互斥语义。
 - **失败重拉：** `/api/scan/tasks/{task_id}/retry-failed` 只处理原任务 `failed` 股票，使用 `retry_policy='failed_only'` 重跑完整个股扫描逻辑。
-- **行情拉取回退：** 主数据源 → 备用数据源；任一 fresh 源成功后才与缓存合并并保存。双源都失败时不能用旧缓存产出扫描结果。AKShare 仅用于获取股票池，不用于 OHLC 数据。
+- **行情模式：** `data.acquisition_mode=tickflow` 为正式批量模式；`legacy_multi_source` 是人工备用模式，顺序为 `tencent -> sina(AkShare) -> baidu`。禁止运行时自动跨模式回退。
+- **TickFlow口径：** 股票固定 `forward_additive`，四个宽基指数固定不复权。扫描前批量更新不新鲜股票，同日后续策略复用本地结果；失败股票进入失败列表，不使用不新鲜缓存。
 - **单只失败不中断：** 全市场扫描中，单只股票异常（超时/解析错误/停牌）记录日志后跳过，不中断整体任务。
 - **数据源锁必须释放：** `try...finally` 确保异常路径也释放锁。
 - **配置文件驱动：** 主要扫描阈值（杯体深度、柄部回撤、流动性等）在 `config.yaml` 中可调；部分策略阈值仍硬编码，新增配置项前先确认代码已接入。
 - **策略6 V4：** 启动、整理和尾段严格按时间分割；形态限定为 VCP/CUP_HANDLE/PLATFORM；客观目标与 1.5R/2R/2.5R/3.5R 执行目标分离，候选按客观盈亏比分层。
+- **策略6决策画像（V4.8）：** 默认 `formal_original` 使用固定尾段和 `S6_FORMAL_ORIGINAL_V1` 评分，只有 ORIGINAL 量干价稳路径参与正式评分、拒绝与分层。`research_quality_v2` 才执行动态尾段、BOX、Brooks 和 `S6_QUALITY_V2`；研究路径不得通过默认配置进入正式扫描。候选、SQLite、CSV/Excel和前端详情必须输出 `decision_profile`，旧记录标记 `legacy_unspecified`。
+- **策略6正式评分（V4.8）：** 启动20 + 形态20 + 支撑20 + ORIGINAL尾段20 + 客观RR10 + RS/风险10。setup质量和支撑反应在正式画像仅作诊断，不参与总分或KEY/READY门槛；真实Quality V2零分不得按缺失值绕过研究门槛。成熟WATCH必须同时通过RR硬底线和 `watch_min_score`。
+- **策略6强势趋势与独立收缩初筛（V4.12）：** 正式主链固定要求前复权收盘价大于10元、相对最近250日最低价至少上涨30%、不低于最近250日最高价70%、`EMA150 > EMA200`、收盘价高于EMA150/200。BB20(2倍总体标准差)严格位于KC20(EMA20、1.5倍Wilder ATR20)仍用于独立初筛池和诊断，但不再作为主链硬拒绝。近20日高位确认保留评分，只限制KEY/READY升级，缺失时达到观察分仍可进入WATCH。可配置TTM模块仅作附加诊断，诊断分不再进入排序。
+- **策略6实体支撑诊断（V4.11）：** `strategy6/body_support.py` 只在现有尾部窗口内确认实体支撑，可向前30日读取锚点但旧锚点不得脱离当前尾部证据单独得分。`body_support_score` 和可扩展的 `latest_bar_patterns` 仅用于诊断、前端展示和导出，不得进入总分、排序、硬过滤、候选分类或生命周期；最新交易日“有效实体低点”必须标记后续确认中，禁止使用未来K线提前确认。
+- **市场宽度研究页：** `/market-breadth` 使用本地真实前复权 `daily_ohlc` 和四个真实宽基指数重建每日涨跌家数，并把实际已完成策略6任务的正式候选作为可关闭的只读标记叠加。统一口径为 `上涨家数 / (上涨家数 + 下跌家数)`，平盘和无法比较股票不进入分母；前端只使用可靠日期计算MA5、趋势、20日结构、120日分位及指数宽度关系，并通过联动图表展示。该页面、`scanner/market_breadth.py` 和 `market_breadth_daily` 汇总缓存均不得进入策略6评分、过滤或候选分类；当前股票池历史重建存在幸存者偏差，覆盖率低于90%或有效样本少于1000的日期必须标记为低覆盖并排除图表及极端排行。
+- **策略6跨画像状态（V4.8）：** `strategy6_candidate_lifecycle.decision_profile` 隔离池龄、失效和冷却；正式/研究画像切换时建立新周期，禁止旧研究候选状态阻塞正式候选。原始基线回测强制正式画像，BOX/Brooks/全面研究命令显式使用研究画像。
 - **策略6价格口径：** 当前生产日线和历史研究均使用前复权价格，策略6输出 `price_basis=FORWARD_ADJUSTED`、`current_price_adj`，`current_price_raw` 保持空值；未复权双价格链仍不在当前范围。成交模拟仅用于本地历史研究，不能伪装成真实成交回报。
 - **策略6市场边界：** 板块过滤已完全移除，`sector_name` 仅用于展示；至少两个同日宽基指数才形成市场状态，RS20只使用同日沪深300。市场过滤开启且沪深300缺失时，最高只允许 WATCH。
+- **策略6主服务模式：** 前端导航、路由、扫描按钮、任务中心和配置页只暴露策略6；旧策略URL重定向到策略6候选页。scheduler只注册 `strategy6_scan` 并创建 `STRATEGY_6_STRONG_VCP_TAIL` 任务，旧 `serial_dual_scan` 配置键仅作为兼容存储。策略1-5后端与历史数据暂时保留，但不得由前端或scheduler主动执行。
+- **策略6批量评分：** `/strategy6/batch-evaluation` 通过 `/api/strategy6/batch-evaluate` 对用户输入的最多200只股票调用正式 `StrongVcpTailEngine.evaluate_at()`；只读本地前复权日线和本地宽基指数，不拉行情、不创建扫描任务、不写候选或生命周期。页面同时展示原始尾部质量分和正式计入总分的尾部分：触发尾部硬条件时后者为0，前者仅用于比较接近合格程度，禁止据此绕过正式候选规则。
 - **策略6生命周期：** 候选按股票维护 START_CONFIRMED/SETUP_FORMING/READY/BUY_ZONE/EXTENDED/FAILED/EXPIRED/COOLDOWN，FAILED 冷却10个交易日、EXPIRED冷却5个交易日，同事件只允许在支撑恢复并重新确认后入池。全局生命周期、任务审计快照和活跃候选必须在同一事务内写入。
 - **策略6稳定箱体双路径（V4.1）：** 原 `evaluate_dry_tail()` 零改动；`strategy6/box_tail.py` 在整理阶段枚举5-30日箱体，结构边界排除最后两日，最后两日用于跌破和当前位置确认。`tail_pass=original OR box`，`BOTH` 取较高路径分，失败箱体不得改变原路径分数。
 - **策略6紧密K线：** 最近配置窗口（默认5日）的实体、收盘集中、相邻重叠、跳空、ATR收缩和现有放量下跌共同生成 `BOX_COMPACT_READY`。该结果不是箱体硬条件，`compact_kline_score` 只参与箱体窗口择优，禁止进入最终 `tail_score`。
@@ -118,6 +127,9 @@ npm --prefix web run preview
 - **策略6全面调优恢复：** `strategy6_optimization_campaigns/stages/trials` 保存campaign、父参数、阶段选择、粗筛/完整run和淘汰原因。训练选择器不得接收包含validation/OOS字段的对象；首次训练入围清单在完整重跑前持久化，中断后原样复用。
 - **策略6全面调优门槛：** 验证期交易不少于30、期望R不低于0.10、PF不低于1.20、平均盈利R/平均亏损R不低于2.5、固定风险最大回撤不超过20%、前五股票盈利贡献不超过55%、单月不超过35%，并要求关键指标至少保留训练期60%。
 - **策略6执行调优：** 信号参数冻结后，买入有效期和最大持有期仅对冻结信号重放。费用不得低于BASE，T+1、一字涨跌停、缺失K线和STOP_FIRST固定；高成本、70%成交率和延迟一天必须实际重放。
+- **策略6入场质量研究：** `strategy6/entry_quality.py` 输出入场时机状态和本股历史路径概率修正RR，字段可持久化、前端查看和导出；`entry_quality.entry_timing_enabled` 与 `probability_rr_enabled` 默认关闭，未通过训练/验证前不得影响正式候选。
+- **策略6入场质量结论：** 冻结任务 `s6bt-772c046cb6c982f61fc5` 的2023-2025真实指数重放中，时机、概率RR及组合方案均未同时达到正期望/PF门禁，结论为 `KEEP_CURRENT_RULES / NO_TRIAL_PASSED_SCREEN`，生产配置未修改。
+- **策略6首次事件与分原型成交研究：** 回测支持默认关闭的 `FIRST_EVENT_PER_START` 与 `ARCHETYPE_TRIGGERED`，旧模式继续使用 `LEGACY_SETUP_ID + FROZEN_TRADE_PLAN`。同一冻结任务的E0-E3真实重放均未通过训练/验证门禁；首次事件方案仅改善2025期望但PF和训练期不合格，分原型样本只覆盖支撑低吸且结果更差，生产配置未修改。
 - **策略6全面调优CLI：** `comprehensive-plan` 创建身份，`comprehensive-run` 串行推进一层，`comprehensive-status` 查看恢复状态，`comprehensive-report` 输出Markdown/JSON及参数、候选、订单、交易CSV。所有结论只供人工审批，禁止自动写生产配置。
 - **策略6 VCP持续观察池（V4.4）：** `strategy6/vcp_observer.py` 继续独立识别VCP形成、近支点、突破后和延伸状态，不参与评分、硬过滤或正式候选分类；`strategy6/vcp_history.py` 使用当前正式参数、真实个股日线和真实指数日线，从当前VCP强势起点到评估日逐日 `as-of` 重放。前端“VCP形态候选”只展示当前VCP有效且本轮曾产生正式非 `REJECTED` 候选的股票；起点前候选、纯VCP观察和过期/失效VCP均不构成资格。纯观察记录仍为 `REJECTED/observation`，不得赋予虚假的交易入池日期或买入语义。
 - **策略6 VCP形态质量分（V4.5）：** `strategy6/vcp_quality.py` 使用当前VCP收缩证据按收缩层次、振幅、成交量、低点、时间和支点六维计算固定绝对分 `VCP_QUALITY_V1`。该分数只用于“VCP形态候选”板块排序、解释和导出，禁止进入策略总分、候选资格、硬过滤、交易分类、生命周期或交易计划。旧任务评分字段保持NULL并显示“未评分”，不得伪造为0分或删除旧候选。
@@ -168,7 +180,8 @@ npm --prefix web run preview
 | `analyzer/invalid_rules.py`          | `find_invalid_conditions(...)` → `list[str]`                                                                                                                                  |
 | `scanner/index_source.py`            | `fetch_market_index_daily(code)` → `list[dict]` (复用新浪源)                                                                                                                  |
 | `server.py`                          | FastAPI API + 扫描任务编排 — CORS/lifespan、恢复中断任务、失败重拉、配置读写、策略2 API                                                                                       |
-| `scanner/daily_data_service.py`      | 共享四数据源拉取服务 — `fetch_with_retry()` / `FetchResult` / 锁/重试/缓存合并                                                                                                |
+| `scanner/data_acquisition.py`        | 行情模式解析、TickFlow扫描前批量准备、禁止跨模式回退、指数缓存读取                                                                                                             |
+| `scanner/daily_data_service.py`      | 传统三源拉取服务 — `fetch_with_retry()` / `FetchResult` / 锁/重试/缓存合并                                                                                                    |
 | `strategy2/models.py`                | 策略2数据模型 — `Strategy2Indicators` / `Score` / `Risk` / `Evaluation`                                                                                                       |
 | `strategy2/indicators.py`            | 策略2指标计算 — V3/V5/V10/V20、分位、range、return                                                                                                                            |
 | `strategy2/scorer.py`                | 策略2量干价稳评分 + 等级                                                                                                                                                      |
@@ -239,7 +252,7 @@ npm --prefix web run preview
 - **Pivot 双边距离**: 新增 `near_pivot_below_pct` 下限（默认 10%），远低于 Pivot 不再误判为 WATCH_BREAKOUT。
 - **VCP 统一引擎**: `StrategyEngine.evaluate_at()` 不再在杯柄未命中时提前返回，统一运行 VCP 分析。移除 `engine.py` 中的重复 VCP 逻辑。
 - **历史回测统一引擎**: `backtester.py` 使用 `CupHandleStrategyEngine` + 逐日大盘数据切片，防止未来数据泄漏。
-- **数据源链顺序**: `_fetch_with_retry` 按 config 顺序迭代（baidu→sina→tencent），busy→跳过不标记为失败，主源用 `retry_attempts` 备源用 `fallback_attempts`。全部 busy→requeue，全部 fail→None。`FetchResult.source_errors` 保留各源失败详情。
+- **传统数据源链顺序**: `_fetch_with_retry` 按 config 顺序迭代（默认 tencent→sina(AkShare)→baidu），busy→跳过不标记为失败，主源用 `retry_attempts` 备源用 `fallback_attempts`。全部 busy→requeue，全部 fail→None。`FetchResult.source_errors` 保留各源失败详情。
 - **历史回测真实止损**: `BacktestResult` 保存策略实际 `stop_loss`/`entry_zone`/`pattern_kind`，`_calc_forward` 使用真实止损而非 `breakout_price*0.95`。`min_score` 参数恢复生效。
 - **VCP 身份模型**: `CupHandleResult.pattern_kind`（cup_handle/vcp），序列化含 `patternKind`，去重按 patternKind 分支避免 VCP 与杯柄碰撞。
 - **最近阻力**: `_find_real_target()` 用 swing high 确认找最近上方阻力，不再用最远高点冒充。
@@ -292,7 +305,7 @@ npm --prefix web run preview
 
 ### Gotchas（2026-06-26 yfinance 剔除）
 
-- **yfinance 已从生产日线源剔除**: 根因是 yfinance 最新日 OHLC 可能与 sina/tencent 明显不一致，曾污染 `daily_ohlc`。生产源链、锁、默认配置、前端配置和依赖均只保留 `baidu`、`sina`、`tencent`。
+- **yfinance 已剔除**: 根因是 yfinance 最新日 OHLC 可能与可信源明显不一致，曾污染 `daily_ohlc`。正式 TickFlow 模式和传统三源备用模式均不得包含 yfinance。
 - **显式 yfinance 配置应失败**: `_daily_fetch_fn("yfinance")` 必须抛 `Unknown daily data source`，不要为兼容旧配置重新注册 yfinance。
 - **历史污染修复**: `tools/data_repair/repair_invalid_ohlc.py --refetch-yfinance-sourced --apply` 用三源重新拉取 `task_stocks` 中曾由 yfinance 成功写入的股票，并替换本地 `daily_ohlc`。
 - **任务恢复不再限定错误类型**: `get_interrupted_task()` 匹配所有 `finished_at IS NULL` 的 failed/cancelled 任务。`mark_dead_tasks_as_failed()` 额外重置崩溃任务的 fetching 股票。代码 bug 导致的失败也可自动恢复。
@@ -332,7 +345,7 @@ npm --prefix web run preview
 ### Gotchas（2026-06-11 策略2 验收修复）
 
 - **全源失败不使用缓存**: 三数据源全部在线失败时，`fetch_with_retry()` 直接返回 `data=None`，股票标记 `failed / ALL_DATA_SOURCES_FAILED`。不使用本地缓存继续扫描。在线拉取成功时仍可与数据库历史合并并持久化。
-- **三源收敛**: 生产数据源为 `baidu / sina / tencent`（可通过 `config.yaml` 的 `data.daily_sources` 配置，但不得包含 yfinance）。`mootdx_source.py` 和 yfinance 生产源均已删除。
+- **模式隔离**: TickFlow 是正式模式；`tencent / sina(AkShare) / baidu` 仅在人工选择 `legacy_multi_source` 后使用。`mootdx_source.py` 和 yfinance 生产源均已删除。
 - **跨策略执行隔离**: `_require_task_strategy(task_id, expected)` 统一校验。策略2 task_id 进入策略1 retry/re-evaluate/candidates 返回 `TASK_STRATEGY_MISMATCH` (400)。策略1 task_id 进入策略2 同理。
 - **历史任务上下文**: URL `?task=` 参数是历史页面唯一任务上下文。`routeTaskId` / `isHistoricalMode` 两种互斥模式。`watch(route.query.task)` 支持 A→B→A→none 切换。历史任务策略类型从任务 API 返回，不依赖当前运行状态。
 - **viewContext 竞态防护**: `beginViewContext()` 每次导航创建新 context。所有 async 函数在 `await` 后用 `isCurrentViewContext(context)` 校验防止 stale response 覆盖新任务。

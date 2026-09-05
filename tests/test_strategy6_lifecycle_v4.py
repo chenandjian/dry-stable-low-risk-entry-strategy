@@ -4,7 +4,13 @@ from types import SimpleNamespace
 from strategy6.scanner import _strategy6_event_key
 
 
-def _update(code, evaluation_date, candidate_type="KEY_CANDIDATE", event_key="start-a|pattern-a"):
+def _update(
+    code,
+    evaluation_date,
+    candidate_type="KEY_CANDIDATE",
+    event_key="start-a|pattern-a",
+    decision_profile="formal_original",
+):
     return db.update_strategy6_lifecycle(
         code=code,
         evaluation_date=evaluation_date,
@@ -15,7 +21,28 @@ def _update(code, evaluation_date, candidate_type="KEY_CANDIDATE", event_key="st
         max_watch_days=10,
         expired_cooldown_days=5,
         failed_cooldown_days=10,
+        decision_profile=decision_profile,
     )
+
+
+def test_lifecycle_resets_when_decision_profile_changes(tmp_path):
+    db.init_db(str(tmp_path / "profile-reset.db"))
+    _update(
+        "000001",
+        "2026-07-01",
+        decision_profile="research_quality_v2",
+    )
+
+    formal = _update(
+        "000001",
+        "2026-07-15",
+        decision_profile="formal_original",
+    )
+
+    assert formal["decision_profile"] == "formal_original"
+    assert formal["first_seen_date"] == "2026-07-15"
+    assert formal["days_in_pool"] == 0
+    assert formal["blocked"] is False
 
 
 def test_candidate_expires_after_ten_trading_days_and_enters_cooldown(tmp_path):
@@ -57,6 +84,56 @@ def test_active_candidate_failure_enters_ten_day_cooldown(tmp_path):
     assert failed["blocked"] is True
     assert failed["exit_reason"] == "SUPPORT_FAILED"
     assert failed["cooldown_until_date"] == "2026-07-16"
+
+
+def test_no_trade_data_status_does_not_poison_active_candidate_lifecycle(tmp_path):
+    db.init_db(str(tmp_path / "no-trade-lifecycle.db"))
+    _update("000001", "2026-07-01")
+
+    unavailable = db.update_strategy6_lifecycle(
+        code="000001", evaluation_date="2026-07-02", candidate_type="REJECTED",
+        lifecycle_status="FAILED", event_key="start-a|pattern-a",
+        reject_reasons=["LATEST_TRADE_SUSPENDED"], max_watch_days=10,
+        expired_cooldown_days=5, failed_cooldown_days=10,
+    )
+
+    assert unavailable["blocked"] is True
+    assert unavailable["lifecycle_status"] == "READY"
+    assert unavailable["last_seen_date"] == "2026-07-01"
+    assert unavailable["exit_reason"] == ""
+    assert unavailable["cooldown_until_date"] == ""
+    stored = db.get_strategy6_lifecycle("000001")
+    assert stored["lifecycle_status"] == "READY"
+    assert stored["last_seen_date"] == "2026-07-01"
+
+
+def test_valid_candidate_recovers_immediately_from_legacy_no_trade_cooldown(tmp_path):
+    db.init_db(str(tmp_path / "legacy-no-trade-cooldown.db"))
+    _update("000001", "2026-07-01")
+    db.update_strategy6_lifecycle(
+        code="000001", evaluation_date="2026-07-02", candidate_type="REJECTED",
+        lifecycle_status="FAILED", event_key="start-a|pattern-a",
+        reject_reasons=["LATEST_TRADE_SUSPENDED"], max_watch_days=10,
+        expired_cooldown_days=5, failed_cooldown_days=10,
+    )
+    # Simulate a lifecycle row written by the old implementation.
+    conn = db.get_conn()
+    conn.execute(
+        """UPDATE strategy6_candidate_lifecycle
+           SET lifecycle_status='FAILED', exit_date='2026-07-02',
+               exit_reason='LATEST_TRADE_SUSPENDED', cooldown_until_date='2026-07-16'
+           WHERE code='000001'"""
+    )
+    conn.commit()
+
+    recovered = _update("000001", "2026-07-03")
+
+    assert recovered["blocked"] is False
+    assert recovered["lifecycle_status"] == "READY"
+    assert recovered["first_seen_date"] == "2026-07-01"
+    assert recovered["exit_reason"] == ""
+    assert recovered["cooldown_until_date"] == ""
+    assert recovered["reentry_count"] == 0
 
 
 def test_same_pattern_can_reenter_after_cooldown_when_support_recovers(tmp_path):

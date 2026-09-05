@@ -7,7 +7,12 @@ import os
 from pathlib import Path
 
 from scanner import db
-from strategy6.backtest.index_history import ensure_index_history, load_index_history
+from scanner.config_io import load_yaml_config
+from strategy6.backtest.index_history import (
+    INDEX_STORAGE_ALIASES,
+    ensure_index_history,
+    load_index_history,
+)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -16,6 +21,9 @@ def build_parser() -> argparse.ArgumentParser:
     for command in (
         "audit-data", "fetch-index", "baseline", "experiments", "optimize",
         "brooks-optimize", "brooks-validate",
+        "selection-optimize",
+        "entry-quality-optimize",
+        "tail-regime-full",
         "comprehensive-plan", "comprehensive-run", "comprehensive-status",
         "comprehensive-report",
     ):
@@ -34,7 +42,8 @@ def build_parser() -> argparse.ArgumentParser:
             "--evaluation-step",
             type=int,
             default=(
-                20 if command == "brooks-optimize"
+                1 if command == "tail-regime-full"
+                else 20 if command == "brooks-optimize"
                 else 10 if command == "brooks-validate"
                 else 5
             ),
@@ -56,13 +65,13 @@ def audit_database(path: str) -> dict:
     row = conn.execute(
         "SELECT COUNT(*), COUNT(DISTINCT code), MIN(date), MAX(date) FROM daily_ohlc"
     ).fetchone()
-    index = {
-        symbol: db.get_market_index_coverage(stored)
-        for symbol, stored in {
-            "sh000001": "sh000001", "sz399001": "sz399001",
-            "sz399006": "sz399006", "hs300": "sh000300",
-        }.items()
-    }
+    index = {}
+    for logical_symbol, aliases in INDEX_STORAGE_ALIASES.items():
+        stored_symbol, coverage = max(
+            ((alias, db.get_market_index_coverage(alias)) for alias in aliases),
+            key=lambda item: item[1]["rows"],
+        )
+        index[logical_symbol] = {**coverage, "stored_symbol": stored_symbol}
     return {
         "database": str(Path(path).resolve()),
         "stocks": stock,
@@ -88,11 +97,9 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps(campaign_status(args.campaign_id), ensure_ascii=False, indent=2, default=str))
         return 0
     if args.command == "comprehensive-report":
-        import yaml
         from strategy6.backtest.comprehensive_report import write_comprehensive_report
         from strategy6.validation import resolve_strategy6_config
-        with open(args.config, "r", encoding="utf-8") as handle:
-            root_config = yaml.safe_load(handle) or {}
+        root_config = load_yaml_config(args.config)
         production_config = resolve_strategy6_config({"strategy6": root_config.get("strategy6") or {}})
         result = write_comprehensive_report(args.campaign_id, args.output, production_config)
         print(json.dumps(result, ensure_ascii=False, indent=2, default=str))
@@ -116,6 +123,9 @@ def main(argv: list[str] | None = None) -> int:
     if args.command in {"comprehensive-plan", "comprehensive-run"}:
         from strategy6.backtest.comprehensive_runner import run_comprehensive_cli
         return run_comprehensive_cli(args, coverage)
+    if args.command == "tail-regime-full":
+        from strategy6.backtest.tail_regime_runner import run_tail_regime_full_cli
+        return run_tail_regime_full_cli(args, coverage)
     from strategy6.backtest.runner import run_cli_research
     return run_cli_research(args, coverage)
 

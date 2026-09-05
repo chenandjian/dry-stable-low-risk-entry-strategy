@@ -1,3 +1,5 @@
+import pytest
+
 from strategy6.backtest.config import resolve_backtest_config
 from strategy6.backtest.stress import (
     build_stress_scenarios,
@@ -5,6 +7,13 @@ from strategy6.backtest.stress import (
     replay_stress_scenarios,
 )
 from strategy6.backtest.models import BacktestSignal
+
+
+def test_backtest_config_rejects_unknown_signal_selection_and_entry_modes():
+    with pytest.raises(ValueError, match="signal_selection_mode"):
+        resolve_backtest_config({"signal_selection_mode": "UNKNOWN"})
+    with pytest.raises(ValueError, match="entry_mode"):
+        resolve_backtest_config({"execution": {"entry_mode": "UNKNOWN"}})
 
 
 def test_stress_scenarios_are_explicit_and_do_not_mutate_base_config():
@@ -17,6 +26,20 @@ def test_stress_scenarios_are_explicit_and_do_not_mutate_base_config():
     delay = next(item for item in scenarios if item["name"] == "ONE_DAY_DELAY")
     assert delay["config"]["execution"]["entry_delay_days"] == 1
     assert base["costs"]["buy_slippage_bps"] == original_buy_slippage
+
+
+def test_stress_scenarios_are_monotonically_stricter_than_custom_base():
+    base = resolve_backtest_config({
+        "costs": {"buy_slippage_bps": 40, "sell_slippage_bps": 45},
+        "execution": {"fill_rate_multiplier": 0.5, "entry_delay_days": 2},
+    })
+
+    scenarios = {item["name"]: item["config"] for item in build_stress_scenarios(base)}
+
+    assert scenarios["HIGH_COST"]["costs"]["buy_slippage_bps"] > 40
+    assert scenarios["HIGH_COST"]["costs"]["sell_slippage_bps"] > 45
+    assert scenarios["LOW_FILL"]["execution"]["fill_rate_multiplier"] < 0.5
+    assert scenarios["ONE_DAY_DELAY"]["execution"]["entry_delay_days"] > 2
 
 
 def test_stress_replay_returns_metrics_for_executable_scenarios():
@@ -38,6 +61,7 @@ def test_stress_replay_returns_metrics_for_executable_scenarios():
     assert set(result) >= {"BASE", "HIGH_COST", "LOW_FILL", "ONE_DAY_DELAY"}
     assert result["BASE"]["orders"] == 1
     assert result["HIGH_COST"]["metrics"]["trades"] == 1
+    assert result["HIGH_COST"]["trades"][0]["exit_date"] == "2025-01-06"
 
 
 def test_frozen_replays_do_not_let_brooks_watch_consume_later_ready_setup():
@@ -86,3 +110,40 @@ def test_frozen_replays_do_not_let_brooks_watch_consume_later_ready_setup():
     assert replay["trades"][0]["signal_date"] == "2025-01-03"
     assert stress["BASE"]["orders"] == 1
     assert stress["BASE"]["metrics"]["trades"] == 1
+
+
+def test_frozen_replay_first_event_mode_deduplicates_mutable_setups_in_one_start_cycle():
+    snapshots = [
+        {
+            "code": "000001", "start_date": "2025-01-01", "decision_profile": "formal_original",
+            "entry_archetype": "SUPPORT_PULLBACK", "tail_path": "BOX",
+            "buy_zone_low": 9.8, "buy_zone_high": 10.2, "suggested_limit_price": 10.0,
+            "stop_loss_price": 9.5, "objective_target_2": 11.5,
+        },
+        {
+            "code": "000001", "start_date": "2025-01-01", "decision_profile": "formal_original",
+            "entry_archetype": "SUPPORT_PULLBACK", "tail_path": "BOX",
+            "buy_zone_low": 9.8, "buy_zone_high": 10.2, "suggested_limit_price": 10.0,
+            "stop_loss_price": 9.5, "objective_target_2": 11.5,
+        },
+    ]
+    signals = [
+        BacktestSignal(
+            parameter_set_id="p", code="000001", name="样本",
+            evaluation_date=f"2025-01-0{index + 2}", setup_id=f"setup-{index}",
+            tail_path="BOX", candidate_type="KEY_CANDIDATE", snapshot=snapshot,
+        )
+        for index, snapshot in enumerate(snapshots, start=1)
+    ]
+    rows = [
+        {"date": f"2025-01-0{day}", "open": 10, "high": 11.6 if day == 7 else 10.2,
+         "low": 9.8, "close": 10, "volume": 1000}
+        for day in range(2, 8)
+    ]
+    config = resolve_backtest_config({"signal_selection_mode": "FIRST_EVENT_PER_START"})
+
+    replay = replay_frozen_signals(
+        signals, load_rows=lambda code: rows, market_dates=[row["date"] for row in rows], config=config,
+    )
+
+    assert replay["orders"] == 1

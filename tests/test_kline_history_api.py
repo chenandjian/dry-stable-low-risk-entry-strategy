@@ -1,11 +1,15 @@
+import asyncio
 from datetime import datetime
 import json
+import threading
 
+import pytest
 from fastapi.testclient import TestClient
 
 import server
 from scanner import db
 from scanner.daily_data_service import FetchResult
+from tickflow_data.web_task import TickFlowTaskConflict
 
 
 def _row(day: str, close: float = 10.0) -> dict:
@@ -404,3 +408,321 @@ def test_kline_health_bulk_refresh_only_refetches_items_that_need_it(monkeypatch
     assert body["skipped_count"] == 1
     assert refreshed_codes == ["000003", "000005"]
     assert {item["code"] for item in body["succeeded"]} == {"000003", "000005"}
+
+
+class _FakeTickFlowFullRefresh:
+    def __init__(self, *, running: bool = False, raises_conflict: bool = False):
+        self.started = []
+        self.raises_conflict = raises_conflict
+        self.state = {
+            "task_id": "tickflow-full-20260721-120000",
+            "running": running,
+            "status": "running" if running else "idle",
+            "total": 0,
+            "processed": 0,
+            "succeeded": 0,
+            "failed": 0,
+            "parameters": {
+                "history_days": 1100,
+                "adjustment": "forward_additive",
+                "chunk_size": 100,
+                "batch_size": 100,
+                "max_workers": 5,
+            },
+        }
+
+    def is_running(self):
+        return self.state["running"]
+
+    def status(self):
+        return dict(self.state)
+
+    def start(self, *, database_path, stocks, access_mode=None, api_key=None):
+        if self.raises_conflict:
+            raise TickFlowTaskConflict("already running")
+        self.started.append({
+            "database_path": str(database_path),
+            "stocks": stocks,
+            "access_mode": access_mode,
+            "api_key": api_key,
+        })
+        self.state.update({
+            "running": True,
+            "status": "running",
+            "total": len(stocks),
+        })
+        return self.status()
+
+
+def test_tickflow_full_refresh_api_starts_fixed_full_market_task(monkeypatch, tmp_path):
+    db_path = tmp_path / "cuphandle.db"
+    db.init_db(str(db_path))
+    db.save_stock_pool([
+        {"code": "000001", "name": "平安银行", "market": "SZ"},
+        {"code": "600000", "name": "浦发银行", "market": "SH"},
+    ])
+    manager = _FakeTickFlowFullRefresh()
+    monkeypatch.setattr(server, "load_config", lambda path="config.yaml": {"data": {
+        "database_path": str(db_path),
+        "tickflow_access_mode": "authenticated",
+        "tickflow_api_key": "refresh-api-secret",
+    }})
+    monkeypatch.setattr(server, "_tickflow_full_refresh", manager, raising=False)
+    monkeypatch.setattr(
+        server,
+        "get_a_stock_pool_result",
+        lambda config: {
+            "stocks": [
+                {"code": "000001", "name": "平安银行", "market": "SZ"},
+                {"code": "600000", "name": "浦发银行", "market": "SH"},
+            ],
+            "source": "akshare",
+            "error": None,
+        },
+    )
+
+    response = TestClient(server.app).post("/api/tickflow/full-refresh")
+
+    assert response.status_code == 202
+    body = response.json()
+    assert body["status"] == "running"
+    assert body["total"] == 2
+    assert body["parameters"]["history_days"] == 1100
+    assert body["parameters"]["adjustment"] == "forward_additive"
+    assert body["parameters"]["chunk_size"] == 100
+    assert manager.started == [{
+        "database_path": str(db_path),
+        "stocks": [
+            {"code": "000001", "name": "平安银行", "market": "SZ"},
+            {"code": "600000", "name": "浦发银行", "market": "SH"},
+        ],
+        "access_mode": "authenticated",
+        "api_key": "refresh-api-secret",
+    }]
+
+
+def test_tickflow_full_refresh_status_api_returns_current_progress(monkeypatch):
+    manager = _FakeTickFlowFullRefresh(running=True)
+    manager.state.update({"total": 5000, "processed": 230, "succeeded": 228, "failed": 2})
+    monkeypatch.setattr(server, "_tickflow_full_refresh", manager, raising=False)
+
+    response = TestClient(server.app).get("/api/tickflow/full-refresh/status")
+
+    assert response.status_code == 200
+    assert response.json()["processed"] == 230
+    assert response.json()["failed"] == 2
+
+
+def test_tickflow_full_refresh_rejects_empty_stock_pool(monkeypatch, tmp_path):
+    db_path = tmp_path / "cuphandle.db"
+    db.init_db(str(db_path))
+    manager = _FakeTickFlowFullRefresh()
+    monkeypatch.setattr(server, "load_config", lambda path="config.yaml": {"data": {"database_path": str(db_path)}})
+    monkeypatch.setattr(server, "_tickflow_full_refresh", manager, raising=False)
+    monkeypatch.setattr(
+        server,
+        "get_a_stock_pool_result",
+        lambda config: {"stocks": [], "source": "none", "error": "unavailable"},
+    )
+
+    response = TestClient(server.app).post("/api/tickflow/full-refresh")
+
+    assert response.status_code == 409
+    assert response.json()["error"] == "EMPTY_STOCK_POOL"
+    assert manager.started == []
+
+
+def test_tickflow_refresh_and_scan_backtest_are_mutually_exclusive(monkeypatch):
+    manager = _FakeTickFlowFullRefresh(running=True)
+    monkeypatch.setattr(server, "_tickflow_full_refresh", manager, raising=False)
+
+    scan_conflict = server._scan_conflict_response()
+    backtest_conflict = server._backtest_conflict_response()
+
+    assert scan_conflict.status_code == 409
+    assert json.loads(scan_conflict.body)["error"] == "TICKFLOW_REFRESH_RUNNING"
+    assert backtest_conflict.status_code == 409
+    assert json.loads(backtest_conflict.body)["error"] == "TICKFLOW_REFRESH_RUNNING"
+
+
+def test_tickflow_freshness_api_returns_read_only_probe(monkeypatch, tmp_path):
+    db_path = tmp_path / "cuphandle.db"
+    db.init_db(str(db_path))
+    calls = []
+    monkeypatch.setattr(
+        server,
+        "_ensure_db_initialized_from_config",
+        lambda: {"data": {
+            "database_path": str(db_path),
+            "tickflow_access_mode": "authenticated",
+            "tickflow_api_key": "freshness-api-secret",
+        }},
+    )
+    monkeypatch.setattr(
+        server,
+        "_now",
+        lambda: datetime(2026, 7, 23, 16, 0, 0),
+    )
+
+    def fake_probe(code, *, target_trade_date, access_mode, api_key):
+        calls.append((code, target_trade_date, access_mode, api_key))
+        return {
+            "checked_at": "2026-07-23T16:00:01",
+            "target_trade_date": target_trade_date,
+            "overall_status": "FRESH",
+            "stock": {"code": code, "status": "FRESH"},
+            "indexes": [{"code": "sh000001", "status": "FRESH"}],
+        }
+
+    monkeypatch.setattr(server, "check_tickflow_freshness", fake_probe, raising=False)
+
+    response = TestClient(server.app).post(
+        "/api/tickflow/freshness-check",
+        json={"stock_code": "000655"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["overall_status"] == "FRESH"
+    assert calls == [(
+        "000655",
+        "2026-07-23",
+        "authenticated",
+        "freshness-api-secret",
+    )]
+
+
+@pytest.mark.parametrize("stock_code", ["", "12345", "1234567", "ABC655"])
+def test_tickflow_freshness_api_rejects_invalid_stock_code(monkeypatch, stock_code):
+    monkeypatch.setattr(
+        server,
+        "check_tickflow_freshness",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("probe called")),
+        raising=False,
+    )
+
+    response = TestClient(server.app).post(
+        "/api/tickflow/freshness-check",
+        json={"stock_code": stock_code},
+    )
+
+    assert response.status_code == 400
+    assert response.json()["error"] == "INVALID_STOCK_CODE"
+
+
+def test_tickflow_freshness_api_returns_structured_gateway_error(monkeypatch, tmp_path):
+    db_path = tmp_path / "cuphandle.db"
+    db.init_db(str(db_path))
+    monkeypatch.setattr(
+        server,
+        "_ensure_db_initialized_from_config",
+        lambda: {"data": {"database_path": str(db_path)}},
+    )
+    monkeypatch.setattr(
+        server,
+        "check_tickflow_freshness",
+        lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("SDK unavailable")),
+        raising=False,
+    )
+
+    response = TestClient(server.app).post(
+        "/api/tickflow/freshness-check",
+        json={"stock_code": "000655"},
+    )
+
+    assert response.status_code == 502
+    assert response.json()["error"] == "TICKFLOW_FRESHNESS_CHECK_FAILED"
+    assert "SDK unavailable" in response.json()["message"]
+
+
+def test_kline_health_ignores_failed_attempts_for_an_old_target_date(monkeypatch, tmp_path):
+    db_path = tmp_path / "cuphandle.db"
+    db.init_db(str(db_path))
+    db.save_stock_pool([{"code": "000001", "name": "正常股份", "market": "SZ"}])
+    db.replace_ohlc_with_metadata(
+        "000001",
+        [_row("2026-06-16", 11)],
+        source="tickflow",
+        fetched_at="2026-06-16 15:12:00",
+    )
+    db.create_scan_task("old-failed-task", "2026-06-15 15:20:00", total_stocks=1)
+    db.save_task_stocks(
+        "old-failed-task",
+        [{"code": "000001", "name": "正常股份", "market": "SZ"}],
+    )
+    db.update_task_stock(
+        "old-failed-task",
+        "000001",
+        status="failed",
+        status_reason="OLD_FETCH_FAILED",
+        kline_fetched_at="2026-06-15 15:12:00",
+        kline_target_trade_date="2026-06-15",
+    )
+    monkeypatch.setattr(
+        server,
+        "load_config",
+        lambda path="config.yaml": {"data": {"database_path": str(db_path)}},
+    )
+    monkeypatch.setattr(server, "_now", lambda: datetime(2026, 6, 16, 15, 20, 0))
+
+    response = TestClient(server.app).get("/api/kline-health", params={"status": "all"})
+
+    assert response.status_code == 200
+    item = response.json()["items"][0]
+    assert item["health_status"] == "fresh"
+    assert item["needs_refetch"] is False
+
+
+def test_kline_health_does_not_use_stale_metadata_after_legacy_replacement(monkeypatch, tmp_path):
+    db_path = tmp_path / "cuphandle.db"
+    db.init_db(str(db_path))
+    db.save_stock_pool([{"code": "000001", "name": "正常股份", "market": "SZ"}])
+    db.replace_ohlc_with_metadata(
+        "000001",
+        [_row("2026-06-15", 10)],
+        source="tickflow",
+        fetched_at="2026-06-15 15:12:00",
+    )
+    db.save_ohlc("000001", [_row("2026-06-15", 10), _row("2026-06-16", 11)])
+    db.create_scan_task("current-task", "2026-06-16 15:20:00", total_stocks=1)
+    db.save_task_stocks(
+        "current-task",
+        [{"code": "000001", "name": "正常股份", "market": "SZ"}],
+    )
+    db.update_task_stock(
+        "current-task",
+        "000001",
+        status="scanned",
+        kline_latest_date="2026-06-16",
+        kline_fetched_at="2026-06-16 15:12:00",
+        kline_target_trade_date="2026-06-16",
+    )
+    monkeypatch.setattr(
+        server,
+        "load_config",
+        lambda path="config.yaml": {"data": {"database_path": str(db_path)}},
+    )
+    monkeypatch.setattr(server, "_now", lambda: datetime(2026, 6, 16, 15, 20, 0))
+
+    response = TestClient(server.app).get("/api/kline-health", params={"status": "all"})
+
+    assert response.status_code == 200
+    item = response.json()["items"][0]
+    assert item["latest_kline_date"] == "2026-06-16"
+    assert item["health_status"] == "fresh"
+
+
+def test_kline_health_build_runs_outside_the_async_event_loop(monkeypatch):
+    caller_thread = threading.get_ident()
+    worker_threads = []
+    monkeypatch.setattr(server, "_ensure_db_initialized_from_config", lambda: {})
+
+    def fake_build(_config):
+        worker_threads.append(threading.get_ident())
+        return ({"total": 0}, [])
+
+    monkeypatch.setattr(server, "_build_kline_health_items", fake_build)
+
+    result = asyncio.run(server.get_kline_health())
+
+    assert result["summary"]["total"] == 0
+    assert worker_threads and worker_threads[0] != caller_thread

@@ -150,7 +150,9 @@ def init_db(path: str = "data/cuphandle.db"):
         _ensure_strategy4_tables(conn)
         _ensure_strategy5_candidates_table(conn)
         _ensure_strategy6_candidates_table(conn)
+        _ensure_strategy6_trend_squeeze_screen_table(conn)
         _ensure_strategy6_market_snapshots_table(conn)
+        _ensure_market_breadth_daily_table(conn)
         _ensure_strategy6_lifecycle_table(conn)
         _ensure_strategy6_task_lifecycle_table(conn)
         _ensure_strategy6_backtest_tables(conn)
@@ -885,6 +887,14 @@ def _ensure_task_stocks_table(conn: sqlite3.Connection):
             conn.execute(f"ALTER TABLE task_stocks ADD COLUMN {name} {typ}")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_task_stocks_task_status ON task_stocks(task_id, status)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_task_stocks_task_idx ON task_stocks(task_id, idx)")
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_task_stocks_code_target_fetch "
+        "ON task_stocks(code, kline_target_trade_date, kline_fetched_at DESC, updated_at DESC)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_task_stocks_target_fetch "
+        "ON task_stocks(kline_target_trade_date, kline_fetched_at DESC, updated_at DESC)"
+    )
 
 
 
@@ -941,6 +951,9 @@ def save_ohlc(code: str, data: list[dict]):
     """Insert or replace OHLC data for a stock."""
     conn = get_conn()
     conn.execute("DELETE FROM daily_ohlc WHERE code = ?", (code,))
+    # This legacy writer has no source/fetch metadata; retaining an older row
+    # would make diagnostics report a stale date after the OHLC replacement.
+    conn.execute("DELETE FROM daily_ohlc_metadata WHERE code = ?", (code,))
     conn.executemany(
         """INSERT INTO daily_ohlc (code, date, open, high, low, close, volume, turnover)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
@@ -2667,6 +2680,7 @@ def _ensure_strategy6_candidates_table(conn: sqlite3.Connection):
             reentry_count INTEGER DEFAULT 0,
             strategy_version TEXT,
             config_hash TEXT,
+            decision_profile TEXT DEFAULT 'legacy_unspecified',
             price_basis TEXT,
             current_price_adj REAL,
             current_price_raw REAL,
@@ -2778,6 +2792,22 @@ def _ensure_strategy6_candidates_table(conn: sqlite3.Connection):
             risk_reward_score INTEGER DEFAULT 0,
             risk_control_score INTEGER DEFAULT 0,
             total_score REAL DEFAULT 0,
+            ttm_squeeze_status TEXT,
+            ttm_squeeze_on INTEGER,
+            ttm_squeeze_days INTEGER,
+            ttm_fired INTEGER,
+            ttm_momentum REAL,
+            ttm_previous_momentum REAL,
+            ttm_momentum_direction TEXT,
+            ttm_bb_upper REAL,
+            ttm_bb_lower REAL,
+            ttm_kc_upper REAL,
+            ttm_kc_lower REAL,
+            ttm_squeeze_score INTEGER,
+            ranking_score REAL,
+            ttm_reasons TEXT,
+            ttm_risk_tags TEXT,
+            ttm_model_version TEXT,
             pattern_score_component INTEGER DEFAULT 0,
             tail_score INTEGER DEFAULT 0,
             objective_rr_score INTEGER DEFAULT 0,
@@ -2819,12 +2849,20 @@ def _ensure_strategy6_candidates_table(conn: sqlite3.Connection):
         "reentry_count": "INTEGER DEFAULT 0",
         "strategy_version": "TEXT",
         "config_hash": "TEXT",
+        "decision_profile": "TEXT DEFAULT 'legacy_unspecified'",
         "price_basis": "TEXT",
         "current_price_adj": "REAL",
         "current_price_raw": "REAL",
         "current_price": "REAL DEFAULT 0",
         "current_close_position": "REAL DEFAULT 0",
         "atr14": "REAL",
+        "consecutive_down_days": "INTEGER",
+        "consecutive_down_low": "REAL",
+        "consecutive_down_structure_version": "TEXT",
+        "consecutive_down_structure_pass": "INTEGER",
+        "consecutive_down_no_new_streak_low": "INTEGER",
+        "consecutive_down_min_low_margin_pct": "REAL",
+        "consecutive_down_max_high_break_pct": "REAL",
         "relative_strength_20": "REAL DEFAULT 0",
         "current_volume_ratio_20": "REAL",
         "relative_strength_20_observed": "INTEGER DEFAULT 0",
@@ -2868,10 +2906,56 @@ def _ensure_strategy6_candidates_table(conn: sqlite3.Connection):
         "tail_score": "INTEGER DEFAULT 0",
         "objective_rr_score": "INTEGER DEFAULT 0",
         "relative_strength_risk_score": "INTEGER DEFAULT 0",
+        "ttm_squeeze_status": "TEXT",
+        "ttm_squeeze_on": "INTEGER",
+        "ttm_squeeze_days": "INTEGER",
+        "ttm_fired": "INTEGER",
+        "ttm_momentum": "REAL",
+        "ttm_previous_momentum": "REAL",
+        "ttm_momentum_direction": "TEXT",
+        "ttm_bb_upper": "REAL",
+        "ttm_bb_lower": "REAL",
+        "ttm_kc_upper": "REAL",
+        "ttm_kc_lower": "REAL",
+        "ttm_squeeze_score": "INTEGER",
+        "ranking_score": "REAL",
+        "ttm_reasons": "TEXT",
+        "ttm_risk_tags": "TEXT",
+        "ttm_model_version": "TEXT",
+        "strong_trend_squeeze_pass": "INTEGER",
+        "strong_trend_squeeze_status": "TEXT",
+        "trend_close": "REAL",
+        "trend_low_250": "REAL",
+        "trend_high_250": "REAL",
+        "trend_close_to_low_ratio": "REAL",
+        "trend_close_to_high_ratio": "REAL",
+        "trend_ema150": "REAL",
+        "trend_ema200": "REAL",
+        "trend_squeeze_on": "INTEGER",
+        "trend_bb_upper": "REAL",
+        "trend_bb_lower": "REAL",
+        "trend_kc_upper": "REAL",
+        "trend_kc_lower": "REAL",
+        "strong_trend_squeeze_reasons": "TEXT",
+        "strong_trend_squeeze_model_version": "TEXT",
         "tail_avg_volume": "REAL",
         "pre_tail_avg_volume_20": "REAL",
         "tail_volume_ratio": "REAL",
         "volume_slope_10": "REAL",
+        "tail_regime_enabled": "INTEGER DEFAULT 0",
+        "tail_regime_status": "TEXT",
+        "tail_regime_start_date": "TEXT",
+        "tail_regime_days": "INTEGER DEFAULT 0",
+        "tail_regime_delta_bic": "REAL",
+        "tail_regime_volume_ratio": "REAL",
+        "tail_regime_range_ratio": "REAL",
+        "tail_regime_body_ratio": "REAL",
+        "tail_regime_abs_return_ratio": "REAL",
+        "tail_regime_close_dispersion": "REAL",
+        "tail_regime_low_slope_atr": "REAL",
+        "tail_regime_model_version": "TEXT",
+        "tail_regime_reasons": "TEXT",
+        "tail_regime_risks": "TEXT",
         "risk_tags": "TEXT",
         "warn_tags": "TEXT",
         "reject_reasons": "TEXT",
@@ -3000,6 +3084,50 @@ def _ensure_strategy6_candidates_table(conn: sqlite3.Connection):
         "vcp_quality_reasons": "TEXT",
         "vcp_quality_warnings": "TEXT",
         "vcp_quality_model_version": "TEXT",
+        "entry_timing_version": "TEXT",
+        "entry_timing_state": "TEXT",
+        "entry_timing_executable": "INTEGER DEFAULT 0",
+        "entry_timing_evidence_count": "INTEGER DEFAULT 0",
+        "entry_timing_reasons": "TEXT",
+        "entry_timing_risk_tags": "TEXT",
+        "probability_rr_version": "TEXT",
+        "probability_rr_status": "TEXT",
+        "probability_rr_reliable": "INTEGER DEFAULT 0",
+        "probability_rr_sample_count": "INTEGER DEFAULT 0",
+        "probability_rr_lookback_days": "INTEGER DEFAULT 0",
+        "probability_rr_horizon_days": "INTEGER DEFAULT 0",
+        "probability_rr_risk_atr": "REAL",
+        "probability_rr_target_1_atr": "REAL",
+        "probability_rr_target_2_atr": "REAL",
+        "probability_rr_target_1_hit_probability": "REAL",
+        "probability_rr_target_2_hit_probability": "REAL",
+        "probability_adjusted_r": "REAL",
+        "probability_rr_reasons": "TEXT",
+        "body_support_pass": "INTEGER DEFAULT 0",
+        "body_support_type": "TEXT",
+        "body_support_floor_price": "REAL",
+        "body_support_zone_low": "REAL",
+        "body_support_zone_high": "REAL",
+        "body_support_pivot_count": "INTEGER DEFAULT 0",
+        "body_support_independent_touch_count": "INTEGER DEFAULT 0",
+        "body_support_body_pivot_slope": "REAL",
+        "body_support_floor_migration": "REAL",
+        "body_support_cluster_width": "REAL",
+        "body_support_body_hold_pass": "INTEGER DEFAULT 0",
+        "body_support_recovery_pass": "INTEGER DEFAULT 0",
+        "body_support_recovery_atr": "REAL",
+        "body_support_low_rejection": "INTEGER DEFAULT 0",
+        "body_support_failed_breakout": "INTEGER DEFAULT 0",
+        "body_support_rejection_ratio": "REAL",
+        "body_support_bear_follow_through_failure": "INTEGER DEFAULT 0",
+        "body_support_confluence": "INTEGER DEFAULT 0",
+        "body_support_volume_quality_pass": "INTEGER DEFAULT 0",
+        "body_support_score": "INTEGER DEFAULT 0",
+        "body_support_status": "TEXT",
+        "body_support_reasons": "TEXT",
+        "body_support_risks": "TEXT",
+        "body_support_model_version": "TEXT",
+        "latest_bar_patterns": "TEXT",
     }.items():
         _ensure_column(conn, "strategy6_candidates", column, col_type)
     conn.execute(
@@ -3046,6 +3174,66 @@ def _ensure_strategy6_market_snapshots_table(conn: sqlite3.Connection):
     _ensure_column(conn, "strategy6_market_snapshots", "data_status", "TEXT DEFAULT 'MISSING'")
 
 
+def _ensure_market_breadth_daily_table(conn: sqlite3.Connection):
+    """Cache research-only daily breadth reconstructed from local OHLC."""
+    conn.execute('''
+        CREATE TABLE IF NOT EXISTS market_breadth_daily (
+            trade_date TEXT PRIMARY KEY,
+            previous_trade_date TEXT NOT NULL,
+            up_count INTEGER NOT NULL,
+            down_count INTEGER NOT NULL,
+            flat_count INTEGER NOT NULL,
+            source_mode TEXT NOT NULL DEFAULT 'CURRENT_UNIVERSE_RECONSTRUCTION',
+            calculated_at TEXT NOT NULL DEFAULT (datetime('now'))
+        )
+    ''')
+    conn.execute('''
+        CREATE TABLE IF NOT EXISTS market_breadth_cache_state (
+            id INTEGER PRIMARY KEY CHECK (id=1),
+            source_revision TEXT NOT NULL,
+            updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+        )
+    ''')
+
+
+def _ensure_strategy6_trend_squeeze_screen_table(conn: sqlite3.Connection):
+    """Create the independent task-level Strategy6 trend/squeeze screen pool."""
+    conn.execute('''
+        CREATE TABLE IF NOT EXISTS strategy6_trend_squeeze_screen (
+            task_id TEXT NOT NULL,
+            code TEXT NOT NULL,
+            name TEXT,
+            evaluation_date TEXT,
+            trend_close REAL DEFAULT 0,
+            trend_low_250 REAL DEFAULT 0,
+            trend_high_250 REAL DEFAULT 0,
+            trend_close_to_low_ratio REAL DEFAULT 0,
+            trend_close_to_high_ratio REAL DEFAULT 0,
+            trend_ema150 REAL DEFAULT 0,
+            trend_ema200 REAL DEFAULT 0,
+            trend_squeeze_on INTEGER DEFAULT 0,
+            trend_bb_upper REAL,
+            trend_bb_lower REAL,
+            trend_kc_upper REAL,
+            trend_kc_lower REAL,
+            strong_trend_squeeze_status TEXT,
+            strong_trend_squeeze_model_version TEXT,
+            downstream_candidate_type TEXT,
+            downstream_classification TEXT,
+            downstream_total_score REAL DEFAULT 0,
+            downstream_reject_reasons TEXT,
+            strategy_version TEXT,
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            PRIMARY KEY (task_id, code),
+            FOREIGN KEY (task_id) REFERENCES scan_tasks(id)
+        )
+    ''')
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_strategy6_trend_squeeze_screen_task "
+        "ON strategy6_trend_squeeze_screen(task_id, code)"
+    )
+
+
 def _ensure_strategy6_lifecycle_table(conn: sqlite3.Connection):
     conn.execute('''
         CREATE TABLE IF NOT EXISTS strategy6_candidate_lifecycle (
@@ -3059,9 +3247,16 @@ def _ensure_strategy6_lifecycle_table(conn: sqlite3.Connection):
             cooldown_until_date TEXT,
             reentry_count INTEGER DEFAULT 0,
             last_event_key TEXT,
+            decision_profile TEXT DEFAULT 'legacy_unspecified',
             updated_at TEXT NOT NULL DEFAULT (datetime('now'))
         )
     ''')
+    _ensure_column(
+        conn,
+        "strategy6_candidate_lifecycle",
+        "decision_profile",
+        "TEXT DEFAULT 'legacy_unspecified'",
+    )
 
 
 def _ensure_strategy6_task_lifecycle_table(conn: sqlite3.Connection):
@@ -3082,6 +3277,7 @@ def _ensure_strategy6_task_lifecycle_table(conn: sqlite3.Connection):
             reentry_count INTEGER DEFAULT 0,
             blocked INTEGER DEFAULT 0,
             reject_reasons TEXT,
+            decision_profile TEXT DEFAULT 'legacy_unspecified',
             updated_at TEXT NOT NULL DEFAULT (datetime('now')),
             PRIMARY KEY (task_id, code),
             FOREIGN KEY (task_id) REFERENCES scan_tasks(id)
@@ -3090,6 +3286,12 @@ def _ensure_strategy6_task_lifecycle_table(conn: sqlite3.Connection):
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_strategy6_task_lifecycle_task "
         "ON strategy6_task_lifecycle(task_id, blocked, lifecycle_status)"
+    )
+    _ensure_column(
+        conn,
+        "strategy6_task_lifecycle",
+        "decision_profile",
+        "TEXT DEFAULT 'legacy_unspecified'",
     )
 
 
@@ -3985,8 +4187,11 @@ def upsert_strategy6_candidate(
     ]
     extra_columns = [
         "first_seen_date", "last_seen_date", "days_in_pool", "exit_date", "exit_reason", "cooldown_until_date", "reentry_count",
-        "strategy_version", "config_hash", "price_basis", "current_price_adj", "current_price_raw",
-        "atr14", "start_day_self_amount_percentile",
+        "strategy_version", "config_hash", "decision_profile", "price_basis", "current_price_adj", "current_price_raw",
+        "atr14", "consecutive_down_days", "consecutive_down_low", "consecutive_down_structure_version",
+        "consecutive_down_structure_pass", "consecutive_down_no_new_streak_low",
+        "consecutive_down_min_low_margin_pct",
+        "consecutive_down_max_high_break_pct", "start_day_self_amount_percentile",
         "phase_status", "consolidation_start_date", "tail_start_date", "signal_date",
         "start_age_days", "consolidation_days", "tail_days",
         "pattern_type", "pattern_score", "pattern_start_date", "pattern_end_date",
@@ -3998,6 +4203,11 @@ def upsert_strategy6_candidate(
         "buy_zone_valid_days", "suggested_limit_price", "execution_notes",
         "pattern_score_component", "tail_score", "objective_rr_score", "relative_strength_risk_score",
         "tail_avg_volume", "pre_tail_avg_volume_20", "tail_volume_ratio", "volume_slope_10",
+        "tail_regime_enabled", "tail_regime_status", "tail_regime_start_date",
+        "tail_regime_days", "tail_regime_delta_bic", "tail_regime_volume_ratio",
+        "tail_regime_range_ratio", "tail_regime_body_ratio", "tail_regime_abs_return_ratio",
+        "tail_regime_close_dispersion", "tail_regime_low_slope_atr",
+        "tail_regime_model_version", "tail_regime_reasons", "tail_regime_risks",
         "original_tail_pass", "original_tail_score", "box_tail_enabled", "box_tail_pass",
         "box_tail_score", "box_status", "tail_pass", "tail_path",
         "box_start_date", "box_end_date", "box_days", "box_high", "box_low", "box_width",
@@ -4040,6 +4250,37 @@ def upsert_strategy6_candidate(
         "vcp_quality_pivot_score", "vcp_quality_breakout_score",
         "vcp_quality_reasons", "vcp_quality_warnings",
         "vcp_quality_model_version",
+        "ttm_squeeze_status", "ttm_squeeze_on", "ttm_squeeze_days", "ttm_fired",
+        "ttm_momentum", "ttm_previous_momentum", "ttm_momentum_direction",
+        "ttm_bb_upper", "ttm_bb_lower", "ttm_kc_upper", "ttm_kc_lower",
+        "ttm_squeeze_score", "ranking_score", "ttm_reasons", "ttm_risk_tags",
+        "ttm_model_version",
+        "strong_trend_squeeze_pass", "strong_trend_squeeze_status",
+        "trend_close", "trend_low_250", "trend_high_250",
+        "trend_close_to_low_ratio", "trend_close_to_high_ratio",
+        "trend_ema150", "trend_ema200", "trend_squeeze_on",
+        "trend_bb_upper", "trend_bb_lower", "trend_kc_upper", "trend_kc_lower",
+        "strong_trend_squeeze_reasons", "strong_trend_squeeze_model_version",
+        "entry_timing_version", "entry_timing_state", "entry_timing_executable",
+        "entry_timing_evidence_count", "entry_timing_reasons", "entry_timing_risk_tags",
+        "probability_rr_version", "probability_rr_status", "probability_rr_reliable",
+        "probability_rr_sample_count", "probability_rr_lookback_days",
+        "probability_rr_horizon_days", "probability_rr_risk_atr",
+        "probability_rr_target_1_atr", "probability_rr_target_2_atr",
+        "probability_rr_target_1_hit_probability",
+        "probability_rr_target_2_hit_probability", "probability_adjusted_r",
+        "probability_rr_reasons",
+        "body_support_pass", "body_support_type", "body_support_floor_price",
+        "body_support_zone_low", "body_support_zone_high", "body_support_pivot_count",
+        "body_support_independent_touch_count", "body_support_recovery_atr",
+        "body_support_body_pivot_slope", "body_support_floor_migration",
+        "body_support_cluster_width", "body_support_body_hold_pass",
+        "body_support_recovery_pass", "body_support_failed_breakout",
+        "body_support_rejection_ratio", "body_support_bear_follow_through_failure",
+        "body_support_low_rejection", "body_support_confluence",
+        "body_support_volume_quality_pass", "body_support_score", "body_support_status",
+        "body_support_reasons", "body_support_risks", "body_support_model_version",
+        "latest_bar_patterns",
     ]
     extra_values = [
         "" if observation_only else d.get("first_seen_date", first_pool_date),
@@ -4051,10 +4292,26 @@ def upsert_strategy6_candidate(
         d.get("reentry_count", 0),
         d.get("strategy_version", ""),
         d.get("config_hash", ""),
+        d.get("decision_profile", "legacy_unspecified"),
         d.get("price_basis", "FORWARD_ADJUSTED"),
         d.get("current_price_adj", d.get("current_price")),
         None,
         d.get("atr14"),
+        d.get("consecutive_down_days"),
+        d.get("consecutive_down_low"),
+        d.get("consecutive_down_structure_version"),
+        (
+            None
+            if d.get("consecutive_down_structure_pass") is None
+            else 1 if d.get("consecutive_down_structure_pass") else 0
+        ),
+        (
+            None
+            if d.get("consecutive_down_no_new_streak_low") is None
+            else 1 if d.get("consecutive_down_no_new_streak_low") else 0
+        ),
+        d.get("consecutive_down_min_low_margin_pct"),
+        d.get("consecutive_down_max_high_break_pct"),
         d.get("start_day_self_amount_percentile", 0),
         d.get("phase_status", ""),
         d.get("consolidation_start_date", ""),
@@ -4096,6 +4353,20 @@ def upsert_strategy6_candidate(
         d.get("pre_tail_avg_volume_20"),
         d.get("tail_volume_ratio"),
         d.get("volume_slope_10"),
+        1 if d.get("tail_regime_enabled") else 0,
+        d.get("tail_regime_status"),
+        d.get("tail_regime_start_date"),
+        d.get("tail_regime_days", 0),
+        d.get("tail_regime_delta_bic"),
+        d.get("tail_regime_volume_ratio"),
+        d.get("tail_regime_range_ratio"),
+        d.get("tail_regime_body_ratio"),
+        d.get("tail_regime_abs_return_ratio"),
+        d.get("tail_regime_close_dispersion"),
+        d.get("tail_regime_low_slope_atr"),
+        d.get("tail_regime_model_version"),
+        _json_any(d.get("tail_regime_reasons", [])),
+        _json_any(d.get("tail_regime_risks", [])),
         1 if d.get("original_tail_pass") else 0,
         d.get("original_tail_score", 0),
         1 if d.get("box_tail_enabled") else 0,
@@ -4220,6 +4491,82 @@ def upsert_strategy6_candidate(
         _json_any(d.get("vcp_quality_reasons", [])),
         _json_any(d.get("vcp_quality_warnings", [])),
         d.get("vcp_quality_model_version"),
+        d.get("ttm_squeeze_status"),
+        None if d.get("ttm_squeeze_on") is None else 1 if d.get("ttm_squeeze_on") else 0,
+        d.get("ttm_squeeze_days"),
+        None if d.get("ttm_fired") is None else 1 if d.get("ttm_fired") else 0,
+        d.get("ttm_momentum"),
+        d.get("ttm_previous_momentum"),
+        d.get("ttm_momentum_direction"),
+        d.get("ttm_bb_upper"),
+        d.get("ttm_bb_lower"),
+        d.get("ttm_kc_upper"),
+        d.get("ttm_kc_lower"),
+        d.get("ttm_squeeze_score"),
+        d.get("ranking_score"),
+        _json_any(d.get("ttm_reasons", [])),
+        _json_any(d.get("ttm_risk_tags", [])),
+        d.get("ttm_model_version"),
+        None if d.get("strong_trend_squeeze_pass") is None else 1 if d.get("strong_trend_squeeze_pass") else 0,
+        d.get("strong_trend_squeeze_status"),
+        d.get("trend_close"),
+        d.get("trend_low_250"),
+        d.get("trend_high_250"),
+        d.get("trend_close_to_low_ratio"),
+        d.get("trend_close_to_high_ratio"),
+        d.get("trend_ema150"),
+        d.get("trend_ema200"),
+        None if d.get("trend_squeeze_on") is None else 1 if d.get("trend_squeeze_on") else 0,
+        d.get("trend_bb_upper"),
+        d.get("trend_bb_lower"),
+        d.get("trend_kc_upper"),
+        d.get("trend_kc_lower"),
+        _json_any(d.get("strong_trend_squeeze_reasons", [])),
+        d.get("strong_trend_squeeze_model_version"),
+        d.get("entry_timing_version"),
+        d.get("entry_timing_state"),
+        1 if d.get("entry_timing_executable") else 0,
+        d.get("entry_timing_evidence_count", 0),
+        _json_any(d.get("entry_timing_reasons", [])),
+        _json_any(d.get("entry_timing_risk_tags", [])),
+        d.get("probability_rr_version"),
+        d.get("probability_rr_status"),
+        1 if d.get("probability_rr_reliable") else 0,
+        d.get("probability_rr_sample_count", 0),
+        d.get("probability_rr_lookback_days", 0),
+        d.get("probability_rr_horizon_days", 0),
+        d.get("probability_rr_risk_atr"),
+        d.get("probability_rr_target_1_atr"),
+        d.get("probability_rr_target_2_atr"),
+        d.get("probability_rr_target_1_hit_probability"),
+        d.get("probability_rr_target_2_hit_probability"),
+        d.get("probability_adjusted_r"),
+        _json_any(d.get("probability_rr_reasons", [])),
+        1 if d.get("body_support_pass") else 0,
+        d.get("body_support_type", "NONE"),
+        d.get("body_support_floor_price"),
+        d.get("body_support_zone_low"),
+        d.get("body_support_zone_high"),
+        d.get("body_support_pivot_count", 0),
+        d.get("body_support_independent_touch_count", 0),
+        d.get("body_support_recovery_atr"),
+        d.get("body_support_body_pivot_slope"),
+        d.get("body_support_floor_migration"),
+        d.get("body_support_cluster_width"),
+        1 if d.get("body_support_body_hold_pass") else 0,
+        1 if d.get("body_support_recovery_pass") else 0,
+        1 if d.get("body_support_failed_breakout") else 0,
+        d.get("body_support_rejection_ratio"),
+        1 if d.get("body_support_bear_follow_through_failure") else 0,
+        1 if d.get("body_support_low_rejection") else 0,
+        1 if d.get("body_support_confluence") else 0,
+        1 if d.get("body_support_volume_quality_pass") else 0,
+        d.get("body_support_score", 0),
+        d.get("body_support_status", "BODY_SUPPORT_NONE"),
+        _json_any(d.get("body_support_reasons", [])),
+        _json_any(d.get("body_support_risks", [])),
+        d.get("body_support_model_version", ""),
+        _json_any(d.get("latest_bar_patterns", [])),
     ]
     columns.extend(extra_columns)
     values.extend(extra_values)
@@ -4259,7 +4606,8 @@ def get_strategy6_candidates(task_id: str = None) -> list[dict]:
         rows = conn.execute(
             "SELECT * FROM strategy6_candidates WHERE task_id=? "
             "ORDER BY CASE candidate_type WHEN 'READY_CANDIDATE' THEN 0 WHEN 'KEY_CANDIDATE' THEN 1 "
-            "WHEN 'WATCH_CANDIDATE' THEN 2 ELSE 3 END, total_score DESC, code ASC",
+            "WHEN 'WATCH_CANDIDATE' THEN 2 ELSE 3 END, "
+            "COALESCE(ranking_score, total_score) DESC, total_score DESC, code ASC",
             (task_id,),
         ).fetchall()
     else:
@@ -4272,7 +4620,9 @@ def get_strategy6_candidates(task_id: str = None) -> list[dict]:
             return []
         rows = conn.execute(
             "SELECT * FROM strategy6_candidates WHERE task_id=? "
-            "ORDER BY total_score DESC, code ASC",
+            "ORDER BY CASE candidate_type WHEN 'READY_CANDIDATE' THEN 0 WHEN 'KEY_CANDIDATE' THEN 1 "
+            "WHEN 'WATCH_CANDIDATE' THEN 2 ELSE 3 END, "
+            "COALESCE(ranking_score, total_score) DESC, total_score DESC, code ASC",
             (row[0],),
         ).fetchall()
     cols = [d[1] for d in conn.execute("PRAGMA table_info(strategy6_candidates)").fetchall()]
@@ -4437,6 +4787,143 @@ def get_strategy6_market_snapshot(task_id: str) -> dict:
     }
 
 
+def upsert_strategy6_trend_squeeze_screen(
+    task_id: str,
+    candidate: dict,
+    *,
+    _conn: sqlite3.Connection | None = None,
+    _commit: bool = True,
+) -> None:
+    """Persist one stock that passed the independent formal prefilter."""
+    if candidate.get("strong_trend_squeeze_pass") is not True:
+        raise ValueError("Strategy6 trend squeeze screen only accepts passed rows")
+    conn = _conn or get_conn()
+    if _commit:
+        _ensure_strategy6_trend_squeeze_screen_table(conn)
+    conn.execute(
+        """INSERT INTO strategy6_trend_squeeze_screen (
+               task_id, code, name, evaluation_date, trend_close, trend_low_250,
+               trend_high_250, trend_close_to_low_ratio, trend_close_to_high_ratio,
+               trend_ema150, trend_ema200, trend_squeeze_on, trend_bb_upper,
+               trend_bb_lower, trend_kc_upper, trend_kc_lower,
+               strong_trend_squeeze_status, strong_trend_squeeze_model_version,
+               downstream_candidate_type, downstream_classification,
+               downstream_total_score, downstream_reject_reasons, strategy_version,
+               created_at
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+           ON CONFLICT(task_id, code) DO UPDATE SET
+               name=excluded.name,
+               evaluation_date=excluded.evaluation_date,
+               trend_close=excluded.trend_close,
+               trend_low_250=excluded.trend_low_250,
+               trend_high_250=excluded.trend_high_250,
+               trend_close_to_low_ratio=excluded.trend_close_to_low_ratio,
+               trend_close_to_high_ratio=excluded.trend_close_to_high_ratio,
+               trend_ema150=excluded.trend_ema150,
+               trend_ema200=excluded.trend_ema200,
+               trend_squeeze_on=excluded.trend_squeeze_on,
+               trend_bb_upper=excluded.trend_bb_upper,
+               trend_bb_lower=excluded.trend_bb_lower,
+               trend_kc_upper=excluded.trend_kc_upper,
+               trend_kc_lower=excluded.trend_kc_lower,
+               strong_trend_squeeze_status=excluded.strong_trend_squeeze_status,
+               strong_trend_squeeze_model_version=excluded.strong_trend_squeeze_model_version,
+               downstream_candidate_type=excluded.downstream_candidate_type,
+               downstream_classification=excluded.downstream_classification,
+               downstream_total_score=excluded.downstream_total_score,
+               downstream_reject_reasons=excluded.downstream_reject_reasons,
+               strategy_version=excluded.strategy_version,
+               created_at=datetime('now')""",
+        (
+            task_id,
+            candidate["code"],
+            candidate.get("name", ""),
+            candidate.get("evaluation_date", ""),
+            float(candidate.get("trend_close") or 0.0),
+            float(candidate.get("trend_low_250") or 0.0),
+            float(candidate.get("trend_high_250") or 0.0),
+            float(candidate.get("trend_close_to_low_ratio") or 0.0),
+            float(candidate.get("trend_close_to_high_ratio") or 0.0),
+            float(candidate.get("trend_ema150") or 0.0),
+            float(candidate.get("trend_ema200") or 0.0),
+            1 if candidate.get("trend_squeeze_on") else 0,
+            candidate.get("trend_bb_upper"),
+            candidate.get("trend_bb_lower"),
+            candidate.get("trend_kc_upper"),
+            candidate.get("trend_kc_lower"),
+            candidate.get("strong_trend_squeeze_status", "PASSED"),
+            candidate.get("strong_trend_squeeze_model_version", ""),
+            candidate.get("candidate_type", "REJECTED"),
+            candidate.get("classification", "rejected"),
+            float(candidate.get("total_score") or 0.0),
+            _json_any(candidate.get("reject_reasons", [])),
+            candidate.get("strategy_version", ""),
+        ),
+    )
+    if _commit:
+        conn.commit()
+
+
+def get_strategy6_trend_squeeze_screen(task_id: str) -> list[dict]:
+    """Return every stock that passed the independent prefilter for one task."""
+    conn = get_conn()
+    _ensure_strategy6_trend_squeeze_screen_table(conn)
+    rows = conn.execute(
+        """SELECT task_id, code, name, evaluation_date, trend_close, trend_low_250,
+                  trend_high_250, trend_close_to_low_ratio, trend_close_to_high_ratio,
+                  trend_ema150, trend_ema200, trend_squeeze_on, trend_bb_upper,
+                  trend_bb_lower, trend_kc_upper, trend_kc_lower,
+                  strong_trend_squeeze_status, strong_trend_squeeze_model_version,
+                  downstream_candidate_type, downstream_classification,
+                  downstream_total_score, downstream_reject_reasons, strategy_version
+           FROM strategy6_trend_squeeze_screen
+           WHERE task_id=?
+           ORDER BY downstream_total_score DESC, code ASC""",
+        (task_id,),
+    ).fetchall()
+    columns = [
+        "task_id", "code", "name", "evaluation_date", "trend_close", "trend_low_250",
+        "trend_high_250", "trend_close_to_low_ratio", "trend_close_to_high_ratio",
+        "trend_ema150", "trend_ema200", "trend_squeeze_on", "trend_bb_upper",
+        "trend_bb_lower", "trend_kc_upper", "trend_kc_lower",
+        "strong_trend_squeeze_status", "strong_trend_squeeze_model_version",
+        "downstream_candidate_type", "downstream_classification",
+        "downstream_total_score", "downstream_reject_reasons", "strategy_version",
+    ]
+    result = []
+    for raw in rows:
+        item = dict(zip(columns, raw))
+        item["trend_squeeze_on"] = bool(item.get("trend_squeeze_on"))
+        try:
+            reasons = json.loads(item.get("downstream_reject_reasons") or "[]")
+        except (json.JSONDecodeError, TypeError):
+            reasons = []
+        item["downstream_reject_reasons"] = reasons if isinstance(reasons, list) else []
+        result.append(item)
+    return result
+
+
+def get_latest_strategy6_trend_squeeze_screen() -> tuple[str, list[dict]]:
+    """Return the newest completed Strategy6 task that has a persisted screen pool."""
+    conn = get_conn()
+    _ensure_strategy6_trend_squeeze_screen_table(conn)
+    row = conn.execute(
+        """SELECT t.id
+           FROM scan_tasks t
+           WHERE t.strategy_type='STRATEGY_6_STRONG_VCP_TAIL'
+             AND t.status='completed'
+             AND EXISTS (
+                 SELECT 1 FROM strategy6_trend_squeeze_screen s WHERE s.task_id=t.id
+             )
+           ORDER BY t.started_at DESC, t.id DESC
+           LIMIT 1"""
+    ).fetchone()
+    if not row:
+        return "", []
+    task_id = str(row[0])
+    return task_id, get_strategy6_trend_squeeze_screen(task_id)
+
+
 def get_strategy6_lifecycle(code: str) -> dict | None:
     conn = get_conn()
     _ensure_strategy6_lifecycle_table(conn)
@@ -4462,8 +4949,9 @@ def save_strategy6_task_lifecycle(
         """INSERT INTO strategy6_task_lifecycle (
                task_id, code, name, evaluation_date, candidate_type, lifecycle_status,
                first_seen_date, last_seen_date, days_in_pool, exit_date, exit_reason,
-               cooldown_until_date, reentry_count, blocked, reject_reasons, updated_at
-           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+               cooldown_until_date, reentry_count, blocked, reject_reasons,
+               decision_profile, updated_at
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
            ON CONFLICT(task_id, code) DO UPDATE SET
                name=excluded.name,
                evaluation_date=excluded.evaluation_date,
@@ -4478,6 +4966,7 @@ def save_strategy6_task_lifecycle(
                reentry_count=excluded.reentry_count,
                blocked=excluded.blocked,
                reject_reasons=excluded.reject_reasons,
+               decision_profile=excluded.decision_profile,
                updated_at=datetime('now')""",
         (
             task_id, code, name, evaluation_date, candidate_type,
@@ -4486,6 +4975,7 @@ def save_strategy6_task_lifecycle(
             lifecycle.get("exit_date", ""), lifecycle.get("exit_reason", ""),
             lifecycle.get("cooldown_until_date", ""), int(lifecycle.get("reentry_count") or 0),
             1 if lifecycle.get("blocked") else 0, _json_any(reject_reasons),
+            lifecycle.get("decision_profile", "legacy_unspecified"),
         ),
     )
     if _commit:
@@ -4498,7 +4988,8 @@ def get_strategy6_task_lifecycle(task_id: str) -> list[dict]:
     rows = conn.execute(
         """SELECT task_id, code, name, evaluation_date, candidate_type, lifecycle_status,
                   first_seen_date, last_seen_date, days_in_pool, exit_date, exit_reason,
-                  cooldown_until_date, reentry_count, blocked, reject_reasons
+                  cooldown_until_date, reentry_count, blocked, reject_reasons,
+                  decision_profile
            FROM strategy6_task_lifecycle WHERE task_id=?
            ORDER BY blocked DESC, lifecycle_status, code""",
         (task_id,),
@@ -4507,6 +4998,7 @@ def get_strategy6_task_lifecycle(task_id: str) -> list[dict]:
         "task_id", "code", "name", "evaluation_date", "candidate_type", "lifecycle_status",
         "first_seen_date", "last_seen_date", "days_in_pool", "exit_date", "exit_reason",
         "cooldown_until_date", "reentry_count", "blocked", "reject_reasons",
+        "decision_profile",
     ]
     result = []
     for row in rows:
@@ -4524,7 +5016,8 @@ def get_strategy6_task_lifecycle(task_id: str) -> list[dict]:
 def _get_strategy6_lifecycle_from_conn(conn: sqlite3.Connection, code: str) -> dict | None:
     row = conn.execute(
         """SELECT code, lifecycle_status, first_seen_date, last_seen_date, days_in_pool,
-                  exit_date, exit_reason, cooldown_until_date, reentry_count, last_event_key
+                  exit_date, exit_reason, cooldown_until_date, reentry_count,
+                  last_event_key, decision_profile
            FROM strategy6_candidate_lifecycle WHERE code=?""",
         (code,),
     ).fetchone()
@@ -4532,7 +5025,8 @@ def _get_strategy6_lifecycle_from_conn(conn: sqlite3.Connection, code: str) -> d
         return None
     columns = [
         "code", "lifecycle_status", "first_seen_date", "last_seen_date", "days_in_pool",
-        "exit_date", "exit_reason", "cooldown_until_date", "reentry_count", "last_event_key",
+        "exit_date", "exit_reason", "cooldown_until_date", "reentry_count",
+        "last_event_key", "decision_profile",
     ]
     return dict(zip(columns, row))
 
@@ -4548,9 +5042,11 @@ def update_strategy6_lifecycle(
     max_watch_days: int,
     expired_cooldown_days: int,
     failed_cooldown_days: int,
+    decision_profile: str = "formal_original",
     _conn: sqlite3.Connection | None = None,
     _commit: bool = True,
 ) -> dict:
+    no_trade_reasons = {"LATEST_TRADE_SUSPENDED", "LATEST_TRADE_NO_TRADE"}
     conn = _conn or get_conn()
     if _commit:
         _ensure_strategy6_lifecycle_table(conn)
@@ -4558,6 +5054,8 @@ def update_strategy6_lifecycle(
         conn.execute("BEGIN IMMEDIATE")
     try:
         previous = _get_strategy6_lifecycle_from_conn(conn, code)
+        if previous and str(previous.get("decision_profile") or "legacy_unspecified") != decision_profile:
+            previous = None
         is_candidate = candidate_type != "REJECTED"
         state = {
             "code": code,
@@ -4570,6 +5068,7 @@ def update_strategy6_lifecycle(
             "cooldown_until_date": "",
             "reentry_count": 0,
             "last_event_key": event_key,
+            "decision_profile": decision_profile,
             "blocked": not is_candidate,
         }
 
@@ -4578,7 +5077,15 @@ def update_strategy6_lifecycle(
             state["last_seen_date"] = evaluation_date
             state["blocked"] = False
             if not is_candidate:
-                if lifecycle_status == "EXTENDED" or "BREAKOUT_EXTENDED" in reject_reasons:
+                no_trade_only = bool(reject_reasons) and all(
+                    reason in no_trade_reasons for reason in reject_reasons
+                )
+                if no_trade_only:
+                    # A missing target-date trade cannot prove that the setup failed.
+                    # Keep the last valid lifecycle intact while blocking this scan.
+                    state.update(previous)
+                    state["blocked"] = True
+                elif lifecycle_status == "EXTENDED" or "BREAKOUT_EXTENDED" in reject_reasons:
                     state.update({
                         "lifecycle_status": "EXTENDED",
                         "exit_date": evaluation_date,
@@ -4604,12 +5111,26 @@ def update_strategy6_lifecycle(
             elif previous["lifecycle_status"] in {"FAILED", "EXPIRED", "COOLDOWN"}:
                 cooldown = str(previous.get("cooldown_until_date") or "")
                 same_event = event_key == str(previous.get("last_event_key") or "")
+                legacy_no_trade_failure = previous.get("exit_reason") in no_trade_reasons
                 support_recovered = (
                     previous["lifecycle_status"] in {"FAILED", "COOLDOWN"}
                     and previous.get("exit_reason") != "MAX_WATCH_DAYS_REACHED"
                     and lifecycle_status in {"READY", "BUY_ZONE", "BREAKOUT_CONFIRMED"}
                 )
-                if (cooldown and evaluation_date <= cooldown) or (same_event and not support_recovered):
+                if legacy_no_trade_failure:
+                    first_seen = str(previous.get("first_seen_date") or evaluation_date)
+                    state.update({
+                        "lifecycle_status": lifecycle_status,
+                        "first_seen_date": first_seen,
+                        "last_seen_date": evaluation_date,
+                        "days_in_pool": _weekday_distance(first_seen, evaluation_date),
+                        "exit_date": "",
+                        "exit_reason": "",
+                        "cooldown_until_date": "",
+                        "last_event_key": event_key,
+                        "blocked": False,
+                    })
+                elif (cooldown and evaluation_date <= cooldown) or (same_event and not support_recovered):
                     state.update({
                         "lifecycle_status": "COOLDOWN",
                         "blocked": True,
@@ -4653,8 +5174,9 @@ def update_strategy6_lifecycle(
         conn.execute(
             """INSERT INTO strategy6_candidate_lifecycle (
                    code, lifecycle_status, first_seen_date, last_seen_date, days_in_pool,
-                   exit_date, exit_reason, cooldown_until_date, reentry_count, last_event_key, updated_at
-               ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+                   exit_date, exit_reason, cooldown_until_date, reentry_count,
+                   last_event_key, decision_profile, updated_at
+               ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
                ON CONFLICT(code) DO UPDATE SET
                    lifecycle_status=excluded.lifecycle_status,
                    first_seen_date=excluded.first_seen_date,
@@ -4665,12 +5187,13 @@ def update_strategy6_lifecycle(
                    cooldown_until_date=excluded.cooldown_until_date,
                    reentry_count=excluded.reentry_count,
                    last_event_key=excluded.last_event_key,
+                   decision_profile=excluded.decision_profile,
                    updated_at=datetime('now')""",
             (
                 state["code"], state["lifecycle_status"], state["first_seen_date"],
                 state["last_seen_date"], state["days_in_pool"], state["exit_date"],
                 state["exit_reason"], state["cooldown_until_date"], state["reentry_count"],
-                state["last_event_key"],
+                state["last_event_key"], state["decision_profile"],
             ),
         )
         if _commit:
@@ -4697,6 +5220,8 @@ def persist_strategy6_evaluation(
     failed_cooldown_days: int,
     candidate: dict | None,
     observation_candidate: dict | None = None,
+    trend_squeeze_candidate: dict | None = None,
+    decision_profile: str = "formal_original",
 ) -> tuple[dict, dict | None]:
     """Atomically persist Strategy6 lifecycle, task audit and active candidate."""
     conn = get_conn()
@@ -4713,6 +5238,7 @@ def persist_strategy6_evaluation(
             max_watch_days=max_watch_days,
             expired_cooldown_days=expired_cooldown_days,
             failed_cooldown_days=failed_cooldown_days,
+            decision_profile=decision_profile,
             _conn=conn,
             _commit=False,
         )
@@ -4725,6 +5251,26 @@ def persist_strategy6_evaluation(
                 candidate_type=candidate_type,
                 lifecycle=lifecycle,
                 reject_reasons=reject_reasons,
+                _conn=conn,
+                _commit=False,
+            )
+
+        conn.execute(
+            "DELETE FROM strategy6_trend_squeeze_screen WHERE task_id=? AND code=?",
+            (task_id, code),
+        )
+        if trend_squeeze_candidate is not None:
+            screen_record = dict(trend_squeeze_candidate)
+            if candidate is not None and lifecycle.get("blocked"):
+                screen_record["candidate_type"] = "REJECTED"
+                screen_record["classification"] = "rejected"
+                screen_record["reject_reasons"] = list(dict.fromkeys([
+                    *screen_record.get("reject_reasons", []),
+                    lifecycle.get("lifecycle_status") or "LIFECYCLE_BLOCKED",
+                ]))
+            upsert_strategy6_trend_squeeze_screen(
+                task_id,
+                screen_record,
                 _conn=conn,
                 _commit=False,
             )
@@ -5520,10 +6066,15 @@ def _deserialize_strategy6_row(row: dict) -> dict:
         "risk_tags", "warn_tags", "reject_reasons", "score_reasons",
         "support_cluster_sources", "execution_notes",
         "compact_kline_reasons", "compact_kline_risk_tags",
+        "tail_regime_reasons", "tail_regime_risks",
         "start_failure_reasons", "setup_quality_reasons", "setup_quality_risk_tags",
         "support_reaction_reasons", "support_reaction_risk_tags",
         "vcp_contractions", "vcp_observation_reasons", "vcp_observation_risk_tags",
         "vcp_quality_reasons", "vcp_quality_warnings",
+        "ttm_reasons", "ttm_risk_tags", "strong_trend_squeeze_reasons",
+        "entry_timing_reasons", "entry_timing_risk_tags",
+        "probability_rr_reasons",
+        "body_support_reasons", "body_support_risks", "latest_bar_patterns",
     ):
         value = row.get(field)
         if isinstance(value, str) and value:
@@ -5546,17 +6097,43 @@ def _deserialize_strategy6_row(row: dict) -> dict:
         row["vcp_forming_round"] = {}
     for field in (
         "is_limit_up", "is_one_word_limit_up", "enable_market_filter",
+        "tail_regime_enabled",
         "relative_strength_20_observed", "original_tail_pass", "box_tail_enabled",
         "box_tail_pass", "tail_pass", "compact_kline_enabled", "compact_kline_pass",
         "brooks_tail_enabled", "brooks_tail_pass", "brooks_tail_premium",
         "brooks_trade_ready", "multi_path_confirmed",
         "vcp_observation_eligible", "vcp_exit_audit", "vcp_history_qualified",
+        "ttm_squeeze_on", "ttm_fired",
+        "entry_timing_executable", "probability_rr_reliable",
+        "body_support_pass", "body_support_low_rejection", "body_support_confluence",
+        "body_support_volume_quality_pass",
+        "body_support_body_hold_pass", "body_support_recovery_pass",
+        "body_support_failed_breakout", "body_support_bear_follow_through_failure",
     ):
         if field in row:
             row[field] = _strategy6_safe_bool(row.get(field))
+    if row.get("consecutive_down_structure_pass") is not None:
+        row["consecutive_down_structure_pass"] = _strategy6_safe_bool(
+            row.get("consecutive_down_structure_pass")
+        )
+    if row.get("consecutive_down_no_new_streak_low") is not None:
+        row["consecutive_down_no_new_streak_low"] = _strategy6_safe_bool(
+            row.get("consecutive_down_no_new_streak_low")
+        )
     for field in ("original_tail_score", "box_tail_score", "brooks_tail_score"):
         if field in row:
             row[field] = _strategy6_safe_int(row.get(field))
+    row["ttm_squeeze_status"] = row.get("ttm_squeeze_status") or ""
+    row["ttm_momentum_direction"] = row.get("ttm_momentum_direction") or ""
+    row["ttm_model_version"] = row.get("ttm_model_version") or ""
+    row["ttm_squeeze_score"] = _strategy6_safe_int(row.get("ttm_squeeze_score"))
+    for field in ("strong_trend_squeeze_pass", "trend_squeeze_on"):
+        if row.get(field) is not None:
+            row[field] = _strategy6_safe_bool(row.get(field))
+    row["strong_trend_squeeze_status"] = row.get("strong_trend_squeeze_status") or ""
+    row["strong_trend_squeeze_model_version"] = row.get("strong_trend_squeeze_model_version") or ""
+    if row.get("ranking_score") is None:
+        row["ranking_score"] = row.get("total_score", 0)
     raw_tail_paths = row.get("tail_paths")
     if isinstance(raw_tail_paths, str) and raw_tail_paths:
         try:

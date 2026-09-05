@@ -127,6 +127,67 @@ def build_setup_id(snapshot: dict) -> str:
     return f"s6setup-{digest[:20]}"
 
 
+def build_candidate_event_id(snapshot: dict, *, fallback_setup_id: str) -> str:
+    """Identify one opportunity by its strong-start cycle, not mutable setup details."""
+    start_date = str(snapshot.get("start_date") or "")
+    if not start_date:
+        return fallback_setup_id
+    identity = {
+        "code": str(snapshot.get("code") or ""),
+        "start_date": start_date,
+        "decision_profile": str(snapshot.get("decision_profile") or "legacy_unspecified"),
+    }
+    digest = hashlib.sha256(
+        json.dumps(identity, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+    return f"s6event-{digest[:20]}"
+
+
+def annotate_candidate_events(signals: list[BacktestSignal]) -> list[BacktestSignal]:
+    """Add as-of event facts without backfilling future dates into older signals."""
+    state_by_event: dict[str, dict] = {}
+    for signal in sorted(signals, key=lambda item: (item.evaluation_date, item.code)):
+        signal.snapshot.setdefault("code", signal.code)
+        event_id = build_candidate_event_id(signal.snapshot, fallback_setup_id=signal.setup_id)
+        state = state_by_event.setdefault(event_id, {
+            "sequence": 0,
+            "first_candidate_date": signal.evaluation_date,
+            "first_executable_date": "",
+            "first_entry_archetype_date": "",
+        })
+        state["sequence"] += 1
+        executable = is_trade_ready_snapshot(signal.snapshot)
+        is_first_executable = executable and not state["first_executable_date"]
+        if is_first_executable:
+            state["first_executable_date"] = signal.evaluation_date
+
+        is_first_archetype = executable and not state["first_entry_archetype_date"]
+        if is_first_archetype:
+            state["first_entry_archetype_date"] = signal.evaluation_date
+
+        signal.snapshot.update({
+            "candidate_event_id": event_id,
+            "candidate_event_sequence": state["sequence"],
+            "first_candidate_date": state["first_candidate_date"],
+            "is_first_candidate_event": state["sequence"] == 1,
+            "first_executable_date": state["first_executable_date"],
+            "is_first_executable_event": is_first_executable,
+            "first_entry_archetype_date": state["first_entry_archetype_date"],
+            "is_first_entry_archetype_event": is_first_archetype,
+        })
+    return signals
+
+
+def signal_selection_key(signal: BacktestSignal, mode: str) -> str:
+    if mode == "FIRST_EVENT_PER_START":
+        snapshot = {"code": signal.code, **signal.snapshot}
+        return str(
+            snapshot.get("candidate_event_id")
+            or build_candidate_event_id(snapshot, fallback_setup_id=signal.setup_id)
+        )
+    return signal.setup_id
+
+
 def _brooks_event_anchor(structure: dict) -> dict[str, str]:
     event_priority = {
         "first_recent_low_date": 1,
@@ -189,7 +250,7 @@ def rebuild_stock_signals(
             candidate_type=str(snapshot.get("candidate_type") or "REJECTED"),
             snapshot=snapshot,
         ))
-    return signals
+    return annotate_candidate_events(signals)
 
 
 def signal_to_record(signal: BacktestSignal) -> dict:

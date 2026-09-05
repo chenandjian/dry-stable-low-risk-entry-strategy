@@ -63,6 +63,25 @@ def test_full_schedule_rejects_non_daily_step_and_coarse_rejects_validation_star
         )
 
 
+def test_selection_research_modes_cover_train_and_validation_without_becoming_final():
+    for mode in ("SELECTION_OPTIMIZATION", "ENTRY_QUALITY_OPTIMIZATION"):
+        schedule = build_evaluation_schedule(
+            CALENDAR,
+            mode=mode,
+            start="2023-01-01",
+            end="2025-12-31",
+            evaluation_step=2,
+            oos_start="2026-01-01",
+        )
+
+        assert schedule.start_date == "2023-01-01"
+        assert schedule.end_date == "2025-12-31"
+        assert schedule.dates[0] == "2023-01-02"
+        assert schedule.dates[-1] == "2025-01-02"
+        assert "2026-01-05" not in schedule.dates
+        assert schedule.final_eligible is False
+
+
 def test_schedule_rejects_empty_real_index_calendar():
     with pytest.raises(ValueError, match="no evaluation dates"):
         build_evaluation_schedule(

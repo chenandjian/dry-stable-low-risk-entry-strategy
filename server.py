@@ -1,11 +1,14 @@
 # server.py
+import asyncio
+import copy
 import datetime
 import json
 import logging
+import re
 import sys
 import threading
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse, Response
 
 logging.basicConfig(
@@ -14,9 +17,9 @@ logging.basicConfig(
     handlers=[logging.StreamHandler(sys.stdout)],
 )
 from fastapi.middleware.cors import CORSMiddleware
-import yaml
 
 import scanner.db as db
+from scanner.config_io import ConfigFileError, load_yaml_config, write_yaml_config_atomic
 from scanner.engine import scan_all, re_evaluate_task
 from strategy2.scanner import scan_strategy2_all
 from strategy2.validation import resolve_strategy2_config
@@ -36,6 +39,7 @@ from strategy6.report import (
     is_strategy6_visible_record,
 )
 from strategy6.scanner import scan_strategy6_all
+from strategy6.batch_evaluator import evaluate_strategy6_batch
 from strategy6.validation import resolve_strategy6_config
 from scanner.strategy_engine import (
     CupHandleStrategyEngine,
@@ -44,19 +48,36 @@ from scanner.strategy_engine import (
     select_strategy_window,
 )
 from scanner.index_source import fetch_market_index_daily
+from scanner.market_breadth import MarketBreadthDataChanging, build_market_breadth_history
 from scanner.pattern_detector import CupHandleResult
 from scanner.single_stock_backtest import (
     DataCoverageError,
     run_single_stock_cuphandle_backtest,
 )
-from scanner.stock_pool import _filter_stocks as filter_stock_pool_for_scan
+from scanner.stock_pool import (
+    _filter_stocks as filter_stock_pool_for_scan,
+    get_a_stock_pool_result,
+)
 from scanner.strategy1_backtest_service import run_strategy1_experiment_from_baseline
 from scanner.daily_data_service import (
     build_cache_freshness_context,
     encode_source_errors,
     fetch_with_retry,
 )
+from scanner.clean_k_analysis import (
+    CleanKDataError,
+    CleanKInputError,
+)
+from scanner.clean_k_v2 import analyze_clean_k_v2, resolve_clean_k_v2_config
+from scanner.clean_k_analysis import resolve_clean_k_period
 from scanner.data_source import DataSourceManager
+from scanner.data_acquisition import resolve_acquisition_mode
+from tickflow_data.web_task import TickFlowFullRefreshManager, TickFlowTaskConflict
+from tickflow_data.freshness import check_tickflow_freshness
+from tickflow_data.client import (
+    resolve_tickflow_access_mode,
+    resolve_tickflow_api_key,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -170,22 +191,14 @@ async def lifespan(app: FastAPI):
                 try:
                     pending = db.get_pending_stocks(interrupted["id"])
                     def on_progress(stage, current, total, detail, discovery=None):
-                        stats = _running.get("stats", {})
-                        if stage == "discovery" and discovery:
-                            found = stats.get("candidates_found", 0) + 1
-                            discoveries = list(stats.get("discoveries") or [])
-                            discoveries.insert(0, _strategy6_discovery_from_candidate(discovery))
-                            _running["stats"] = {**stats, "discoveries": discoveries[:20], "candidates_found": found}
-                        else:
-                            code = detail.split()[0] if detail else ""
-                            _running["stats"] = {
-                                **stats,
-                                "scanned": current,
-                                "processed": current,
-                                "total_stocks": total,
-                                "current_code": code,
-                                "current_name": detail[len(code):].strip() if len(detail) > len(code) else detail,
-                            }
+                        _running["stats"] = _strategy6_progress_stats(
+                            _running.get("stats", {}),
+                            stage,
+                            current,
+                            total,
+                            detail,
+                            discovery,
+                        )
                     result = scan_strategy6_all(config, progress_callback=on_progress, task_id=interrupted["id"], stocks=pending)
                     _running["stats"] = result["stats"]
                     s = result["stats"]
@@ -340,6 +353,8 @@ _backtest_running = {
     "thread": None,
 }
 
+_tickflow_full_refresh = TickFlowFullRefreshManager()
+
 
 def _get_running_task_id() -> str | None:
     """Return the active scan task id from memory or DB."""
@@ -360,6 +375,16 @@ def _get_running_strategy_type() -> str | None:
 
 def _scan_conflict_response():
     """Return a 409 response if any scan or backtest process is already running."""
+    if _tickflow_full_refresh.is_running():
+        status = _tickflow_full_refresh.status()
+        return JSONResponse(
+            {
+                "error": "TICKFLOW_REFRESH_RUNNING",
+                "message": "当前已有 TickFlow 全市场数据重拉任务正在运行",
+                "runningTaskId": status.get("task_id"),
+            },
+            status_code=409,
+        )
     running_id = _get_running_task_id()
     if running_id:
         return JSONResponse(
@@ -602,6 +627,60 @@ def _strategy6_discovery_from_candidate(candidate: dict) -> dict:
     }
 
 
+def _strategy6_progress_stats(
+    stats: dict,
+    stage: str,
+    current: int,
+    total: int,
+    detail: str,
+    discovery=None,
+) -> dict:
+    """Keep TickFlow preparation progress separate from strategy scan counts."""
+    if stage == "discovery" and discovery:
+        discoveries = list(stats.get("discoveries") or [])
+        discoveries.insert(0, _strategy6_discovery_from_candidate(discovery))
+        return {
+            **stats,
+            "phase": "scanning",
+            "discoveries": discoveries[:20],
+            "candidates_found": stats.get("candidates_found", 0) + 1,
+        }
+
+    code = detail.split()[0] if detail else ""
+    current_name = detail[len(code):].strip() if code and len(detail) > len(code) else detail
+    if stage == "data_acquisition":
+        return {
+            **stats,
+            "phase": stage,
+            "data_processed": current,
+            "data_total": total,
+            "current_code": code or "--",
+            "current_name": current_name,
+        }
+    if stage == "index_acquisition":
+        return {
+            **stats,
+            "phase": stage,
+            "index_processed": current,
+            "index_total": total,
+            "current_code": "--",
+            "current_name": current_name,
+        }
+
+    return {
+        **stats,
+        "phase": "scanning",
+        "scanned": current,
+        "processed": current,
+        "total_stocks": total,
+        "current_code": code or "--",
+        "current_name": current_name,
+        "candidates_found": stats.get("candidates_found", 0),
+        "skipped": stats.get("skipped", 0),
+        "failed": stats.get("failed", 0),
+    }
+
+
 def _db_running_scan_status(running_task: dict) -> dict:
     """Build live scan status from persisted DB rows for scheduler-owned scans."""
     task_id = running_task["id"]
@@ -647,8 +726,7 @@ def _db_running_scan_status(running_task: dict) -> dict:
 
 
 def load_config(path: str = "config.yaml") -> dict:
-    with open(path, "r", encoding="utf-8") as f:
-        return yaml.safe_load(f)
+    return load_yaml_config(path)
 
 
 def _deep_merge(base: dict, update: dict):
@@ -1268,21 +1346,38 @@ def _invalid_ohlc_reason(row: dict | None) -> str | None:
     return None
 
 
-def _load_kline_health_inputs(config: dict | None = None) -> tuple[dict[str, dict], dict[str, dict]]:
+def _load_kline_health_inputs(
+    config: dict | None = None,
+    *,
+    target_trade_date: str,
+) -> tuple[dict[str, dict], dict[str, dict]]:
     conn = db.get_conn()
-    latest_rows = conn.execute(
-        """SELECT o.code, o.date, o.open, o.high, o.low, o.close, o.volume, o.turnover
-           FROM daily_ohlc o
-           JOIN (
-                SELECT code, MAX(date) AS latest_date
-                FROM daily_ohlc
-                GROUP BY code
-           ) latest
-             ON latest.code = o.code AND latest.latest_date = o.date"""
+    pool_rows = conn.execute("SELECT code, name, market FROM stock_pool").fetchall()
+    pool_stocks = [
+        {"code": row[0], "name": row[1] or "", "market": row[2] or ""}
+        for row in pool_rows
+    ]
+    if config is not None:
+        pool_stocks = filter_stock_pool_for_scan(
+            [stock.copy() for stock in pool_stocks], config
+        )
+    pool_codes = {stock["code"] for stock in pool_stocks}
+
+    metadata_rows = conn.execute(
+        """SELECT m.code, m.latest_date, o.open, o.high, o.low, o.close,
+                  o.volume, o.turnover, m.fetched_at
+           FROM daily_ohlc_metadata m
+           LEFT JOIN daily_ohlc o
+             ON o.code=m.code AND o.date=m.latest_date"""
     ).fetchall()
-    latest_by_code = {
-        row[0]: {
-            "code": row[0],
+    latest_by_code: dict[str, dict] = {}
+    fetched_at_by_code: dict[str, str | None] = {}
+    for row in metadata_rows:
+        code = row[0]
+        if code not in pool_codes:
+            continue
+        latest_by_code[code] = {
+            "code": code,
             "date": row[1],
             "open": row[2],
             "high": row[3],
@@ -1291,23 +1386,54 @@ def _load_kline_health_inputs(config: dict | None = None) -> tuple[dict[str, dic
             "volume": row[6],
             "turnover": row[7],
         }
-        for row in latest_rows
-    }
+        fetched_at_by_code[code] = row[8]
+
+    # Compatibility for old rows written before provenance metadata existed.
+    missing_metadata_codes = sorted(pool_codes - set(latest_by_code))
+    for start in range(0, len(missing_metadata_codes), 500):
+        chunk = missing_metadata_codes[start:start + 500]
+        if not chunk:
+            continue
+        placeholders = ",".join("?" for _ in chunk)
+        legacy_rows = conn.execute(
+            f"""SELECT o.code, o.date, o.open, o.high, o.low, o.close,
+                       o.volume, o.turnover
+                FROM daily_ohlc o
+                JOIN (
+                    SELECT code, MAX(date) AS latest_date
+                    FROM daily_ohlc
+                    WHERE code IN ({placeholders})
+                    GROUP BY code
+                ) latest
+                  ON latest.code=o.code AND latest.latest_date=o.date""",
+            chunk,
+        ).fetchall()
+        for row in legacy_rows:
+            latest_by_code[row[0]] = {
+                "code": row[0],
+                "date": row[1],
+                "open": row[2],
+                "high": row[3],
+                "low": row[4],
+                "close": row[5],
+                "volume": row[6],
+                "turnover": row[7],
+            }
 
     task_rows = conn.execute(
         """SELECT code, name, market, status, status_reason, error_detail,
                   source_errors, kline_latest_date, kline_fetched_at,
                   kline_target_trade_date, quote_status, updated_at
            FROM task_stocks
-           WHERE kline_fetched_at IS NOT NULL
-              OR kline_latest_date IS NOT NULL
-              OR status = 'failed'
-           ORDER BY COALESCE(kline_fetched_at, updated_at) DESC, updated_at DESC"""
+           WHERE kline_target_trade_date = ?
+           ORDER BY COALESCE(kline_fetched_at, updated_at) DESC,
+                    updated_at DESC, rowid DESC""",
+        (target_trade_date,),
     ).fetchall()
     task_by_code: dict[str, dict] = {}
     for row in task_rows:
         code = row[0]
-        if code in task_by_code:
+        if code not in pool_codes or code in task_by_code:
             continue
         task_by_code[code] = {
             "code": code,
@@ -1323,14 +1449,23 @@ def _load_kline_health_inputs(config: dict | None = None) -> tuple[dict[str, dic
             "quote_status": row[10] or "not_requested",
         }
 
-    pool_rows = conn.execute("SELECT code, name, market FROM stock_pool").fetchall()
-    pool_stocks = [
-        {"code": row[0], "name": row[1] or "", "market": row[2] or ""}
-        for row in pool_rows
-    ]
-    if config is not None:
-        # Match the scan universe without refreshing the external stock pool.
-        pool_stocks = filter_stock_pool_for_scan([stock.copy() for stock in pool_stocks], config)
+    for code, latest_row in latest_by_code.items():
+        if code in task_by_code:
+            continue
+        task_by_code[code] = {
+            "code": code,
+            "name": "",
+            "market": "",
+            "task_status": None,
+            "status_reason": None,
+            "error_detail": None,
+            "source_errors": None,
+            "kline_latest_date": latest_row.get("date"),
+            "kline_fetched_at": fetched_at_by_code.get(code),
+            "kline_target_trade_date": target_trade_date,
+            "quote_status": "not_requested",
+        }
+
     for stock in pool_stocks:
         code = stock["code"]
         meta = task_by_code.setdefault(
@@ -1435,7 +1570,10 @@ def _filter_kline_health_items(items: list[dict], status: str) -> list[dict]:
 
 def _build_kline_health_items(config: dict) -> tuple[dict, list[dict]]:
     context = build_cache_freshness_context(now=_now())
-    latest_by_code, task_by_code = _load_kline_health_inputs(config)
+    latest_by_code, task_by_code = _load_kline_health_inputs(
+        config,
+        target_trade_date=context.target_trade_date,
+    )
     codes = sorted(set(latest_by_code) | set(task_by_code))
     items = [
         _classify_kline_health_item(
@@ -1463,7 +1601,7 @@ def _build_kline_health_items(config: dict) -> tuple[dict, list[dict]]:
 async def get_kline_health(status: str = "problem", page: int = 1, page_size: int = 100):
     """Return market-wide local K-line freshness and anomaly diagnostics."""
     config = _ensure_db_initialized_from_config()
-    summary, items = _build_kline_health_items(config)
+    summary, items = await asyncio.to_thread(_build_kline_health_items, config)
     filtered = _filter_kline_health_items(items, status)
 
     page = max(1, int(page or 1))
@@ -1485,7 +1623,7 @@ async def refresh_kline_health(payload: dict | None = None):
     status = payload.get("status") or "problem"
     limit = min(500, max(1, int(payload.get("limit") or 200)))
     config = _ensure_db_initialized_from_config()
-    _, items = _build_kline_health_items(config)
+    _, items = await asyncio.to_thread(_build_kline_health_items, config)
     filtered = _filter_kline_health_items(items, status)
     targets = [item for item in filtered if item.get("needs_refetch")][:limit]
     skipped_count = sum(1 for item in filtered if not item.get("needs_refetch"))
@@ -1512,6 +1650,90 @@ async def refresh_kline_health(payload: dict | None = None):
         "succeeded": succeeded,
         "failed": failed,
     }
+
+
+@app.post("/api/tickflow/full-refresh", status_code=202)
+async def start_tickflow_full_refresh():
+    """Force a full-market TickFlow refresh using fixed audited parameters."""
+    conflict = _scan_conflict_response()
+    if conflict is not None:
+        return conflict
+
+    config = _ensure_db_initialized_from_config()
+    database_path = config.get("data", {}).get("database_path", "data/cuphandle.db")
+    pool_result = await asyncio.to_thread(get_a_stock_pool_result, config)
+    stocks = pool_result["stocks"]
+    if not stocks:
+        return JSONResponse(
+            {
+                "error": "EMPTY_STOCK_POOL",
+                "message": "股票池为空，无法启动 TickFlow 全市场重拉",
+            },
+            status_code=409,
+        )
+    try:
+        data_config = config.get("data", {})
+        return _tickflow_full_refresh.start(
+            database_path=database_path,
+            stocks=stocks,
+            access_mode=resolve_tickflow_access_mode(
+                data_config.get("tickflow_access_mode")
+            ),
+            api_key=data_config.get("tickflow_api_key"),
+        )
+    except TickFlowTaskConflict:
+        status = _tickflow_full_refresh.status()
+        return JSONResponse(
+            {
+                "error": "TICKFLOW_REFRESH_RUNNING",
+                "message": "当前已有 TickFlow 全市场数据重拉任务正在运行",
+                "runningTaskId": status.get("task_id"),
+            },
+            status_code=409,
+        )
+
+
+@app.get("/api/tickflow/full-refresh/status")
+async def get_tickflow_full_refresh_status():
+    """Return the current in-process TickFlow refresh state."""
+    return _tickflow_full_refresh.status()
+
+
+@app.post("/api/tickflow/freshness-check")
+async def tickflow_freshness_check(payload: dict):
+    """Probe one stock and the four required indexes without writing local history."""
+    stock_code = str((payload or {}).get("stock_code") or "").strip()
+    if re.fullmatch(r"\d{6}", stock_code) is None:
+        return JSONResponse(
+            {
+                "error": "INVALID_STOCK_CODE",
+                "message": "股票代码必须是6位数字",
+            },
+            status_code=400,
+        )
+
+    config = _ensure_db_initialized_from_config()
+    freshness = build_cache_freshness_context(now=_now())
+    data_config = config.get("data", {})
+    try:
+        return await asyncio.to_thread(
+            check_tickflow_freshness,
+            stock_code,
+            target_trade_date=freshness.target_trade_date,
+            access_mode=resolve_tickflow_access_mode(
+                data_config.get("tickflow_access_mode")
+            ),
+            api_key=data_config.get("tickflow_api_key"),
+        )
+    except Exception as exc:
+        logger.exception("TickFlow freshness probe failed for %s", stock_code)
+        return JSONResponse(
+            {
+                "error": "TICKFLOW_FRESHNESS_CHECK_FAILED",
+                "message": str(exc),
+            },
+            status_code=502,
+        )
 
 
 @app.post("/api/stock/{code}/kline-refresh")
@@ -1640,12 +1862,16 @@ async def refresh_stock_kline(code: str):
         skipped=1 if no_trade else 0,
     )
 
-    latest_by_code, task_by_code = _load_kline_health_inputs(config)
+    health_context = build_cache_freshness_context(now=_now())
+    latest_by_code, task_by_code = _load_kline_health_inputs(
+        config,
+        target_trade_date=health_context.target_trade_date,
+    )
     summary = _classify_kline_health_item(
         code,
         latest_by_code.get(code),
         task_by_code.get(code, stock),
-        build_cache_freshness_context(now=_now()),
+        health_context,
     )
     return {
         "code": code,
@@ -1655,6 +1881,76 @@ async def refresh_stock_kline(code: str):
         "source": fetch_result.fallback_source or fetch_result.primary_source,
         "summary": summary,
     }
+
+
+@app.post("/api/stock/clean-k/analyze")
+async def analyze_stock_clean_k(payload: dict):
+    """Analyze recent completed local OHLC bars without fetching external data."""
+    code = str(payload.get("stockCode") or "").strip()
+    if not re.fullmatch(r"\d{6}", code):
+        return JSONResponse(
+            {"error": "INVALID_STOCK_CODE", "message": "stockCode must be a 6-digit code"},
+            status_code=400,
+        )
+
+    config = _ensure_db_initialized_from_config()
+    try:
+        clean_k_config = resolve_clean_k_v2_config(config.get("clean_k", {}))
+        period = resolve_clean_k_period(payload.get("period", 20), clean_k_config)
+    except CleanKInputError as exc:
+        return JSONResponse(
+            {"error": "INVALID_PERIOD", "message": str(exc)},
+            status_code=400,
+        )
+
+    rows = db.get_ohlc(code) or []
+    if not rows:
+        return JSONResponse(
+            {"error": "KLINE_NOT_FOUND", "message": f"no local K-line data for {code}"},
+            status_code=404,
+        )
+    metadata = db.get_ohlc_metadata(code) or {}
+    freshness = build_cache_freshness_context(
+        now=_now(),
+        fetched_at=metadata.get("fetched_at"),
+    )
+    target_trade_date = freshness.target_trade_date
+    analysis_rows = rows
+    excluded_incomplete_date = None
+    if (
+        str(rows[-1].get("date") or "") == target_trade_date
+        and freshness.min_fetch_time
+        and str(freshness.fetched_at or "") < freshness.min_fetch_time
+    ):
+        excluded_incomplete_date = target_trade_date
+        analysis_rows = [
+            row for row in rows if str(row.get("date") or "") < target_trade_date
+        ]
+    try:
+        result = analyze_clean_k_v2(
+            analysis_rows,
+            period=period,
+            config=clean_k_config,
+            stock_code=code,
+            target_trade_date=target_trade_date,
+        )
+        result["excludedIncompleteDate"] = excluded_incomplete_date
+        if excluded_incomplete_date:
+            result["dataIsFresh"] = False
+            risk_flags = result.setdefault("riskFlags", [])
+            if "INCOMPLETE_TARGET_BAR_EXCLUDED" not in risk_flags:
+                risk_flags.append("INCOMPLETE_TARGET_BAR_EXCLUDED")
+        return result
+    except CleanKInputError as exc:
+        return JSONResponse(
+            {"error": "INVALID_PERIOD", "message": str(exc)},
+            status_code=400,
+        )
+    except CleanKDataError as exc:
+        return JSONResponse(
+            {"error": "INSUFFICIENT_KLINE_DATA", "message": str(exc)},
+            status_code=422,
+        )
 
 
 @app.get("/api/stock/{code}/kline-history")
@@ -1818,7 +2114,14 @@ def _candidate_to_pattern_result(c: dict) -> CupHandleResult:
 @app.get("/api/config")
 async def get_config():
     """Return current configuration (excluding sensitive fields)."""
-    config = load_config()
+    config = copy.deepcopy(load_config())
+    data_config = config.setdefault("data", {})
+    data_config["tickflow_access_mode"] = resolve_tickflow_access_mode(
+        data_config.get("tickflow_access_mode")
+    )
+    configured_key = resolve_tickflow_api_key(data_config.get("tickflow_api_key"))
+    data_config["tickflow_api_key"] = ""
+    data_config["tickflow_api_key_configured"] = bool(configured_key)
     return {
         "config": {
             **config,
@@ -1873,9 +2176,58 @@ async def update_config(data: dict):
     Accepts partial config updates. Only specified fields are changed.
     """
     config = load_config()
+    update = copy.deepcopy(data)
+    update_data = update.get("data", {})
+    if isinstance(update_data, dict):
+        update_data.pop("tickflow_api_key_configured", None)
+        if "tickflow_access_mode" in update_data:
+            incoming_mode = update_data["tickflow_access_mode"]
+            if not isinstance(incoming_mode, str):
+                return JSONResponse(
+                    {
+                        "status": "error",
+                        "message": "Invalid data config: data.tickflow_access_mode must be a string",
+                    },
+                    status_code=400,
+                )
+            try:
+                update_data["tickflow_access_mode"] = resolve_tickflow_access_mode(
+                    incoming_mode
+                )
+            except ValueError as e:
+                return JSONResponse(
+                    {"status": "error", "message": f"Invalid data config: {e}"},
+                    status_code=400,
+                )
+        if "tickflow_api_key" in update_data:
+            incoming_key = update_data["tickflow_api_key"]
+            if not isinstance(incoming_key, str):
+                return JSONResponse(
+                    {
+                        "status": "error",
+                        "message": "Invalid data config: data.tickflow_api_key must be a string",
+                    },
+                    status_code=400,
+                )
+            incoming_key = incoming_key.strip()
+            if incoming_key:
+                update_data["tickflow_api_key"] = incoming_key
+            else:
+                update_data.pop("tickflow_api_key", None)
 
     # Deep merge: only update provided keys
-    _deep_merge(config, data)
+    _deep_merge(config, update)
+
+    try:
+        resolve_acquisition_mode(config)
+        resolve_tickflow_access_mode(
+            config.get("data", {}).get("tickflow_access_mode")
+        )
+    except ValueError as e:
+        return JSONResponse(
+            {"status": "error", "message": f"Invalid data config: {e}"},
+            status_code=400,
+        )
 
     try:
         _validate_scheduler_config(config)
@@ -1922,12 +2274,33 @@ async def update_config(data: dict):
                 status_code=400,
             )
 
-    # Write back to config.yaml
-    with open("config.yaml", "w", encoding="utf-8") as f:
-        yaml.dump(config, f, allow_unicode=True, default_flow_style=False, sort_keys=False)
+    try:
+        write_yaml_config_atomic(
+            config,
+            "config.yaml",
+            backup_path="data/config-backups/config.yaml.bak",
+        )
+    except ConfigFileError as e:
+        logger.exception("Failed to save configuration")
+        return JSONResponse(
+            {
+                "status": "error",
+                "error": "CONFIG_WRITE_FAILED",
+                "message": f"配置保存失败，原配置保持不变: {e}",
+            },
+            status_code=500,
+        )
 
     scheduler_reloaded = False
-    if "scheduler" in data:
+    data_update = update.get("data", {}) if isinstance(update.get("data", {}), dict) else {}
+    scheduler_inputs_changed = (
+        "scheduler" in update
+        or "acquisition_mode" in data_update
+        or "daily_sources" in data_update
+        or "tickflow_access_mode" in data_update
+        or "tickflow_api_key" in data_update
+    )
+    if scheduler_inputs_changed:
         try:
             _reload_scheduler_from_config(config)
             scheduler_reloaded = True
@@ -2344,6 +2717,47 @@ async def strategy5_candidate_detail(task_id: str, code: str):
 
 # ====== Strategy6 API ======
 
+@app.post("/api/strategy6/batch-evaluate")
+async def strategy6_batch_evaluate(request: Request):
+    try:
+        payload = await request.json()
+    except Exception:
+        payload = None
+    raw_codes = payload.get("codes") if isinstance(payload, dict) else None
+    if not isinstance(raw_codes, list) or not raw_codes:
+        return JSONResponse(
+            {"error": "EMPTY_STOCK_CODES", "message": "请至少输入一个股票代码"},
+            status_code=400,
+        )
+    codes = list(dict.fromkeys(
+        normalized
+        for code in raw_codes
+        if (normalized := str(code).strip())
+    ))
+    if not codes:
+        return JSONResponse(
+            {"error": "EMPTY_STOCK_CODES", "message": "请至少输入一个股票代码"},
+            status_code=400,
+        )
+    if len(codes) > 200:
+        return JSONResponse(
+            {"error": "TOO_MANY_STOCK_CODES", "message": "单次最多评估200只股票"},
+            status_code=400,
+        )
+    invalid = [code for code in codes if not re.fullmatch(r"\d{6}", code)]
+    if invalid:
+        return JSONResponse(
+            {
+                "error": "INVALID_STOCK_CODES",
+                "message": "股票代码必须为6位数字",
+                "invalidCodes": invalid,
+            },
+            status_code=400,
+        )
+    config = load_config() or {}
+    result = await asyncio.to_thread(evaluate_strategy6_batch, codes, config)
+    return {"requestedCount": len(codes), **result}
+
 @app.post("/api/strategy6/scans")
 async def start_strategy6_scan():
     """启动策略6强势 VCP 尾部候选扫描。"""
@@ -2377,35 +2791,21 @@ async def start_strategy6_scan():
     def run():
         try:
             def on_progress(stage, current, total, detail, discovery=None):
-                stats = _running.get("stats", {})
-                if stage == "discovery" and discovery:
-                    discoveries = list(stats.get("discoveries") or [])
-                    discoveries.insert(0, _strategy6_discovery_from_candidate(discovery))
-                    _running["stats"] = {
-                        **stats,
-                        "discoveries": discoveries[:20],
-                        "candidates_found": stats.get("candidates_found", 0) + 1,
-                    }
-                else:
-                    code = detail.split()[0] if detail else ""
-                    s = stats.copy()
-                    s.update({
-                        "scanned": current,
-                        "processed": current,
-                        "total_stocks": total,
-                        "current_code": code or "--",
-                        "current_name": detail[len(code):].strip() if code and len(detail) > len(code) else detail,
-                    })
-                    s.setdefault("candidates_found", 0)
-                    s.setdefault("skipped", 0)
-                    s.setdefault("failed", 0)
-                    _running["stats"] = s
-                db.update_scan_progress(
-                    task_id,
-                    scanned=_running["stats"].get("scanned", 0),
-                    skipped=_running["stats"].get("skipped", 0),
-                    candidates_count=_running["stats"].get("candidates_found", 0),
+                _running["stats"] = _strategy6_progress_stats(
+                    _running.get("stats", {}),
+                    stage,
+                    current,
+                    total,
+                    detail,
+                    discovery,
                 )
+                if stage in {"scanning", "discovery"}:
+                    db.update_scan_progress(
+                        task_id,
+                        scanned=_running["stats"].get("scanned", 0),
+                        skipped=_running["stats"].get("skipped", 0),
+                        candidates_count=_running["stats"].get("candidates_found", 0),
+                    )
 
             result = scan_strategy6_all(config, task_id=task_id, progress_callback=on_progress)
             stats = result.get("stats", {})
@@ -2493,6 +2893,21 @@ async def strategy6_candidate_detail(task_id: str, code: str):
     return {"taskId": task_id, "candidate": candidate}
 
 
+@app.get("/api/strategy6/tasks/{task_id}/trend-squeeze-screen")
+async def strategy6_trend_squeeze_screen(task_id: str):
+    _, err = _require_task_strategy(task_id, STRATEGY6_TYPE)
+    if err:
+        return err
+    stocks = db.get_strategy6_trend_squeeze_screen(task_id)
+    return {"taskId": task_id, "stocks": stocks, "total": len(stocks)}
+
+
+@app.get("/api/strategy6/trend-squeeze-screen/latest")
+async def latest_strategy6_trend_squeeze_screen():
+    task_id, stocks = db.get_latest_strategy6_trend_squeeze_screen()
+    return {"taskId": task_id, "stocks": stocks, "total": len(stocks)}
+
+
 @app.get("/api/strategy6/tasks/{task_id}/market-snapshot")
 async def strategy6_market_snapshot(task_id: str):
     _, err = _require_task_strategy(task_id, STRATEGY6_TYPE)
@@ -2522,6 +2937,34 @@ async def strategy6_excel_report(task_id: str):
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={"Content-Disposition": f'attachment; filename="strategy6-report-{task_id}.xlsx"'},
     )
+
+
+@app.get("/api/market-breadth/history")
+async def market_breadth_history(
+    start_date: str | None = None,
+    end_date: str | None = None,
+    limit: int = 1500,
+):
+    """Return research-only breadth reconstructed from local real daily bars."""
+    config = load_config()
+    db.init_db(config.get("data", {}).get("database_path", "data/cuphandle.db"))
+    try:
+        return await asyncio.to_thread(
+            build_market_breadth_history,
+            start_date=start_date,
+            end_date=end_date,
+            limit=limit,
+        )
+    except (TypeError, ValueError) as exc:
+        return JSONResponse(
+            {"error": "INVALID_MARKET_BREADTH_QUERY", "message": str(exc)},
+            status_code=400,
+        )
+    except MarketBreadthDataChanging as exc:
+        return JSONResponse(
+            {"error": "MARKET_DATA_UPDATING", "message": str(exc)},
+            status_code=409,
+        )
 
 
 # ====== Strategy2 API ======
@@ -3187,6 +3630,13 @@ async def strategy3_candidate_detail(code: str, task_id: str = None):
 
 def _backtest_conflict_response():
     """Return 409 if any scan or backtest is running."""
+    if _tickflow_full_refresh.is_running():
+        status = _tickflow_full_refresh.status()
+        return JSONResponse({
+            "error": "TICKFLOW_REFRESH_RUNNING",
+            "message": "当前已有 TickFlow 全市场数据重拉任务正在运行",
+            "runningTaskId": status.get("task_id"),
+        }, status_code=409)
     if _running["running"]:
         return JSONResponse({
             "error": "TASK_CONFLICT",
@@ -3792,8 +4242,9 @@ async def strategy2_backtest_resume(task_id: str):
     task = db.get_strategy2_backtest_task(task_id)
     if not task:
         return JSONResponse({"error": "TASK_NOT_FOUND"}, status_code=404)
-    if _backtest_running["running"]:
-        return JSONResponse({"error": "TASK_CONFLICT", "message": "已有回测正在运行"}, status_code=409)
+    conflict = _backtest_conflict_response()
+    if conflict is not None:
+        return conflict
     if str(task.get("status", "")).lower() not in {"interrupted", "canceled"}:
         return JSONResponse({"error": "TASK_NOT_RESUMABLE"}, status_code=409)
     target_stocks = [
@@ -3844,8 +4295,9 @@ async def strategy2_backtest_retry_failed(task_id: str):
     task = db.get_strategy2_backtest_task(task_id)
     if not task:
         return JSONResponse({"error": "TASK_NOT_FOUND"}, status_code=404)
-    if _backtest_running["running"]:
-        return JSONResponse({"error": "TASK_CONFLICT"}, status_code=409)
+    conflict = _backtest_conflict_response()
+    if conflict is not None:
+        return conflict
     if str(task.get("status", "")).lower() == "running":
         return JSONResponse({"error": "TASK_CONFLICT"}, status_code=409)
     target_stocks = db.get_strategy2_backtest_task_stocks(task_id, status="FAILED")

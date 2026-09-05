@@ -31,7 +31,13 @@ CupHandleScan 是 Python 3.10+ 的 A 股扫描系统，当前项目包含六套�
 
 策略6必须保持启动、整理、尾段不重叠，使用客观目标计算盈亏比，并将执行R目标单独输出。策略6不得恢复板块过滤，`sector_name` 仅展示。当前策略6价格全部为前复权口径，禁止把 `current_price_raw` 伪填为前复权价格。
 
-策略6尾部采用双路径：原 `strategy6/dry_tail.py::evaluate_dry_tail()` 必须保持业务逻辑和阈值不变；新增稳定箱体路径位于 `strategy6/box_tail.py`。最终通过使用 OR，`BOTH` 才对两个已通过路径取较高分；`ORIGINAL` 和 `NONE` 必须保留原尾部分，失败箱体不得抬高旧结果。紧密K线评分仅用于箱体窗口择优和质量标签，不得累加到最终 `tail_score`。
+策略6正式长期趋势初筛使用固定全条件规则：前复权收盘价大于10元、位于最近250个交易日最高/最低价规定区间、`EMA150 > EMA200`、收盘价同时高于EMA150/200，并且BB20(2倍总体标准差)严格位于KC20(EMA20中轨、1.5倍Wilder ATR20)内。该规则替代旧 `close > MA250` 与 `MA120 > MA250`，不替代强势启动事件；TTM附加诊断分不得再参与资格、总分或排序。
+
+当前产品以策略6为唯一主服务：前端只提供策略6扫描、候选、任务和配置入口，策略1-5页面与启动入口不得恢复；自动定时任务只允许创建并执行 `STRATEGY_6_STRONG_VCP_TAIL`。策略1-5后端代码、历史数据和旧API暂时保留用于兼容与审计，不得由前端或scheduler主动触发。
+
+策略6默认决策画像为 `formal_original`：固定尾段窗口，只有 `strategy6/dry_tail.py::evaluate_dry_tail()` 的 ORIGINAL 路径参与正式评分、过滤与候选分层。`dynamic_tail`、稳定箱体、Brooks 和 `S6_QUALITY_V2` 仅允许在显式 `research_quality_v2` 研究画像中执行，不得绕过 ORIGINAL 风险进入正式候选。旧输出字段继续保留，正式画像填充禁用中性值；生命周期必须按 `decision_profile` 隔离。
+
+稳定箱体研究路径位于 `strategy6/box_tail.py`。研究画像中最终通过使用 OR，`BOTH` 才对两个已通过路径取较高分；`ORIGINAL` 和 `NONE` 必须保留原尾部分，失败箱体不得抬高旧结果。紧密K线评分仅用于箱体窗口择优和质量标签，不得累加到最终 `tail_score`。
 
 策略6历史研究位于 `strategy6/backtest/`，只能通过冻结 `StrongVcpTailEngine.evaluate_at()` 按历史日期重建信号。个股和交易统一使用本地前复权日线；四个真实宽基指数必须覆盖研究区间，缺少沪深300时回测必须返回 `BLOCKED_INDEX_HISTORY`。P0-P3不得读取OOS收益、不得写生产配置，当前股票池结果必须标记 `RESEARCH_ONLY_CURRENT_UNIVERSE`。
 
@@ -96,8 +102,9 @@ python -m pytest tests/test_tushare_hist.py -v
 
 - 策略2扫描、实验、正式参数升级、验收分析和回测默认只使用本地 `stock_pool` / `daily_ohlc`。
 - 没有用户明确要求时，不重新拉取 Baidu/Sina/Tencent/AKShare/Tushare 数据。
-- 生产日线源只允许 `baidu`、`sina`、`tencent`；yfinance 已因 OHLC 可信度问题从生产源链、默认配置、前端配置和依赖中剔除。
-- 三数据源或多数据源全部在线失败时，不使用旧缓存产出扫描结果；股票应标记为失败并保留失败原因。
+- 正式日线模式由 `data.acquisition_mode` 人工选择：默认 `tickflow`；备用 `legacy_multi_source` 使用 `tencent -> sina(AkShare) -> baidu`。运行时禁止自动跨模式回退。
+- TickFlow 股票固定使用 `forward_additive`，四个宽基指数使用不复权日线；手动扫描、定时扫描、失败重试和中断恢复必须遵循任务启动时的模式。
+- TickFlow 或传统多源全部失败时，不使用不新鲜缓存产出扫描结果；股票应标记为失败并保留失败原因。
 - 回测只读本地 DB，禁止调用任何外部行情源。
 - `NEXT_OPEN` 是可信基线执行模型，不得改回信号日收盘成交。
 - 同一股票两个命中之间累计 10 个有效未命中交易日后，才拆分为新机会。

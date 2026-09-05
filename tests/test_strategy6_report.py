@@ -30,6 +30,7 @@ def test_strategy6_report_xlsx_handles_empty_candidates():
     assert "enable_market_filter" in shared
     assert "relative_strength_10_sector" not in shared
     assert "strategy_version" in shared
+    assert "decision_profile" in shared
     assert "pattern_type" in shared
     assert "objective_target_2" in shared
     assert "execution_target_2r" in shared
@@ -38,6 +39,14 @@ def test_strategy6_report_xlsx_handles_empty_candidates():
     assert "price_basis" in shared
     assert "start_day_self_amount_percentile" in shared
     for header in (
+        "ttm_squeeze_status", "ttm_squeeze_on", "ttm_squeeze_days", "ttm_fired",
+        "ttm_momentum", "ttm_previous_momentum", "ttm_momentum_direction",
+        "ttm_bb_upper", "ttm_bb_lower", "ttm_kc_upper", "ttm_kc_lower",
+        "ttm_squeeze_score", "ranking_score", "ttm_reasons", "ttm_risk_tags",
+        "ttm_model_version",
+    ):
+        assert header in shared
+    for header in (
         "original_tail_pass", "box_tail_enabled", "box_tail_pass", "box_status",
         "tail_path", "box_start_date", "box_high", "box_low", "box_width",
         "box_low_test_count", "box_volume_contraction_ratio", "box_center_shift",
@@ -45,6 +54,12 @@ def test_strategy6_report_xlsx_handles_empty_candidates():
         "box_quality_score", "box_quality_tag", "avg_body_ratio_5",
         "compact_close_range_5", "kline_overlap_pair_count", "atr_contraction_ratio",
         "compact_kline_reasons", "compact_kline_risk_tags",
+        "tail_regime_enabled", "tail_regime_status", "tail_regime_start_date",
+        "tail_regime_days", "tail_regime_delta_bic", "tail_regime_volume_ratio",
+        "tail_regime_range_ratio", "tail_regime_body_ratio",
+        "tail_regime_abs_return_ratio", "tail_regime_close_dispersion",
+        "tail_regime_low_slope_atr", "tail_regime_model_version",
+        "tail_regime_reasons", "tail_regime_risks",
         "brooks_tail_enabled", "brooks_tail_pass", "brooks_tail_score",
         "brooks_tail_premium", "brooks_status", "brooks_trade_ready",
         "brooks_trade_trigger_type", "brooks_trigger_price", "brooks_trigger_valid_until", "tail_paths",

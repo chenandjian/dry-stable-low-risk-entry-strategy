@@ -1,10 +1,14 @@
 from strategy6.backtest.snapshot import (
+    annotate_candidate_events,
     authoritative_tail_paths,
+    build_candidate_event_id,
     build_setup_id,
     is_trade_ready_snapshot,
     rebuild_stock_signals,
 )
+from strategy6.backtest.models import BacktestSignal
 from strategy6.engine import StrongVcpTailEngine
+from strategy6.ttm_squeeze import calculate_ttm_squeeze
 
 
 class FakeEvaluation:
@@ -67,6 +71,73 @@ def test_asof_rebuild_never_passes_future_stock_or_market_rows():
     assert [signal.evaluation_date for signal in signals] == ["2025-01-05", "2025-01-06"]
 
 
+def test_asof_rebuild_ttm_snapshot_is_unchanged_when_future_rows_are_appended():
+    class TtmEvaluation(FakeEvaluation):
+        def __init__(self, rows):
+            ttm = calculate_ttm_squeeze(rows, {
+                "enabled": True,
+                "bb_period": 5,
+                "bb_stddev": 2.0,
+                "kc_ema_period": 5,
+                "kc_atr_period": 5,
+                "kc_atr_multiplier": 1.5,
+                "momentum_period": 5,
+                "bullish_squeeze_min_days": 3,
+            })
+            super().__init__(rows[-1]["date"], **{
+                "ttm_squeeze_status": ttm.status,
+                "ttm_squeeze_score": ttm.score,
+                "ttm_momentum": ttm.momentum,
+                "ttm_bb_upper": ttm.bb_upper,
+                "ttm_kc_upper": ttm.kc_upper,
+            })
+
+    class TtmEngine:
+        def evaluate_at(self, rows, **kwargs):
+            return TtmEvaluation(rows)
+
+    history = [
+        {
+            "date": f"2025-01-{day:02d}",
+            "open": 10 + day * 0.01,
+            "high": 10.2 + day * 0.01,
+            "low": 9.8 + day * 0.01,
+            "close": 10 + day * 0.01,
+            "volume": 100,
+        }
+        for day in range(1, 12)
+    ]
+    evaluation_date = history[-1]["date"]
+    future_rows = history + [{
+        "date": "2025-01-12",
+        "open": 20,
+        "high": 25,
+        "low": 15,
+        "close": 24,
+        "volume": 1000,
+    }]
+
+    base = rebuild_stock_signals(
+        code="000001", name="样本", rows=history, evaluation_dates=[evaluation_date],
+        market_data_by_symbol={}, parameter_set_id="s6ps-base",
+        engine=TtmEngine(), minimum_history=1,
+    )[0].snapshot
+    extended = rebuild_stock_signals(
+        code="000001", name="样本", rows=future_rows, evaluation_dates=[evaluation_date],
+        market_data_by_symbol={}, parameter_set_id="s6ps-future",
+        engine=TtmEngine(), minimum_history=1,
+    )[0].snapshot
+
+    for field in (
+        "ttm_squeeze_status",
+        "ttm_squeeze_score",
+        "ttm_momentum",
+        "ttm_bb_upper",
+        "ttm_kc_upper",
+    ):
+        assert extended[field] == base[field]
+
+
 def test_wait_breakout_snapshot_is_observable_but_not_trade_ready():
     waiting = FakeEvaluation(
         "2025-01-05",
@@ -77,6 +148,53 @@ def test_wait_breakout_snapshot_is_observable_but_not_trade_ready():
     assert authoritative_tail_paths(waiting) == ["BOX"]
     assert is_trade_ready_snapshot(waiting) is False
     assert is_trade_ready_snapshot(FakeEvaluation("2025-01-05").to_candidate_dict()) is True
+
+
+def test_candidate_event_identity_uses_strong_start_cycle_not_mutable_setup_details():
+    first = FakeEvaluation(
+        "2025-01-05", entry_archetype="WAIT_BREAKOUT", start_date="2025-01-01",
+    ).to_candidate_dict()
+    second = FakeEvaluation(
+        "2025-01-06", entry_archetype="SUPPORT_PULLBACK", start_date="2025-01-01",
+        pivot_price=10.7, box_start_date="2025-01-04",
+    ).to_candidate_dict()
+
+    assert build_setup_id(first) != build_setup_id(second)
+    assert build_candidate_event_id(first, fallback_setup_id="setup-a") == build_candidate_event_id(
+        second, fallback_setup_id="setup-b",
+    )
+
+
+def test_candidate_event_annotation_marks_first_candidate_and_first_executable_signal():
+    snapshots = [
+        FakeEvaluation("2025-01-05", entry_archetype="WAIT_BREAKOUT").to_candidate_dict(),
+        FakeEvaluation("2025-01-06", entry_archetype="SUPPORT_PULLBACK").to_candidate_dict(),
+        FakeEvaluation("2025-01-07", entry_archetype="SUPPORT_PULLBACK").to_candidate_dict(),
+        FakeEvaluation("2025-01-08", entry_archetype="PIVOT_BREAKOUT").to_candidate_dict(),
+    ]
+    signals = [
+        BacktestSignal(
+            parameter_set_id="s6ps-a", code="000001", name="样本",
+            evaluation_date=snapshot["evaluation_date"], setup_id=f"setup-{index}",
+            tail_path="BOX", candidate_type="KEY_CANDIDATE", snapshot=snapshot,
+        )
+        for index, snapshot in enumerate(snapshots, start=1)
+    ]
+
+    annotated = annotate_candidate_events(signals)
+
+    assert len({signal.snapshot["candidate_event_id"] for signal in annotated}) == 1
+    assert [signal.snapshot["candidate_event_sequence"] for signal in annotated] == [1, 2, 3, 4]
+    assert annotated[0].snapshot["is_first_candidate_event"] is True
+    assert annotated[0].snapshot["first_candidate_date"] == "2025-01-05"
+    assert annotated[0].snapshot["is_first_executable_event"] is False
+    assert annotated[0].snapshot["first_executable_date"] == ""
+    assert annotated[1].snapshot["is_first_executable_event"] is True
+    assert annotated[1].snapshot["first_executable_date"] == "2025-01-06"
+    assert annotated[1].snapshot["is_first_entry_archetype_event"] is True
+    assert annotated[2].snapshot["is_first_entry_archetype_event"] is False
+    assert annotated[3].snapshot["is_first_entry_archetype_event"] is False
+    assert annotated[3].snapshot["first_entry_archetype_date"] == "2025-01-06"
 
 
 def test_setup_id_is_stable_but_parameter_set_keeps_snapshots_independent():

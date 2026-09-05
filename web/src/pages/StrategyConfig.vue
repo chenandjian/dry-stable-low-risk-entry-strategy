@@ -1,7 +1,10 @@
 <template>
   <div class="page-content">
-    <h2 class="page-title">策略配置</h2>
-    <p class="page-sub">修改扫描参数，保存后下次扫描生效</p>
+    <div class="page-heading">
+      <span class="terminal-kicker">STRATEGY 6 / CONTROL PARAMETERS</span>
+      <h2 class="page-title">策略配置</h2>
+      <p class="page-sub">策略6扫描、行情数据与定时任务参数，保存后立即生效</p>
+    </div>
 
     <!-- 市场范围 -->
     <section class="section">
@@ -17,8 +20,8 @@
 
     <!-- 基础参数 -->
     <section class="section">
-      <h3 class="section-title">基础参数</h3>
-      <div class="param-grid">
+      <h3 class="section-title">行情数据</h3>
+      <div v-if="false" class="param-grid">
         <div class="param">
           <label title="近20日平均成交额低于此值的股票将被过滤（单位：元）">平均成交额阈值 <span class="unit">元</span></label>
           <input type="number" v-model.number="config.liquidity.min_avg_turnover"
@@ -51,6 +54,61 @@
         </div>
       </div>
       <div class="param-group" style="margin-top:12px">
+        <label class="param-label">日线数据获取模式</label>
+        <div class="mode-options">
+          <label class="mode-option">
+            <input data-test="acquisition-mode-tickflow" type="radio"
+              v-model="config.data.acquisition_mode" value="tickflow" @change="markDirty" />
+            <span><strong>TickFlow 批量模式</strong><small>正式模式，股票使用前复权批量日线；失败时不会自动切换传统数据源。</small></span>
+          </label>
+          <label class="mode-option">
+            <input data-test="acquisition-mode-legacy" type="radio"
+              v-model="config.data.acquisition_mode" value="legacy_multi_source" @change="markDirty" />
+            <span><strong>传统多数据源模式</strong><small>人工备用模式，按下方启用顺序调用腾讯、AkShare-Sina、百度。</small></span>
+          </label>
+        </div>
+      </div>
+      <div class="param-group" style="margin-top:12px">
+        <label class="param-label">TickFlow 访问模式</label>
+        <div class="mode-options">
+          <label class="mode-option">
+            <input data-test="tickflow-access-free" type="radio"
+              v-model="config.data.tickflow_access_mode" value="free" @change="markDirty" />
+            <span><strong>免费模式（默认）</strong><small>始终调用 TickFlow.free()，不会使用已保存的 API Key。</small></span>
+          </label>
+          <label class="mode-option">
+            <input data-test="tickflow-access-authenticated" type="radio"
+              v-model="config.data.tickflow_access_mode" value="authenticated" @change="markDirty" />
+            <span><strong>API Key 认证模式</strong><small>只使用 API Key 认证，失败时不会自动切换免费模式。</small></span>
+          </label>
+        </div>
+        <p v-if="config.data.tickflow_access_mode === 'free'" class="section-hint">
+          已保存的 Key 会保留，但当前不会使用。
+        </p>
+      </div>
+      <div v-if="config.data.tickflow_access_mode === 'authenticated'"
+        class="param-group tickflow-key-group" style="margin-top:12px">
+        <label class="param-label" for="tickflow-api-key">
+          TickFlow API Key
+          <span class="key-status" :class="{ configured: config.data.tickflow_api_key_configured }">
+            {{ config.data.tickflow_api_key_configured ? '已配置' : '未配置' }}
+          </span>
+        </label>
+        <div class="secret-input-row">
+          <input id="tickflow-api-key" data-test="tickflow-api-key"
+            :type="showTickFlowApiKey ? 'text' : 'password'"
+            v-model="config.data.tickflow_api_key"
+            autocomplete="new-password"
+            placeholder="留空表示保留现有密钥"
+            @input="markDirty" />
+          <button type="button" class="btn-secondary" data-test="tickflow-api-key-visible"
+            @click="showTickFlowApiKey = !showTickFlowApiKey">
+            {{ showTickFlowApiKey ? '隐藏' : '显示' }}
+          </button>
+        </div>
+        <p class="section-hint">后端不会回显已保存的密钥；输入新值并保存才会替换，留空会保留原值。</p>
+      </div>
+      <div class="param-group" style="margin-top:12px">
         <label class="param-label" title="按优先级排列，首位为主数据源，拉取失败时按顺序尝试后续数据源">日线数据源 <span class="unit">按优先级排列</span></label>
         <div class="toggle-grid">
           <label v-for="src in availableSources" :key="src.key" class="toggle-item">
@@ -66,18 +124,13 @@
     <section class="section scheduler-section">
       <h3 class="section-title">定时任务</h3>
       <p class="section-hint">
-        串行任务会在工作日按设定时间先执行策略1，完成后再执行策略2和策略3。保存后会立即重载后端定时任务。
+        工作日按设定时间执行策略6全市场扫描。保存后会立即重载后端定时任务。
       </p>
       <div class="toggle-grid" style="margin-bottom:16px">
         <label class="toggle-item">
           <span class="toggle-label">启用定时任务</span>
           <button data-test="scheduler-enabled" class="toggle" :class="{ active: config.scheduler?.enabled === true }"
             @click="toggleScheduler('enabled')">{{ config.scheduler?.enabled === true ? '开' : '关' }}</button>
-        </label>
-        <label class="toggle-item">
-          <span class="toggle-label">启用串行三策略扫描</span>
-          <button data-test="serial-dual-scan-enabled" class="toggle" :class="{ active: config.scheduler?.serial_dual_scan?.enabled !== false }"
-            @click="toggleSerialDualScan">{{ config.scheduler?.serial_dual_scan?.enabled !== false ? '开' : '关' }}</button>
         </label>
       </div>
       <div class="param-grid">
@@ -90,7 +143,7 @@
     </section>
 
     <!-- 高级参数 -->
-    <section class="section">
+    <section v-if="false" class="section">
       <h3 class="section-title" style="cursor:pointer" @click="showAdvanced = !showAdvanced">
         {{ showAdvanced ? '▾' : '▸' }} 高级参数
       </h3>
@@ -262,7 +315,7 @@
     </section>
 
     <!-- 策略2：极致量干价稳 -->
-    <section class="section strategy2-section">
+    <section v-if="false" class="section strategy2-section">
       <h3 class="section-title strategy2-title">策略2 · 极致量干价稳</h3>
       <p class="section-hint">
         策略2 独立扫描全部股票，不依赖杯柄/VCP 形态识别。日线拉取天数沿用全局配置；本期不支持回测。
@@ -337,7 +390,7 @@
     </section>
 
     <!-- 策略3：强势回踩二次启动 -->
-    <section class="section strategy3-section">
+    <section v-if="false" class="section strategy3-section">
       <h3 class="section-title strategy3-title">策略3 · 强势回踩二次启动</h3>
       <p class="section-hint">
         策略3不是杯柄/VCP策略，也不是极致量干价稳策略。它寻找已证明强势的股票，在健康回踩、缩量企稳后二次转强的机会。
@@ -437,7 +490,7 @@
     </section>
 
     <!-- 策略4：热点龙头二波 -->
-    <section class="section strategy4-section">
+    <section v-if="false" class="section strategy4-section">
       <h3 class="section-title strategy4-title">策略4 · 热点龙头二波</h3>
       <p class="section-hint">
         策略4先确认热点行业/题材，再识别核心龙头，最后只在龙头池中判断第一波回踩后的二波机会。
@@ -532,7 +585,7 @@
     </section>
 
     <!-- 策略5：短线强势冲刺盘整支撑 -->
-    <section class="section strategy5-section">
+    <section v-if="false" class="section strategy5-section">
       <h3 class="section-title strategy5-title">策略5 · 短线强势冲刺盘整支撑</h3>
       <p class="section-hint">
         策略5从全市场日线中寻找短线强度、新高确认、盘整可控且贴近 MA 支撑的重点/观察候选。
@@ -676,6 +729,10 @@
       <p class="section-hint">
         策略6独立寻找强势启动后的支撑横盘尾部，重点看价稳量干、支撑有效和 RR2 盈亏比。
       </p>
+      <div data-test="strategy6-decision-profile" class="info-msg strategy6-info">
+        当前决策规则：<strong>{{ config.strategy6?.decision_profile === 'research_quality_v2' ? '研究质量 V2' : '正式原始链' }}</strong>。
+        稳定箱体、动态尾段、Brooks 与质量 V2 参数仅用于研究配置，正式原始链不读取这些参数作选股决策。
+      </div>
 
       <div class="toggle-grid" style="margin-bottom:16px">
         <label class="toggle-item">
@@ -980,6 +1037,26 @@
           <span class="default">默认 60</span>
         </div>
       </div>
+
+      <h4 class="subsection-title">TTM Squeeze 附加诊断</h4>
+      <div class="toggle-row">
+        <div class="toggle-item">
+          <span>启用TTM附加诊断</span>
+          <button data-test="strategy6-ttm-enabled" class="toggle" :class="{ active: config.strategy6.ttm_squeeze.enabled }"
+            @click="toggleStrategy6Ttm('enabled')">{{ config.strategy6.ttm_squeeze.enabled ? '开' : '关' }}</button>
+        </div>
+      </div>
+      <div class="param-grid">
+        <div class="param"><label title="布林带计算周期">布林带周期</label><input data-test="strategy6-ttm-bb-period" type="number" v-model.number="config.strategy6.ttm_squeeze.bb_period" @input="markDirty" min="5" max="120" /><span class="default">默认 20</span></div>
+        <div class="param"><label title="布林带标准差倍数">布林带倍数</label><input type="number" v-model.number="config.strategy6.ttm_squeeze.bb_stddev" @input="markDirty" min="0.01" max="10" step="0.1" /><span class="default">默认 2.0</span></div>
+        <div class="param"><label title="Keltner中轨EMA周期">Keltner EMA周期</label><input type="number" v-model.number="config.strategy6.ttm_squeeze.kc_ema_period" @input="markDirty" min="5" max="120" /><span class="default">默认 20</span></div>
+        <div class="param"><label title="Keltner通道ATR周期">Keltner ATR周期</label><input type="number" v-model.number="config.strategy6.ttm_squeeze.kc_atr_period" @input="markDirty" min="5" max="120" /><span class="default">默认 20</span></div>
+        <div class="param"><label title="Keltner通道ATR倍数">Keltner ATR倍数</label><input data-test="strategy6-ttm-kc-multiplier" type="number" v-model.number="config.strategy6.ttm_squeeze.kc_atr_multiplier" @input="markDirty" min="0.01" max="10" step="0.1" /><span class="default">默认 1.5</span></div>
+        <div class="param"><label title="TTM线性回归动量周期">动量周期</label><input data-test="strategy6-ttm-momentum-period" type="number" v-model.number="config.strategy6.ttm_squeeze.momentum_period" @input="markDirty" min="5" max="120" /><span class="default">默认 20</span></div>
+        <div class="param"><label title="多头挤压加3分所需的最少连续交易日">多头挤压最少天数</label><input type="number" v-model.number="config.strategy6.ttm_squeeze.bullish_squeeze_min_days" @input="markDirty" min="1" max="20" /><span class="default">默认 3</span></div>
+        <div class="param"><label title="保留旧字段兼容；当前仅为诊断分，不参与资格、总分或排序">TTM诊断分上限</label><input type="number" v-model.number="config.strategy6.ttm_squeeze.max_ranking_bonus" @input="markDirty" min="4" max="4" /><span class="default">固定 4</span></div>
+      </div>
+      <p class="section-note">ⓘ 此处仅控制可配置的TTM动量诊断，不参与资格、总分或排序。正式主链固定使用价格位置与EMA150/200长期趋势过滤；BB20完全进入KC20保留为独立初筛池和诊断，不直接淘汰主链候选。</p>
 
       <h4 class="subsection-title">稳定箱体尾部路径</h4>
       <div class="toggle-row">
@@ -1335,8 +1412,21 @@ const defaultStrategy6BoxTailConfig = {
   },
 }
 
+const defaultStrategy6TtmSqueezeConfig = {
+  enabled: true,
+  bb_period: 20,
+  bb_stddev: 2.0,
+  kc_ema_period: 20,
+  kc_atr_period: 20,
+  kc_atr_multiplier: 1.5,
+  momentum_period: 20,
+  bullish_squeeze_min_days: 3,
+  max_ranking_bonus: 4,
+}
+
 const defaultStrategy6Config = {
   enabled: true,
+  decision_profile: 'formal_original',
   kline_days: 1100,
   minimum_trading_days: 500,
   min_avg_amount_60d_yi: 3,
@@ -1414,6 +1504,7 @@ const defaultStrategy6Config = {
   ready_min_score: 85,
   key_min_score: 75,
   watch_min_score: 60,
+  ttm_squeeze: defaultStrategy6TtmSqueezeConfig,
   box_tail: defaultStrategy6BoxTailConfig,
   brooks_tail: null,
 }
@@ -1421,7 +1512,15 @@ const defaultStrategy6Config = {
 const config = reactive({
   market: {},
   liquidity: {},
-  data: { scan_window_days: 250, backtest_window_days: 250, daily_sources: ['baidu', 'sina', 'tencent'] },
+  data: {
+    acquisition_mode: 'legacy_multi_source',
+    tickflow_access_mode: 'free',
+    tickflow_api_key: '',
+    tickflow_api_key_configured: false,
+    scan_window_days: 250,
+    backtest_window_days: 250,
+    daily_sources: ['tencent', 'sina', 'baidu'],
+  },
   cup: {},
   handle: {},
   breakout: {},
@@ -1454,6 +1553,7 @@ const saved = ref(false)
 const saving = ref(false)
 const error = ref('')
 const showAdvanced = ref(false)
+const showTickFlowApiKey = ref(false)
 
 // Computed: convert cup depth from 0-1 to percentage for slider display
 const cupMinDepth = computed({
@@ -1609,12 +1709,17 @@ function sanitizeStrategy6Config(value) {
     Object.entries(value || {}).filter(([key]) => Object.prototype.hasOwnProperty.call(defaultStrategy6Config, key))
   )
   const boxTail = known.box_tail || {}
+  const ttmSqueeze = known.ttm_squeeze || {}
   const brooksTail = known.brooks_tail && typeof known.brooks_tail === 'object'
     ? JSON.parse(JSON.stringify(known.brooks_tail))
     : null
   return {
     ...defaultStrategy6Config,
     ...known,
+    ttm_squeeze: {
+      ...defaultStrategy6TtmSqueezeConfig,
+      ...ttmSqueeze,
+    },
     box_tail: {
       ...defaultStrategy6BoxTailConfig,
       ...boxTail,
@@ -1688,6 +1793,9 @@ function schedulerTimeIsValid() {
 function toggleScheduler(key) {
   ensureSchedulerConfig()
   config.scheduler[key] = !config.scheduler[key]
+  if (key === 'enabled') {
+    config.scheduler.serial_dual_scan.enabled = config.scheduler.enabled
+  }
   markDirty()
 }
 
@@ -1738,6 +1846,12 @@ function toggleStrategy6BoxTail(key) {
   markDirty()
 }
 
+function toggleStrategy6Ttm(key) {
+  ensureStrategy6Config()
+  config.strategy6.ttm_squeeze[key] = !config.strategy6.ttm_squeeze[key]
+  markDirty()
+}
+
 function toggleStrategy6CompactKline(key) {
   ensureStrategy6Config()
   config.strategy6.box_tail.compact_kline[key] = !config.strategy6.box_tail.compact_kline[key]
@@ -1754,9 +1868,9 @@ function toggleStrategy6Brooks(section, key) {
 }
 
 const availableSources = [
-  { key: 'baidu', label: '百度', tip: '百度股票API，国内数据源，稳定可靠' },
-  { key: 'sina', label: '新浪', tip: '新浪财经API，数据覆盖全' },
   { key: 'tencent', label: '腾讯', tip: '腾讯财经API，实时性好' },
+  { key: 'sina', label: 'AkShare-Sina', tip: '通过 AkShare 调用新浪前复权历史行情' },
+  { key: 'baidu', label: '百度', tip: '百度股票API备用源' },
 ]
 const availableSourceKeys = new Set(availableSources.map(s => s.key))
 
@@ -1791,6 +1905,12 @@ function toggleSource(key) {
 
 function sanitizeDailySources() {
   if (!config.data) config.data = {}
+  if (!['tickflow', 'legacy_multi_source'].includes(config.data.acquisition_mode)) {
+    config.data.acquisition_mode = 'legacy_multi_source'
+  }
+  if (!['free', 'authenticated'].includes(config.data.tickflow_access_mode)) {
+    config.data.tickflow_access_mode = 'free'
+  }
   const current = Array.isArray(config.data.daily_sources)
     ? config.data.daily_sources
     : availableSources.map(s => s.key)
@@ -1806,6 +1926,14 @@ function markDirty() {
 function validate() {
   const errors = []
   sanitizeDailySources()
+  const strategy6OnlyFrontend = true
+  const strategy6Data = config.data || {}
+  if (!strategy6Data.daily_sources || strategy6Data.daily_sources.length === 0) errors.push('至少选择一个日线数据源')
+  if (!['tickflow', 'legacy_multi_source'].includes(strategy6Data.acquisition_mode)) errors.push('请选择有效的日线数据获取模式')
+  if (!['free', 'authenticated'].includes(strategy6Data.tickflow_access_mode)) errors.push('请选择有效的 TickFlow 访问模式')
+  if (!schedulerTimeIsValid()) errors.push('定时任务执行时间格式不正确')
+
+  if (!strategy6OnlyFrontend) {
   const cup = config.cup
   const handle = config.handle
 
@@ -1829,6 +1957,8 @@ function validate() {
   if (dataCfg.backtest_window_days < 30) errors.push('回测分析天数最低 30天')
   if (dataCfg.scan_window_days > liq.min_listing_days) errors.push('扫描分析天数不能超过日线拉取天数')
   if (!dataCfg.daily_sources || dataCfg.daily_sources.length === 0) errors.push('至少选择一个日线数据源')
+  if (!['tickflow', 'legacy_multi_source'].includes(dataCfg.acquisition_mode)) errors.push('请选择有效的日线数据获取模式')
+  if (!['free', 'authenticated'].includes(dataCfg.tickflow_access_mode)) errors.push('请选择有效的 TickFlow 访问模式')
   if (!schedulerTimeIsValid()) errors.push('定时任务执行时间格式不正确')
 
   // Strategy2 validation
@@ -1911,6 +2041,8 @@ function validate() {
   if (s5.trade_total_score_weight < 0 || s5.trade_total_score_weight > 2) errors.push('策略5: 总分权重需在 0-2')
   if (s5.trade_short_strength_weight < 0 || s5.trade_short_strength_weight > 5) errors.push('策略5: 短线强度权重需在 0-5')
 
+  }
+
   // Strategy6 validation
   ensureStrategy6Config()
   const s6 = config.strategy6 || {}
@@ -1954,6 +2086,16 @@ function validate() {
   if (s6.key_min_score < s6.watch_min_score || s6.key_min_score > s6.ready_min_score) errors.push('策略6: 重点最低分需在观察和就绪之间')
   if (s6.ready_min_score < s6.key_min_score || s6.ready_min_score > 100) errors.push('策略6: 就绪最低分需不低于重点且不超过100')
   if (s6.max_watch_days < 1 || s6.max_watch_days > 60) errors.push('策略6: 最大观察天数需在 1-60')
+  const ttm = s6.ttm_squeeze || {}
+  const ttmIntegerInRange = (value, min, max) => Number.isInteger(value) && value >= min && value <= max
+  const ttmNumberInRange = (value, min, max) => typeof value === 'number' && Number.isFinite(value) && value > min && value <= max
+  for (const [key, label] of [['bb_period', '布林带周期'], ['kc_ema_period', 'Keltner EMA周期'], ['kc_atr_period', 'Keltner ATR周期'], ['momentum_period', '动量周期']]) {
+    if (!ttmIntegerInRange(ttm[key], 5, 120)) errors.push(`策略6 TTM: ${label}需为5-120的整数`)
+  }
+  if (!ttmNumberInRange(ttm.bb_stddev, 0, 10)) errors.push('策略6 TTM: 布林带倍数需在 (0,10]')
+  if (!ttmNumberInRange(ttm.kc_atr_multiplier, 0, 10)) errors.push('策略6 TTM: Keltner ATR倍数需在 (0,10]')
+  if (!ttmIntegerInRange(ttm.bullish_squeeze_min_days, 1, 20)) errors.push('策略6 TTM: 多头挤压最少天数需为1-20的整数')
+  if (ttm.max_ranking_bonus !== 4) errors.push('策略6 TTM: 最大排序加分本版本必须为4')
   const box = s6.box_tail || {}
   const compact = box.compact_kline || {}
   if (box.min_box_days < 5 || box.min_box_days > box.max_box_days) errors.push('策略6箱体: 最短天数需在 5 到最长天数之间')
@@ -2040,44 +2182,40 @@ async function saveConfig() {
   saving.value = true
   error.value = ''
   try {
-    // Build the payload matching config.yaml structure
+    const replacementTickFlowKey = config.data.tickflow_access_mode === 'authenticated'
+      ? String(config.data.tickflow_api_key || '').trim()
+      : ''
+    const dataPayload = {
+      ...config.data,
+      daily_sources: [...config.data.daily_sources],
+    }
+    delete dataPayload.tickflow_api_key_configured
+    if (replacementTickFlowKey) {
+      dataPayload.tickflow_api_key = replacementTickFlowKey
+    } else {
+      delete dataPayload.tickflow_api_key
+    }
+    // Only send settings owned by the Strategy6 service UI. The backend
+    // deep-merges this payload, preserving legacy strategy configuration.
     const payload = {
       market: { ...config.market },
-      liquidity: { ...config.liquidity },
-      data: { ...config.data, daily_sources: [...config.data.daily_sources] },
-      cup: {
-        min_duration: config.cup.min_duration,
-        max_duration: config.cup.max_duration,
-        min_depth: config.cup.min_depth,
-        max_depth: config.cup.max_depth,
-        max_lip_deviation: config.cup.max_lip_deviation,
-        min_bottom_roundness: config.cup.min_bottom_roundness,
-      },
-      handle: {
-        min_duration: config.handle.min_duration,
-        max_duration: config.handle.max_duration,
-        max_depth: config.handle.max_depth,
-      },
-      breakout: {
-        buffer_pct: config.breakout.buffer_pct,
-        volume_multiplier: config.breakout.volume_multiplier,
-      },
-      decision: { ...config.decision },
-      volume_dry: { ...config.volume_dry },
-      price_stable: { ...config.price_stable },
-      risk_reward: { ...config.risk_reward },
+      data: dataPayload,
       scheduler: {
         enabled: config.scheduler?.enabled === true,
-        serial_dual_scan: { ...config.scheduler?.serial_dual_scan },
+        serial_dual_scan: {
+          ...config.scheduler?.serial_dual_scan,
+          enabled: config.scheduler?.enabled === true,
+        },
       },
-      strategy2: { ...config.strategy2 },
-      strategy3: { ...config.strategy3 },
-      strategy4: { ...config.strategy4 },
-      strategy5: sanitizeStrategy5Config(config.strategy5),
       strategy6: sanitizeStrategy6Config(config.strategy6),
     }
     const res = await updateConfig(payload)
     if (res.status === 'ok') {
+      if (replacementTickFlowKey) {
+        config.data.tickflow_api_key = ''
+        config.data.tickflow_api_key_configured = true
+        showTickFlowApiKey.value = false
+      }
       dirty.value = false
       saved.value = true
       setTimeout(() => { saved.value = false }, 3000)
@@ -2130,20 +2268,33 @@ onMounted(async () => {
 </script>
 
 <style scoped>
-.page-content { padding: 20px 24px; max-width: 900px; margin: 0 auto; }
-.page-title { font-size: 24px; font-weight: 700; color: var(--text-primary); }
-.page-sub { font-size: 13px; color: var(--text-muted); margin-bottom: 24px; }
+.page-content { padding: 22px 24px 48px; max-width: 1180px; margin: 0 auto; }
+.page-heading { margin-bottom: 16px; padding-bottom: 14px; border-bottom: 1px solid var(--border); }
+.terminal-kicker { color: var(--gold); font: 10px/1 var(--font-mono); letter-spacing: 0.16em; }
+.page-title { margin: 7px 0 3px; font-size: 23px; font-weight: 700; color: var(--text-primary); }
+.page-sub { margin: 0; font-size: 12px; color: var(--text-muted); }
 
 .section {
   background: var(--bg-panel); border: 1px solid var(--border);
-  border-radius: 8px; padding: 20px; margin-bottom: 16px;
+  border-radius: var(--radius-sm); padding: 18px 20px; margin-bottom: 12px;
+  box-shadow: var(--shadow-panel);
 }
 .section-title {
-  font-size: 14px; font-weight: 600; color: var(--text-primary);
-  margin-bottom: 16px; padding-bottom: 10px; border-bottom: 1px solid var(--border);
+  font-size: 12px; font-weight: 700; letter-spacing: 0.05em; color: var(--text-secondary);
+  margin: 0 0 16px; padding-bottom: 10px; border-bottom: 1px solid var(--border);
 }
 
 .toggle-grid { display: flex; gap: 12px; flex-wrap: wrap; }
+.mode-options { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 10px; margin-top: 8px; }
+.secret-input-row { display: flex; gap: 8px; align-items: center; margin-top: 8px; }
+.secret-input-row input { flex: 1; min-width: 0; }
+.key-status { margin-left: 8px; color: var(--text-muted); font-size: 12px; }
+.key-status.configured { color: var(--success, #22a06b); }
+.mode-option { display: flex; gap: 10px; align-items: flex-start; padding: 12px; border: 1px solid var(--border); border-radius: var(--radius-sm); cursor: pointer; background: rgba(16,24,36,0.45); }
+.mode-option:hover { border-color: var(--border-light); background: var(--bg-hover); }
+.mode-option input { margin-top: 3px; accent-color: var(--accent); }
+.mode-option span { display: flex; flex-direction: column; gap: 4px; }
+.mode-option small { color: var(--text-muted); line-height: 1.45; }
 .toggle-item { display: flex; align-items: center; gap: 10px; cursor: pointer; }
 .toggle-label { font-size: 13px; color: var(--text-secondary); min-width: 90px; }
 .toggle {
@@ -2172,8 +2323,9 @@ onMounted(async () => {
 .actions-bar {
   display: flex; align-items: center; justify-content: space-between;
   background: var(--bg-panel); border: 1px solid var(--border);
-  border-radius: 8px; padding: 16px 20px; margin-top: 20px;
+  border-radius: var(--radius-sm); padding: 13px 16px; margin-top: 16px;
   position: sticky; bottom: 20px;
+  box-shadow: 0 10px 30px rgba(0,0,0,0.35);
 }
 .saved-msg { color: var(--down-green); font-size: 13px; font-weight: 600; }
 .error-msg { color: var(--up-red); font-size: 13px; }
@@ -2188,6 +2340,11 @@ onMounted(async () => {
 }
 .btn-save.dirty {
   background: var(--accent); color: #fff;
+}
+@media (max-width: 720px) {
+  .page-content { padding: 16px 12px 38px; }
+  .section { padding: 15px 14px; }
+  .actions-bar { bottom: 8px; }
 }
 
 /* Strategy2 section */

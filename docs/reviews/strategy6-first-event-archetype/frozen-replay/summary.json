@@ -1,0 +1,339 @@
+{
+  "date_range": {
+    "start": "2023-01-01",
+    "train_end": "2024-12-31",
+    "validation_end": "2025-12-31"
+  },
+  "entry_archetype_counts": {
+    "NONE": 384,
+    "SUPPORT_PULLBACK": 721,
+    "WAIT_BREAKOUT": 15
+  },
+  "entry_rebuild_failed": [],
+  "experiments": [
+    {
+      "closed": 252,
+      "closed_delta_vs_e0": 0,
+      "entry_mode": "FROZEN_TRADE_PLAN",
+      "experiment_id": "S6_EXEC_E0_LEGACY",
+      "fill_reason_counts": {
+        "CANCEL_OPEN_ABOVE_BUY_ZONE": 299,
+        "CANCEL_OPEN_BELOW_BUY_ZONE": 19,
+        "CANCEL_STRUCTURE_FAILED_BEFORE_ENTRY": 38,
+        "EXPIRED_NO_FILL": 2,
+        "FILLED_FROZEN_PLAN": 257
+      },
+      "filled": 257,
+      "full_metrics": {
+        "avg_loss_r": 1.0368571968911917,
+        "avg_net_return": -0.016810872261904763,
+        "avg_win_r": 2.897352186440678,
+        "expectancy_r": -0.11575261904761905,
+        "losses": 193,
+        "median_net_return": -0.06267531,
+        "net_profit": -20920.150209,
+        "profit_factor": 0.6402181695466351,
+        "trades": 252,
+        "win_rate": 0.23412698412698413,
+        "wins": 59
+      },
+      "gate": {
+        "passed": false,
+        "reasons": [
+          "TRAIN_EXPECTANCY_NOT_POSITIVE",
+          "TRAIN_PF_LT_1_20",
+          "VALIDATION_EXPECTANCY_NOT_POSITIVE",
+          "VALIDATION_PF_LT_1_20"
+        ]
+      },
+      "order_delta_vs_e0": 0,
+      "orders": 615,
+      "signal_selection_mode": "LEGACY_SETUP_ID",
+      "train_metrics": {
+        "avg_loss_r": 1.0099201304347827,
+        "avg_net_return": -0.045907141698113205,
+        "avg_win_r": 2.6416072857142856,
+        "expectancy_r": -0.5276429245283019,
+        "losses": 46,
+        "median_net_return": -0.07428629,
+        "net_profit": -7904.428492,
+        "profit_factor": 0.2763528821272169,
+        "trades": 53,
+        "win_rate": 0.1320754716981132,
+        "wins": 7
+      },
+      "unfilled_rate": 0.5821138211382114,
+      "validation_metrics": {
+        "avg_loss_r": 1.0452864829931974,
+        "avg_net_return": -0.009061614572864321,
+        "avg_win_r": 2.9317793846153846,
+        "expectancy_r": -0.0060531909547738676,
+        "losses": 147,
+        "median_net_return": -0.06048774,
+        "net_profit": -13015.721717,
+        "profit_factor": 0.7243817170101081,
+        "trades": 199,
+        "win_rate": 0.2613065326633166,
+        "wins": 52
+      }
+    },
+    {
+      "closed": 198,
+      "closed_delta_vs_e0": -54,
+      "entry_mode": "FROZEN_TRADE_PLAN",
+      "experiment_id": "S6_EXEC_E1_FIRST_EVENT",
+      "fill_reason_counts": {
+        "CANCEL_OPEN_ABOVE_BUY_ZONE": 233,
+        "CANCEL_OPEN_BELOW_BUY_ZONE": 16,
+        "CANCEL_STRUCTURE_FAILED_BEFORE_ENTRY": 30,
+        "EXPIRED_NO_FILL": 2,
+        "FILLED_FROZEN_PLAN": 202
+      },
+      "filled": 202,
+      "full_metrics": {
+        "avg_loss_r": 1.039436899328859,
+        "avg_net_return": -0.013941873888888888,
+        "avg_win_r": 2.8974919591836734,
+        "expectancy_r": -0.06514642424242424,
+        "losses": 149,
+        "median_net_return": -0.06229026,
+        "net_profit": -8968.583207000001,
+        "profit_factor": 0.7875146681767022,
+        "trades": 198,
+        "win_rate": 0.2474747474747475,
+        "wins": 49
+      },
+      "gate": {
+        "passed": false,
+        "reasons": [
+          "TRAIN_EXPECTANCY_NOT_POSITIVE",
+          "TRAIN_PF_LT_1_20",
+          "VALIDATION_PF_LT_1_20"
+        ]
+      },
+      "order_delta_vs_e0": -132,
+      "orders": 483,
+      "signal_selection_mode": "FIRST_EVENT_PER_START",
+      "train_metrics": {
+        "avg_loss_r": 1.005013542857143,
+        "avg_net_return": -0.03872499880952381,
+        "avg_win_r": 2.6416072857142856,
+        "expectancy_r": -0.3972434047619048,
+        "losses": 35,
+        "median_net_return": -0.07924882999999999,
+        "net_profit": -4841.044905,
+        "profit_factor": 0.3840642793695941,
+        "trades": 42,
+        "win_rate": 0.16666666666666666,
+        "wins": 7
+      },
+      "unfilled_rate": 0.5817805383022774,
+      "validation_metrics": {
+        "avg_loss_r": 1.0500054736842106,
+        "avg_net_return": -0.007269494102564103,
+        "avg_win_r": 2.9401394047619047,
+        "expectancy_r": 0.024264301282051284,
+        "losses": 114,
+        "median_net_return": -0.060947495,
+        "net_profit": -4127.538302000001,
+        "profit_factor": 0.8798330020275804,
+        "trades": 156,
+        "win_rate": 0.2692307692307692,
+        "wins": 42
+      }
+    },
+    {
+      "closed": 440,
+      "closed_delta_vs_e0": 188,
+      "entry_mode": "ARCHETYPE_TRIGGERED",
+      "experiment_id": "S6_EXEC_E2_ARCHETYPE",
+      "fill_reason_counts": {
+        "CANCEL_STRUCTURE_FAILED_BEFORE_ENTRY": 50,
+        "EXPIRED_NO_FILL": 118,
+        "FILLED_SUPPORT_PULLBACK_LIMIT": 447
+      },
+      "filled": 447,
+      "full_metrics": {
+        "avg_loss_r": 1.0315918240469208,
+        "avg_net_return": -0.022430798772727273,
+        "avg_win_r": 2.6604496262626265,
+        "expectancy_r": -0.20088249772727274,
+        "losses": 341,
+        "median_net_return": -0.06694151500000001,
+        "net_profit": -56241.549872,
+        "profit_factor": 0.5060148807820636,
+        "trades": 440,
+        "win_rate": 0.225,
+        "wins": 99
+      },
+      "gate": {
+        "passed": false,
+        "reasons": [
+          "TRAIN_EXPECTANCY_NOT_POSITIVE",
+          "TRAIN_PF_LT_1_20",
+          "VALIDATION_EXPECTANCY_NOT_POSITIVE",
+          "VALIDATION_PF_LT_1_20"
+        ]
+      },
+      "order_delta_vs_e0": 0,
+      "orders": 615,
+      "signal_selection_mode": "LEGACY_SETUP_ID",
+      "train_metrics": {
+        "avg_loss_r": 0.9903968695652174,
+        "avg_net_return": -0.043030861125,
+        "avg_win_r": 2.584681818181818,
+        "expectancy_r": -0.49882355,
+        "losses": 69,
+        "median_net_return": -0.073095815,
+        "net_profit": -12414.128054,
+        "profit_factor": 0.266895453641191,
+        "trades": 80,
+        "win_rate": 0.1375,
+        "wins": 11
+      },
+      "unfilled_rate": 0.2731707317073171,
+      "validation_metrics": {
+        "avg_loss_r": 1.0420420147058824,
+        "avg_net_return": -0.017853007138888887,
+        "avg_win_r": 2.669920602272727,
+        "expectancy_r": -0.13467337499999998,
+        "losses": 272,
+        "median_net_return": -0.06661028999999999,
+        "net_profit": -43827.421818,
+        "profit_factor": 0.5477936729664813,
+        "trades": 360,
+        "win_rate": 0.24444444444444444,
+        "wins": 88
+      }
+    },
+    {
+      "closed": 345,
+      "closed_delta_vs_e0": 93,
+      "entry_mode": "ARCHETYPE_TRIGGERED",
+      "experiment_id": "S6_EXEC_E3_COMBINED",
+      "fill_reason_counts": {
+        "CANCEL_STRUCTURE_FAILED_BEFORE_ENTRY": 40,
+        "EXPIRED_NO_FILL": 92,
+        "FILLED_SUPPORT_PULLBACK_LIMIT": 351
+      },
+      "filled": 351,
+      "full_metrics": {
+        "avg_loss_r": 1.0272890536398467,
+        "avg_net_return": -0.018385065971014494,
+        "avg_win_r": 2.6296553095238093,
+        "expectancy_r": -0.13690259999999999,
+        "losses": 261,
+        "median_net_return": -0.06698136,
+        "net_profit": -34214.062534000004,
+        "profit_factor": 0.5938361900790273,
+        "trades": 345,
+        "win_rate": 0.24347826086956523,
+        "wins": 84
+      },
+      "gate": {
+        "passed": false,
+        "reasons": [
+          "TRAIN_EXPECTANCY_NOT_POSITIVE",
+          "TRAIN_PF_LT_1_20",
+          "VALIDATION_EXPECTANCY_NOT_POSITIVE",
+          "VALIDATION_PF_LT_1_20"
+        ]
+      },
+      "order_delta_vs_e0": -132,
+      "orders": 483,
+      "signal_selection_mode": "FIRST_EVENT_PER_START",
+      "train_metrics": {
+        "avg_loss_r": 0.9815588703703704,
+        "avg_net_return": -0.035886773076923076,
+        "avg_win_r": 2.584681818181818,
+        "expectancy_r": -0.3780412153846154,
+        "losses": 54,
+        "median_net_return": -0.07405806,
+        "net_profit": -8290.884247,
+        "profit_factor": 0.3528002967511786,
+        "trades": 65,
+        "win_rate": 0.16923076923076924,
+        "wins": 11
+      },
+      "unfilled_rate": 0.2732919254658385,
+      "validation_metrics": {
+        "avg_loss_r": 1.0392186666666667,
+        "avg_net_return": -0.014322169678571429,
+        "avg_win_r": 2.6364321369863015,
+        "expectancy_r": -0.08092399285714284,
+        "losses": 207,
+        "median_net_return": -0.06694151500000001,
+        "net_profit": -25923.178287,
+        "profit_factor": 0.6370660306185582,
+        "trades": 280,
+        "win_rate": 0.26071428571428573,
+        "wins": 73
+      }
+    }
+  ],
+  "index_coverage": {
+    "hs300": {
+      "fetched_at": "2026-07-29 16:56:08",
+      "max_date": "2025-12-31",
+      "min_date": "2022-01-04",
+      "missing_dates": [],
+      "rows": 1106,
+      "rows_count": 969,
+      "source": "tickflow",
+      "stored_symbol": "hs300",
+      "symbol": "hs300"
+    },
+    "sh000001": {
+      "fetched_at": "2026-07-29 16:56:08",
+      "max_date": "2025-12-31",
+      "min_date": "2022-01-04",
+      "missing_dates": [],
+      "rows": 1106,
+      "rows_count": 969,
+      "source": "tickflow",
+      "stored_symbol": "sh000001",
+      "symbol": "sh000001"
+    },
+    "sz399001": {
+      "fetched_at": "2026-07-29 16:56:08",
+      "max_date": "2025-12-31",
+      "min_date": "2022-01-04",
+      "missing_dates": [],
+      "rows": 1106,
+      "rows_count": 969,
+      "source": "tickflow",
+      "stored_symbol": "sz399001",
+      "symbol": "sz399001"
+    },
+    "sz399006": {
+      "fetched_at": "2026-07-29 16:56:08",
+      "max_date": "2025-12-31",
+      "min_date": "2022-01-04",
+      "missing_dates": [],
+      "rows": 1106,
+      "rows_count": 969,
+      "source": "tickflow",
+      "stored_symbol": "sz399006",
+      "symbol": "sz399006"
+    }
+  },
+  "index_status": "READY",
+  "missing_stock_codes": [
+    "002759"
+  ],
+  "missing_stock_signal_count": 1,
+  "oos_status": "LOCKED_2026_PLUS",
+  "parameter_set_id": "s6ps-f03199f3e7189f9b",
+  "price_basis": "FORWARD_ADJUSTED_LOCAL_OHLC",
+  "production_config_modified": false,
+  "recommendation": {
+    "decision": "KEEP_CURRENT_RULES",
+    "qualified_experiments": [],
+    "reason": "NO_TRIAL_PASSED_INITIAL_GATE"
+  },
+  "replayed_signal_count": 1120,
+  "source_run_id": "s6bt-772c046cb6c982f61fc5",
+  "source_setup_count": 887,
+  "source_signal_count": 1121,
+  "source_stock_count": 519
+}

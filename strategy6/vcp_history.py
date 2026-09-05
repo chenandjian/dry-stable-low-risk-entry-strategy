@@ -44,6 +44,7 @@ def evaluate_vcp_candidate_history(
     engine = engine_factory(config)
     minimum_history = int(config.get("minimum_trading_days", 1))
     pattern_index = _date_index(rows, pattern_start_date)
+    evaluation_index = _date_index(rows, current)
 
     eligible_indexes = [
         index
@@ -72,11 +73,11 @@ def evaluate_vcp_candidate_history(
             continue
         if (
             pattern_index is not None
-            and index < pattern_index
             and not _history_continuity_valid(
                 rows,
                 candidate_index=index,
                 pattern_index=pattern_index,
+                evaluation_index=evaluation_index,
                 config=config,
             )
         ):
@@ -97,23 +98,25 @@ def _history_continuity_valid(
     *,
     candidate_index: int,
     pattern_index: int,
+    evaluation_index: int | None,
     config: dict,
 ) -> bool:
-    if candidate_index >= pattern_index:
-        return True
     candidate_close = _close(rows[candidate_index])
-    pattern_close = _close(rows[pattern_index])
-    if candidate_close <= 0 or pattern_close <= 0:
+    if candidate_close <= 0 or evaluation_index is None:
         return False
 
-    max_start_loss = float(config.get("vcp_history_max_start_loss_pct", 0.15))
-    if pattern_close / candidate_close - 1.0 < -max_start_loss:
-        return False
+    if candidate_index < pattern_index:
+        pattern_close = _close(rows[pattern_index])
+        if pattern_close <= 0:
+            return False
+        max_start_loss = float(config.get("vcp_history_max_start_loss_pct", 0.15))
+        if pattern_close / candidate_close - 1.0 < -max_start_loss:
+            return False
 
     max_drawdown_limit = float(config.get("vcp_history_max_drawdown_pct", 0.20))
     peak = candidate_close
     max_drawdown = 0.0
-    for row in rows[candidate_index:pattern_index + 1]:
+    for row in rows[candidate_index:evaluation_index + 1]:
         close = _close(row)
         if close <= 0:
             return False
@@ -122,9 +125,10 @@ def _history_continuity_valid(
     if max_drawdown < -max_drawdown_limit:
         return False
 
-    bearish_days = int(config.get("vcp_history_bearish_trend_days", 5))
-    if _ending_bearish_alignment_days(rows, pattern_index) >= bearish_days:
-        return False
+    if candidate_index < pattern_index:
+        bearish_days = int(config.get("vcp_history_bearish_trend_days", 5))
+        if _ending_bearish_alignment_days(rows, pattern_index) >= bearish_days:
+            return False
     return True
 
 

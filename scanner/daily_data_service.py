@@ -21,7 +21,7 @@ from scanner.tencent_source import fetch_tencent_daily
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_DAILY_SOURCES = ["baidu", "sina", "tencent"]
+DEFAULT_DAILY_SOURCES = ["tencent", "sina", "baidu"]
 MARKET_CLOSE_TIME = "15:00:00"
 MARKET_CLOSE_CONFIRM_TIME = "15:10:00"
 

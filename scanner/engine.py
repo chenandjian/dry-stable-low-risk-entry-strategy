@@ -13,6 +13,7 @@ from scanner.data_source import DataSourceManager
 from scanner.baidu_source import fetch_baidu_daily
 from scanner.sina_source import fetch_sina_daily
 from scanner.tencent_source import fetch_tencent_daily
+from scanner.data_acquisition import load_market_index_daily, prepare_scan_daily_data
 from scanner.index_source import fetch_market_index_daily
 from scanner.liquidity_filter import passes_liquidity_filter
 from scanner.daily_data_service import (
@@ -65,6 +66,7 @@ def scan_all(
     stocks: list[dict] = None,
     retry_policy: str = "normal",
     worker_count: int = 4,
+    fetch_daily_fn=None,
 ) -> dict:
     """多线程全市场扫描。"""
     from scanner.stock_pool import get_a_stock_pool
@@ -89,6 +91,10 @@ def scan_all(
         if not resume_task_id:
             db.save_task_stocks(task_id, stocks)
 
+    prepared_session = prepare_scan_daily_data(config, stocks)
+    if fetch_daily_fn is None and prepared_session is not None:
+        fetch_daily_fn = prepared_session.fetch
+
     if retry_policy == "failed_only":
         primary_attempts = 3
         fallback_attempts = 3
@@ -96,7 +102,10 @@ def scan_all(
         primary_attempts = 2
         fallback_attempts = 2
 
-    daily_sources = config.get("data", {}).get("daily_sources") or DEFAULT_DAILY_SOURCES
+    daily_sources = (
+        ["tickflow"] if prepared_session is not None
+        else config.get("data", {}).get("daily_sources") or DEFAULT_DAILY_SOURCES
+    )
     configured_workers = config.get("data", {}).get("worker_count")
     worker_count = resolve_effective_worker_count(
         configured_workers if configured_workers is not None else worker_count,
@@ -137,7 +146,11 @@ def scan_all(
     strategy_engine = CupHandleStrategyEngine(config)
     max_busy_retries = config.get("data", {}).get("source_busy_max_retries", 3)
     market_cfg = config.get("market_environment", {})
-    market_data = fetch_market_index_daily(market_cfg.get("index_symbol"))
+    market_data = load_market_index_daily(
+        config,
+        market_cfg.get("index_symbol") or "sh000001",
+        legacy_fetch_fn=fetch_market_index_daily,
+    )
 
     start_time = time.time()
 
@@ -180,7 +193,8 @@ def scan_all(
                     fallback_source=daily_sources[-1],
                     started_at=_now(),
                 )
-                fetch_result = _fetch_with_retry(
+                fetcher = fetch_daily_fn or _fetch_with_retry
+                fetch_result = fetcher(
                     code,
                     daily_sources[0],
                     retry_attempts=primary_attempts,
@@ -562,7 +576,11 @@ def re_evaluate_task(
     scan_window_days = windows.scan_window_days
     strategy_engine = CupHandleStrategyEngine(config)
     market_cfg = config.get("market_environment", {})
-    market_data = fetch_market_index_daily(market_cfg.get("index_symbol"))
+    market_data = load_market_index_daily(
+        config,
+        market_cfg.get("index_symbol") or "sh000001",
+        legacy_fetch_fn=fetch_market_index_daily,
+    )
     old_candidates = {c["code"] for c in db.get_candidates(task_id=task_id)}
     total = len(stocks)
     new_codes = set()

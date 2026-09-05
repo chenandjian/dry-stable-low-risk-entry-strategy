@@ -4,11 +4,13 @@ from __future__ import annotations
 import copy
 import hashlib
 import json
+from math import isfinite
 from numbers import Real
 
 
 DEFAULT_STRATEGY6_CONFIG = {
     "enabled": True,
+    "decision_profile": "formal_original",
     "kline_days": 1100,
     "minimum_trading_days": 500,
     "min_avg_amount_60d_yi": 3,
@@ -23,6 +25,7 @@ DEFAULT_STRATEGY6_CONFIG = {
     "consolidation_min_days": 5,
     "consolidation_max_days": 40,
     "tail_window_days": 5,
+    "tail_regime_shadow_enabled": True,
     "dynamic_tail_enabled": True,
     "dynamic_tail_min_days": 3,
     "dynamic_tail_max_days": 10,
@@ -103,6 +106,57 @@ DEFAULT_STRATEGY6_CONFIG = {
     "setup_quality_min_ready": 18,
     "support_reaction_min_key": 3,
     "support_reaction_min_ready": 5,
+    "selection_optimization": {
+        "support_confirmation_enabled": False,
+        "conservative_rr_enabled": False,
+        "rs_fading_downgrade_enabled": False,
+        "tail_deterioration_filter_enabled": False,
+        "matched_market_downgrade_enabled": False,
+    },
+    "entry_quality": {
+        "entry_timing_enabled": False,
+        "probability_rr_enabled": False,
+        "probability_lookback_days": 250,
+        "probability_horizon_days": 20,
+        "probability_minimum_samples": 60,
+        "probability_min_watch_r": 0.0,
+        "probability_min_key_r": 0.10,
+        "probability_min_ready_r": 0.20,
+    },
+    "ttm_squeeze": {
+        "enabled": True,
+        "bb_period": 20,
+        "bb_stddev": 2.0,
+        "kc_ema_period": 20,
+        "kc_atr_period": 20,
+        "kc_atr_multiplier": 1.5,
+        "momentum_period": 20,
+        "bullish_squeeze_min_days": 3,
+        "max_ranking_bonus": 4,
+    },
+    "body_support": {
+        "enabled": True,
+        "reference_window_days": 30,
+        "pivot_left_days": 2,
+        "confirm_days": 2,
+        "body_hold_max_break_pct": 0.015,
+        "body_hold_max_break_atr": 0.30,
+        "recovery_window_days": 3,
+        "recovery_valid_atr": 0.80,
+        "recovery_premium_atr": 1.50,
+        "lower_shadow_ratio_min": 0.30,
+        "flat_min_pivot_count": 2,
+        "flat_valid_width": 0.020,
+        "flat_strong_width": 0.015,
+        "flat_premium_width": 0.008,
+        "rising_max_lower_tolerance_pct": 0.015,
+        "independent_rebound_pct": 0.02,
+        "independent_rebound_atr": 0.80,
+        "zone_min_width_pct": 0.008,
+        "zone_atr_width": 0.25,
+        "support_confluence_pct": 0.01,
+        "support_confluence_atr": 0.50,
+    },
     "box_tail": {
         "enabled": True,
         "min_box_days": 5,
@@ -249,8 +303,8 @@ def resolve_strategy6_config(config: dict | None) -> dict:
                         for nested_key, nested_value in compact_override.items()
                         if nested_key in raw["box_tail"]["compact_kline"]
                     })
-            elif key == "brooks_tail" and isinstance(value, dict):
-                _merge_known_dict(raw["brooks_tail"], value)
+            elif key in {"brooks_tail", "ttm_squeeze", "body_support", "selection_optimization", "entry_quality"} and isinstance(value, dict):
+                _merge_known_dict(raw[key], value)
             else:
                 raw[key] = value
 
@@ -264,6 +318,10 @@ def resolve_strategy6_config(config: dict | None) -> dict:
         raw["vcp_first_contraction_max_range"] = raw["vcp_min_first_range"]
 
     raw["enabled"] = bool(raw.get("enabled", True))
+    if raw.get("decision_profile") not in {"formal_original", "research_quality_v2"}:
+        raise ValueError(
+            "decision_profile must be one of formal_original/research_quality_v2"
+        )
     _validate_int_range(raw, "kline_days", 260, 3000)
     _validate_int_range(raw, "minimum_trading_days", 260, raw["kline_days"])
     _validate_int_range(raw, "start_lookback_days", 20, 250)
@@ -275,6 +333,7 @@ def resolve_strategy6_config(config: dict | None) -> dict:
     _validate_int_range(raw, "consolidation_min_days", 1, 40)
     _validate_int_range(raw, "consolidation_max_days", raw["consolidation_min_days"], 120)
     _validate_int_range(raw, "tail_window_days", 3, 10)
+    raw["tail_regime_shadow_enabled"] = bool(raw.get("tail_regime_shadow_enabled", True))
     raw["dynamic_tail_enabled"] = bool(raw.get("dynamic_tail_enabled", True))
     _validate_int_range(raw, "dynamic_tail_min_days", 3, 10)
     _validate_int_range(raw, "dynamic_tail_max_days", raw["dynamic_tail_min_days"], 15)
@@ -327,6 +386,37 @@ def resolve_strategy6_config(config: dict | None) -> dict:
     raw["pattern_filter_enabled"] = bool(raw.get("pattern_filter_enabled", True))
     if raw.get("pattern_filter_mode") not in {"strict", "downgrade", "score_only"}:
         raise ValueError("pattern_filter_mode must be one of strict/downgrade/score_only")
+    for key in (
+        "support_confirmation_enabled",
+        "conservative_rr_enabled",
+        "rs_fading_downgrade_enabled",
+        "tail_deterioration_filter_enabled",
+        "matched_market_downgrade_enabled",
+    ):
+        raw["selection_optimization"][key] = bool(raw["selection_optimization"].get(key, False))
+    entry_quality = raw["entry_quality"]
+    entry_quality["entry_timing_enabled"] = bool(entry_quality.get("entry_timing_enabled", False))
+    entry_quality["probability_rr_enabled"] = bool(entry_quality.get("probability_rr_enabled", False))
+    _validate_int_range(entry_quality, "probability_lookback_days", 60, 1000)
+    _validate_int_range(entry_quality, "probability_horizon_days", 5, 60)
+    _validate_int_range(
+        entry_quality,
+        "probability_minimum_samples",
+        20,
+        entry_quality["probability_lookback_days"],
+    )
+    for key in (
+        "probability_min_watch_r",
+        "probability_min_key_r",
+        "probability_min_ready_r",
+    ):
+        _validate_number_range(entry_quality, key, -1.0, 5.0)
+    if not (
+        entry_quality["probability_min_watch_r"]
+        <= entry_quality["probability_min_key_r"]
+        <= entry_quality["probability_min_ready_r"]
+    ):
+        raise ValueError("probability RR thresholds must be ordered watch <= key <= ready")
     _validate_between(raw, "normal_start_self_amount_percentile", 0, 1)
     _validate_between(raw, "vcp_contraction_range_ratio", 0, 1)
     _validate_between(raw, "vcp_contraction_volume_ratio", 0, 1)
@@ -364,12 +454,19 @@ def resolve_strategy6_config(config: dict | None) -> dict:
         raise ValueError("support reaction thresholds must satisfy key <= ready")
     _validate_box_tail_config(raw["box_tail"])
     _validate_brooks_tail_config(raw["brooks_tail"])
+    _validate_ttm_squeeze_config(raw["ttm_squeeze"])
+    _validate_body_support_config(raw["body_support"])
     return raw
 
 
 def strategy6_config_hash(config: dict) -> str:
     payload = json.dumps(config, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def is_strategy6_research_profile(config: dict) -> bool:
+    """Return whether experimental Strategy6 decision paths may affect selection."""
+    return config.get("decision_profile") == "research_quality_v2"
 
 
 def _validate_int_range(config: dict, key: str, min_v: int, max_v: int) -> None:
@@ -382,7 +479,7 @@ def _validate_int_range(config: dict, key: str, min_v: int, max_v: int) -> None:
 
 def _validate_number(config: dict, key: str) -> None:
     value = config.get(key)
-    if isinstance(value, bool) or not isinstance(value, Real):
+    if isinstance(value, bool) or not isinstance(value, Real) or not isfinite(value):
         raise ValueError(f"{key} must be a number")
 
 
@@ -407,6 +504,55 @@ def _validate_between(
     if lower_invalid or value > max_v:
         bracket = "(" if lower_exclusive else "["
         raise ValueError(f"{key} must be in {bracket}{min_v}, {max_v}]")
+
+
+def _validate_ttm_squeeze_config(config: dict) -> None:
+    if not isinstance(config, dict):
+        raise ValueError("ttm_squeeze must be a mapping")
+    config["enabled"] = bool(config.get("enabled", True))
+    for key in ("bb_period", "kc_ema_period", "kc_atr_period", "momentum_period"):
+        _validate_int_range(config, key, 5, 120)
+    _validate_between(config, "bb_stddev", 0, 10, lower_exclusive=True)
+    _validate_between(config, "kc_atr_multiplier", 0, 10, lower_exclusive=True)
+    _validate_int_range(config, "bullish_squeeze_min_days", 1, 20)
+    _validate_int_range(config, "max_ranking_bonus", 4, 4)
+
+
+def _validate_body_support_config(config: dict) -> None:
+    if not isinstance(config, dict):
+        raise ValueError("body_support must be a mapping")
+    config["enabled"] = bool(config.get("enabled", True))
+    _validate_int_range(config, "reference_window_days", 10, 60)
+    _validate_int_range(config, "pivot_left_days", 1, 5)
+    _validate_int_range(config, "confirm_days", 1, 5)
+    _validate_int_range(config, "recovery_window_days", 1, 10)
+    _validate_int_range(config, "flat_min_pivot_count", 2, 5)
+    for key, upper in (
+        ("body_hold_max_break_pct", 0.10),
+        ("body_hold_max_break_atr", 2.0),
+        ("recovery_valid_atr", 5.0),
+        ("recovery_premium_atr", 8.0),
+        ("lower_shadow_ratio_min", 1.0),
+        ("flat_valid_width", 0.10),
+        ("flat_strong_width", 0.10),
+        ("flat_premium_width", 0.10),
+        ("rising_max_lower_tolerance_pct", 0.10),
+        ("independent_rebound_pct", 0.20),
+        ("independent_rebound_atr", 5.0),
+        ("zone_min_width_pct", 0.10),
+        ("zone_atr_width", 2.0),
+        ("support_confluence_pct", 0.10),
+        ("support_confluence_atr", 3.0),
+    ):
+        _validate_between(config, key, 0, upper, lower_exclusive=True)
+    if config["recovery_premium_atr"] < config["recovery_valid_atr"]:
+        raise ValueError("body_support recovery premium must be >= valid")
+    if not (
+        config["flat_premium_width"]
+        <= config["flat_strong_width"]
+        <= config["flat_valid_width"]
+    ):
+        raise ValueError("body_support flat widths must satisfy premium <= strong <= valid")
 
 
 def _validate_box_tail_config(config: dict) -> None:

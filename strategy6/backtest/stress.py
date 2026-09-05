@@ -6,7 +6,10 @@ from dataclasses import asdict
 
 from strategy6.backtest.execution import simulate_frozen_trade
 from strategy6.backtest.metrics import calculate_trade_metrics
-from strategy6.backtest.snapshot import is_trade_ready_snapshot
+from strategy6.backtest.snapshot import is_trade_ready_snapshot, signal_selection_key
+
+
+MIN_STRESS_CLOSED_TRADE_RETENTION = 0.50
 
 
 def build_execution_tuning_configs(base_config: dict) -> list[dict]:
@@ -41,29 +44,61 @@ def validate_replay_config(config: dict, base_config: dict) -> None:
 
 
 def evaluate_stress_acceptance(results: dict) -> dict:
+    base = results.get("BASE") or {}
+    base_metrics = base.get("metrics") or {}
+    base_closed_trades = int(base_metrics.get("trades") or 0)
     checks = {}
+    retention = {}
     for name in ("HIGH_COST", "LOW_FILL", "ONE_DAY_DELAY"):
-        metrics = (results.get(name) or {}).get("metrics") or {}
+        scenario = results.get(name) or {}
+        metrics = scenario.get("metrics") or {}
         expectancy = float(metrics.get("expectancy_r", 0))
         profit_factor = float(metrics.get("profit_factor", 0))
-        checks[name] = not (expectancy < 0 and profit_factor < 1.0)
-    return {"passed": all(checks.values()), "checks": checks}
+        closed_trades = int(metrics.get("trades") or 0)
+        retention[name] = (
+            closed_trades / base_closed_trades if base_closed_trades > 0 else 0.0
+        )
+        checks[name] = bool(
+            base.get("status") == "COMPLETED"
+            and base_closed_trades > 0
+            and scenario.get("status") == "COMPLETED"
+            and int(scenario.get("orders") or 0) > 0
+            and closed_trades > 0
+            and retention[name] >= MIN_STRESS_CLOSED_TRADE_RETENTION
+            and not (expectancy < 0 and profit_factor < 1.0)
+        )
+    return {
+        "passed": all(checks.values()),
+        "checks": checks,
+        "closed_trade_retention": retention,
+    }
 
 
 def build_stress_scenarios(base_config: dict) -> list[dict]:
     scenarios = [{"name": "BASE", "config": copy.deepcopy(base_config)}]
 
     high_cost = copy.deepcopy(base_config)
-    high_cost["costs"]["buy_slippage_bps"] = 30.0
-    high_cost["costs"]["sell_slippage_bps"] = 30.0
+    high_cost["costs"]["buy_slippage_bps"] = (
+        float(base_config["costs"]["buy_slippage_bps"]) + 20.0
+    )
+    high_cost["costs"]["sell_slippage_bps"] = (
+        float(base_config["costs"]["sell_slippage_bps"]) + 20.0
+    )
+    validate_replay_config(high_cost, base_config)
     scenarios.append({"name": "HIGH_COST", "config": high_cost})
 
     low_fill = copy.deepcopy(base_config)
-    low_fill["execution"]["fill_rate_multiplier"] = 0.70
+    low_fill["execution"]["fill_rate_multiplier"] = (
+        float(base_config["execution"].get("fill_rate_multiplier", 1.0)) * 0.70
+    )
+    validate_replay_config(low_fill, base_config)
     scenarios.append({"name": "LOW_FILL", "config": low_fill})
 
     delayed = copy.deepcopy(base_config)
-    delayed["execution"]["entry_delay_days"] = 1
+    delayed["execution"]["entry_delay_days"] = (
+        int(base_config["execution"].get("entry_delay_days", 0)) + 1
+    )
+    validate_replay_config(delayed, base_config)
     scenarios.append({"name": "ONE_DAY_DELAY", "config": delayed})
 
     return scenarios
@@ -76,12 +111,14 @@ def replay_stress_scenarios(signals, *, load_rows, market_dates: list[str], base
         orders = 0
         trades = []
         seen: set[str] = set()
+        selection_mode = str(scenario["config"].get("signal_selection_mode") or "LEGACY_SETUP_ID")
         for signal in sorted(signals, key=lambda item: (item.evaluation_date, item.code)):
             if not is_trade_ready_snapshot({"tail_path": signal.tail_path, **signal.snapshot}):
                 continue
-            if signal.setup_id in seen:
+            selection_key = signal_selection_key(signal, selection_mode)
+            if selection_key in seen:
                 continue
-            seen.add(signal.setup_id)
+            seen.add(selection_key)
             outcome = simulate_frozen_trade(signal, load_rows(signal.code), market_dates, scenario["config"])
             orders += 1
             if outcome.trade is None:
@@ -93,6 +130,7 @@ def replay_stress_scenarios(signals, *, load_rows, market_dates: list[str], base
             "status": "COMPLETED", "orders": orders,
             "unfilled_rate": (orders - len(trades)) / orders if orders else 0.0,
             "metrics": calculate_trade_metrics([item for item in trades if item.get("exit_date")]),
+            "trades": trades,
         }
     return results
 
@@ -103,12 +141,14 @@ def replay_frozen_signals(signals, *, load_rows, market_dates: list[str], config
     trades = []
     setup_ids = []
     seen: set[str] = set()
+    selection_mode = str(config.get("signal_selection_mode") or "LEGACY_SETUP_ID")
     for signal in sorted(signals, key=lambda item: (item.evaluation_date, item.code)):
         if not is_trade_ready_snapshot({"tail_path": signal.tail_path, **signal.snapshot}):
             continue
-        if signal.setup_id in seen:
+        selection_key = signal_selection_key(signal, selection_mode)
+        if selection_key in seen:
             continue
-        seen.add(signal.setup_id)
+        seen.add(selection_key)
         setup_ids.append(signal.setup_id)
         outcome = simulate_frozen_trade(signal, load_rows(signal.code), market_dates, config)
         orders += 1

@@ -67,9 +67,18 @@ def simulate_frozen_trade(
         order.status = "CANCELLED"
         order.fill_reason = "CANCEL_INVALID_FROZEN_PLAN"
         return outcome
+    entry_mode = str(execution.get("entry_mode") or "FROZEN_TRADE_PLAN")
+    entry_archetype = str(snapshot.get("entry_archetype") or "").upper()
+    if entry_mode == "ARCHETYPE_TRIGGERED" and entry_archetype not in {
+        "SUPPORT_PULLBACK", "PIVOT_BREAKOUT", "FAILED_BREAKOUT_RECLAIM",
+    }:
+        order.status = "CANCELLED"
+        order.fill_reason = "CANCEL_ENTRY_ARCHETYPE_NOT_EXECUTABLE"
+        return outcome
 
     entry_row = None
     entry_price = 0.0
+    fill_reason = "FILLED_FROZEN_PLAN"
     previous_close = _previous_close(stock_rows, signal.evaluation_date)
     for trade_date in valid_dates:
         row = row_by_date.get(trade_date)
@@ -87,24 +96,37 @@ def simulate_frozen_trade(
             previous_close = float(row["close"])
             continue
         open_price = float(row["open"])
-        if open_price > buy_high:
-            order.status = "CANCELLED"
-            order.fill_reason = "CANCEL_OPEN_ABOVE_BUY_ZONE"
-            return outcome
-        if open_price < buy_low:
-            order.status = "CANCELLED"
-            order.fill_reason = "CANCEL_OPEN_BELOW_BUY_ZONE"
-            return outcome
         if open_price <= stop_price:
             order.status = "CANCELLED"
             order.fill_reason = "CANCEL_STRUCTURE_FAILED_BEFORE_ENTRY"
             return outcome
-        entry_row = row
-        if buy_low <= open_price <= buy_high:
-            entry_price = _buy_with_slippage(open_price, costs)
-        elif float(row["low"]) <= limit_price <= float(row["high"]):
-            entry_price = _buy_with_slippage(limit_price, costs)
+        if entry_mode == "ARCHETYPE_TRIGGERED":
+            fill = _archetype_fill(
+                entry_archetype=entry_archetype,
+                snapshot=snapshot,
+                row=row,
+                buy_low=buy_low,
+                buy_high=buy_high,
+                limit_price=limit_price,
+            )
+            if fill:
+                raw_entry_price, fill_reason = fill
+                entry_price = _buy_with_slippage(raw_entry_price, costs)
+        else:
+            if open_price > buy_high:
+                order.status = "CANCELLED"
+                order.fill_reason = "CANCEL_OPEN_ABOVE_BUY_ZONE"
+                return outcome
+            if open_price < buy_low:
+                order.status = "CANCELLED"
+                order.fill_reason = "CANCEL_OPEN_BELOW_BUY_ZONE"
+                return outcome
+            if buy_low <= open_price <= buy_high:
+                entry_price = _buy_with_slippage(open_price, costs)
+            elif float(row["low"]) <= limit_price <= float(row["high"]):
+                entry_price = _buy_with_slippage(limit_price, costs)
         if entry_price > 0:
+            entry_row = row
             break
         previous_close = float(row["close"])
 
@@ -114,7 +136,7 @@ def simulate_frozen_trade(
         return outcome
 
     order.status = "FILLED"
-    order.fill_reason = "FILLED_FROZEN_PLAN"
+    order.fill_reason = fill_reason
     shares = 100
     trade = BacktestTrade(
         trade_id=f"s6trade-{stable_hash(order.order_id)[:20]}",
@@ -166,6 +188,42 @@ def simulate_frozen_trade(
         trade.exit_reason = "UNRESOLVED_NO_EXIT_BAR"
     outcome.trade = trade
     return outcome
+
+
+def _archetype_fill(
+    *,
+    entry_archetype: str,
+    snapshot: dict,
+    row: dict,
+    buy_low: float,
+    buy_high: float,
+    limit_price: float,
+) -> tuple[float, str] | None:
+    open_price = float(row["open"])
+    high_price = float(row["high"])
+    low_price = float(row["low"])
+    if entry_archetype == "SUPPORT_PULLBACK":
+        if buy_low <= open_price <= buy_high:
+            return open_price, "FILLED_SUPPORT_PULLBACK_LIMIT"
+        if low_price <= limit_price <= high_price:
+            return limit_price, "FILLED_SUPPORT_PULLBACK_LIMIT"
+        return None
+
+    trigger_price = float(
+        snapshot.get("suggested_limit_price")
+        or snapshot.get("brooks_trigger_price")
+        or snapshot.get("pivot_price")
+        or 0
+    )
+    if trigger_price <= 0 or trigger_price > buy_high or open_price > buy_high:
+        return None
+    if trigger_price <= open_price <= buy_high:
+        raw_price = open_price
+    elif open_price < trigger_price <= high_price:
+        raw_price = trigger_price
+    else:
+        return None
+    return raw_price, f"FILLED_{entry_archetype}_TRIGGER"
 
 
 def _previous_close(rows: list[dict], date: str) -> float:

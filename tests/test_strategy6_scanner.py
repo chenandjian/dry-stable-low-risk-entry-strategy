@@ -1,8 +1,24 @@
 import scanner.db as db
 from datetime import date, timedelta
+import pytest
 from scanner.daily_data_service import FetchResult
 from strategy6 import STRATEGY6_TYPE
+from strategy6.models import Strategy6StrongTrendSqueeze
 from strategy6.scanner import scan_strategy6_all
+
+
+@pytest.fixture(autouse=True)
+def _isolate_formal_trend_squeeze_gate(monkeypatch):
+    """Scanner fixtures predate the new gate; engine integration is tested separately."""
+    monkeypatch.setattr(
+        "strategy6.engine.evaluate_strong_trend_squeeze",
+        lambda _rows: Strategy6StrongTrendSqueeze(
+            passed=True,
+            calculable=True,
+            status="PASSED",
+            squeeze_on=True,
+        ),
+    )
 
 
 def _market_rows(closes, start_date=date(2025, 11, 11)):
@@ -23,6 +39,217 @@ def _empty_market(monkeypatch):
     import strategy6.scanner as scanner_mod
 
     monkeypatch.setattr(scanner_mod, "fetch_market_index_daily", lambda *args, **kwargs: [])
+
+
+def test_strategy6_scan_forwards_progress_callback_to_tickflow_prepare(tmp_path, monkeypatch):
+    import strategy6.scanner as scanner_mod
+
+    db_path = str(tmp_path / "s6-progress.db")
+    callback = lambda *args: None
+    captured = {}
+
+    def fake_prepare(config, stocks, *, progress_callback=None):
+        captured["callback"] = progress_callback
+        raise RuntimeError("stop after preparation boundary")
+
+    monkeypatch.setattr(scanner_mod, "prepare_scan_daily_data", fake_prepare)
+
+    with pytest.raises(RuntimeError, match="preparation boundary"):
+        scan_strategy6_all(
+            {"data": {"database_path": db_path}, "strategy6": {}},
+            task_id="s6-progress",
+            stocks=[{"code": "000001", "name": "平安银行", "market": "深证主板"}],
+            progress_callback=callback,
+        )
+
+    assert captured["callback"] is callback
+
+
+def test_strategy6_tickflow_prepared_scan_skips_legacy_task_reuse_lookup(tmp_path, monkeypatch):
+    import strategy6.scanner as scanner_mod
+    from tests.test_strategy6_core_rules import build_strategy6_candidate_data
+
+    _empty_market(monkeypatch)
+    data = build_strategy6_candidate_data()
+
+    class PreparedSession:
+        target_trade_date = data[-1]["date"]
+
+        @staticmethod
+        def fetch(*args, **kwargs):
+            return FetchResult(
+                data=data,
+                primary_source="tickflow",
+                fallback_source="tickflow",
+                from_cache=True,
+                kline_fetched_at=f"{data[-1]['date']} 15:10:00",
+                kline_target_trade_date=data[-1]["date"],
+            )
+
+    monkeypatch.setattr(
+        scanner_mod,
+        "prepare_scan_daily_data",
+        lambda *args, **kwargs: PreparedSession(),
+    )
+    monkeypatch.setattr(
+        db,
+        "get_reusable_task_stock_kline_context",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("prepared TickFlow scan must not query legacy task reuse")
+        ),
+    )
+
+    result = scan_strategy6_all(
+        {
+            "data": {
+                "database_path": str(tmp_path / "s6-tickflow-fast.db"),
+                "acquisition_mode": "tickflow",
+                "worker_count": 1,
+            },
+            "strategy6": {},
+        },
+        task_id="s6-tickflow-fast",
+        stocks=[{"code": "000001", "name": "平安银行", "market": "SZ"}],
+        worker_count=1,
+    )
+
+    assert result["stats"]["failed"] == 0
+
+
+def test_strategy6_tickflow_prepared_scan_uses_configured_local_workers(tmp_path, monkeypatch):
+    import strategy6.scanner as scanner_mod
+
+    _empty_market(monkeypatch)
+
+    class PreparedSession:
+        target_trade_date = "2026-07-21"
+
+        @staticmethod
+        def fetch(*args, **kwargs):
+            return FetchResult(
+                data=None,
+                primary_source="tickflow",
+                fallback_source="tickflow",
+                primary_error="prepared failure",
+                fallback_error="prepared failure",
+            )
+
+    monkeypatch.setattr(
+        scanner_mod,
+        "prepare_scan_daily_data",
+        lambda *args, **kwargs: PreparedSession(),
+    )
+    real_thread = scanner_mod.threading.Thread
+    created_threads = []
+
+    def tracked_thread(*args, **kwargs):
+        thread = real_thread(*args, **kwargs)
+        created_threads.append(thread)
+        return thread
+
+    monkeypatch.setattr(scanner_mod.threading, "Thread", tracked_thread)
+    scan_strategy6_all(
+        {
+            "data": {
+                "database_path": str(tmp_path / "s6-tickflow-workers.db"),
+                "acquisition_mode": "tickflow",
+                "worker_count": 4,
+            },
+            "strategy6": {},
+        },
+        task_id="s6-tickflow-workers",
+        stocks=[
+            {"code": f"00000{index}", "name": f"股票{index}", "market": "SZ"}
+            for index in range(1, 5)
+        ],
+    )
+
+    assert len(created_threads) == 4
+
+
+def test_strategy6_scan_does_not_refresh_full_task_summary_per_stock(tmp_path, monkeypatch):
+    import strategy6.scanner as scanner_mod
+
+    _empty_market(monkeypatch)
+    original_refresh = db.refresh_scan_task_counts
+    refresh_calls = []
+
+    def tracked_refresh(task_id):
+        refresh_calls.append(task_id)
+        return original_refresh(task_id)
+
+    monkeypatch.setattr(db, "refresh_scan_task_counts", tracked_refresh)
+    progress = []
+    result = scan_strategy6_all(
+        {
+            "data": {
+                "database_path": str(tmp_path / "s6-progress-fast.db"),
+                "daily_sources": ["baidu", "sina", "tencent"],
+                "worker_count": 1,
+            },
+            "strategy6": {},
+        },
+        task_id="s6-progress-fast",
+        stocks=[
+            {"code": "000001", "name": "股票1", "market": "SZ"},
+            {"code": "000002", "name": "股票2", "market": "SZ"},
+            {"code": "000003", "name": "股票3", "market": "SZ"},
+        ],
+        fetch_daily_fn=lambda *args, **kwargs: FetchResult(
+            data=None,
+            primary_source="baidu",
+            fallback_source="tencent",
+            primary_error="down",
+            fallback_error="down",
+        ),
+        progress_callback=lambda stage, current, total, detail, *args: progress.append(
+            (stage, current, total)
+        ),
+        worker_count=1,
+    )
+
+    assert result["stats"]["failed"] == 3
+    assert refresh_calls == ["s6-progress-fast"]
+    assert [item[1] for item in progress if item[0] == "scanning"][-3:] == [1, 2, 3]
+
+
+def test_strategy6_scan_caches_market_slice_for_same_evaluation_date(tmp_path, monkeypatch):
+    import strategy6.scanner as scanner_mod
+    from tests.test_strategy6_core_rules import build_strategy6_candidate_data
+
+    _empty_market(monkeypatch)
+    data = build_strategy6_candidate_data()
+    original_slice = scanner_mod._market_data_until
+    slice_calls = []
+
+    def tracked_slice(market_data_by_symbol, evaluation_date):
+        slice_calls.append(evaluation_date)
+        return original_slice(market_data_by_symbol, evaluation_date)
+
+    monkeypatch.setattr(scanner_mod, "_market_data_until", tracked_slice)
+    scan_strategy6_all(
+        {
+            "data": {
+                "database_path": str(tmp_path / "s6-market-cache.db"),
+                "daily_sources": ["baidu", "sina", "tencent"],
+                "worker_count": 1,
+            },
+            "strategy6": {},
+        },
+        task_id="s6-market-cache",
+        stocks=[
+            {"code": "000001", "name": "股票1", "market": "SZ"},
+            {"code": "000002", "name": "股票2", "market": "SZ"},
+        ],
+        fetch_daily_fn=lambda *args, **kwargs: FetchResult(
+            data=data,
+            primary_source="baidu",
+            fallback_source="baidu",
+        ),
+        worker_count=1,
+    )
+
+    assert slice_calls == [data[-1]["date"]]
 
 
 def test_strategy6_scan_marks_all_source_failure_as_failed_stock(tmp_path, monkeypatch):
@@ -141,6 +368,10 @@ def test_strategy6_scan_persists_observer_only_row_without_counting_trade_candid
     assert rows[0]["vcp_history_candidate_date"] == "2026-01-20"
     assert db.get_task_stocks("s6-observer-only")[0]["status"] == "scanned"
     assert db.get_strategy6_lifecycle("000001") is None
+    screened = db.get_strategy6_trend_squeeze_screen("s6-observer-only")
+    assert len(screened) == 1
+    assert screened[0]["code"] == "000001"
+    assert screened[0]["strong_trend_squeeze_status"] == "PASSED"
 
 
 def test_strategy6_scan_does_not_persist_vcp_without_formal_candidate_history(tmp_path, monkeypatch):

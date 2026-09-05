@@ -63,7 +63,10 @@ def test_dynamic_tail_uses_the_earliest_qualified_contraction_window():
             "close": close,
             "volume": 350_000,
         })
-    cfg = resolve_strategy6_config({"strategy6": {"dynamic_tail_min_score": 4}})
+    cfg = resolve_strategy6_config({"strategy6": {
+        "decision_profile": "research_quality_v2",
+        "dynamic_tail_min_score": 4,
+    }})
 
     phase = segment_phases(rows, start, cfg)
 
@@ -88,7 +91,10 @@ def test_dynamic_tail_falls_back_to_configured_window_without_contraction():
             "close": close,
             "volume": 1_000_000,
         })
-    cfg = resolve_strategy6_config({"strategy6": {"tail_window_days": 5}})
+    cfg = resolve_strategy6_config({"strategy6": {
+        "decision_profile": "research_quality_v2",
+        "tail_window_days": 5,
+    }})
 
     phase = segment_phases(rows, start, cfg)
 

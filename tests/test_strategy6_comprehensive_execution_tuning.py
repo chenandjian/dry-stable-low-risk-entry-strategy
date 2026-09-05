@@ -48,18 +48,59 @@ def test_replay_validation_forbids_lower_costs_or_execution_semantic_changes():
 
 
 def test_stress_acceptance_rejects_negative_expectancy_and_subunit_pf():
+    def scenario(expectancy, profit_factor, *, trades=10, orders=10):
+        return {
+            "status": "COMPLETED",
+            "orders": orders,
+            "metrics": {
+                "trades": trades,
+                "expectancy_r": expectancy,
+                "profit_factor": profit_factor,
+            },
+        }
+
     passing = {
-        "HIGH_COST": {"metrics": {"expectancy_r": 0.01, "profit_factor": 1.01}},
-        "LOW_FILL": {"metrics": {"expectancy_r": -0.01, "profit_factor": 1.10}},
-        "ONE_DAY_DELAY": {"metrics": {"expectancy_r": 0.02, "profit_factor": 0.90}},
+        "BASE": scenario(0.02, 1.20),
+        "HIGH_COST": scenario(0.01, 1.01),
+        "LOW_FILL": scenario(-0.01, 1.10, trades=7),
+        "ONE_DAY_DELAY": scenario(0.02, 0.90, trades=6),
     }
     failing = copy.deepcopy(passing)
-    failing["LOW_FILL"]["metrics"] = {"expectancy_r": -0.01, "profit_factor": 0.99}
+    failing["LOW_FILL"] = scenario(-0.01, 0.99, trades=7)
 
     assert evaluate_stress_acceptance(passing)["passed"] is True
     result = evaluate_stress_acceptance(failing)
     assert result["passed"] is False
     assert result["checks"]["LOW_FILL"] is False
+
+
+def test_stress_acceptance_rejects_zero_closed_trades_and_collapsed_retention():
+    base = {
+        "status": "COMPLETED",
+        "orders": 30,
+        "metrics": {"trades": 30, "expectancy_r": 0.2, "profit_factor": 1.5},
+    }
+    zero_trades = {
+        "BASE": base,
+        **{
+            name: {
+                "status": "COMPLETED",
+                "orders": 30,
+                "metrics": {"trades": 0, "expectancy_r": 0, "profit_factor": 0},
+            }
+            for name in ("HIGH_COST", "LOW_FILL", "ONE_DAY_DELAY")
+        },
+    }
+    collapsed = copy.deepcopy(zero_trades)
+    for name in ("HIGH_COST", "LOW_FILL", "ONE_DAY_DELAY"):
+        collapsed[name]["metrics"] = {
+            "trades": 10,
+            "expectancy_r": 0.1,
+            "profit_factor": 1.2,
+        }
+
+    assert evaluate_stress_acceptance(zero_trades)["passed"] is False
+    assert evaluate_stress_acceptance(collapsed)["passed"] is False
 
 
 def test_execution_replay_uses_frozen_signals_without_strategy_reevaluation():

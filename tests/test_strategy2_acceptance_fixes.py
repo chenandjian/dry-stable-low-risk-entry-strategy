@@ -411,9 +411,9 @@ class TestAllSourcesFailedNoCache:
 
 class TestDataSourceConvergence:
     def test_default_daily_sources_equal_three(self):
-        """DEFAULT_DAILY_SOURCES == ['baidu', 'sina', 'tencent'].""" 
+        """The legacy fallback defaults to the approved source priority."""
         from scanner.daily_data_service import DEFAULT_DAILY_SOURCES as DDS
-        assert DDS == ["baidu", "sina", "tencent"], f"Got: {DDS}"
+        assert DDS == ["tencent", "sina", "baidu"], f"Got: {DDS}"
 
     def test_mootdx_not_in_source_chain(self):
         """ACCEPT-S2-004: mootdx not in available fetch functions."""
@@ -432,12 +432,12 @@ class TestDataSourceConvergence:
             f"Got: {set(mgr._locks.keys())}"
 
     def test_config_default_daily_sources_are_three(self):
-        """config.yaml default daily_sources are baidu/sina/tencent."""
+        """The manually selected legacy mode keeps the approved source priority."""
         import yaml
         with open("config.yaml", "r", encoding="utf-8") as f:
             config = yaml.safe_load(f)
         sources = config.get("data", {}).get("daily_sources", [])
-        assert sources == ["baidu", "sina", "tencent"], f"Got: {sources}"
+        assert sources == ["tencent", "sina", "baidu"], f"Got: {sources}"
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

@@ -5,6 +5,7 @@ import { nextTick } from 'vue'
 const api = {
   getStrategy6Tasks: vi.fn(),
   getStrategy6Candidates: vi.fn(),
+  getStrategy6TrendSqueezeScreen: vi.fn(),
   getStrategy6MarketSnapshot: vi.fn(),
   getStrategy6Lifecycle: vi.fn(),
   downloadStrategy6Report: vi.fn(),
@@ -49,8 +50,71 @@ describe('Strategy6Results', () => {
           classification: 'ready',
           lifecycle_status: 'BUY_ZONE',
           total_score: 91,
+          ranking_score: 95,
+          ttm_squeeze_status: 'FIRED_BULLISH',
+          ttm_squeeze_on: false,
+          ttm_squeeze_days: 0,
+          ttm_fired: true,
+          ttm_momentum: 0.42,
+          ttm_previous_momentum: 0.31,
+          ttm_momentum_direction: 'RISING',
+          ttm_bb_upper: 12.8,
+          ttm_bb_lower: 11.9,
+          ttm_kc_upper: 12.9,
+          ttm_kc_lower: 11.8,
+          ttm_squeeze_score: 4,
+          ttm_reasons: ['TTM_FIRED', 'TTM_MOMENTUM_POSITIVE', 'TTM_MOMENTUM_RISING'],
+          ttm_risk_tags: [],
+          ttm_model_version: 'S6_TTM_SQUEEZE_V1',
+          strong_trend_squeeze_pass: true,
+          strong_trend_squeeze_status: 'PASSED',
+          trend_close: 12.34,
+          trend_low_250: 8.5,
+          trend_high_250: 14.0,
+          trend_close_to_low_ratio: 1.4518,
+          trend_close_to_high_ratio: 0.8814,
+          trend_ema150: 11.2,
+          trend_ema200: 10.8,
+          trend_squeeze_on: true,
+          trend_bb_upper: 12.8,
+          trend_bb_lower: 11.9,
+          trend_kc_upper: 12.9,
+          trend_kc_lower: 11.8,
+          strong_trend_squeeze_reasons: [],
+          strong_trend_squeeze_model_version: 'S6_STRONG_TREND_SQUEEZE_V1',
+          body_support_score: 8,
+          body_support_status: 'BODY_SUPPORT_STRONG',
+          body_support_type: 'FAILED_BREAK_BODY_FLOOR',
+          body_support_floor_price: 11.9,
+          body_support_zone_low: 11.7,
+          body_support_zone_high: 12.1,
+          body_support_pivot_count: 2,
+          body_support_reasons: ['FAILED_BREAK_BODY_FLOOR'],
+          body_support_risks: [],
+          body_support_model_version: 'S6_BODY_SUPPORT_V1',
+          latest_bar_patterns: [{
+            code: 'VALID_BODY_LOW', name: '有效实体低点', matched: true,
+            status: 'CONFIRMING', signal_type: 'FAILED_BREAK_RECLAIM',
+            evaluation_date: '2026-07-09', body_bottom: 11.95, body_top: 12.34,
+            floor_price: 11.9, zone_low: 11.7, zone_high: 12.1,
+            distance_to_floor_pct: 0.0042,
+            reasons: ['LATEST_LOW_BREAK_RECLAIMED_BY_BODY'],
+            risks: ['REQUIRES_TWO_COMPLETED_BARS_TO_CONFIRM_PIVOT'],
+          }],
+          decision_profile: 'research_quality_v2',
           score_model_version: 'S6_QUALITY_V2',
           entry_archetype: 'SUPPORT_PULLBACK',
+          entry_timing_version: 'S6_ENTRY_TIMING_V1',
+          entry_timing_state: 'SUPPORT_CONFIRMED',
+          entry_timing_executable: true,
+          entry_timing_evidence_count: 4,
+          probability_rr_version: 'S6_PROBABILITY_RR_V1',
+          probability_rr_status: 'RELIABLE',
+          probability_rr_reliable: true,
+          probability_rr_sample_count: 230,
+          probability_rr_target_1_hit_probability: 0.48,
+          probability_rr_target_2_hit_probability: 0.31,
+          probability_adjusted_r: 0.27,
           start_event_quality_score: 17,
           setup_quality_score: 21,
           setup_quality_reasons: ['gain_retention=0.820'],
@@ -64,6 +128,7 @@ describe('Strategy6Results', () => {
           current_price: 12.34,
           start_type: 'VOLUME_LIMIT_UP',
           start_grade: 'S',
+          high_trigger: 'new_120d_high',
           start_low: 11.2,
           days_since_start: 5,
           support_status: 'MA10_SUPPORT',
@@ -113,6 +178,27 @@ describe('Strategy6Results', () => {
           tail_avg_volume: 500000,
           pre_tail_avg_volume_20: 1000000,
           tail_volume_ratio: 0.5,
+          consecutive_down_days: 3,
+          consecutive_down_low: 11.92,
+          consecutive_down_structure_version: 'CONSECUTIVE_DOWN_INTERVAL_5D_V2',
+          consecutive_down_structure_pass: true,
+          consecutive_down_no_new_streak_low: true,
+          consecutive_down_min_low_margin_pct: 0.012,
+          consecutive_down_max_high_break_pct: -0.018,
+          tail_regime_enabled: true,
+          tail_regime_status: 'CONFIRMED',
+          tail_regime_start_date: '2026-07-02',
+          tail_regime_days: 8,
+          tail_regime_delta_bic: 18.75,
+          tail_regime_volume_ratio: 0.52,
+          tail_regime_range_ratio: 0.61,
+          tail_regime_body_ratio: 0.58,
+          tail_regime_abs_return_ratio: 0.63,
+          tail_regime_close_dispersion: 0.012,
+          tail_regime_low_slope_atr: 0.04,
+          tail_regime_model_version: 'TAIL_REGIME_CP_V1',
+          tail_regime_reasons: ['ROBUST_BIC_CHANGE_POINT', 'TAIL_VOLUME_CONTRACTED'],
+          tail_regime_risks: ['PREVIOUS_SUPPORT_TWO_CLOSE_BREAK', 'PREVIOUS_PHASE_INVALID'],
           original_tail_pass: false,
           original_tail_score: 12,
           box_tail_enabled: true,
@@ -227,6 +313,13 @@ describe('Strategy6Results', () => {
           pre_tail_avg_volume_20: 0,
           tail_volume_ratio: 0,
           tail_path: 'NONE',
+          consecutive_down_days: 3,
+          consecutive_down_low: 8.51,
+          consecutive_down_structure_version: 'CONSECUTIVE_DOWN_INTERVAL_5D_V2',
+          consecutive_down_structure_pass: false,
+          consecutive_down_no_new_streak_low: false,
+          consecutive_down_min_low_margin_pct: 0.008,
+          consecutive_down_max_high_break_pct: -0.012,
           risk_tags: ['UPPER_PRESSURE'],
           warn_tags: [],
         },
@@ -238,6 +331,23 @@ describe('Strategy6Results', () => {
           classification: 'watch',
           lifecycle_status: 'SETUP_FORMING',
           total_score: 68,
+          decision_profile: 'formal_original',
+          score_model_version: 'S6_FORMAL_ORIGINAL_V1',
+          entry_archetype: 'SUPPORT_PULLBACK',
+          start_event_quality_score: 18,
+          setup_quality_score: 12,
+          support_reaction_score: 10,
+          path_evidence_score: 0,
+          tail_segmentation_status: 'FIXED_WINDOW',
+          tail_segmentation_score: 0,
+          consecutive_down_days: 3,
+          consecutive_down_low: 9.88,
+          consecutive_down_structure_pass: true,
+          consecutive_down_no_new_streak_low: true,
+          consecutive_down_min_low_margin_pct: 0.01,
+          consecutive_down_max_high_break_pct: -0.01,
+          box_tail_enabled: false,
+          brooks_tail_enabled: false,
           support_status: 'MA50_TESTING',
           risk_reward_ratio_2: 1.6,
           warn_tags: ['MARKET_WEAK_DOWNGRADED'],
@@ -268,6 +378,28 @@ describe('Strategy6Results', () => {
         ],
       },
     })
+    api.getStrategy6TrendSqueezeScreen.mockResolvedValue({
+      taskId: 's6-task',
+      total: 2,
+      stocks: [
+        {
+          code: '300604', name: '长川科技', evaluation_date: '2026-09-03',
+          trend_close: 62.5, trend_low_250: 35, trend_high_250: 70,
+          trend_close_to_low_ratio: 1.785714, trend_close_to_high_ratio: 0.892857,
+          trend_ema150: 54.2, trend_ema200: 49.8, trend_squeeze_on: true,
+          trend_bb_lower: 60, trend_bb_upper: 64, trend_kc_lower: 59, trend_kc_upper: 65,
+          downstream_candidate_type: 'REJECTED', downstream_reject_reasons: ['START_NOT_FOUND'],
+        },
+        {
+          code: '000001', name: '平安银行', evaluation_date: '2026-09-03',
+          trend_close: 12.34, trend_low_250: 8.5, trend_high_250: 14,
+          trend_close_to_low_ratio: 1.4518, trend_close_to_high_ratio: 0.8814,
+          trend_ema150: 11.2, trend_ema200: 10.8, trend_squeeze_on: true,
+          trend_bb_lower: 11.9, trend_bb_upper: 12.8, trend_kc_lower: 11.8, trend_kc_upper: 12.9,
+          downstream_candidate_type: 'READY_CANDIDATE', downstream_reject_reasons: [],
+        },
+      ],
+    })
     api.getStrategy6Lifecycle.mockResolvedValue({
       lifecycle: [{
         code: '600001', name: '退出样本', lifecycle_status: 'FAILED',
@@ -279,6 +411,110 @@ describe('Strategy6Results', () => {
     api.downloadStrategy6Report.mockResolvedValue(new Blob(['xlsx-bytes'], {
       type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
     }))
+  })
+
+  it('paginates the strategy6 task selector with ten tasks per page', async () => {
+    api.getStrategy6Tasks.mockResolvedValue({
+      tasks: Array.from({ length: 23 }, (_, index) => ({
+        id: `s6-task-${String(index + 1).padStart(2, '0')}`,
+        status: 'completed',
+        candidates: index,
+      })),
+    })
+
+    const wrapper = mount(Strategy6Results, {
+      global: { mocks: { $route: { query: {} } } },
+    })
+    await flushUi()
+
+    expect(wrapper.find('[data-test="strategy6-task-dropdown"]').exists()).toBe(false)
+    await wrapper.find('[data-test="strategy6-task-trigger"]').trigger('click')
+
+    expect(wrapper.findAll('[data-test^="strategy6-task-option-"]')).toHaveLength(10)
+    expect(wrapper.find('[data-test="strategy6-task-dropdown"]').text()).toContain('s6-task-01')
+    expect(wrapper.find('[data-test="strategy6-task-dropdown"]').text()).not.toContain('s6-task-11')
+    expect(wrapper.find('[data-test="strategy6-task-page-info"]').text()).toBe('第 1 / 3 页 · 共 23 个任务')
+    expect(wrapper.find('[data-test="strategy6-task-prev"]').attributes('disabled')).toBeDefined()
+
+    await wrapper.find('[data-test="strategy6-task-next"]').trigger('click')
+
+    expect(wrapper.find('[data-test="strategy6-task-dropdown"]').text()).toContain('s6-task-11')
+    expect(wrapper.find('[data-test="strategy6-task-dropdown"]').text()).toContain('s6-task-20')
+    expect(wrapper.find('[data-test="strategy6-task-dropdown"]').text()).not.toContain('s6-task-01')
+    expect(wrapper.find('[data-test="strategy6-task-page-info"]').text()).toBe('第 2 / 3 页 · 共 23 个任务')
+  })
+
+  it('renders and downloads the independent trend squeeze screen pool', async () => {
+    const wrapper = mount(Strategy6Results, {
+      global: { mocks: { $route: { query: { task: 's6-task' } } } },
+    })
+    await flushUi()
+
+    expect(api.getStrategy6TrendSqueezeScreen).toHaveBeenCalledWith('s6-task')
+    expect(wrapper.text()).toContain('强势趋势收缩初筛池')
+    expect(wrapper.text()).toContain('长川科技')
+    expect(wrapper.text()).toContain('通过初筛，后续未入选')
+
+    const mocks = installDownloadMocks()
+    await wrapper.get('[data-test="export-trend-squeeze-screen"]').trigger('click')
+    expect(mocks.click).toHaveBeenCalled()
+    const blob = mocks.createObjectURL.mock.calls[0][0]
+    const csv = await blob.text()
+    expect(csv).toContain('300604')
+    expect(csv).toContain('START_NOT_FOUND')
+  })
+
+  it('keeps the selected task in the trigger without injecting it into another page', async () => {
+    api.getStrategy6Tasks.mockResolvedValue({
+      tasks: Array.from({ length: 23 }, (_, index) => ({
+        id: `s6-task-${String(index + 1).padStart(2, '0')}`,
+        status: 'completed',
+        candidates: index,
+      })),
+    })
+
+    const wrapper = mount(Strategy6Results, {
+      global: { mocks: { $route: { query: { task: 's6-task-17' } } } },
+    })
+    await flushUi()
+
+    expect(wrapper.vm.selectedTaskId).toBe('s6-task-17')
+    expect(wrapper.find('[data-test="strategy6-task-trigger"]').text()).toContain('s6-task-17')
+    await wrapper.find('[data-test="strategy6-task-trigger"]').trigger('click')
+    expect(wrapper.find('[data-test="strategy6-task-page-info"]').text()).toContain('第 2 / 3 页')
+    expect(wrapper.find('[data-test="strategy6-task-dropdown"]').text()).toContain('s6-task-17')
+    expect(api.getStrategy6Candidates).toHaveBeenCalledWith('s6-task-17')
+
+    await wrapper.find('[data-test="strategy6-task-next"]').trigger('click')
+
+    expect(wrapper.vm.selectedTaskId).toBe('s6-task-17')
+    expect(wrapper.find('[data-test="strategy6-task-trigger"]').text()).toContain('s6-task-17')
+    expect(wrapper.find('[data-test="strategy6-task-dropdown"]').text()).not.toContain('s6-task-17')
+    expect(wrapper.find('[data-test="strategy6-task-page-info"]').text()).toContain('第 3 / 3 页')
+  })
+
+  it('selects a task from the dropdown and closes the panel', async () => {
+    api.getStrategy6Tasks.mockResolvedValue({
+      tasks: Array.from({ length: 12 }, (_, index) => ({
+        id: `s6-task-${String(index + 1).padStart(2, '0')}`,
+        status: 'completed',
+        candidates: index,
+      })),
+    })
+
+    const wrapper = mount(Strategy6Results, {
+      global: { mocks: { $route: { query: {} } } },
+    })
+    await flushUi()
+
+    await wrapper.find('[data-test="strategy6-task-trigger"]').trigger('click')
+    await wrapper.find('[data-test="strategy6-task-option-s6-task-03"]').trigger('click')
+    await flushUi()
+
+    expect(wrapper.vm.selectedTaskId).toBe('s6-task-03')
+    expect(wrapper.find('[data-test="strategy6-task-trigger"]').text()).toContain('s6-task-03')
+    expect(wrapper.find('[data-test="strategy6-task-dropdown"]').exists()).toBe(false)
+    expect(api.getStrategy6Candidates).toHaveBeenCalledWith('s6-task-03')
   })
 
   afterEach(() => {
@@ -308,6 +544,8 @@ describe('Strategy6Results', () => {
     expect(wrapper.text()).toContain('MA10支撑')
     expect(wrapper.text()).toContain('11.80 / 11.60')
     expect(wrapper.text()).toContain('启动后5日')
+    expect(wrapper.text()).toContain('近20日高位确认')
+    expect(wrapper.text()).toContain('近20日创120日收盘新高')
     expect(wrapper.text()).toContain('启动日低点')
     expect(wrapper.text()).toContain('11.80 - 12.20')
     expect(wrapper.text()).toContain('止损')
@@ -349,11 +587,58 @@ describe('Strategy6Results', () => {
     expect(wrapper.text()).toContain('下沿测试2次')
     expect(wrapper.text()).toContain('紧密排列')
     expect(wrapper.text()).toContain('支撑低吸')
+    expect(wrapper.find('[data-test="detail-entry-timing"]').text()).toContain('支撑止跌已确认')
+    expect(wrapper.find('[data-test="detail-entry-timing"]').text()).toContain('可执行')
+    expect(wrapper.find('[data-test="detail-probability-rr"]').text()).toContain('期望R 0.27')
+    expect(wrapper.find('[data-test="detail-probability-rr"]').text()).toContain('目标1 48.00%')
+    expect(wrapper.find('[data-test="detail-probability-rr"]').text()).toContain('样本 230')
     expect(wrapper.text()).toContain('整理质量 21')
     expect(wrapper.text()).toContain('支撑反应 8')
+    expect(wrapper.find('[data-test="candidate-ttm-000001"]').text()).toContain('多头挤压释放')
+    expect(wrapper.find('[data-test="candidate-ttm-000001"]').text()).toContain('诊断分 4')
+    expect(wrapper.find('[data-test="candidate-ttm-000003"]').text()).toBe('未计算')
+    expect(wrapper.find('[data-test="detail-ttm-squeeze"]').text()).toContain('多头挤压释放')
+    expect(wrapper.find('[data-test="detail-ttm-squeeze"]').text()).toContain('不参与资格与排序')
+    expect(wrapper.find('[data-test="detail-strong-trend-squeeze"]').text()).toContain('通过')
+    expect(wrapper.find('[data-test="candidate-body-support-000001"]').text()).toContain('8/10')
+    expect(wrapper.find('[data-test="candidate-latest-pattern-000001"]').text()).toContain('有效实体低点')
+    expect(wrapper.find('[data-test="candidate-latest-pattern-000002"]').text()).toContain('旧任务未计算')
+    expect(wrapper.find('[data-test="detail-body-support"]').text()).toContain('诊断分不计入总分')
+    expect(wrapper.find('[data-test="detail-latest-bar-pattern"]').text()).toContain('假跌破收回')
+    expect(wrapper.find('[data-test="detail-latest-bar-pattern"]').text()).toContain('后续确认中')
+    expect(wrapper.find('[data-test="detail-trend-position"]').text()).toContain('高位比 88.14%')
+    expect(wrapper.find('[data-test="detail-trend-ema"]').text()).toContain('EMA150 11.20')
+    expect(wrapper.find('[data-test="detail-ttm-bands"]').text()).toContain('BB 11.90 - 12.80')
+    expect(wrapper.find('[data-test="detail-ttm-momentum"]').text()).toContain('上升')
+    expect(wrapper.text()).not.toContain('FIRED_BULLISH')
+    const formalObservation = wrapper.find('[data-test="candidate-row-000003"]')
+    expect(formalObservation.text()).toContain('支撑低吸')
+    expect(formalObservation.text()).toContain('整理 12 · 支撑 10')
     expect(wrapper.text()).toContain('启动质量 17')
     expect(wrapper.text()).toContain('路径证据 13')
+    expect(wrapper.text()).toContain('研究质量 V2')
+    expect(wrapper.vm.decisionProfileText({ decision_profile: 'formal_original' })).toBe('正式原始链')
     expect(wrapper.text()).toContain('动态收缩尾段')
+    expect(wrapper.text()).toContain('尾部变点观察')
+    expect(wrapper.text()).toContain('连续收跌结构')
+    expect(wrapper.find('[data-test="candidate-consecutive-down-000001"]').text()).toBe('3日 · 守5日参考低 · 未创5日高')
+    expect(wrapper.find('[data-test="candidate-consecutive-down-000002"]').text()).toBe('3日 · 跌破5日参考低')
+    expect(wrapper.vm.consecutiveDownStructureText({
+      consecutive_down_days: 3,
+      consecutive_down_structure_pass: true,
+      consecutive_down_no_new_streak_low: true,
+    })).toBe('未计算')
+    expect(wrapper.find('[data-test="detail-consecutive-down-structure"]').text()).toContain('连跌低点 11.92')
+    expect(wrapper.find('[data-test="detail-consecutive-down-structure"]').text()).toContain('相对5日参考低余量 1.20%')
+    expect(wrapper.find('[data-test="detail-consecutive-down-structure"]').text()).toContain('高点突破 -1.80%')
+    expect(wrapper.text()).toContain('影子研究，不参与正式选股')
+    expect(wrapper.text()).toContain('已确认')
+    expect(wrapper.text()).toContain('2026-07-02')
+    expect(wrapper.text()).toContain('BIC证据 18.750')
+    expect(wrapper.text()).toContain('成交量比 0.520')
+    expect(wrapper.text()).toContain('鲁棒BIC识别到状态变点')
+    expect(wrapper.text()).toContain('前一交易日连续收盘跌破关键支撑')
+    expect(wrapper.text()).toContain('前一交易日阶段划分无效')
     expect(wrapper.text()).toContain('未形成尾段（V5/V20 0.660）')
     expect(wrapper.vm.tailVolumeDisplay({
       tail_avg_volume: 0,
@@ -383,6 +668,39 @@ describe('Strategy6Results', () => {
     )
   })
 
+  it('shows formal fixed-tail diagnostics and distinguishes disabled research modules from failed evaluation', async () => {
+    const wrapper = mount(Strategy6Results, {
+      global: { mocks: { $route: { query: { task: 's6-task' } } } },
+    })
+    await flushUi()
+
+    await wrapper.find('[data-test="candidate-row-000003"]').trigger('click')
+
+    const detail = wrapper.find('.detail-panel')
+    expect(detail.text()).toContain('固定窗口')
+    expect(detail.text()).toContain('正式策略未启用稳定箱体研究，未参与评估')
+    expect(detail.text()).toContain('正式策略未启用 Brooks 研究，未参与评估')
+    expect(detail.text()).not.toContain('未识别稳定箱体')
+  })
+
+  it('uses populated diagnostic fields instead of a score-model version whitelist', async () => {
+    const wrapper = mount(Strategy6Results, {
+      global: { mocks: { $route: { query: { task: 's6-task' } } } },
+    })
+    await flushUi()
+
+    const futureFormal = {
+      score_model_version: 'S6_FORMAL_ORIGINAL_V2',
+      entry_archetype: 'SUPPORT_PULLBACK',
+      setup_quality_score: 14,
+      support_reaction_score: 9,
+    }
+    expect(wrapper.vm.hasQualityDiagnostics(futureFormal)).toBe(true)
+    expect(wrapper.vm.entryArchetypeText(futureFormal)).toBe('支撑低吸')
+    expect(wrapper.vm.qualityValue(futureFormal, 'setup_quality_score')).toBe(14)
+    expect(wrapper.vm.hasQualityDiagnostics({ setup_quality_score: 0 })).toBe(false)
+  })
+
   it('does not guess the original tier for legacy downgraded tasks', async () => {
     api.getStrategy6Candidates.mockResolvedValue({ candidates: [{
       code: '000099', name: '旧任务样本', candidate_type: 'WATCH_CANDIDATE',
@@ -397,6 +715,7 @@ describe('Strategy6Results', () => {
     expect(wrapper.text()).toContain('市场降级 · 原等级未记录')
     expect(wrapper.text()).not.toContain('原重点候选')
     expect(wrapper.text()).not.toContain('原就绪候选')
+    expect(wrapper.find('[data-test="candidate-consecutive-down-000099"]').text()).toBe('未计算')
   })
 
   it('renders an independent VCP observation section without removing trade groups', async () => {
@@ -410,6 +729,12 @@ describe('Strategy6Results', () => {
         vcp_history_source: 'DAILY_AS_OF_REPLAY',
         vcp_contraction_count: 2, vcp_pivot_price: 68.21, vcp_structure_low: 65.61,
         vcp_distance_to_pivot_pct: 0.154, vcp_breakout_date: '2026-07-09',
+        consecutive_down_days: 3, consecutive_down_low: 66.2,
+        consecutive_down_structure_version: 'CONSECUTIVE_DOWN_INTERVAL_5D_V2',
+        consecutive_down_structure_pass: true,
+        consecutive_down_no_new_streak_low: true,
+        consecutive_down_min_low_margin_pct: 0.011,
+        consecutive_down_max_high_break_pct: -0.016,
         vcp_contractions: [
           { peak_date: '2026-06-30', low_date: '2026-07-03', recovery_peak_date: '2026-07-07', amplitude: 0.1459, rebound: 0.08, decline_avg_volume: 138603150 },
           { peak_date: '2026-07-07', low_date: '2026-07-08', recovery_peak_date: '2026-07-09', amplitude: 0.0381, rebound: 0.06, decline_avg_volume: 120261046 },
@@ -423,6 +748,12 @@ describe('Strategy6Results', () => {
         vcp_observation_eligible: true, vcp_lifecycle_status: 'VCP_ROUND1_CONFIRMED',
         vcp_history_qualified: true, vcp_history_candidate_date: '2026-07-01',
         vcp_contraction_count: 1, vcp_pivot_price: 21.5, vcp_structure_low: 18.8,
+        consecutive_down_days: 2, consecutive_down_low: 19.4,
+        consecutive_down_structure_version: 'CONSECUTIVE_DOWN_INTERVAL_5D_V2',
+        consecutive_down_structure_pass: false,
+        consecutive_down_no_new_streak_low: true,
+        consecutive_down_min_low_margin_pct: 0.006,
+        consecutive_down_max_high_break_pct: -0.009,
         vcp_forming_round: { peak_date: '2026-07-08', low_date: '2026-07-10', phase: 'REBOUNDING' },
       },
       {
@@ -463,6 +794,8 @@ describe('Strategy6Results', () => {
     expect(text.indexOf('VCP确认候选')).toBeLessThan(text.indexOf('VCP早期观察'))
     expect(wrapper.find('[data-test="vcp-row-002156"]').exists()).toBe(true)
     expect(wrapper.find('[data-test="vcp-row-002056"]').exists()).toBe(true)
+    expect(wrapper.find('[data-test="vcp-consecutive-down-002156"]').text()).toBe('3日 · 守5日参考低 · 未创5日高')
+    expect(wrapper.find('[data-test="vcp-consecutive-down-002056"]').text()).toBe('2日 · 未满足')
     expect(wrapper.find('[data-test="vcp-row-300001"]').exists()).toBe(false)
     expect(wrapper.find('[data-test="vcp-row-300002"]').exists()).toBe(false)
     expect(wrapper.find('[data-test="vcp-row-600001"]').exists()).toBe(false)
@@ -554,6 +887,45 @@ describe('Strategy6Results', () => {
       'vcp-row-000003',
       'vcp-row-000005',
     ])
+  })
+
+  it('sorts candidates within the same type by ranking score and keeps legacy fallback', async () => {
+    api.getStrategy6Candidates.mockResolvedValue({ candidates: [
+      { code: '000001', name: '原总分较高', candidate_type: 'WATCH_CANDIDATE', total_score: 82, ranking_score: 82 },
+      { code: '000002', name: 'TTM加分领先', candidate_type: 'WATCH_CANDIDATE', total_score: 80, ranking_score: 84 },
+      { code: '000003', name: '旧任务回退', candidate_type: 'WATCH_CANDIDATE', total_score: 81 },
+    ] })
+
+    const wrapper = mount(Strategy6Results, {
+      global: { mocks: { $route: { query: { task: 's6-ranking' } } } },
+    })
+    await flushUi()
+
+    expect(wrapper.findAll('[data-test^="candidate-row-"]').map(row => row.attributes('data-test'))).toEqual([
+      'candidate-row-000002',
+      'candidate-row-000001',
+      'candidate-row-000003',
+    ])
+  })
+
+  it('keeps formal candidate type priority ahead of TTM ranking score', async () => {
+    api.getStrategy6Candidates.mockResolvedValue({ candidates: [
+      { code: '000003', name: '高排序观察', candidate_type: 'WATCH_CANDIDATE', total_score: 96, ranking_score: 100 },
+      { code: '000002', name: '中排序重点', candidate_type: 'KEY_CANDIDATE', total_score: 80, ranking_score: 80 },
+      { code: '000001', name: '低排序就绪', candidate_type: 'READY_CANDIDATE', total_score: 70, ranking_score: 70 },
+    ] })
+
+    const wrapper = mount(Strategy6Results, {
+      global: { mocks: { $route: { query: { task: 's6-ranking-priority' } } } },
+    })
+    await flushUi()
+
+    expect(wrapper.vm.tradingCandidates.map(candidate => candidate.code)).toEqual([
+      '000001',
+      '000002',
+      '000003',
+    ])
+    expect(wrapper.vm.topScore).toBe(96)
   })
 
   it('shows VCP quality score, grade, components, reasons and warnings', async () => {
@@ -826,12 +1198,22 @@ describe('Strategy6Results', () => {
     expect(csv).toContain('市场状态,市场状态原始值,市场降级前等级,市场降级前等级原始值,RS20')
     expect(csv).not.toContain('板块状态')
     expect(csv).not.toContain('板块RS10')
-    expect(csv).toContain('启动日低点,启动后天数')
+    expect(csv).toContain('启动日低点,启动后天数,近20日高位确认')
     expect(csv).toContain('关键支撑,前置支撑')
     expect(csv).toContain('阶段状态,阶段状态原始值,形态类型,形态类型原始值')
-    expect(csv).toContain('评分模型版本,入场类型,入场类型原始值,启动事件质量分,整理质量分,支撑反应分,路径证据分')
+    expect(csv).toContain('决策规则,评分模型版本,入场类型,入场类型原始值,启动事件质量分,整理质量分,支撑反应分,路径证据分')
     expect(csv).toContain('尾段划分,尾段划分原始值,尾段划分分数')
+    expect(csv).toContain('连续收跌天数,连续收跌最低价,连续收跌结构,守住5日参考低,相对5日参考低余量,5日高最大突破')
+    expect(csv).toContain('3,11.92,3日 · 守5日参考低 · 未创5日高,是,1.20%,-1.80%')
+    const csvLines = csv.trim().split('\n')
+    const csvHeaders = csvLines[0].split(',')
+    const legacyRow = csvLines.find(line => line.startsWith('000003,')).split(',')
+    expect(legacyRow[csvHeaders.indexOf('守住5日参考低')]).toBe('')
+    expect(csv).toContain('固定窗口,FIXED_WINDOW,0')
     expect(csv).toContain('S6_QUALITY_V2,支撑低吸,SUPPORT_PULLBACK,17,21,8,13')
+    expect(csv).toContain('入场时机,入场时机原始值,当前可执行,入场证据数,概率RR状态,概率RR状态原始值,概率RR样本,目标1命中率,目标2命中率,概率修正期望R')
+    expect(csv).toContain('支撑止跌已确认,SUPPORT_CONFIRMED,是,4,可靠,RELIABLE,230,48.00%,31.00%,0.27')
+    expect(csv).toContain('S6_FORMAL_ORIGINAL_V1,支撑低吸,SUPPORT_PULLBACK,18,12,10,0')
     expect(csv).toContain('客观目标1,客观目标2,客观RR1,客观RR2')
     expect(csv).toContain('权威路径汇总,权威路径汇总原始值,主路径,主路径原始值,通过路径')
     expect(csv).toContain('Brooks状态,Brooks状态原始值,Brooks交易状态,Brooks触发类型,Brooks触发类型原始值')
@@ -849,6 +1231,10 @@ describe('Strategy6Results', () => {
     expect(csv).toContain('VCP支点,VCP结构低点,距VCP支点,VCP突破日期,VCP突破后天数')
     expect(csv).toContain('VCP形态分,VCP等级,VCP完整轮次分,VCP振幅递减分,VCP下跌量递减分,VCP低点稳定分,VCP启动涨幅保留分,VCP时间结构分,VCP支点收紧分,VCP突破质量分')
     expect(csv).toContain('VCP评分原因,VCP评分警告,VCP评分模型版本')
+    expect(csv).toContain('总分,TTM状态,TTM状态原始值,TTM诊断分,排序分,连续挤压天数,当前挤压,挤压刚解除,TTM动量,前一日TTM动量,TTM动量方向')
+    expect(csv).toContain('强势趋势收缩初筛,EMA150,EMA200,52周最低价,52周最高价')
+    expect(csv).toContain('当前挤压,挤压刚解除')
+    expect(csv).toContain('91,多头挤压释放,FIRED_BULLISH,4,95,0,否,是,0.420,0.310,上升')
   })
 
   it('exports Brooks-only waiting candidates without READY or immediate-buy semantics', async () => {

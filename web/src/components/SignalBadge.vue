@@ -16,15 +16,16 @@ defineProps({
 
 <style scoped>
 .badge {
-  display: inline-block; font-size: 11px; font-weight: 600;
-  padding: 3px 10px; border-radius: 3px; white-space: nowrap;
+  display: inline-block; font-size: 10px; font-weight: 600;
+  padding: 2px 7px; border-radius: 2px; white-space: nowrap;
+  border: 1px solid transparent; letter-spacing: 0.02em;
 }
-.badge-strong { background: rgba(245,158,11,0.15); color: var(--gold); }
-.badge-medium { background: rgba(79,125,255,0.12); color: var(--accent); }
-.badge-weak { background: rgba(90,106,126,0.12); color: var(--text-muted); }
-.badge-breakout { background: rgba(239,68,68,0.12); color: var(--up-red); }
-.badge-confirm { background: rgba(249,115,22,0.12); color: var(--warn-orange); }
-.badge-near { background: rgba(79,125,255,0.10); color: var(--accent); }
+.badge-strong { background: var(--gold-glow); border-color: rgba(214,168,74,0.28); color: var(--gold); }
+.badge-medium { background: var(--accent-glow); border-color: rgba(76,141,255,0.22); color: var(--accent-strong); }
+.badge-weak { background: rgba(98,115,134,0.09); border-color: rgba(98,115,134,0.18); color: var(--text-muted); }
+.badge-breakout { background: var(--up-red-glow); border-color: rgba(240,68,68,0.22); color: var(--up-red); }
+.badge-confirm { background: var(--warn-orange-glow); border-color: rgba(232,144,63,0.22); color: var(--warn-orange); }
+.badge-near { background: var(--accent-glow); border-color: rgba(76,141,255,0.2); color: var(--accent-strong); }
 .badge-wait { background: rgba(90,106,126,0.1); color: var(--text-muted); }
 .badge-watch { background: rgba(90,106,126,0.1); color: var(--text-muted); }
 .badge-volume { background: rgba(239,68,68,0.1); color: var(--up-red); }

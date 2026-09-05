@@ -292,6 +292,48 @@ export function useApi() {
     return { ...body, ok: res.ok, statusCode: res.status }
   }
 
+  async function evaluateStrategy6Batch(codes) {
+    const res = await fetch(`${API_BASE}/strategy6/batch-evaluate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ codes }),
+    })
+    const body = await res.json().catch(() => ({}))
+    return { ...body, ok: res.ok, statusCode: res.status }
+  }
+
+  async function analyzeCleanK(payload) {
+    const res = await fetch(`${API_BASE}/stock/clean-k/analyze`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    })
+    const body = await res.json().catch(() => ({}))
+    return { ...body, ok: res.ok, statusCode: res.status }
+  }
+
+  async function startTickFlowFullRefresh() {
+    const res = await fetch(`${API_BASE}/tickflow/full-refresh`, { method: 'POST' })
+    const body = await res.json().catch(() => ({}))
+    return { ...body, ok: res.ok, statusCode: res.status }
+  }
+
+  async function getTickFlowFullRefreshStatus() {
+    const res = await fetch(`${API_BASE}/tickflow/full-refresh/status`)
+    const body = await res.json().catch(() => ({}))
+    return { ...body, ok: res.ok, statusCode: res.status }
+  }
+
+  async function checkTickFlowFreshness(stockCode) {
+    const res = await fetch(`${API_BASE}/tickflow/freshness-check`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ stock_code: stockCode }),
+    })
+    const body = await res.json().catch(() => ({}))
+    return { ...body, ok: res.ok, statusCode: res.status }
+  }
+
   async function getStrategy6ScanStatus() {
     const res = await fetch(`${API_BASE}/strategy6/scans/status`)
     return res.json().catch(() => ({ running: false, stats: {} }))
@@ -307,10 +349,32 @@ export function useApi() {
     return res.json().catch(() => ({ candidates: [] }))
   }
 
+  async function getStrategy6TrendSqueezeScreen(taskId) {
+    const res = await fetch(`${API_BASE}/strategy6/tasks/${encodeURIComponent(taskId)}/trend-squeeze-screen`)
+    if (!res.ok) throw new Error(`strategy6 trend squeeze screen failed: ${res.status}`)
+    return res.json().catch(() => ({ taskId, stocks: [], total: 0 }))
+  }
+
+  async function getLatestStrategy6TrendSqueezeScreen() {
+    const res = await fetch(`${API_BASE}/strategy6/trend-squeeze-screen/latest`)
+    if (!res.ok) throw new Error(`latest strategy6 trend squeeze screen failed: ${res.status}`)
+    return res.json().catch(() => ({ taskId: '', stocks: [], total: 0 }))
+  }
+
   async function getStrategy6MarketSnapshot(taskId) {
     const res = await fetch(`${API_BASE}/strategy6/tasks/${encodeURIComponent(taskId)}/market-snapshot`)
     if (!res.ok) throw new Error(`strategy6 market snapshot failed: ${res.status}`)
     return res.json().catch(() => ({ snapshot: null }))
+  }
+
+  async function getMarketBreadthHistory(params = {}) {
+    const clean = Object.fromEntries(
+      Object.entries(params).filter(([, value]) => value !== '' && value !== null && value !== undefined)
+    )
+    const qs = new URLSearchParams(clean).toString()
+    const res = await fetch(`${API_BASE}/market-breadth/history${qs ? '?' + qs : ''}`)
+    if (!res.ok) throw new Error(`market breadth history failed: ${res.status}`)
+    return res.json().catch(() => ({ meta: {}, summary: null, rows: [] }))
   }
 
   async function getStrategy6Lifecycle(taskId) {
@@ -447,7 +511,8 @@ export function useApi() {
 
   return {
     startScan, getScanStatus, getCandidates, getCandidate, getScanTasks,
-    getSchedulerLogs, getKlineHistory, getKlineHealth, refreshKlineData, refreshKlineHealth,
+    getSchedulerLogs, getKlineHistory, analyzeCleanK, getKlineHealth, refreshKlineData, refreshKlineHealth,
+    startTickFlowFullRefresh, getTickFlowFullRefreshStatus, checkTickFlowFreshness,
     getTaskStocks, retryFailedStocks, reEvaluateTask, getConfig, updateConfig,
     runCupHandleBacktest,
     startStrategy2Scan, getStrategy2ScanStatus, getStrategy2Tasks,
@@ -462,8 +527,9 @@ export function useApi() {
     getStrategy4TrackingEvents,
     startStrategy5Scan, getStrategy5ScanStatus, getStrategy5Tasks,
     getStrategy5Candidates, getStrategy5Candidate,
-    startStrategy6Scan, getStrategy6ScanStatus, getStrategy6Tasks,
-    getStrategy6Candidates, getStrategy6MarketSnapshot, getStrategy6Lifecycle, getStrategy6Candidate, downloadStrategy6Report,
+    startStrategy6Scan, evaluateStrategy6Batch, getStrategy6ScanStatus, getStrategy6Tasks,
+    getStrategy6Candidates, getStrategy6TrendSqueezeScreen, getLatestStrategy6TrendSqueezeScreen,
+    getStrategy6MarketSnapshot, getMarketBreadthHistory, getStrategy6Lifecycle, getStrategy6Candidate, downloadStrategy6Report,
     startStrategy2Backtest, getStrategy2BacktestStatus,
     getStrategy2BacktestTasks, getStrategy2BacktestTask,
     getStrategy2BacktestOpportunities, getStrategy2BacktestInsufficientStocks,

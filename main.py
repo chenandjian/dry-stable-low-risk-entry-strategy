@@ -2,13 +2,13 @@
 import argparse
 import logging
 import sys
-import yaml
 import os
+
+from scanner.config_io import load_yaml_config
 
 
 def load_config(path: str = "config.yaml") -> dict:
-    with open(path, "r", encoding="utf-8") as f:
-        return yaml.safe_load(f)
+    return load_yaml_config(path)
 
 
 def setup_logging(config: dict):

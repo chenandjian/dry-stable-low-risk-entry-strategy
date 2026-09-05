@@ -13,8 +13,8 @@ async function flushUi() {
 }
 
 const ScanEngineStub = {
-  props: ['running', 'scanned', 'total', 'skipped', 'failed', 'candidates', 'latestTradeDate', 'stockPoolSource'],
-  template: `<div data-test="scan-summary">running={{ running }} processed={{ scanned }} total={{ total }} skipped={{ skipped }} failed={{ failed }} candidates={{ candidates }} latest={{ latestTradeDate }} source={{ stockPoolSource }}</div>`,
+  props: ['running', 'scanned', 'total', 'skipped', 'failed', 'candidates', 'latestTradeDate', 'stockPoolSource', 'phase', 'dataProcessed', 'dataTotal', 'currentCode', 'currentName'],
+  template: `<div data-test="scan-summary">running={{ running }} processed={{ scanned }} total={{ total }} skipped={{ skipped }} failed={{ failed }} candidates={{ candidates }} latest={{ latestTradeDate }} source={{ stockPoolSource }} phase={{ phase }} data={{ dataProcessed }}/{{ dataTotal }} current={{ currentCode }} {{ currentName }}</div>`,
 }
 
 const mockRoute = reactive({ query: {}, path: '/' })
@@ -360,5 +360,30 @@ describe('ScannerConsole history task context', () => {
     expect(wrapper.text()).not.toContain('VCP观察')
     expect(wrapper.text()).not.toContain('退出审计')
     expect(wrapper.get('[data-test="scan-summary"]').text()).toContain('candidates=1')
+  })
+
+  it('[27] Strategy6 TickFlow preparation keeps data progress separate from scan progress', async () => {
+    mockApi.getScanStatus.mockResolvedValue({
+      running: true,
+      task_id: 's6-live',
+      strategyType: 'STRATEGY_6_STRONG_VCP_TAIL',
+      stats: {
+        phase: 'data_acquisition',
+        processed: 0,
+        total_stocks: 4994,
+        data_processed: 1200,
+        data_total: 4994,
+        current_code: '600519',
+        current_name: '贵州茅台',
+      },
+    })
+
+    wrapper = mountPage(); await flushUi()
+
+    const summary = wrapper.get('[data-test="scan-summary"]').text()
+    expect(summary).toContain('phase=data_acquisition')
+    expect(summary).toContain('data=1200/4994')
+    expect(summary).toContain('processed=0')
+    expect(summary).toContain('current=600519 贵州茅台')
   })
 })

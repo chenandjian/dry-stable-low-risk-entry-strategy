@@ -1,8 +1,15 @@
 from datetime import date, timedelta
 from dataclasses import replace
 
+import pytest
+
 from strategy6.engine import StrongVcpTailEngine
-from strategy6.filters import classify_candidate, classify_candidate_before_market_downgrade
+import strategy6.indicators as strategy6_indicators
+from strategy6.filters import (
+    _quality_threshold_met,
+    classify_candidate,
+    classify_candidate_before_market_downgrade,
+)
 from strategy6.indicators import calculate_indicators
 from strategy6.market import build_market_snapshot
 from strategy6.models import (
@@ -11,13 +18,28 @@ from strategy6.models import (
     Strategy6DryTail,
     Strategy6Indicators,
     Strategy6Score,
+    Strategy6StrongTrendSqueeze,
     Strategy6TradePlan,
     Strategy6VcpObservation,
     Strategy6VcpQuality,
 )
 from strategy6.strong_start import evaluate_strong_start
 from strategy6.scorer import _relative_strength_risk_score
-from strategy6.validation import resolve_strategy6_config
+from strategy6.validation import is_strategy6_research_profile, resolve_strategy6_config
+
+
+@pytest.fixture(autouse=True)
+def _isolate_formal_trend_squeeze_gate(monkeypatch):
+    """Core-rule fixtures predate the new gate; its behavior has dedicated tests."""
+    monkeypatch.setattr(
+        "strategy6.engine.evaluate_strong_trend_squeeze",
+        lambda _rows: Strategy6StrongTrendSqueeze(
+            passed=True,
+            calculable=True,
+            status="PASSED",
+            squeeze_on=True,
+        ),
+    )
 
 
 def _row(i, close=10.0, open_price=None, high=None, low=None, volume=1_000_000, amount=600_000_000):
@@ -32,6 +54,175 @@ def _row(i, close=10.0, open_price=None, high=None, low=None, volume=1_000_000, 
         "volume": volume,
         "amount": amount,
     }
+
+
+def _consecutive_down_rows(*, broken=False, new_high=False, streak_new_low=False, equal_prior_four_low=False, down_days=3, insufficient=False, flat_last=False):
+    base_count = 3 if insufficient else 5
+    rows = [
+        _row(i, close=10.2 + i * 0.1, low=9.0 + i * 0.02)
+        for i in range(base_count)
+    ]
+    previous_close = rows[-1]["close"]
+    for offset in range(down_days):
+        close = previous_close if flat_last and offset == down_days - 1 else previous_close - 0.1
+        stable_lows = [9.4, 9.5, 9.45]
+        low = stable_lows[min(offset, len(stable_lows) - 1)]
+        if streak_new_low and offset == down_days - 1:
+            low = 9.39
+        if equal_prior_four_low and offset == down_days - 1:
+            low = 9.06
+        if broken and offset == down_days - 1:
+            low = 8.9
+        high = 11.5 if new_high and offset == down_days - 1 else close * 1.01
+        rows.append(_row(base_count + offset, close=close, low=low, high=high))
+        previous_close = close
+    return rows
+
+
+def test_strategy6_consecutive_down_holds_each_days_rolling_five_day_low():
+    _, indicators = calculate_indicators(
+        _consecutive_down_rows(),
+        {"big_down_return": -0.07, "big_down_volume_ratio": 1.5},
+    )
+
+    assert indicators.consecutive_down_days == 3
+    assert indicators.consecutive_down_low == 9.4
+    assert indicators.consecutive_down_structure_pass is True
+    assert indicators.consecutive_down_no_new_streak_low is True
+    assert indicators.consecutive_down_min_low_margin_pct >= 0
+    assert indicators.consecutive_down_max_high_break_pct <= 0
+
+
+def test_strategy6_consecutive_down_allows_lower_streak_low_when_it_holds_rolling_five_day_low():
+    _, indicators = calculate_indicators(
+        _consecutive_down_rows(streak_new_low=True),
+        {"big_down_return": -0.07, "big_down_volume_ratio": 1.5},
+    )
+
+    assert indicators.consecutive_down_days == 3
+    assert indicators.consecutive_down_low == 9.39
+    assert indicators.consecutive_down_min_low_margin_pct >= 0
+    assert indicators.consecutive_down_max_high_break_pct <= 0
+    assert indicators.consecutive_down_no_new_streak_low is True
+    assert indicators.consecutive_down_structure_pass is True
+
+
+def test_strategy6_consecutive_down_allows_decline_low_equal_to_reference_low():
+    _, indicators = calculate_indicators(
+        _consecutive_down_rows(equal_prior_four_low=True),
+        {"big_down_return": -0.07, "big_down_volume_ratio": 1.5},
+    )
+
+    assert indicators.consecutive_down_days == 3
+    assert indicators.consecutive_down_low == 9.06
+    assert indicators.consecutive_down_min_low_margin_pct == 0
+    assert indicators.consecutive_down_no_new_streak_low is True
+    assert indicators.consecutive_down_structure_pass is True
+
+
+def test_strategy6_consecutive_down_five_days_cannot_avoid_five_day_low():
+    _, indicators = calculate_indicators(
+        _consecutive_down_rows(down_days=5),
+        {"big_down_return": -0.07, "big_down_volume_ratio": 1.5},
+    )
+
+    assert indicators.consecutive_down_days == 5
+    assert indicators.consecutive_down_no_new_streak_low is None
+    assert indicators.consecutive_down_min_low_margin_pct is None
+    assert indicators.consecutive_down_structure_pass is False
+
+
+def test_strategy6_consecutive_down_allows_equal_adjusted_reference_low():
+    rows = _consecutive_down_rows(equal_prior_four_low=True)
+    rows[3]["low"] = 9.059999
+    rows[-1]["low"] = 9.059999
+
+    _, indicators = calculate_indicators(
+        rows,
+        {"big_down_return": -0.07, "big_down_volume_ratio": 1.5},
+    )
+
+    assert indicators.consecutive_down_low == 9.06
+    assert indicators.consecutive_down_min_low_margin_pct == 0
+    assert indicators.consecutive_down_no_new_streak_low is True
+    assert indicators.consecutive_down_structure_pass is True
+
+
+def test_strategy6_consecutive_down_fails_when_decline_creates_five_day_low():
+    _, indicators = calculate_indicators(
+        _consecutive_down_rows(broken=True),
+        {"big_down_return": -0.07, "big_down_volume_ratio": 1.5},
+    )
+
+    assert indicators.consecutive_down_days == 3
+    assert indicators.consecutive_down_low == 8.9
+    assert indicators.consecutive_down_structure_pass is False
+    assert indicators.consecutive_down_no_new_streak_low is False
+    assert indicators.consecutive_down_min_low_margin_pct < 0
+
+
+def test_strategy6_consecutive_down_fails_when_any_day_makes_rolling_five_day_high():
+    _, indicators = calculate_indicators(
+        _consecutive_down_rows(new_high=True),
+        {"big_down_return": -0.07, "big_down_volume_ratio": 1.5},
+    )
+
+    assert indicators.consecutive_down_days == 3
+    assert indicators.consecutive_down_min_low_margin_pct >= 0
+    assert indicators.consecutive_down_max_high_break_pct > 0
+    assert indicators.consecutive_down_structure_pass is False
+
+
+def test_strategy6_consecutive_down_requires_three_days_and_resets_on_flat_close():
+    _, two_days = calculate_indicators(
+        _consecutive_down_rows(down_days=2),
+        {"big_down_return": -0.07, "big_down_volume_ratio": 1.5},
+    )
+    _, flat_last = calculate_indicators(
+        _consecutive_down_rows(flat_last=True),
+        {"big_down_return": -0.07, "big_down_volume_ratio": 1.5},
+    )
+
+    assert two_days.consecutive_down_days == 2
+    assert two_days.consecutive_down_structure_pass is False
+    assert flat_last.consecutive_down_days == 0
+    assert flat_last.consecutive_down_structure_pass is False
+
+
+def test_strategy6_consecutive_down_does_not_pass_without_five_prior_days():
+    _, indicators = calculate_indicators(
+        _consecutive_down_rows(insufficient=True),
+        {"big_down_return": -0.07, "big_down_volume_ratio": 1.5},
+    )
+
+    assert indicators.consecutive_down_days == 3
+    assert indicators.consecutive_down_structure_pass is False
+    assert indicators.consecutive_down_no_new_streak_low is None
+    assert indicators.consecutive_down_min_low_margin_pct is None
+    assert indicators.consecutive_down_max_high_break_pct is None
+
+
+def test_strategy6_consecutive_down_diagnostic_does_not_change_decision(monkeypatch):
+    data = build_strategy6_candidate_data()
+    engine = StrongVcpTailEngine({})
+    baseline = engine.evaluate_at(data, code="000001", name="平安银行")
+
+    monkeypatch.setattr(
+        strategy6_indicators,
+        "_consecutive_decline_support",
+        lambda _rows: (9, 8.88, True, True, 0.123456, -0.012345),
+        raising=False,
+    )
+    diagnosed = engine.evaluate_at(data, code="000001", name="平安银行")
+    candidate = diagnosed.to_candidate_dict()
+
+    assert candidate["consecutive_down_structure_version"] == "CONSECUTIVE_DOWN_INTERVAL_5D_V2"
+    assert candidate["consecutive_down_days"] == 9
+    assert candidate["consecutive_down_structure_pass"] is True
+    assert candidate["consecutive_down_no_new_streak_low"] is True
+    assert diagnosed.score.total_score == baseline.score.total_score
+    assert diagnosed.reject_reasons == baseline.reject_reasons
+    assert diagnosed.candidate_type == baseline.candidate_type
 
 
 def build_strategy6_candidate_data(length=760):
@@ -136,7 +327,9 @@ def test_engine_outputs_full_candidate_trade_plan():
     assert candidate["sector_name"] == "银行"
     assert candidate["original_tail_pass"] == result.dry_tail.dry_tail_pass
     assert candidate["original_tail_score"] == result.dry_tail.dry_stable_score
-    assert candidate["box_tail_enabled"] is True
+    assert candidate["decision_profile"] == "formal_original"
+    assert candidate["box_tail_enabled"] is False
+    assert candidate["brooks_tail_enabled"] is False
     assert candidate["tail_pass"] == bool(candidate["tail_paths"])
     assert candidate["tail_path"] in {"ORIGINAL", "BOX", "BOTH", "NONE"}
     assert candidate["start_event_quality_score"] >= 0
@@ -149,11 +342,98 @@ def test_engine_outputs_full_candidate_trade_plan():
     assert candidate["setup_quality_score"] >= 0
     assert candidate["support_reaction_score"] >= 0
     assert candidate["path_evidence_score"] >= 0
+    assert candidate["selection_diagnostics_version"] == "S6_SELECTION_DIAGNOSTICS_V1"
+    assert candidate["support_confirmation_status"] in {
+        "CONFIRMED", "PARTIAL", "PENDING", "FAILED",
+    }
+    assert candidate["recent_tail_status"] in {
+        "STABLE", "FORMING", "DETERIORATING", "UNKNOWN",
+    }
+    assert candidate["matched_market_symbol"] == "sz399001"
+    assert candidate["conservative_rr"] == candidate["objective_rr_1"]
+    assert candidate["entry_timing_version"] == "S6_ENTRY_TIMING_V1"
+    assert candidate["entry_timing_state"] in {
+        "INVALID", "WAITING_BREAKOUT", "SUPPORT_FORMING", "SUPPORT_CONFIRMED",
+        "BREAKOUT_CONFIRMED", "RECLAIM_CONFIRMED", "NOT_APPLICABLE",
+    }
+    assert isinstance(candidate["entry_timing_executable"], bool)
+    assert candidate["probability_rr_version"] == "S6_PROBABILITY_RR_V1"
+    assert candidate["probability_rr_status"] in {
+        "RELIABLE", "INSUFFICIENT_SAMPLE", "INVALID_TRADE_PLAN", "NOT_EVALUATED",
+    }
+    assert candidate["probability_rr_sample_count"] >= 0
     assert candidate["entry_archetype"] in {
         "SUPPORT_PULLBACK", "PIVOT_BREAKOUT", "FAILED_BREAKOUT_RECLAIM",
         "WAIT_BREAKOUT", "NONE",
     }
-    assert candidate["score_model_version"] == "S6_QUALITY_V2"
+    assert candidate["tail_segmentation_status"] == "FIXED_WINDOW"
+    assert candidate["score_model_version"] == "S6_FORMAL_ORIGINAL_V1"
+
+
+def test_tail_regime_shadow_switch_never_changes_formal_decision():
+    data = build_strategy6_candidate_data()
+    enabled = StrongVcpTailEngine({
+        "strategy6": {"tail_regime_shadow_enabled": True},
+    }).evaluate_at(data, code="000001", name="平安银行")
+    disabled = StrongVcpTailEngine({
+        "strategy6": {"tail_regime_shadow_enabled": False},
+    }).evaluate_at(data, code="000001", name="平安银行")
+
+    assert enabled.dry_tail == disabled.dry_tail
+    assert enabled.tail_paths == disabled.tail_paths
+    assert enabled.trade_plan == disabled.trade_plan
+    assert enabled.score == disabled.score
+    assert enabled.reject_reasons == disabled.reject_reasons
+    assert enabled.candidate_type == disabled.candidate_type
+    assert enabled.classification == disabled.classification
+    assert enabled.lifecycle_status == disabled.lifecycle_status
+    assert enabled.tail_regime.enabled is True
+    assert enabled.tail_regime.status in {
+        "FORMING", "CONFIRMED", "BROKEN", "NO_REGIME_CHANGE", "INSUFFICIENT_BASELINE",
+    }
+    assert disabled.tail_regime.enabled is False
+    assert disabled.tail_regime.status == "DISABLED"
+
+    candidate = enabled.to_candidate_dict()
+    assert candidate["tail_regime_model_version"] == "TAIL_REGIME_CP_V1"
+    assert isinstance(candidate["tail_regime_reasons"], list)
+    assert isinstance(candidate["tail_regime_risks"], list)
+
+
+def test_invalid_phase_skips_tail_regime_detection(monkeypatch):
+    import strategy6.engine as engine_mod
+
+    def fail_if_called(*args, **kwargs):
+        raise AssertionError("invalid phase must not run tail regime detection")
+
+    monkeypatch.setattr(engine_mod, "evaluate_tail_regime", fail_if_called)
+    result = StrongVcpTailEngine({
+        "strategy6": {"start_age_max_days": 5},
+    }).evaluate_at(build_strategy6_candidate_data(), code="000001")
+
+    assert result.phase.valid is False
+    assert result.tail_regime.status == "INSUFFICIENT_BASELINE"
+    assert result.phase.status in result.tail_regime.risks
+
+
+def test_formal_engine_does_not_execute_auxiliary_tail_paths(monkeypatch):
+    import strategy6.engine as engine_mod
+
+    def fail_if_called(*args, **kwargs):
+        raise AssertionError("formal profile must not execute research-only tail paths")
+
+    monkeypatch.setattr(engine_mod, "evaluate_box_tail", fail_if_called)
+    monkeypatch.setattr(engine_mod, "analyze_brooks_tail", fail_if_called)
+
+    candidate = StrongVcpTailEngine({}).evaluate_at(
+        build_strategy6_candidate_data(),
+        code="000001",
+    ).to_candidate_dict()
+
+    assert candidate["tail_paths"] == (
+        ["ORIGINAL"] if candidate["original_tail_pass"] else []
+    )
+    assert candidate["tail_primary_path"] in {"ORIGINAL", "NONE"}
 
 
 def test_engine_candidate_dict_exposes_safe_vcp_observation_defaults():
@@ -289,7 +569,9 @@ def test_vcp_observation_does_not_bypass_strategy6_data_and_liquidity_floor(monk
 
 
 def test_engine_outputs_brooks_and_authoritative_three_path_fields():
-    result = StrongVcpTailEngine({}).evaluate_at(
+    result = StrongVcpTailEngine({
+        "strategy6": {"decision_profile": "research_quality_v2"},
+    }).evaluate_at(
         build_strategy6_candidate_data(),
         code="000001",
         name="平安银行",
@@ -309,7 +591,9 @@ def test_engine_outputs_brooks_and_authoritative_three_path_fields():
 def test_engine_candidate_dict_exposes_authoritative_brooks_trigger_price():
     from strategy6.brooks.models import BrooksTradeTriggerResult
 
-    result = StrongVcpTailEngine({}).evaluate_at(
+    result = StrongVcpTailEngine({
+        "strategy6": {"decision_profile": "research_quality_v2"},
+    }).evaluate_at(
         build_strategy6_candidate_data(),
         code="000001",
         name="平安银行",
@@ -329,7 +613,10 @@ def test_engine_candidate_dict_exposes_authoritative_brooks_trigger_price():
 
 def test_engine_brooks_disabled_preserves_legacy_two_path_summary():
     result = StrongVcpTailEngine({
-        "strategy6": {"brooks_tail": {"enabled": False}},
+        "strategy6": {
+            "decision_profile": "research_quality_v2",
+            "brooks_tail": {"enabled": False},
+        },
     }).evaluate_at(build_strategy6_candidate_data(), code="000001")
     candidate = result.to_candidate_dict()
 
@@ -398,7 +685,12 @@ def test_engine_brooks_only_waiting_candidate_dict_has_no_ready_or_buy_semantics
         lambda *args, **kwargs: Strategy6Score(total_score=95, tail_score=18),
     )
 
-    result = StrongVcpTailEngine({"strategy6": {"enable_market_filter": False}}).evaluate_at(
+    result = StrongVcpTailEngine({
+        "strategy6": {
+            "decision_profile": "research_quality_v2",
+            "enable_market_filter": False,
+        },
+    }).evaluate_at(
         build_strategy6_candidate_data(),
         code="000001",
         name="平安银行",
@@ -431,6 +723,51 @@ def test_rr2_below_minimum_rejects_candidate():
     assert result.passed is False
     assert result.candidate_type == "REJECTED"
     assert "RR2_LT_4_0" in result.reject_reasons
+
+
+def test_current_quality_model_does_not_treat_real_zero_as_missing():
+    assert _quality_threshold_met(0, 14, "S6_QUALITY_V2") is False
+    assert _quality_threshold_met(13, 14, "S6_QUALITY_V2") is False
+    assert _quality_threshold_met(14, 14, "S6_QUALITY_V2") is True
+
+
+def test_legacy_empty_quality_model_keeps_missing_zero_compatibility():
+    assert _quality_threshold_met(0, 14, "") is True
+
+
+def test_mature_candidate_below_watch_score_is_rejected_even_when_rr_passes():
+    engine = StrongVcpTailEngine({
+        "strategy6": {"enable_market_filter": False},
+    })
+    result = engine.evaluate_at(
+        build_strategy6_candidate_data(),
+        code="000001",
+        name="平安银行",
+    )
+
+    candidate_type, classification, _, suggestion = classify_candidate(
+        result.indicators,
+        result.start,
+        result.phase,
+        result.pattern,
+        result.support,
+        replace(result.dry_tail, dry_tail_pass=True),
+        replace(
+            result.trade_plan,
+            objective_rr_2=max(3.0, engine.config["rr2_min_watch"]),
+        ),
+        replace(
+            result.score,
+            total_score=engine.config["watch_min_score"] - 1,
+        ),
+        [],
+        engine.config,
+    )
+
+    assert result.phase.status != "START_TOO_RECENT"
+    assert candidate_type == "REJECTED"
+    assert classification == "rejected"
+    assert "评分不足" in suggestion
 
 
 def test_big_down_volume_is_hard_rejected():
@@ -692,6 +1029,8 @@ def test_config_rejects_invalid_filter_mode():
 def test_strategy6_defaults_enable_real_market_filter_only():
     cfg = resolve_strategy6_config({})
 
+    assert cfg["decision_profile"] == "formal_original"
+    assert is_strategy6_research_profile(cfg) is False
     assert cfg["enable_market_filter"] is True
     assert cfg["market_filter_mode"] == "downgrade"
     assert "enable_sector_filter" not in cfg
@@ -699,6 +1038,26 @@ def test_strategy6_defaults_enable_real_market_filter_only():
     assert "sector_min_member_new_high_count" not in cfg
     assert cfg["min_relative_strength_20"] == 0.10
     assert cfg["breakout_extended_max_pct"] == 0.08
+
+
+def test_strategy6_accepts_explicit_research_decision_profile():
+    cfg = resolve_strategy6_config({
+        "strategy6": {"decision_profile": "research_quality_v2"},
+    })
+
+    assert cfg["decision_profile"] == "research_quality_v2"
+    assert is_strategy6_research_profile(cfg) is True
+
+
+def test_strategy6_rejects_unknown_decision_profile():
+    try:
+        resolve_strategy6_config({
+            "strategy6": {"decision_profile": "experimental_guess"},
+        })
+    except ValueError as exc:
+        assert "decision_profile" in str(exc)
+    else:
+        raise AssertionError("unknown decision_profile should fail")
 
 
 def _market_rows(closes, end_date=date(2026, 1, 29)):

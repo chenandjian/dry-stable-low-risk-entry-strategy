@@ -55,11 +55,11 @@ const scoreColor = computed(() => {
 <style scoped>
 .discovery-item {
   display: flex; align-items: center; gap: 12px;
-  padding: 10px 16px; border-bottom: 1px solid rgba(31,42,58,0.5);
+  padding: 11px 16px; border-bottom: 1px solid rgba(28,41,56,0.72);
   cursor: pointer; transition: background 0.1s;
 }
-.discovery-item:hover { background: rgba(79,125,255,0.04); }
-.signal-bar { width: 3px; height: 36px; border-radius: 2px; flex-shrink: 0; }
+.discovery-item:hover { background: var(--bg-hover); }
+.signal-bar { width: 2px; height: 36px; flex-shrink: 0; }
 .bar-red { background: var(--up-red); }
 .bar-orange { background: var(--warn-orange); }
 .bar-blue { background: var(--accent); }

@@ -18,6 +18,7 @@ from scanner.daily_data_service import (
     resolve_effective_worker_count,
 )
 from scanner.data_source import DataSourceManager
+from scanner.data_acquisition import prepare_scan_daily_data
 from strategy5.engine import ShortSprintSupportEngine
 from strategy5.validation import resolve_strategy5_config
 
@@ -49,7 +50,14 @@ def scan_strategy5_all(
         stocks = get_a_stock_pool(config)
     db.save_task_stocks(task_id, stocks)
 
-    daily_sources = config.get("data", {}).get("daily_sources") or DEFAULT_DAILY_SOURCES
+    prepared_session = prepare_scan_daily_data(config, stocks)
+    if fetch_daily_fn is None and prepared_session is not None:
+        fetch_daily_fn = prepared_session.fetch
+
+    daily_sources = (
+        ["tickflow"] if prepared_session is not None
+        else config.get("data", {}).get("daily_sources") or DEFAULT_DAILY_SOURCES
+    )
     kline_days = int(cfg["kline_days"])
     configured_workers = config.get("data", {}).get("worker_count")
     worker_count = resolve_effective_worker_count(

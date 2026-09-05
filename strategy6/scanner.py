@@ -1,6 +1,7 @@
 """Strategy6 scan orchestration."""
 from __future__ import annotations
 
+import copy
 import logging
 import threading
 import time
@@ -8,6 +9,7 @@ from datetime import datetime
 from queue import Queue
 
 import scanner.db as db
+from scanner.data_acquisition import load_market_index_daily, prepare_scan_daily_data
 from scanner.index_source import fetch_market_index_daily
 from scanner.daily_data_service import (
     DEFAULT_DAILY_SOURCES,
@@ -53,13 +55,27 @@ def scan_strategy6_all(
         stocks = get_a_stock_pool(config)
     db.save_task_stocks(task_id, stocks)
 
-    daily_sources = config.get("data", {}).get("daily_sources") or DEFAULT_DAILY_SOURCES
+    prepared_session = prepare_scan_daily_data(
+        config,
+        stocks,
+        progress_callback=progress_callback,
+    )
+    if fetch_daily_fn is None and prepared_session is not None:
+        fetch_daily_fn = prepared_session.fetch
+
+    daily_sources = (
+        ["tickflow"] if prepared_session is not None
+        else config.get("data", {}).get("daily_sources") or DEFAULT_DAILY_SOURCES
+    )
+    if progress_callback:
+        progress_callback("scanning", 0, len(stocks), "-- 策略6计算准备中")
     kline_days = int(cfg["kline_days"])
     configured_workers = config.get("data", {}).get("worker_count")
-    worker_count = resolve_effective_worker_count(
-        configured_workers if configured_workers is not None else worker_count,
-        daily_sources,
-    )
+    requested_workers = configured_workers if configured_workers is not None else worker_count
+    if prepared_session is not None:
+        worker_count = max(1, min(int(requested_workers), len(stocks)))
+    else:
+        worker_count = resolve_effective_worker_count(requested_workers, daily_sources)
     max_busy_retries = config.get("data", {}).get("source_busy_max_retries", 3)
 
     stock_queue: Queue = Queue()
@@ -68,7 +84,7 @@ def scan_strategy6_all(
 
     mgr = DataSourceManager()
     engine = StrongVcpTailEngine({"strategy6": cfg})
-    market_data_by_symbol = _load_market_data_by_symbol(cfg)
+    market_data_by_symbol = _load_market_data_by_symbol(config)
     market_target_date = build_cache_freshness_context(
         now=datetime.strptime(_now(), "%Y-%m-%d %H:%M:%S")
     ).target_trade_date
@@ -84,11 +100,20 @@ def scan_strategy6_all(
     candidate_lock = threading.Lock()
     busy_retries_by_code: dict[str, int] = {}
     busy_retry_lock = threading.Lock()
+    progress_lock = threading.Lock()
+    processed_count = 0
+    progress_sync_interval = 50
+    market_slice_cache: dict[str, dict[str, list[dict]]] = {}
+    market_slice_lock = threading.Lock()
+    base_freshness_context = build_cache_freshness_context(
+        now=datetime.strptime(_now(), "%Y-%m-%d %H:%M:%S")
+    )
     start_time = time.time()
 
     def _cache_freshness_context(code: str):
-        now = datetime.strptime(_now(), "%Y-%m-%d %H:%M:%S")
-        context = build_cache_freshness_context(now=now)
+        context = copy.copy(base_freshness_context)
+        if prepared_session is not None:
+            return context
         prior = db.get_reusable_task_stock_kline_context(
             code,
             context.target_trade_date,
@@ -101,6 +126,14 @@ def scan_strategy6_all(
             context.allow_previous_trade_date = context.quote_status in {"suspended", "no_trade"}
         return context
 
+    def _market_context(evaluation_date: str) -> dict[str, list[dict]]:
+        with market_slice_lock:
+            cached = market_slice_cache.get(evaluation_date)
+            if cached is None:
+                cached = _market_data_until(market_data_by_symbol, evaluation_date)
+                market_slice_cache[evaluation_date] = cached
+            return cached
+
     def _finish_stock(
         code: str,
         name: str,
@@ -110,6 +143,7 @@ def scan_strategy6_all(
         kline_latest_date: str | None = None,
         fetch_result: FetchResult | None = None,
     ) -> None:
+        nonlocal processed_count
         source_fields = {}
         if fetch_result is not None:
             source_fields = {
@@ -134,9 +168,13 @@ def scan_strategy6_all(
             finished_at=_now(),
             **source_fields,
         )
-        summary = db.refresh_scan_task_counts(task_id)
-        if progress_callback:
-            progress_callback("scanning", summary["processed"], summary["total_stocks"], f"{code} {name}")
+        with progress_lock:
+            processed_count += 1
+            current = processed_count
+            if progress_callback:
+                progress_callback("scanning", current, len(stocks), f"{code} {name}")
+        if current % progress_sync_interval == 0 and current < len(stocks):
+            db.refresh_scan_task_counts(task_id)
 
     def worker():
         while not stock_queue.empty():
@@ -205,7 +243,7 @@ def scan_strategy6_all(
                     data_source=fetch_result.primary_source,
                     kline_fetched_at=fetch_result.kline_fetched_at or "",
                     quote_status=fetch_result.quote_status or "",
-                    market_data_by_symbol=_market_data_until(market_data_by_symbol, latest_trade_date or ""),
+                    market_data_by_symbol=_market_context(latest_trade_date or ""),
                 )
                 observation = None
                 vcp = evaluation.vcp_observation
@@ -228,7 +266,6 @@ def scan_strategy6_all(
                     vcp.history_origin_start_date = history.origin_start_date
                     if vcp.history_qualified:
                         vcp.quality = evaluate_vcp_quality(normalize_rows(data), vcp)
-                candidate = evaluation.to_candidate_dict() if evaluation.passed else None
                 vcp_exit_audit = (
                     bool(prior_vcp_states.get(code, {}).get("vcp_observation_eligible"))
                     and bool(prior_vcp_states.get(code, {}).get("vcp_history_qualified"))
@@ -238,10 +275,22 @@ def scan_strategy6_all(
                         or (bool(vcp.origin_start_date) and "VCP_BASE_FILTER_FAILED" in vcp.risk_tags)
                     )
                 )
+                needs_observation = (vcp.eligible and vcp.history_qualified) or vcp_exit_audit
+                evaluation_record = (
+                    evaluation.to_candidate_dict()
+                    if evaluation.passed or evaluation.strong_trend_squeeze.passed or needs_observation
+                    else None
+                )
+                candidate = evaluation_record if evaluation.passed else None
+                trend_squeeze_candidate = (
+                    dict(evaluation_record)
+                    if evaluation.strong_trend_squeeze.passed
+                    else None
+                )
                 if candidate is not None and vcp_exit_audit:
                     candidate["vcp_exit_audit"] = True
-                if (vcp.eligible and vcp.history_qualified) or vcp_exit_audit:
-                    observation = evaluation.to_candidate_dict()
+                if needs_observation:
+                    observation = dict(evaluation_record)
                     observation.update({
                         "candidate_type": "REJECTED",
                         "classification": "observation",
@@ -266,6 +315,8 @@ def scan_strategy6_all(
                     failed_cooldown_days=int(cfg["failed_cooldown_days"]),
                     candidate=candidate,
                     observation_candidate=observation,
+                    trend_squeeze_candidate=trend_squeeze_candidate,
+                    decision_profile=cfg["decision_profile"],
                 )
                 if lifecycle["blocked"] and evaluation.passed:
                     _finish_stock(
@@ -352,17 +403,20 @@ def _ensure_scan_task(task_id: str) -> None:
     )
 
 
-def _load_market_data_by_symbol(cfg: dict) -> dict[str, list[dict]]:
+def _load_market_data_by_symbol(config: dict) -> dict[str, list[dict]]:
     result: dict[str, list[dict]] = {}
     for symbol in ("sh000001", "sz399001", "sz399006", "hs300"):
         fetch_symbol = "sh000300" if symbol == "hs300" else symbol
         try:
-            rows = fetch_market_index_daily(fetch_symbol, days=250) or []
+            rows = load_market_index_daily(
+                config,
+                fetch_symbol,
+                days=250,
+                legacy_fetch_fn=fetch_market_index_daily,
+            ) or []
         except Exception as exc:
             logger.warning("Strategy6 market index fetch failed for %s: %s", fetch_symbol, exc)
             rows = []
-        if rows:
-            db.upsert_market_index_ohlc(fetch_symbol, rows, source="sina")
         result[symbol] = rows
     return result
 

@@ -22,7 +22,7 @@
         <span class="progress-pct">{{ progressPct }}%</span>
       </div>
       <div class="current-stock">
-        <span class="label">当前扫描</span>
+        <span class="label">{{ currentLabel }}</span>
         <span class="code">{{ currentCode }}</span>
         <span class="name">{{ currentName }}</span>
         <span class="speed">{{ skipText }}</span>
@@ -44,22 +44,7 @@
       </div>
     </div>
     <div v-if="!running" class="scan-controls">
-      <button class="btn-primary" @click="$emit('start')" title="策略1: 杯柄/VCP形态识别">
-        启动策略1扫描
-      </button>
-      <button class="btn-secondary" @click="$emit('startStrategy2')" title="策略2: 极致量干价稳">
-        启动策略2扫描
-      </button>
-      <button class="btn-secondary strategy3" @click="$emit('startStrategy3')" title="策略3: 强势回踩二次启动">
-        启动策略3扫描
-      </button>
-      <button class="btn-secondary strategy4" @click="$emit('startStrategy4')" title="策略4: 热点龙头二波">
-        启动策略4扫描
-      </button>
-      <button class="btn-secondary strategy5" @click="$emit('startStrategy5')" title="策略5: 短线强势冲刺盘整支撑">
-        启动策略5扫描
-      </button>
-      <button class="btn-secondary strategy6" @click="$emit('startStrategy6')" title="策略6: 强势VCP尾部候选池">
+      <button class="btn-primary" @click="$emit('startStrategy6')" title="策略6: 强势VCP尾部候选池">
         启动策略6扫描
       </button>
     </div>
@@ -79,31 +64,62 @@ const props = defineProps({
   candidates: Number,
   latestTradeDate: String,
   stockPoolSource: String,
+  phase: String,
+  dataProcessed: Number,
+  dataTotal: Number,
+  indexProcessed: Number,
+  indexTotal: Number,
   logLines: { type: Array, default: () => [] },
 })
-defineEmits(['start', 'startStrategy2', 'startStrategy3', 'startStrategy4', 'startStrategy5', 'startStrategy6'])
+defineEmits(['startStrategy6'])
 
 const logExpanded = ref(true)
-const progressPct = computed(() => props.total > 0 ? Math.round(props.scanned / props.total * 100) : 0)
-const progressText = computed(() => {
-  const total = props.total || 0
-  const scanned = props.scanned || 0
-  return `已处理 ${scanned} / ${total || '--'} · 剩余 ${Math.max(0, total - scanned)}只`
+const isDataAcquisition = computed(() => props.phase === 'data_acquisition')
+const isIndexAcquisition = computed(() => props.phase === 'index_acquisition')
+const activeProcessed = computed(() => {
+  if (isDataAcquisition.value) return props.dataProcessed || 0
+  if (isIndexAcquisition.value) return props.indexProcessed || 0
+  return props.scanned || 0
 })
-const statusText = computed(() => props.running ? '扫描任务进行中' : '')
-const skipText = computed(() => `跳过 ${props.skipped || 0} · 失败 ${props.failed || 0} · 候选 ${props.candidates || 0}`)
+const activeTotal = computed(() => {
+  if (isDataAcquisition.value) return props.dataTotal || 0
+  if (isIndexAcquisition.value) return props.indexTotal || 0
+  return props.total || 0
+})
+const progressPct = computed(() => activeTotal.value > 0
+  ? Math.round(activeProcessed.value / activeTotal.value * 100)
+  : 0)
+const progressText = computed(() => {
+  const total = activeTotal.value
+  const processed = activeProcessed.value
+  const action = isDataAcquisition.value ? '已拉取' : isIndexAcquisition.value ? '已更新' : '已处理'
+  return `${action} ${processed} / ${total || '--'} · 剩余 ${Math.max(0, total - processed)}${isIndexAcquisition.value ? '个' : '只'}`
+})
+const statusText = computed(() => {
+  if (!props.running) return ''
+  if (isDataAcquisition.value) return 'TickFlow 批量行情拉取中'
+  if (isIndexAcquisition.value) return 'TickFlow 宽基指数更新中'
+  if (props.phase === 'preparing') return '扫描任务准备中'
+  return '扫描任务进行中'
+})
+const currentLabel = computed(() => isDataAcquisition.value
+  ? '当前拉取'
+  : isIndexAcquisition.value ? '当前指数' : '当前扫描')
+const skipText = computed(() => (isDataAcquisition.value || isIndexAcquisition.value)
+  ? '完成后自动进入策略计算'
+  : `跳过 ${props.skipped || 0} · 失败 ${props.failed || 0} · 候选 ${props.candidates || 0}`)
 const sourceText = computed(() => props.stockPoolSource ? `股票池 ${props.stockPoolSource}` : '股票池 --')
 </script>
 
 <style scoped>
 .panel {
-  background: var(--bg-panel); border: 1px solid var(--border); border-radius: 6px; overflow: hidden;
+  background: var(--bg-panel); border: 1px solid var(--border); border-radius: var(--radius-sm); overflow: hidden;
 }
 .panel-header {
   display: flex; align-items: center; justify-content: space-between;
-  padding: 12px 16px; border-bottom: 1px solid var(--border);
-  font-size: 12px; font-weight: 600; color: var(--text-secondary);
-  text-transform: uppercase; letter-spacing: 0.5px;
+  padding: 11px 16px; border-bottom: 1px solid var(--border);
+  font-size: 11px; font-weight: 650; color: var(--text-secondary);
+  text-transform: uppercase; letter-spacing: 0.08em;
 }
 .panel-header.sub { text-transform: none; letter-spacing: 0; font-weight: 500; }
 .status { font-size: 11px; color: var(--text-muted); }
@@ -120,9 +136,9 @@ const sourceText = computed(() => props.stockPoolSource ? `股票池 ${props.sto
 .title { font-size: 14px; font-weight: 600; color: var(--text-primary); }
 .sub { font-size: 12px; color: var(--text-muted); }
 .progress-row { display: flex; align-items: center; gap: 10px; margin: 12px 0; }
-.progress-bar { flex: 1; height: 4px; background: var(--border); border-radius: 2px; overflow: hidden; }
+.progress-bar { flex: 1; height: 3px; background: var(--border); overflow: hidden; }
 .progress-pct { font-family: var(--font-mono); font-size: 11px; color: var(--accent); min-width: 32px; text-align: right; }
-.progress-fill { height: 100%; background: linear-gradient(90deg, var(--accent), #79A0FF); border-radius: 2px; transition: width 0.3s; }
+.progress-fill { height: 100%; background: linear-gradient(90deg, var(--gold), var(--accent)); transition: width 0.3s; }
 .current-stock { display: flex; align-items: center; gap: 8px; font-size: 13px; }
 .scan-meta { display: flex; justify-content: space-between; margin-top: 8px; font-size: 11px; color: var(--text-muted); }
 .label { color: var(--text-muted); }
@@ -137,22 +153,9 @@ const sourceText = computed(() => props.stockPoolSource ? `股票池 ${props.sto
 .log-line .error { color: var(--up-red); }
 .scan-controls { padding: 10px 16px; display: flex; gap: 8px; }
 .btn-primary {
-  background: var(--accent); color: #fff; border: none;
-  padding: 8px 20px; border-radius: 4px; font-size: 13px; font-weight: 600; cursor: pointer;
+  background: var(--accent); color: #fff; border: 1px solid var(--accent);
+  padding: 8px 20px; border-radius: var(--radius-sm); font-size: 13px; font-weight: 600; cursor: pointer;
   transition: background 0.15s;
 }
 .btn-primary:hover { background: #3D6BEE; }
-.btn-secondary {
-  background: transparent; color: var(--text-secondary); border: 1px solid var(--border);
-  padding: 6px 14px; border-radius: 4px; font-size: 12px; cursor: pointer;
-}
-.btn-secondary:hover { border-color: var(--accent); color: var(--accent); }
-.btn-secondary.strategy3 { color: #d6b35a; border-color: rgba(214,179,90,0.5); }
-.btn-secondary.strategy3:hover { border-color: #d6b35a; color: #f0ca6a; }
-.btn-secondary.strategy4 { color: #f97316; border-color: rgba(249,115,22,0.55); }
-.btn-secondary.strategy4:hover { border-color: #f97316; color: #fb923c; }
-.btn-secondary.strategy5 { color: #22c55e; border-color: rgba(34,197,94,0.55); }
-.btn-secondary.strategy5:hover { border-color: #22c55e; color: #86efac; }
-.btn-secondary.strategy6 { color: #a78bfa; border-color: rgba(167,139,250,0.55); }
-.btn-secondary.strategy6:hover { border-color: #a78bfa; color: #c4b5fd; }
 </style>

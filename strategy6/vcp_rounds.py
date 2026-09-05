@@ -131,6 +131,8 @@ def _find_next_round(
         low_close = closes[low_index]
         if low_close <= 0 or low_close >= peak_close:
             continue
+        if max(closes[peak_index + 1:low_index + 1]) > peak_close:
+            return None
         recovery_close = closes[recovery_index]
         rebound = recovery_close / low_close - 1.0
         direct_breakout = (

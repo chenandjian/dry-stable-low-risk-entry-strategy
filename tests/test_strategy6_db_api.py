@@ -8,6 +8,31 @@ import server as server_mod
 from strategy6 import STRATEGY6_TYPE
 
 
+def test_strategy6_tickflow_progress_does_not_overwrite_strategy_scan_counts():
+    stats = {
+        "processed": 0,
+        "scanned": 0,
+        "total_stocks": 4994,
+        "candidates_found": 0,
+    }
+
+    updated = server_mod._strategy6_progress_stats(
+        stats,
+        "data_acquisition",
+        1200,
+        4994,
+        "600519 贵州茅台",
+    )
+
+    assert updated["phase"] == "data_acquisition"
+    assert updated["data_processed"] == 1200
+    assert updated["data_total"] == 4994
+    assert updated["processed"] == 0
+    assert updated["scanned"] == 0
+    assert updated["current_code"] == "600519"
+    assert updated["current_name"] == "贵州茅台"
+
+
 def _candidate():
     return {
         "code": "000001",
@@ -27,6 +52,13 @@ def _candidate():
         "start_type": "NORMAL_STRONG_BREAKOUT",
         "start_grade": "A",
         "current_close_position": 0.72,
+        "consecutive_down_days": 3,
+        "consecutive_down_low": 11.92,
+        "consecutive_down_structure_version": "CONSECUTIVE_DOWN_INTERVAL_5D_V2",
+        "consecutive_down_structure_pass": True,
+        "consecutive_down_no_new_streak_low": True,
+        "consecutive_down_min_low_margin_pct": 0.012,
+        "consecutive_down_max_high_break_pct": -0.018,
         "start_low": 11.5,
         "days_since_start": 5,
         "support_status": "MA20_SUPPORT",
@@ -47,6 +79,7 @@ def _candidate():
         "start_day_self_amount_percentile": 0.95,
         "strategy_version": "4.0.0",
         "config_hash": "abc123",
+        "decision_profile": "research_quality_v2",
         "phase_status": "PHASE_VALID",
         "consolidation_start_date": "2026-06-20",
         "tail_start_date": "2026-07-03",
@@ -73,6 +106,20 @@ def _candidate():
         "tail_avg_volume": 500000,
         "pre_tail_avg_volume_20": 1000000,
         "tail_volume_ratio": 0.5,
+        "tail_regime_enabled": True,
+        "tail_regime_status": "CONFIRMED",
+        "tail_regime_start_date": "2026-07-03",
+        "tail_regime_days": 7,
+        "tail_regime_delta_bic": 18.75,
+        "tail_regime_volume_ratio": 0.52,
+        "tail_regime_range_ratio": 0.61,
+        "tail_regime_body_ratio": 0.58,
+        "tail_regime_abs_return_ratio": 0.63,
+        "tail_regime_close_dispersion": 0.012,
+        "tail_regime_low_slope_atr": 0.04,
+        "tail_regime_model_version": "TAIL_REGIME_CP_V1",
+        "tail_regime_reasons": ["ROBUST_BIC_CHANGE_POINT"],
+        "tail_regime_risks": [],
         "original_tail_pass": False,
         "original_tail_score": 12,
         "box_tail_enabled": True,
@@ -155,6 +202,55 @@ def _candidate():
         "path_evidence_score": 13,
         "entry_archetype": "SUPPORT_PULLBACK",
         "score_model_version": "S6_QUALITY_V2",
+        "entry_timing_version": "S6_ENTRY_TIMING_V1",
+        "entry_timing_state": "SUPPORT_CONFIRMED",
+        "entry_timing_executable": True,
+        "entry_timing_evidence_count": 4,
+        "entry_timing_reasons": ["ENTRY_NO_NEW_LOW"],
+        "entry_timing_risk_tags": [],
+        "probability_rr_version": "S6_PROBABILITY_RR_V1",
+        "probability_rr_status": "RELIABLE",
+        "probability_rr_reliable": True,
+        "probability_rr_sample_count": 230,
+        "probability_rr_lookback_days": 250,
+        "probability_rr_horizon_days": 20,
+        "probability_rr_risk_atr": 1.2,
+        "probability_rr_target_1_atr": 2.0,
+        "probability_rr_target_2_atr": 3.5,
+        "probability_rr_target_1_hit_probability": 0.48,
+        "probability_rr_target_2_hit_probability": 0.31,
+        "probability_adjusted_r": 0.27,
+        "probability_rr_reasons": ["PROBABILITY_RR_ASOF_HISTORY"],
+        "body_support_pass": True,
+        "body_support_type": "FAILED_BREAK_BODY_FLOOR",
+        "body_support_floor_price": 11.9,
+        "body_support_zone_low": 11.7,
+        "body_support_zone_high": 12.1,
+        "body_support_pivot_count": 2,
+        "body_support_independent_touch_count": 2,
+        "body_support_floor_migration": 0.015,
+        "body_support_cluster_width": 0.008,
+        "body_support_body_hold_pass": True,
+        "body_support_recovery_pass": True,
+        "body_support_recovery_atr": 1.2,
+        "body_support_low_rejection": True,
+        "body_support_failed_breakout": True,
+        "body_support_rejection_ratio": 0.75,
+        "body_support_bear_follow_through_failure": True,
+        "body_support_confluence": True,
+        "body_support_volume_quality_pass": True,
+        "body_support_score": 8,
+        "body_support_status": "BODY_SUPPORT_STRONG",
+        "body_support_reasons": ["FAILED_BREAK_BODY_FLOOR"],
+        "body_support_risks": [],
+        "body_support_model_version": "S6_BODY_SUPPORT_V1",
+        "latest_bar_patterns": [{
+            "code": "VALID_BODY_LOW",
+            "name": "有效实体低点",
+            "matched": True,
+            "status": "CONFIRMING",
+            "signal_type": "FAILED_BREAK_RECLAIM",
+        }],
     }
 
 
@@ -181,8 +277,23 @@ def test_strategy6_candidate_table_is_independent(tmp_path):
     assert rows[0]["first_pool_date"] == "2026-07-01"
     assert rows[0]["pool_age_trading_days"] == 6
     assert rows[0]["warn_tags"] == ["PRESSURE_NEAR_HIGH"]
+    assert rows[0]["consecutive_down_days"] == 3
+    assert rows[0]["consecutive_down_low"] == 11.92
+    assert rows[0]["consecutive_down_structure_version"] == "CONSECUTIVE_DOWN_INTERVAL_5D_V2"
+    assert rows[0]["consecutive_down_structure_pass"] is True
+    assert rows[0]["consecutive_down_no_new_streak_low"] is True
+    assert rows[0]["consecutive_down_min_low_margin_pct"] == 0.012
+    assert rows[0]["consecutive_down_max_high_break_pct"] == -0.018
     assert detail["risk_reward_ratio_2"] == 2.5
     assert detail["strategy_version"] == "4.0.0"
+    assert detail["decision_profile"] == "research_quality_v2"
+    assert detail["body_support_score"] == 8
+    assert detail["body_support_status"] == "BODY_SUPPORT_STRONG"
+    assert detail["body_support_reasons"] == ["FAILED_BREAK_BODY_FLOOR"]
+    assert detail["body_support_rejection_ratio"] == 0.75
+    assert detail["body_support_body_hold_pass"] is True
+    assert detail["latest_bar_patterns"][0]["name"] == "有效实体低点"
+    assert detail["latest_bar_patterns"][0]["matched"] is True
     assert detail["pre_market_candidate_type"] == "KEY_CANDIDATE"
     assert detail["pattern_type"] == "VCP"
     assert detail["support_cluster_sources"] == ["MA10", "PATTERN_LOW"]
@@ -191,6 +302,13 @@ def test_strategy6_candidate_table_is_independent(tmp_path):
     assert detail["price_basis"] == "FORWARD_ADJUSTED"
     assert detail["current_price_adj"] == 12.34
     assert detail["current_price_raw"] is None
+    assert detail["tail_regime_enabled"] is True
+    assert detail["tail_regime_status"] == "CONFIRMED"
+    assert detail["tail_regime_start_date"] == "2026-07-03"
+    assert detail["tail_regime_days"] == 7
+    assert detail["tail_regime_delta_bic"] == 18.75
+    assert detail["tail_regime_reasons"] == ["ROBUST_BIC_CHANGE_POINT"]
+    assert detail["tail_regime_risks"] == []
     assert detail["start_day_self_amount_percentile"] == 0.95
     assert detail["original_tail_pass"] is False
     assert detail["box_tail_enabled"] is True
@@ -222,7 +340,17 @@ def test_strategy6_candidate_table_is_independent(tmp_path):
     assert detail["support_reaction_reasons"] == ["LOW_VOLUME_RECOVERY"]
     assert detail["path_evidence_score"] == 13
     assert detail["entry_archetype"] == "SUPPORT_PULLBACK"
+    assert detail["entry_timing_state"] == "SUPPORT_CONFIRMED"
+    assert detail["entry_timing_executable"] is True
+    assert detail["entry_timing_reasons"] == ["ENTRY_NO_NEW_LOW"]
+    assert detail["probability_rr_status"] == "RELIABLE"
+    assert detail["probability_rr_reliable"] is True
+    assert detail["probability_rr_sample_count"] == 230
+    assert detail["probability_adjusted_r"] == 0.27
+    assert detail["probability_rr_reasons"] == ["PROBABILITY_RR_ASOF_HISTORY"]
     assert detail["score_model_version"] == "S6_QUALITY_V2"
+    assert detail["ranking_score"] == detail["total_score"]
+    assert detail["ttm_squeeze_status"] == ""
     assert detail["vcp_observation_eligible"] is False
     assert detail["vcp_lifecycle_status"] == "VCP_NONE"
     assert detail["vcp_contractions"] == []
@@ -235,12 +363,110 @@ def test_strategy6_candidate_table_is_independent(tmp_path):
     assert db.get_strategy5_candidates("s6-task") == []
 
 
+def test_strategy6_trend_squeeze_screen_is_independent_from_candidates(tmp_path):
+    db.init_db(str(tmp_path / "s6-screen.db"))
+    db.create_scan_task("s6-screen", "2026-09-03 15:30:00", strategy_type=STRATEGY6_TYPE)
+    screened = _candidate()
+    screened.update({
+        "code": "300604", "name": "长川科技",
+        "strong_trend_squeeze_pass": True,
+        "strong_trend_squeeze_status": "PASSED",
+        "trend_close": 62.5, "trend_low_250": 35.0, "trend_high_250": 70.0,
+        "trend_close_to_low_ratio": 1.785714,
+        "trend_close_to_high_ratio": 0.892857,
+        "trend_ema150": 54.2, "trend_ema200": 49.8,
+        "trend_squeeze_on": True,
+        "trend_bb_upper": 64.0, "trend_bb_lower": 60.0,
+        "trend_kc_upper": 65.0, "trend_kc_lower": 59.0,
+        "strong_trend_squeeze_reasons": [],
+        "strong_trend_squeeze_model_version": "S6_STRONG_TREND_SQUEEZE_V1",
+        "reject_reasons": ["START_NOT_FOUND"],
+        "candidate_type": "REJECTED", "classification": "rejected",
+    })
+
+    db.upsert_strategy6_trend_squeeze_screen("s6-screen", screened)
+
+    assert db.get_strategy6_candidates("s6-screen") == []
+    rows = db.get_strategy6_trend_squeeze_screen("s6-screen")
+    assert len(rows) == 1
+    assert rows[0]["code"] == "300604"
+    assert rows[0]["trend_close"] == 62.5
+    assert rows[0]["trend_squeeze_on"] is True
+    assert rows[0]["downstream_reject_reasons"] == ["START_NOT_FOUND"]
+
+
+def test_strategy6_evaluation_replaces_stale_trend_squeeze_screen_row(tmp_path):
+    db.init_db(str(tmp_path / "s6-screen-replace.db"))
+    db.create_scan_task("s6-screen", "2026-09-03 15:30:00", strategy_type=STRATEGY6_TYPE)
+    screened = _candidate()
+    screened.update({
+        "strong_trend_squeeze_pass": True,
+        "strong_trend_squeeze_status": "PASSED",
+        "trend_squeeze_on": True,
+        "strong_trend_squeeze_model_version": "S6_STRONG_TREND_SQUEEZE_V1",
+        "candidate_type": "REJECTED",
+        "classification": "rejected",
+    })
+    common = {
+        "task_id": "s6-screen", "code": "000001", "name": "平安银行",
+        "evaluation_date": "2026-09-03", "candidate_type": "REJECTED",
+        "lifecycle_status": "REJECTED", "event_key": "screen-replace",
+        "reject_reasons": ["START_NOT_FOUND"], "max_watch_days": 20,
+        "expired_cooldown_days": 5, "failed_cooldown_days": 10,
+        "candidate": None,
+    }
+
+    db.persist_strategy6_evaluation(**common, trend_squeeze_candidate=screened)
+    assert len(db.get_strategy6_trend_squeeze_screen("s6-screen")) == 1
+
+    db.persist_strategy6_evaluation(**common, trend_squeeze_candidate=None)
+    assert db.get_strategy6_trend_squeeze_screen("s6-screen") == []
+
+
+def test_strategy6_trend_squeeze_screen_api_supports_task_and_latest(tmp_path, monkeypatch):
+    db_path = str(tmp_path / "s6-screen-api.db")
+    db.init_db(db_path)
+    monkeypatch.setattr(server_mod, "load_config", lambda: {"data": {"database_path": db_path}})
+    db.create_scan_task("s6-old", "2026-09-02 15:30:00", strategy_type=STRATEGY6_TYPE)
+    db.finish_scan_task("s6-old", "2026-09-02 16:00:00", 0, 1.0)
+    db.create_scan_task("s6-latest", "2026-09-03 15:30:00", strategy_type=STRATEGY6_TYPE)
+    screened = _candidate()
+    screened.update({
+        "strong_trend_squeeze_pass": True,
+        "strong_trend_squeeze_status": "PASSED",
+        "trend_squeeze_on": True,
+        "strong_trend_squeeze_model_version": "S6_STRONG_TREND_SQUEEZE_V1",
+    })
+    db.upsert_strategy6_trend_squeeze_screen("s6-latest", screened)
+    db.finish_scan_task("s6-latest", "2026-09-03 16:00:00", 0, 1.0)
+    db.create_scan_task("s1-task", "2026-09-03 16:10:00", strategy_type="STRATEGY_1_CUP_HANDLE")
+
+    client = TestClient(server_mod.app)
+    task_response = client.get("/api/strategy6/tasks/s6-latest/trend-squeeze-screen")
+    latest_response = client.get("/api/strategy6/trend-squeeze-screen/latest")
+
+    assert task_response.status_code == 200
+    assert task_response.json()["total"] == 1
+    assert task_response.json()["stocks"][0]["code"] == "000001"
+    assert latest_response.status_code == 200
+    assert latest_response.json()["taskId"] == "s6-latest"
+    assert latest_response.json()["total"] == 1
+    mismatch = client.get("/api/strategy6/tasks/s1-task/trend-squeeze-screen")
+    assert mismatch.status_code == 400
+    assert mismatch.json()["error"] == "TASK_STRATEGY_MISMATCH"
+
+
 def test_strategy6_candidate_schema_contains_all_box_tail_output_fields(tmp_path):
     db.init_db(str(tmp_path / "s6-box-schema.db"))
     columns = {
         row[1] for row in db.get_conn().execute("PRAGMA table_info(strategy6_candidates)").fetchall()
     }
     required = {
+        "decision_profile",
+        "consecutive_down_days", "consecutive_down_low", "consecutive_down_structure_version",
+        "consecutive_down_structure_pass", "consecutive_down_no_new_streak_low",
+        "consecutive_down_min_low_margin_pct",
+        "consecutive_down_max_high_break_pct",
         "original_tail_pass", "original_tail_score", "box_tail_enabled",
         "box_tail_pass", "box_tail_score", "box_status", "tail_pass", "tail_path",
         "box_start_date", "box_end_date", "box_days", "box_high", "box_low",
@@ -254,11 +480,22 @@ def test_strategy6_candidate_schema_contains_all_box_tail_output_fields(tmp_path
         "kline_overlap_pair_count", "avg_kline_overlap_ratio", "gap_count_5",
         "max_gap_ratio_5", "atr5", "atr20", "atr_contraction_ratio",
         "compact_kline_reasons", "compact_kline_risk_tags",
+        "tail_regime_enabled", "tail_regime_status", "tail_regime_start_date",
+        "tail_regime_days", "tail_regime_delta_bic", "tail_regime_volume_ratio",
+        "tail_regime_range_ratio", "tail_regime_body_ratio",
+        "tail_regime_abs_return_ratio", "tail_regime_close_dispersion",
+        "tail_regime_low_slope_atr", "tail_regime_model_version",
+        "tail_regime_reasons", "tail_regime_risks",
         "brooks_tail_enabled", "brooks_tail_pass", "brooks_tail_score",
         "brooks_tail_premium", "brooks_status", "brooks_trade_ready",
         "brooks_trade_trigger_type", "brooks_trigger_price", "brooks_trigger_valid_until", "tail_paths",
         "tail_path_summary", "tail_primary_path", "passed_path_count",
         "multi_path_confirmed", "brooks_result_json",
+        "ttm_squeeze_status", "ttm_squeeze_on", "ttm_squeeze_days", "ttm_fired",
+        "ttm_momentum", "ttm_previous_momentum", "ttm_momentum_direction",
+        "ttm_bb_upper", "ttm_bb_lower", "ttm_kc_upper", "ttm_kc_lower",
+        "ttm_squeeze_score", "ranking_score", "ttm_reasons", "ttm_risk_tags",
+        "ttm_model_version",
         "vcp_observation_eligible", "vcp_lifecycle_status",
         "vcp_origin_start_date", "vcp_pattern_start_date", "vcp_pattern_end_date",
         "vcp_contraction_count", "vcp_contractions", "vcp_forming_round", "vcp_pivot_price",
@@ -278,6 +515,86 @@ def test_strategy6_candidate_schema_contains_all_box_tail_output_fields(tmp_path
     }
 
     assert required <= columns
+
+
+def test_strategy6_candidates_persist_ttm_fields_and_sort_within_candidate_type(tmp_path):
+    db.init_db(str(tmp_path / "s6-ttm.db"))
+    db.create_scan_task("s6-ttm", "2026-07-28 10:00:00", strategy_type=STRATEGY6_TYPE)
+
+    candidates = [
+        {
+            **_candidate(),
+            "code": "000003",
+            "candidate_type": "KEY_CANDIDATE",
+            "total_score": 75,
+            "ranking_score": 75,
+        },
+        {
+            **_candidate(),
+            "code": "000001",
+            "candidate_type": "WATCH_CANDIDATE",
+            "total_score": 80,
+            "ranking_score": 84,
+            "ttm_squeeze_status": "FIRED_BULLISH",
+            "ttm_squeeze_on": False,
+            "ttm_squeeze_days": 0,
+            "ttm_fired": True,
+            "ttm_momentum": 0.42,
+            "ttm_previous_momentum": 0.31,
+            "ttm_momentum_direction": "RISING",
+            "ttm_bb_upper": 12.8,
+            "ttm_bb_lower": 11.9,
+            "ttm_kc_upper": 12.7,
+            "ttm_kc_lower": 11.8,
+            "ttm_squeeze_score": 4,
+            "ttm_reasons": ["TTM_FIRED", "TTM_MOMENTUM_POSITIVE"],
+            "ttm_risk_tags": [],
+            "ttm_model_version": "S6_TTM_SQUEEZE_V1",
+        },
+        {
+            **_candidate(),
+            "code": "000002",
+            "candidate_type": "WATCH_CANDIDATE",
+            "total_score": 82,
+            "ranking_score": 82,
+        },
+    ]
+    for candidate in candidates:
+        db.upsert_strategy6_candidate("s6-ttm", candidate)
+
+    rows = db.get_strategy6_candidates("s6-ttm")
+
+    assert [row["code"] for row in rows] == ["000003", "000001", "000002"]
+    fired = rows[1]
+    assert fired["ttm_squeeze_status"] == "FIRED_BULLISH"
+    assert fired["ttm_squeeze_on"] is False
+    assert fired["ttm_fired"] is True
+    assert fired["ttm_squeeze_score"] == 4
+    assert fired["ranking_score"] == 84
+    assert fired["ttm_reasons"] == ["TTM_FIRED", "TTM_MOMENTUM_POSITIVE"]
+    assert fired["ttm_risk_tags"] == []
+
+
+def test_strategy6_legacy_candidate_keeps_missing_consecutive_down_diagnostic_as_null(tmp_path):
+    db.init_db(str(tmp_path / "s6-consecutive-down-legacy.db"))
+    db.create_scan_task("s6-legacy-down", "2026-07-09 10:00:00", strategy_type=STRATEGY6_TYPE)
+    db.get_conn().execute(
+        """INSERT INTO strategy6_candidates (
+               task_id, code, name, evaluation_date, candidate_type, classification, total_score
+           ) VALUES (?, ?, ?, ?, ?, ?, ?)""",
+        ("s6-legacy-down", "000001", "旧任务", "2026-07-09", "WATCH_CANDIDATE", "observe", 60),
+    )
+    db.get_conn().commit()
+
+    row = db.get_strategy6_candidate("000001", task_id="s6-legacy-down")
+
+    assert row["consecutive_down_days"] is None
+    assert row["consecutive_down_low"] is None
+    assert row["consecutive_down_structure_version"] is None
+    assert row["consecutive_down_structure_pass"] is None
+    assert row["consecutive_down_no_new_streak_low"] is None
+    assert row["consecutive_down_min_low_margin_pct"] is None
+    assert row["consecutive_down_max_high_break_pct"] is None
 
 
 def test_strategy6_candidate_round_trips_vcp_observation_fields(tmp_path):
@@ -604,11 +921,18 @@ def test_strategy6_api_returns_candidates_and_rejects_cross_strategy(tmp_path, m
     assert listed["brooks_result"]["trade_trigger"]["ready"] is True
     assert listed["brooks_trigger_price"] == 12.48
     assert listed["brooks_result"]["trade_trigger"]["trigger_price"] == 12.48
+    assert listed["consecutive_down_days"] == 3
+    assert listed["consecutive_down_structure_pass"] is True
+    assert listed["consecutive_down_no_new_streak_low"] is True
     assert detailed["candidate_type"] == "KEY_CANDIDATE"
     assert detailed["tail_path"] == "BOX"
     assert detailed["brooks_status"] == "SECOND_ENTRY_LONG_READY"
     assert detailed["brooks_trigger_price"] == 12.48
     assert detailed["brooks_result"]["structure"]["setup_types"] == ["SECOND_ENTRY_LONG"]
+    assert detailed["consecutive_down_low"] == 11.92
+    assert detailed["consecutive_down_no_new_streak_low"] is True
+    assert detailed["consecutive_down_min_low_margin_pct"] == 0.012
+    assert detailed["consecutive_down_max_high_break_pct"] == -0.018
 
     mismatch = client.get("/api/strategy6/tasks/s1-task/candidates")
     assert mismatch.status_code == 400
@@ -817,6 +1141,12 @@ def test_strategy6_atomic_persist_rolls_back_lifecycle_when_candidate_write_fail
     def fail_candidate_write(*args, **kwargs):
         raise RuntimeError("candidate write failed")
 
+    screened = _candidate()
+    screened.update({
+        "strong_trend_squeeze_pass": True,
+        "strong_trend_squeeze_status": "PASSED",
+        "trend_squeeze_on": True,
+    })
     monkeypatch.setattr(db, "upsert_strategy6_candidate", fail_candidate_write)
     with pytest.raises(RuntimeError, match="candidate write failed"):
         db.persist_strategy6_evaluation(
@@ -832,11 +1162,13 @@ def test_strategy6_atomic_persist_rolls_back_lifecycle_when_candidate_write_fail
             expired_cooldown_days=5,
             failed_cooldown_days=10,
             candidate=_candidate(),
+            trend_squeeze_candidate=screened,
         )
 
     assert db.get_strategy6_lifecycle("000001") is None
     assert db.get_strategy6_task_lifecycle("s6-atomic") == []
     assert db.get_strategy6_candidates("s6-atomic") == []
+    assert db.get_strategy6_trend_squeeze_screen("s6-atomic") == []
 
 
 def test_strategy6_atomic_persist_rolls_back_lifecycle_when_observation_write_fails(tmp_path, monkeypatch):

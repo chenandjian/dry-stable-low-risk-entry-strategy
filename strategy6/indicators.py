@@ -66,6 +66,14 @@ def calculate_indicators(
     ind.range_5 = _range(rows, 5)
     ind.range_10 = _range(rows, 10)
     ind.close_range_5 = _close_range(rows, 5)
+    (
+        ind.consecutive_down_days,
+        ind.consecutive_down_low,
+        ind.consecutive_down_structure_pass,
+        ind.consecutive_down_no_new_streak_low,
+        ind.consecutive_down_min_low_margin_pct,
+        ind.consecutive_down_max_high_break_pct,
+    ) = _consecutive_decline_support(rows)
     ind.has_big_down_volume = _has_big_down_volume(rows, ind.v20, config)
     if ind.has_big_down_volume:
         ind.risk_tags.append("BIG_DOWN_VOLUME")
@@ -141,6 +149,65 @@ def _close_range(rows: list[dict], days: int) -> float:
     selected = rows[-days:]
     close = rows[-1]["close"] if rows else 0.0
     return round((max(r["close"] for r in selected) - min(r["close"] for r in selected)) / close, 6) if close > 0 and selected else 0.0
+
+
+def _consecutive_decline_support(
+    rows: list[dict],
+) -> tuple[int, float | None, bool, bool | None, float | None, float | None]:
+    decline_indexes: list[int] = []
+    for index in range(len(rows) - 1, 0, -1):
+        if rows[index]["close"] >= rows[index - 1]["close"]:
+            break
+        decline_indexes.append(index)
+    decline_indexes.reverse()
+
+    days = len(decline_indexes)
+    if not decline_indexes:
+        return 0, None, False, None, None, None
+    if len(rows) < 5:
+        return days, None, False, None, None, None
+
+    decline_low_raw = min(rows[index]["low"] for index in decline_indexes)
+    decline_low = round(decline_low_raw, 4)
+    recent_start = len(rows) - 5
+    decline_index_set = set(decline_indexes)
+    reference_rows = [
+        rows[index]
+        for index in range(recent_start, len(rows))
+        if index not in decline_index_set
+    ]
+    if not reference_rows:
+        return days, decline_low, False, None, None, None
+    five_day_reference_low = min(row["low"] for row in reference_rows)
+    if five_day_reference_low <= 0:
+        return days, decline_low, False, None, None, None
+    decline_low_margin = decline_low_raw / five_day_reference_low - 1.0
+    decline_low_holds_reference = decline_low_margin >= 0
+
+    high_breaks: list[float] = []
+    for index in decline_indexes:
+        if index < 4:
+            return days, decline_low, False, None, None, None
+        prior_four = rows[index - 4:index]
+        prior_high = max(row["high"] for row in prior_four)
+        if prior_high <= 0:
+            return days, decline_low, False, None, None, None
+        high_breaks.append(rows[index]["high"] / prior_high - 1.0)
+
+    max_high_break = max(high_breaks)
+    passed = (
+        days >= 3
+        and decline_low_holds_reference
+        and max_high_break <= 0
+    )
+    return (
+        days,
+        decline_low,
+        passed,
+        decline_low_holds_reference,
+        round(decline_low_margin, 6),
+        round(max_high_break, 6),
+    )
 
 
 def _has_big_down_volume(rows: list[dict], v20: float, config: dict) -> bool:

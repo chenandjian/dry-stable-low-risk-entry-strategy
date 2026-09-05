@@ -37,6 +37,13 @@ class Strategy6Indicators:
     range_5: float = 0.0
     range_10: float = 0.0
     close_range_5: float = 0.0
+    consecutive_down_days: int = 0
+    consecutive_down_low: float | None = None
+    consecutive_down_structure_version: str = "CONSECUTIVE_DOWN_INTERVAL_5D_V2"
+    consecutive_down_structure_pass: bool = False
+    consecutive_down_no_new_streak_low: bool | None = None
+    consecutive_down_min_low_margin_pct: float | None = None
+    consecutive_down_max_high_break_pct: float | None = None
     relative_strength_20: float = 0.0
     relative_strength_20_observed: bool = False
     market_status: str = "UNKNOWN"
@@ -143,6 +150,53 @@ class Strategy6SetupQuality:
 
 
 @dataclass
+class Strategy6SelectionDiagnostics:
+    """Independent facts used by Strategy6 selection experiments."""
+
+    model_version: str = "S6_SELECTION_DIAGNOSTICS_V1"
+    relative_strength_5: float = 0.0
+    relative_strength_10: float = 0.0
+    relative_strength_20: float = 0.0
+    relative_strength_60: float = 0.0
+    relative_strength_periods_observed: list[int] = field(default_factory=list)
+    relative_strength_trend: str = "UNKNOWN"
+    matched_market_symbol: str = ""
+    matched_market_status: str = "UNKNOWN"
+    support_confirmation_status: str = "PENDING"
+    recent_tail_status: str = "UNKNOWN"
+    conservative_rr: float = 0.0
+    reasons: list[str] = field(default_factory=list)
+    risk_tags: list[str] = field(default_factory=list)
+
+
+@dataclass
+class Strategy6EntryTiming:
+    model_version: str = "S6_ENTRY_TIMING_V1"
+    state: str = "NOT_APPLICABLE"
+    executable: bool = False
+    evidence_count: int = 0
+    reasons: list[str] = field(default_factory=list)
+    risk_tags: list[str] = field(default_factory=list)
+
+
+@dataclass
+class Strategy6ProbabilityAdjustedRR:
+    model_version: str = "S6_PROBABILITY_RR_V1"
+    status: str = "NOT_EVALUATED"
+    reliable: bool = False
+    sample_count: int = 0
+    lookback_days: int = 0
+    horizon_days: int = 0
+    risk_atr: float = 0.0
+    target_1_atr: float = 0.0
+    target_2_atr: float = 0.0
+    target_1_hit_probability: float = 0.0
+    target_2_hit_probability: float = 0.0
+    probability_adjusted_r: float = 0.0
+    reasons: list[str] = field(default_factory=list)
+
+
+@dataclass
 class Strategy6DryTail:
     dry_stable_score: int = 0
     dry_tail_pass: bool = False
@@ -152,6 +206,24 @@ class Strategy6DryTail:
     pre_tail_avg_volume_20: float = 0.0
     tail_volume_ratio: float = 0.0
     volume_slope_10: float = 0.0
+
+
+@dataclass
+class Strategy6TailRegime:
+    enabled: bool = True
+    status: str = "INSUFFICIENT_BASELINE"
+    start_date: str = ""
+    days: int = 0
+    delta_bic: float = 0.0
+    volume_ratio: float = 0.0
+    range_ratio: float = 0.0
+    body_ratio: float = 0.0
+    abs_return_ratio: float = 0.0
+    close_dispersion: float = 0.0
+    low_slope_atr: float = 0.0
+    model_version: str = "TAIL_REGIME_CP_V1"
+    reasons: list[str] = field(default_factory=list)
+    risks: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -275,7 +347,125 @@ class Strategy6Score:
     setup_quality_score: int = 0
     support_reaction_score: int = 0
     path_evidence_score: int = 0
-    score_model_version: str = "S6_QUALITY_V2"
+    score_model_version: str = ""
+
+
+@dataclass
+class Strategy6TtmSqueeze:
+    status: str = "INSUFFICIENT_DATA"
+    squeeze_on: bool = False
+    squeeze_days: int = 0
+    fired: bool = False
+    momentum: float | None = None
+    previous_momentum: float | None = None
+    momentum_direction: str = "UNKNOWN"
+    bb_upper: float | None = None
+    bb_lower: float | None = None
+    kc_upper: float | None = None
+    kc_lower: float | None = None
+    score: int = 0
+    reasons: list[str] = field(default_factory=list)
+    risk_tags: list[str] = field(default_factory=list)
+    model_version: str = "S6_TTM_SQUEEZE_V1"
+
+
+@dataclass
+class Strategy6StrongTrendSqueeze:
+    passed: bool = False
+    calculable: bool = False
+    status: str = "INSUFFICIENT_DATA"
+    close: float = 0.0
+    low_250: float = 0.0
+    high_250: float = 0.0
+    close_to_low_ratio: float = 0.0
+    close_to_high_ratio: float = 0.0
+    ema150: float = 0.0
+    ema200: float = 0.0
+    squeeze_on: bool = False
+    bb_upper: float | None = None
+    bb_lower: float | None = None
+    kc_upper: float | None = None
+    kc_lower: float | None = None
+    reasons: list[str] = field(default_factory=list)
+    model_version: str = "S6_STRONG_TREND_SQUEEZE_V1"
+
+    def apply_rules(self) -> None:
+        if not self.calculable:
+            self.passed = False
+            self.status = "INSUFFICIENT_DATA"
+            if not self.reasons:
+                self.reasons = ["TREND_SQUEEZE_DATA_INSUFFICIENT"]
+            return
+
+        reasons: list[str] = []
+        if self.close <= 10:
+            reasons.append("CLOSE_LE_10")
+        if self.low_250 <= 0 or self.close < self.low_250 * 1.30:
+            reasons.append("CLOSE_LT_52W_LOW_1_30")
+        if self.high_250 <= 0 or self.close < self.high_250 * 0.70:
+            reasons.append("CLOSE_LT_52W_HIGH_0_70")
+        if self.high_250 <= 0 or self.close > self.high_250:
+            reasons.append("CLOSE_GT_52W_HIGH")
+        if self.ema150 <= self.ema200:
+            reasons.append("EMA150_LE_EMA200")
+        if self.close <= self.ema150:
+            reasons.append("CLOSE_LE_EMA150")
+        if self.close <= self.ema200:
+            reasons.append("CLOSE_LE_EMA200")
+        if not self.squeeze_on:
+            reasons.append("BB_NOT_INSIDE_KC")
+        self.reasons = reasons
+        self.passed = not reasons
+        self.status = "PASSED" if self.passed else "REJECTED"
+
+
+@dataclass
+class Strategy6LatestBarPattern:
+    code: str = ""
+    name: str = ""
+    matched: bool = False
+    status: str = "NOT_MATCHED"
+    signal_type: str = "NONE"
+    evaluation_date: str = ""
+    body_bottom: float | None = None
+    body_top: float | None = None
+    body_direction: str = "UNKNOWN"
+    floor_price: float | None = None
+    zone_low: float | None = None
+    zone_high: float | None = None
+    distance_to_floor_pct: float | None = None
+    reasons: list[str] = field(default_factory=list)
+    risks: list[str] = field(default_factory=list)
+
+
+@dataclass
+class Strategy6BodySupport:
+    enabled: bool = True
+    passed: bool = False
+    support_type: str = "NONE"
+    floor_price: float | None = None
+    zone_low: float | None = None
+    zone_high: float | None = None
+    pivot_count: int = 0
+    independent_touch_count: int = 0
+    body_pivot_slope: float | None = None
+    body_floor_migration: float | None = None
+    cluster_width: float | None = None
+    body_hold_pass: bool = False
+    recovery_pass: bool = False
+    recovery_atr: float | None = None
+    low_rejection: bool = False
+    failed_breakout: bool = False
+    rejection_ratio: float | None = None
+    bear_follow_through_failure: bool = False
+    support_confluence: bool = False
+    volume_quality_pass: bool = False
+    score: int = 0
+    status: str = "BODY_SUPPORT_NONE"
+    reasons: list[str] = field(default_factory=list)
+    risks: list[str] = field(default_factory=list)
+    latest_bar_patterns: list[Strategy6LatestBarPattern] = field(default_factory=list)
+    model_version: str = "S6_BODY_SUPPORT_V1"
 
 
 @dataclass
@@ -339,10 +529,19 @@ class Strategy6Evaluation:
     tail_paths: Strategy6TailPaths
     trade_plan: Strategy6TradePlan
     score: Strategy6Score
+    ttm_squeeze: Strategy6TtmSqueeze = field(default_factory=Strategy6TtmSqueeze)
+    strong_trend_squeeze: Strategy6StrongTrendSqueeze = field(default_factory=Strategy6StrongTrendSqueeze)
+    body_support: Strategy6BodySupport = field(default_factory=Strategy6BodySupport)
+    ranking_score: int = 0
     setup_quality: Strategy6SetupQuality = field(default_factory=Strategy6SetupQuality)
+    tail_regime: Strategy6TailRegime = field(default_factory=Strategy6TailRegime)
+    selection_diagnostics: Strategy6SelectionDiagnostics = field(default_factory=Strategy6SelectionDiagnostics)
+    entry_timing: Strategy6EntryTiming = field(default_factory=Strategy6EntryTiming)
+    probability_rr: Strategy6ProbabilityAdjustedRR = field(default_factory=Strategy6ProbabilityAdjustedRR)
     vcp_observation: Strategy6VcpObservation = field(default_factory=Strategy6VcpObservation)
     strategy_version: str = ""
     config_hash: str = ""
+    decision_profile: str = "formal_original"
     pre_market_candidate_type: str = ""
     candidate_type: str = "REJECTED"
     classification: str = "rejected"
@@ -368,11 +567,19 @@ class Strategy6Evaluation:
         compact = box.compact_kline
         tail = self.tail_paths
         quality = self.setup_quality
+        regime = self.tail_regime
+        diagnostics = self.selection_diagnostics
+        entry_timing = self.entry_timing
+        probability_rr = self.probability_rr
+        ttm = self.ttm_squeeze
+        trend = self.strong_trend_squeeze
+        body_support = self.body_support
         vcp = self.vcp_observation
         vcp_quality = vcp.quality
         return {
             "strategy_version": self.strategy_version,
             "config_hash": self.config_hash,
+            "decision_profile": self.decision_profile,
             "price_basis": "FORWARD_ADJUSTED",
             "current_price_adj": ind.current_price,
             "current_price_raw": None,
@@ -397,6 +604,38 @@ class Strategy6Evaluation:
             "return_20": ind.return_20,
             "relative_strength_20": ind.relative_strength_20,
             "relative_strength_20_observed": ind.relative_strength_20_observed,
+            "selection_diagnostics_version": diagnostics.model_version,
+            "relative_strength_5": diagnostics.relative_strength_5,
+            "relative_strength_10": diagnostics.relative_strength_10,
+            "relative_strength_60": diagnostics.relative_strength_60,
+            "relative_strength_periods_observed": diagnostics.relative_strength_periods_observed,
+            "relative_strength_trend": diagnostics.relative_strength_trend,
+            "matched_market_symbol": diagnostics.matched_market_symbol,
+            "matched_market_status": diagnostics.matched_market_status,
+            "support_confirmation_status": diagnostics.support_confirmation_status,
+            "recent_tail_status": diagnostics.recent_tail_status,
+            "conservative_rr": diagnostics.conservative_rr,
+            "selection_diagnostic_reasons": diagnostics.reasons,
+            "selection_diagnostic_risk_tags": diagnostics.risk_tags,
+            "entry_timing_version": entry_timing.model_version,
+            "entry_timing_state": entry_timing.state,
+            "entry_timing_executable": entry_timing.executable,
+            "entry_timing_evidence_count": entry_timing.evidence_count,
+            "entry_timing_reasons": entry_timing.reasons,
+            "entry_timing_risk_tags": entry_timing.risk_tags,
+            "probability_rr_version": probability_rr.model_version,
+            "probability_rr_status": probability_rr.status,
+            "probability_rr_reliable": probability_rr.reliable,
+            "probability_rr_sample_count": probability_rr.sample_count,
+            "probability_rr_lookback_days": probability_rr.lookback_days,
+            "probability_rr_horizon_days": probability_rr.horizon_days,
+            "probability_rr_risk_atr": probability_rr.risk_atr,
+            "probability_rr_target_1_atr": probability_rr.target_1_atr,
+            "probability_rr_target_2_atr": probability_rr.target_2_atr,
+            "probability_rr_target_1_hit_probability": probability_rr.target_1_hit_probability,
+            "probability_rr_target_2_hit_probability": probability_rr.target_2_hit_probability,
+            "probability_adjusted_r": probability_rr.probability_adjusted_r,
+            "probability_rr_reasons": probability_rr.reasons,
             "amount_avg_10": ind.amount_avg_10,
             "amount_avg_30": ind.amount_avg_30,
             "amount_avg_60": ind.amount_avg_60,
@@ -410,6 +649,20 @@ class Strategy6Evaluation:
             "pre_tail_avg_volume_20": self.dry_tail.pre_tail_avg_volume_20,
             "tail_volume_ratio": self.dry_tail.tail_volume_ratio,
             "volume_slope_10": self.dry_tail.volume_slope_10,
+            "tail_regime_enabled": regime.enabled,
+            "tail_regime_status": regime.status,
+            "tail_regime_start_date": regime.start_date,
+            "tail_regime_days": regime.days,
+            "tail_regime_delta_bic": regime.delta_bic,
+            "tail_regime_volume_ratio": regime.volume_ratio,
+            "tail_regime_range_ratio": regime.range_ratio,
+            "tail_regime_body_ratio": regime.body_ratio,
+            "tail_regime_abs_return_ratio": regime.abs_return_ratio,
+            "tail_regime_close_dispersion": regime.close_dispersion,
+            "tail_regime_low_slope_atr": regime.low_slope_atr,
+            "tail_regime_model_version": regime.model_version,
+            "tail_regime_reasons": regime.reasons,
+            "tail_regime_risks": regime.risks,
             "original_tail_pass": tail.original_pass,
             "original_tail_score": tail.original_score,
             "box_tail_enabled": box.enabled,
@@ -465,6 +718,13 @@ class Strategy6Evaluation:
             "range_5": ind.range_5,
             "range_10": ind.range_10,
             "close_range_5": ind.close_range_5,
+            "consecutive_down_days": ind.consecutive_down_days,
+            "consecutive_down_low": ind.consecutive_down_low,
+            "consecutive_down_structure_version": ind.consecutive_down_structure_version,
+            "consecutive_down_structure_pass": ind.consecutive_down_structure_pass,
+            "consecutive_down_no_new_streak_low": ind.consecutive_down_no_new_streak_low,
+            "consecutive_down_min_low_margin_pct": ind.consecutive_down_min_low_margin_pct,
+            "consecutive_down_max_high_break_pct": ind.consecutive_down_max_high_break_pct,
             "start_date": start.start_date,
             "start_type": start.start_type,
             "start_grade": start.start_grade,
@@ -566,6 +826,83 @@ class Strategy6Evaluation:
             "risk_reward_score": score.risk_reward_score,
             "risk_control_score": score.risk_control_score,
             "total_score": score.total_score,
+            "ttm_squeeze_status": ttm.status,
+            "ttm_squeeze_on": ttm.squeeze_on,
+            "ttm_squeeze_days": ttm.squeeze_days,
+            "ttm_fired": ttm.fired,
+            "ttm_momentum": ttm.momentum,
+            "ttm_previous_momentum": ttm.previous_momentum,
+            "ttm_momentum_direction": ttm.momentum_direction,
+            "ttm_bb_upper": ttm.bb_upper,
+            "ttm_bb_lower": ttm.bb_lower,
+            "ttm_kc_upper": ttm.kc_upper,
+            "ttm_kc_lower": ttm.kc_lower,
+            "ttm_squeeze_score": ttm.score,
+            "ranking_score": self.ranking_score,
+            "ttm_reasons": ttm.reasons,
+            "ttm_risk_tags": ttm.risk_tags,
+            "ttm_model_version": ttm.model_version,
+            "strong_trend_squeeze_pass": trend.passed,
+            "strong_trend_squeeze_status": trend.status,
+            "trend_close": trend.close,
+            "trend_low_250": trend.low_250,
+            "trend_high_250": trend.high_250,
+            "trend_close_to_low_ratio": trend.close_to_low_ratio,
+            "trend_close_to_high_ratio": trend.close_to_high_ratio,
+            "trend_ema150": trend.ema150,
+            "trend_ema200": trend.ema200,
+            "trend_squeeze_on": trend.squeeze_on,
+            "trend_bb_upper": trend.bb_upper,
+            "trend_bb_lower": trend.bb_lower,
+            "trend_kc_upper": trend.kc_upper,
+            "trend_kc_lower": trend.kc_lower,
+            "strong_trend_squeeze_reasons": trend.reasons,
+            "strong_trend_squeeze_model_version": trend.model_version,
+            "body_support_enabled": body_support.enabled,
+            "body_support_pass": body_support.passed,
+            "body_support_type": body_support.support_type,
+            "body_support_floor_price": body_support.floor_price,
+            "body_support_zone_low": body_support.zone_low,
+            "body_support_zone_high": body_support.zone_high,
+            "body_support_pivot_count": body_support.pivot_count,
+            "body_support_independent_touch_count": body_support.independent_touch_count,
+            "body_support_body_pivot_slope": body_support.body_pivot_slope,
+            "body_support_floor_migration": body_support.body_floor_migration,
+            "body_support_cluster_width": body_support.cluster_width,
+            "body_support_body_hold_pass": body_support.body_hold_pass,
+            "body_support_recovery_pass": body_support.recovery_pass,
+            "body_support_recovery_atr": body_support.recovery_atr,
+            "body_support_low_rejection": body_support.low_rejection,
+            "body_support_failed_breakout": body_support.failed_breakout,
+            "body_support_rejection_ratio": body_support.rejection_ratio,
+            "body_support_bear_follow_through_failure": body_support.bear_follow_through_failure,
+            "body_support_confluence": body_support.support_confluence,
+            "body_support_volume_quality_pass": body_support.volume_quality_pass,
+            "body_support_score": body_support.score,
+            "body_support_status": body_support.status,
+            "body_support_reasons": body_support.reasons,
+            "body_support_risks": body_support.risks,
+            "body_support_model_version": body_support.model_version,
+            "latest_bar_patterns": [
+                {
+                    "code": item.code,
+                    "name": item.name,
+                    "matched": item.matched,
+                    "status": item.status,
+                    "signal_type": item.signal_type,
+                    "evaluation_date": item.evaluation_date,
+                    "body_bottom": item.body_bottom,
+                    "body_top": item.body_top,
+                    "body_direction": item.body_direction,
+                    "floor_price": item.floor_price,
+                    "zone_low": item.zone_low,
+                    "zone_high": item.zone_high,
+                    "distance_to_floor_pct": item.distance_to_floor_pct,
+                    "reasons": item.reasons,
+                    "risks": item.risks,
+                }
+                for item in body_support.latest_bar_patterns
+            ],
             "pattern_score_component": score.pattern_score_component,
             "tail_score": score.tail_score,
             "objective_rr_score": score.objective_rr_score,

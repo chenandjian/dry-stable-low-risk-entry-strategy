@@ -1,5 +1,9 @@
 from strategy6.backtest.cli import build_parser
-from strategy6.backtest.runner import BROOKS_OPTIMIZATION_SPACE, build_brooks_trial_configs
+from strategy6.backtest.runner import (
+    BROOKS_OPTIMIZATION_SPACE,
+    _research_strategy_config,
+    build_brooks_trial_configs,
+)
 from strategy6.backtest.validation import build_evaluation_schedule
 from strategy6.backtest.models import BacktestRunSpec
 
@@ -21,6 +25,16 @@ def test_brooks_optimization_space_cannot_change_other_strategy6_paths():
     assert all(key.startswith("brooks_tail.") for key in BROOKS_OPTIMIZATION_SPACE)
     assert "brooks_tail.scoring.pass_score_min" in BROOKS_OPTIMIZATION_SPACE
     assert "box_tail.normal_box_width_max" not in BROOKS_OPTIMIZATION_SPACE
+
+
+def test_research_trial_config_explicitly_uses_quality_v2_without_mutating_base():
+    base = {"decision_profile": "formal_original", "watch_min_score": 60}
+
+    research = _research_strategy_config(base)
+
+    assert research["decision_profile"] == "research_quality_v2"
+    assert research["watch_min_score"] == 60
+    assert base["decision_profile"] == "formal_original"
 
 
 def test_brooks_coarse_schedule_keeps_consecutive_trigger_windows_and_locks_oos():
@@ -104,7 +118,8 @@ def test_brooks_trials_are_baseline_oat_relaxations_then_joint_relaxation():
     trials = build_brooks_trial_configs(base, max_trials=15)
 
     assert len(trials) == 15
-    assert trials[0] == base
+    assert trials[0]["decision_profile"] == "research_quality_v2"
+    assert {key: value for key, value in trials[0].items() if key != "decision_profile"} == base
     for trial in trials[1:7]:
         changed = [
             key for key in BROOKS_OPTIMIZATION_SPACE
