@@ -330,8 +330,7 @@
       </div>
     </section>
 
-    <div v-if="selected" data-test="candidate-detail-overlay" class="detail-overlay" @click.self="closeCandidate">
-    <section class="panel detail-panel" role="dialog" aria-modal="true" :aria-label="`候选详情 ${selected.code} ${selected.name}`">
+    <section v-if="selected" data-test="candidate-detail-inline" class="panel detail-panel detail-inline" role="region" :aria-label="`候选详情 ${selected.code} ${selected.name}`">
       <div class="panel-header detail-panel-header">
         <span data-test="candidate-detail-title">候选详情 · {{ selected.code }} {{ selected.name }}</span>
         <div class="detail-header-actions">
@@ -499,7 +498,6 @@
         <span v-for="tag in selected.score_reasons || []" :key="'s' + tag" class="tag info">{{ label('tag', tag) }}</span>
       </div>
     </section>
-    </div>
 
     <div class="loading" v-if="loading">加载中...</div>
   </div>
@@ -1542,8 +1540,8 @@ td { vertical-align: top; }
 .tag.risk { background: rgba(239, 68, 68, 0.16); color: #fca5a5; }
 .tag.warn { background: rgba(249, 115, 22, 0.16); color: #fdba74; }
 .tag.info { background: rgba(79,125,255,0.15); color: #93c5fd; }
-.detail-overlay { position: fixed; inset: 0; z-index: 100; display: flex; justify-content: flex-end; background: rgba(2, 6, 12, 0.72); backdrop-filter: blur(2px); }
-.detail-panel { width: min(980px, calc(100vw - 32px)); height: 100vh; margin: 0; padding-bottom: 12px; overflow-y: auto; border-top: 0; border-right: 0; border-bottom: 0; border-radius: 0; box-shadow: -18px 0 48px rgba(0, 0, 0, 0.45); }
+.detail-panel { width: 100%; margin: 14px 0 0; padding-bottom: 12px; }
+.detail-inline { scroll-margin-top: 12px; }
 .detail-panel-header { position: sticky; top: 0; z-index: 8; background: var(--bg-elevated); }
 .detail-header-actions { display: flex; align-items: center; gap: 8px; }
 .detail-action { height: 30px; padding: 5px 12px; color: var(--text-primary); background: transparent; border: 1px solid var(--border-light); border-radius: var(--radius-sm); cursor: pointer; white-space: nowrap; }
@@ -1584,6 +1582,5 @@ td { vertical-align: top; }
   .strategy6-results { padding: 16px 12px 30px; }
   .task-picker { min-width: 100%; width: 100%; }
   .market-index-grid { grid-template-columns: 1fr; }
-  .detail-panel { width: 100vw; }
 }
 </style>

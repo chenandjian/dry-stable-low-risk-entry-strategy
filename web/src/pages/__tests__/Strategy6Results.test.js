@@ -535,10 +535,14 @@ describe('Strategy6Results', () => {
     })
     await flushUi()
 
-    expect(wrapper.find('[data-test="candidate-detail-overlay"]').exists()).toBe(false)
+    expect(wrapper.find('[data-test="candidate-detail-inline"]').exists()).toBe(false)
     await wrapper.find('[data-test="candidate-row-000001"]').trigger('click')
     await nextTick()
-    expect(wrapper.find('[data-test="candidate-detail-overlay"]').exists()).toBe(true)
+    const detail = wrapper.find('[data-test="candidate-detail-inline"]')
+    expect(detail.exists()).toBe(true)
+    expect(detail.attributes('role')).toBe('region')
+    expect(detail.attributes('aria-modal')).toBeUndefined()
+    expect(wrapper.find('[data-test="candidate-detail-overlay"]').exists()).toBe(false)
     expect(wrapper.find('[data-test="candidate-detail-title"]').text()).toContain('000001 平安银行')
 
     expect(api.getStrategy6Candidates).toHaveBeenCalledWith('s6-task')
@@ -686,7 +690,7 @@ describe('Strategy6Results', () => {
     ).toBeTruthy()
   })
 
-  it('closes the candidate detail drawer without changing the selected task', async () => {
+  it('closes the inline candidate detail without changing the selected task', async () => {
     const wrapper = mount(Strategy6Results, {
       global: { mocks: { $route: { query: { task: 's6-task' } } } },
     })
@@ -695,11 +699,11 @@ describe('Strategy6Results', () => {
     await wrapper.find('[data-test="candidate-row-000001"]').trigger('click')
     await wrapper.find('[data-test="candidate-detail-close"]').trigger('click')
 
-    expect(wrapper.find('[data-test="candidate-detail-overlay"]').exists()).toBe(false)
+    expect(wrapper.find('[data-test="candidate-detail-inline"]').exists()).toBe(false)
     expect(wrapper.vm.selectedTaskId).toBe('s6-task')
   })
 
-  it('copies the stock code while opening the candidate detail drawer', async () => {
+  it('copies the stock code while opening the inline candidate detail', async () => {
     const wrapper = mount(Strategy6Results, {
       global: { mocks: { $route: { query: { task: 's6-task' } } } },
     })
@@ -710,6 +714,23 @@ describe('Strategy6Results', () => {
 
     expect(navigator.clipboard.writeText).toHaveBeenCalledWith('000001')
     expect(wrapper.find('[data-test="candidate-detail-copy-code"]').text()).toBe('已复制')
+  })
+
+  it('keeps candidate rows available while switching the inline detail', async () => {
+    const wrapper = mount(Strategy6Results, {
+      global: { mocks: { $route: { query: { task: 's6-task' } } } },
+    })
+    await flushUi()
+
+    await wrapper.find('[data-test="candidate-row-000001"]').trigger('click')
+    await wrapper.find('[data-test="candidate-row-000002"]').trigger('click')
+    await flushUi()
+
+    expect(wrapper.find('[data-test="candidate-row-000001"]').exists()).toBe(true)
+    expect(wrapper.find('[data-test="candidate-row-000002"]').exists()).toBe(true)
+    expect(wrapper.find('[data-test="candidate-detail-title"]').text()).toContain('000002')
+    expect(navigator.clipboard.writeText).toHaveBeenNthCalledWith(1, '000001')
+    expect(navigator.clipboard.writeText).toHaveBeenNthCalledWith(2, '000002')
   })
 
   it('shows the exact pre-market tier in candidate detail', async () => {
