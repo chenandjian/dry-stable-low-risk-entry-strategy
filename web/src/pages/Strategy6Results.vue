@@ -132,47 +132,7 @@
       </details>
     </section>
 
-    <section v-if="selectedTaskId" class="panel trend-squeeze-screen-panel">
-      <div class="panel-header">
-        <span>强势趋势收缩初筛池</span>
-        <div class="panel-header-actions">
-          <span class="panel-count">{{ trendSqueezeScreen.length }}</span>
-          <button
-            data-test="export-trend-squeeze-screen"
-            class="export-btn"
-            :disabled="!trendSqueezeScreen.length"
-            @click="exportTrendSqueezeScreen"
-          >下载初筛股票</button>
-        </div>
-      </div>
-      <div class="panel-note">独立保存通过“强势趋势 + 高位波动收缩”七项门槛的全部股票；不代表已通过强势启动、尾部、支撑和盈亏比主链。</div>
-      <div v-if="trendSqueezeScreen.length" class="table-scroll">
-        <table class="trend-screen-table">
-          <thead>
-            <tr>
-              <th>股票</th><th>评价日</th><th>现价</th><th>EMA150 / EMA200</th><th>52周低 / 高</th>
-              <th>距低点 / 高位比</th><th>BB / KC</th><th>后续主链结果</th><th>后续拦截原因</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="stock in trendSqueezeScreen" :key="`trend-screen-${stock.code}`" :data-test="`trend-screen-row-${stock.code}`">
-              <td><span class="code">{{ stock.code }}</span> {{ stock.name }}</td>
-              <td>{{ stock.evaluation_date || '--' }}</td>
-              <td>{{ fmt(stock.trend_close) }}</td>
-              <td>{{ fmt(stock.trend_ema150) }} / {{ fmt(stock.trend_ema200) }}</td>
-              <td>{{ fmt(stock.trend_low_250) }} / {{ fmt(stock.trend_high_250) }}</td>
-              <td>{{ pct(Number(stock.trend_close_to_low_ratio || 0) - 1) }} / {{ pct(stock.trend_close_to_high_ratio) }}</td>
-              <td>BB {{ priceRange(stock.trend_bb_lower, stock.trend_bb_upper) }}<br><span class="muted">KC {{ priceRange(stock.trend_kc_lower, stock.trend_kc_upper) }}</span></td>
-              <td>{{ trendScreenOutcomeText(stock) }}</td>
-              <td>{{ joinedLabels('tag', stock.downstream_reject_reasons) }}</td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
-      <div v-else class="panel-empty">该任务未生成独立初筛池；旧任务需要重新扫描策略6。</div>
-    </section>
-
-    <section v-for="group in candidateGroups" :key="group.type" class="panel">
+    <section v-for="group in candidateGroups" :key="group.type" class="panel" :data-test="`candidate-group-${group.type}`">
       <div class="panel-header"><span>{{ group.title }}</span><span class="panel-count">{{ group.items.length }}</span></div>
       <div class="table-scroll">
         <table class="candidate-table">
@@ -184,7 +144,7 @@
             </tr>
           </thead>
           <tbody>
-            <tr v-for="c in group.items" :key="c.code" :data-test="`candidate-row-${c.code}`" class="clickable" @click="selected = c">
+            <tr v-for="c in group.items" :key="c.code" :data-test="`candidate-row-${c.code}`" class="clickable" @click="openCandidate(c)">
               <td><span class="code">{{ c.code }}</span> {{ c.name }}</td>
               <td>{{ fmt(c.current_price) }}</td>
               <td class="score">{{ fmt(c.total_score, 0) }}</td>
@@ -235,7 +195,7 @@
       </div>
     </section>
 
-    <section v-for="group in vcpGroups" :key="group.key" class="panel vcp-panel">
+    <section v-for="group in vcpGroups" :key="group.key" class="panel vcp-panel" :data-test="`vcp-group-${group.key}`">
       <div class="panel-header"><span>{{ group.title }}</span><span class="panel-count">{{ group.rows.length }}</span></div>
       <template v-if="group.rows.length">
         <div class="panel-note">仅跟踪本轮VCP起点后曾进入策略6正式候选的股票；过度延伸只保留跟踪，不代表立即买入。</div>
@@ -254,7 +214,7 @@
               :key="c.code"
               :data-test="`vcp-row-${c.code}`"
               class="clickable"
-              @click="selected = c"
+              @click="openCandidate(c)"
             >
               <td><span class="code">{{ c.code }}</span> {{ c.name }}</td>
               <td>
@@ -290,6 +250,46 @@
         </div>
       </template>
       <div v-else class="panel-empty">{{ group.emptyMessage }}</div>
+    </section>
+
+    <section v-if="selectedTaskId" data-test="trend-squeeze-screen" class="panel trend-squeeze-screen-panel">
+      <div class="panel-header">
+        <span>强势趋势收缩初筛池</span>
+        <div class="panel-header-actions">
+          <span class="panel-count">{{ trendSqueezeScreen.length }}</span>
+          <button
+            data-test="export-trend-squeeze-screen"
+            class="export-btn"
+            :disabled="!trendSqueezeScreen.length"
+            @click="exportTrendSqueezeScreen"
+          >下载初筛股票</button>
+        </div>
+      </div>
+      <div class="panel-note">独立保存通过“强势趋势 + 高位波动收缩”七项门槛的全部股票；不代表已通过强势启动、尾部、支撑和盈亏比主链。</div>
+      <div v-if="trendSqueezeScreen.length" class="table-scroll">
+        <table class="trend-screen-table">
+          <thead>
+            <tr>
+              <th>股票</th><th>评价日</th><th>现价</th><th>EMA150 / EMA200</th><th>52周低 / 高</th>
+              <th>距低点 / 高位比</th><th>BB / KC</th><th>后续主链结果</th><th>后续拦截原因</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="stock in trendSqueezeScreen" :key="`trend-screen-${stock.code}`" :data-test="`trend-screen-row-${stock.code}`">
+              <td><span class="code">{{ stock.code }}</span> {{ stock.name }}</td>
+              <td>{{ stock.evaluation_date || '--' }}</td>
+              <td>{{ fmt(stock.trend_close) }}</td>
+              <td>{{ fmt(stock.trend_ema150) }} / {{ fmt(stock.trend_ema200) }}</td>
+              <td>{{ fmt(stock.trend_low_250) }} / {{ fmt(stock.trend_high_250) }}</td>
+              <td>{{ pct(Number(stock.trend_close_to_low_ratio || 0) - 1) }} / {{ pct(stock.trend_close_to_high_ratio) }}</td>
+              <td>BB {{ priceRange(stock.trend_bb_lower, stock.trend_bb_upper) }}<br><span class="muted">KC {{ priceRange(stock.trend_kc_lower, stock.trend_kc_upper) }}</span></td>
+              <td>{{ trendScreenOutcomeText(stock) }}</td>
+              <td>{{ joinedLabels('tag', stock.downstream_reject_reasons) }}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <div v-else class="panel-empty">该任务未生成独立初筛池；旧任务需要重新扫描策略6。</div>
     </section>
 
     <section v-if="vcpExitAuditRows.length" class="panel vcp-audit-panel">
@@ -330,8 +330,12 @@
       </div>
     </section>
 
-    <section v-if="selected" class="panel detail-panel">
-      <div class="panel-header">候选详情 · {{ selected.code }} {{ selected.name }}</div>
+    <div v-if="selected" data-test="candidate-detail-overlay" class="detail-overlay" @click.self="closeCandidate">
+    <section class="panel detail-panel" role="dialog" aria-modal="true" :aria-label="`候选详情 ${selected.code} ${selected.name}`">
+      <div class="panel-header detail-panel-header">
+        <span data-test="candidate-detail-title">候选详情 · {{ selected.code }} {{ selected.name }}</span>
+        <button data-test="candidate-detail-close" class="detail-close" type="button" aria-label="关闭候选详情" @click="closeCandidate">关闭</button>
+      </div>
       <div class="detail-grid">
         <div v-if="selected.vcp_observation_eligible"><span>VCP生命周期</span><strong>{{ label('vcpStatus', selected.vcp_lifecycle_status) }} · {{ selected.vcp_pattern_start_date || '--' }} 至 {{ selected.vcp_pattern_end_date || '--' }}</strong></div>
         <div v-if="selected.vcp_observation_eligible"><span>VCP关键位</span><strong>支点 {{ fmt(selected.vcp_pivot_price) }} · 结构低点 {{ fmt(selected.vcp_structure_low) }} · 距支点 {{ pct(selected.vcp_distance_to_pivot_pct) }}</strong></div>
@@ -490,6 +494,7 @@
         <span v-for="tag in selected.score_reasons || []" :key="'s' + tag" class="tag info">{{ label('tag', tag) }}</span>
       </div>
     </section>
+    </div>
 
     <div class="loading" v-if="loading">加载中...</div>
   </div>
@@ -942,6 +947,12 @@ export default {
       const groups = [detail, detail.context, detail.selling_pressure, detail.structure, detail.compact_structure, detail.trade_trigger]
       return [...new Set(groups.flatMap(group => Array.isArray(group?.[key]) ? group[key] : []))]
     },
+    openCandidate(candidate) {
+      this.selected = candidate
+    },
+    closeCandidate() {
+      this.selected = null
+    },
     async loadCandidates() {
       if (!this.selectedTaskId) {
         this.candidates = []
@@ -953,13 +964,14 @@ export default {
       }
       this.loading = true
       this.error = ''
+      this.selected = null
       const api = useApi()
       const taskId = this.selectedTaskId
       try {
         const res = await api.getStrategy6Candidates(taskId)
         if (this.selectedTaskId !== taskId) return
         this.candidates = res.candidates || []
-        this.selected = this.candidates[0] || null
+        this.selected = null
       } catch (e) {
         if (this.selectedTaskId === taskId) {
           this.error = '策略6候选加载失败'
@@ -1510,7 +1522,11 @@ td { vertical-align: top; }
 .tag.risk { background: rgba(239, 68, 68, 0.16); color: #fca5a5; }
 .tag.warn { background: rgba(249, 115, 22, 0.16); color: #fdba74; }
 .tag.info { background: rgba(79,125,255,0.15); color: #93c5fd; }
-.detail-panel { padding-bottom: 12px; }
+.detail-overlay { position: fixed; inset: 0; z-index: 100; display: flex; justify-content: flex-end; background: rgba(2, 6, 12, 0.72); backdrop-filter: blur(2px); }
+.detail-panel { width: min(980px, calc(100vw - 32px)); height: 100vh; margin: 0; padding-bottom: 12px; overflow-y: auto; border-top: 0; border-right: 0; border-bottom: 0; border-radius: 0; box-shadow: -18px 0 48px rgba(0, 0, 0, 0.45); }
+.detail-panel-header { position: sticky; top: 0; z-index: 8; background: var(--bg-elevated); }
+.detail-close { height: 30px; padding: 5px 12px; color: var(--text-primary); background: transparent; border: 1px solid var(--border-light); border-radius: var(--radius-sm); cursor: pointer; }
+.detail-close:hover { color: var(--accent); border-color: var(--accent); }
 .detail-grid { padding: 12px 14px 14px; display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 1px; background: var(--border); }
 .detail-grid div { display: flex; flex-direction: column; gap: 4px; min-height: 58px; padding: 10px 11px; background: var(--bg-panel); }
 .detail-grid span { color: var(--text-secondary); font-size: 12px; }
@@ -1547,5 +1563,6 @@ td { vertical-align: top; }
   .strategy6-results { padding: 16px 12px 30px; }
   .task-picker { min-width: 100%; width: 100%; }
   .market-index-grid { grid-template-columns: 1fr; }
+  .detail-panel { width: 100vw; }
 }
 </style>
