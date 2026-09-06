@@ -448,6 +448,24 @@ describe('Strategy6Results', () => {
     expect(wrapper.find('[data-test="strategy6-task-page-info"]').text()).toBe('第 2 / 3 页 · 共 23 个任务')
   })
 
+  it('opens the latest strategy6 task by default when the URL has no task', async () => {
+    api.getStrategy6Tasks.mockResolvedValue({
+      tasks: [
+        { id: 's6-latest', status: 'completed', candidates: 3 },
+        { id: 's6-older', status: 'completed', candidates: 2 },
+      ],
+    })
+
+    const wrapper = mount(Strategy6Results, {
+      global: { mocks: { $route: { query: {} } } },
+    })
+    await flushUi()
+
+    expect(wrapper.vm.selectedTaskId).toBe('s6-latest')
+    expect(wrapper.find('[data-test="strategy6-task-trigger"]').text()).toContain('s6-latest')
+    expect(api.getStrategy6Candidates).toHaveBeenCalledWith('s6-latest')
+  })
+
   it('renders and downloads the independent trend squeeze screen pool', async () => {
     const wrapper = mount(Strategy6Results, {
       global: { mocks: { $route: { query: { task: 's6-task' } } } },
@@ -690,7 +708,7 @@ describe('Strategy6Results', () => {
     ).toBeTruthy()
   })
 
-  it('places a compact collapsed detail between formal and VCP candidate pools', async () => {
+  it('places the compact detail immediately above the candidate pool that was clicked', async () => {
     const wrapper = mount(Strategy6Results, {
       global: { mocks: { $route: { query: { task: 's6-task' } } } },
     })
@@ -711,6 +729,14 @@ describe('Strategy6Results', () => {
     expect(formalPanels[formalPanels.length - 1].classes()).toContain('formal-candidate-panel')
     expect(detail.classes()).toContain('detail-inline')
     expect(firstVcpPanel.classes()).toContain('vcp-panel')
+    expect(Number(detail.element.style.order)).toBe(Number(formalPanels[0].element.style.order) - 1)
+    expect(wrapper.find('[data-test="candidate-row-000001"]').classes()).toContain('selected')
+
+    await wrapper.find('[data-test="candidate-row-000002"]').trigger('click')
+    await nextTick()
+
+    expect(Number(detail.element.style.order)).toBe(Number(formalPanels[1].element.style.order) - 1)
+    expect(wrapper.find('[data-test="candidate-row-000002"]').classes()).toContain('selected')
   })
 
   it('closes the inline candidate detail without changing the selected task', async () => {
@@ -1056,6 +1082,10 @@ describe('Strategy6Results', () => {
     expect(wrapper.text()).toContain('83分')
     expect(wrapper.text()).toContain('高质量VCP')
     await wrapper.find('[data-test="vcp-row-000001"]').trigger('click')
+    await nextTick()
+    const inspector = wrapper.find('[data-test="candidate-detail-inline"]')
+    const vcpPanel = wrapper.find('[data-test="vcp-group-confirmed"]')
+    expect(Number(inspector.element.style.order)).toBe(Number(vcpPanel.element.style.order) - 1)
     const detail = wrapper.find('[data-test="vcp-quality-detail"]')
     expect(detail.text()).toContain('完整轮次 10/15')
     expect(detail.text()).toContain('振幅递减 18/20')
