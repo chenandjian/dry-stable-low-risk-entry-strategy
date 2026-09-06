@@ -132,7 +132,7 @@
       </details>
     </section>
 
-    <section v-for="group in candidateGroups" :key="group.type" class="panel formal-candidate-panel" :data-test="`candidate-group-${group.type}`">
+    <section v-for="(group, groupIndex) in candidateGroups" :key="group.type" class="panel formal-candidate-panel" :style="{ order: formalCandidateOrder(groupIndex) }" :data-test="`candidate-group-${group.type}`">
       <div class="panel-header"><span>{{ group.title }}</span><span class="panel-count">{{ group.items.length }}</span></div>
       <div class="table-scroll candidate-table-scroll">
         <table class="candidate-table">
@@ -144,7 +144,7 @@
             </tr>
           </thead>
           <tbody>
-            <tr v-for="c in group.items" :key="c.code" :data-test="`candidate-row-${c.code}`" class="clickable" :class="{ selected: selected?.code === c.code }" @click="openCandidate(c)">
+            <tr v-for="c in group.items" :key="c.code" :data-test="`candidate-row-${c.code}`" class="clickable" :class="{ selected: selected?.code === c.code }" @click="openCandidate(c, { kind: 'formal', index: groupIndex })">
               <td><span class="code">{{ c.code }}</span> {{ c.name }}</td>
               <td>{{ fmt(c.current_price) }}</td>
               <td class="score">{{ fmt(c.total_score, 0) }}</td>
@@ -195,7 +195,7 @@
       </div>
     </section>
 
-    <section v-for="group in vcpGroups" :key="group.key" class="panel vcp-panel" :data-test="`vcp-group-${group.key}`">
+    <section v-for="(group, groupIndex) in vcpGroups" :key="group.key" class="panel vcp-panel" :style="{ order: vcpCandidateOrder(groupIndex) }" :data-test="`vcp-group-${group.key}`">
       <div class="panel-header"><span>{{ group.title }}</span><span class="panel-count">{{ group.rows.length }}</span></div>
       <template v-if="group.rows.length">
         <div class="panel-note">仅跟踪本轮VCP起点后曾进入策略6正式候选的股票；过度延伸只保留跟踪，不代表立即买入。</div>
@@ -215,7 +215,7 @@
               :data-test="`vcp-row-${c.code}`"
               class="clickable"
               :class="{ selected: selected?.code === c.code }"
-              @click="openCandidate(c)"
+              @click="openCandidate(c, { kind: 'vcp', index: groupIndex })"
             >
               <td><span class="code">{{ c.code }}</span> {{ c.name }}</td>
               <td>
@@ -331,7 +331,7 @@
       </div>
     </section>
 
-    <section v-if="selected" data-test="candidate-detail-inline" class="panel detail-panel detail-inline" role="region" :aria-label="`候选详情 ${selected.code} ${selected.name}`">
+    <section v-if="selected" data-test="candidate-detail-inline" class="panel detail-panel detail-inline" :style="{ order: selectedDetailOrder }" role="region" :aria-label="`候选详情 ${selected.code} ${selected.name}`">
       <div class="panel-header detail-panel-header">
         <span data-test="candidate-detail-title">候选详情 · {{ selected.code }} {{ selected.name }}</span>
         <div class="detail-header-actions">
@@ -533,6 +533,7 @@ export default {
       trendSqueezeScreen: [],
       selectedTaskId: '',
       selected: null,
+      selectedLocation: null,
       copiedCode: '',
       marketSnapshot: null,
       lifecycleRows: [],
@@ -679,6 +680,12 @@ export default {
     lifecycleAuditRows() {
       return this.lifecycleRows.filter(row => row.blocked || ['FAILED', 'EXPIRED', 'COOLDOWN'].includes(row.lifecycle_status))
     },
+    selectedDetailOrder() {
+      const index = Number(this.selectedLocation?.index || 0)
+      return this.selectedLocation?.kind === 'vcp'
+        ? this.vcpCandidateOrder(index) - 1
+        : this.formalCandidateOrder(index) - 1
+    },
   },
   async mounted() {
     document.addEventListener('click', this.closeTaskDropdown)
@@ -690,7 +697,7 @@ export default {
       this.error = '策略6任务加载失败'
     }
     const queryTaskId = this.$route?.query?.task || new URLSearchParams(window.location.search).get('task')
-    const defaultTaskId = queryTaskId || (this.tasks.length === 1 ? this.tasks[0].id : '')
+    const defaultTaskId = queryTaskId || this.tasks[0]?.id || ''
     if (defaultTaskId) {
       if (!this.tasks.some(t => t.id === defaultTaskId)) {
         this.tasks = [{ id: defaultTaskId, status: 'selected', candidates: 0 }, ...this.tasks]
@@ -724,6 +731,12 @@ export default {
     },
     changeTaskPage(offset) {
       this.taskPage = Math.min(this.taskPageCount, Math.max(1, this.taskPage + offset))
+    },
+    formalCandidateOrder(index) {
+      return 20 + (Number(index) || 0) * 10
+    },
+    vcpCandidateOrder(index) {
+      return 60 + (Number(index) || 0) * 10
     },
     candidateRankingScore(candidate) {
       const rankingScore = Number(candidate?.ranking_score)
@@ -964,13 +977,15 @@ export default {
       const groups = [detail, detail.context, detail.selling_pressure, detail.structure, detail.compact_structure, detail.trade_trigger]
       return [...new Set(groups.flatMap(group => Array.isArray(group?.[key]) ? group[key] : []))]
     },
-    openCandidate(candidate) {
+    openCandidate(candidate, location = null) {
       this.selected = candidate
+      this.selectedLocation = location
       this.copiedCode = ''
       void this.copySelectedCode()
     },
     closeCandidate() {
       this.selected = null
+      this.selectedLocation = null
       this.copiedCode = ''
     },
     async copySelectedCode() {
@@ -989,6 +1004,7 @@ export default {
         this.candidates = []
         this.trendSqueezeScreen = []
         this.selected = null
+        this.selectedLocation = null
         this.marketSnapshot = null
         this.lifecycleRows = []
         return
@@ -996,6 +1012,7 @@ export default {
       this.loading = true
       this.error = ''
       this.selected = null
+      this.selectedLocation = null
       const api = useApi()
       const taskId = this.selectedTaskId
       try {
@@ -1003,6 +1020,7 @@ export default {
         if (this.selectedTaskId !== taskId) return
         this.candidates = res.candidates || []
         this.selected = null
+        this.selectedLocation = null
       } catch (e) {
         if (this.selectedTaskId === taskId) {
           this.error = '策略6候选加载失败'
@@ -1529,13 +1547,10 @@ p { margin: 0; color: var(--text-muted); font-size: 12px; }
 .market-raw-data summary:hover { color: var(--accent); background: var(--bg-hover); }
 .vcp-panel { border-color: rgba(20, 184, 166, 0.35); }
 .vcp-audit-panel { border-color: rgba(239, 68, 68, 0.28); }
-.formal-candidate-panel { order: 10; }
-.detail-inline { order: 20; }
-.vcp-panel { order: 30; }
-.trend-squeeze-screen-panel { order: 40; }
-.vcp-audit-panel { order: 50; }
-.lifecycle-audit-panel { order: 60; }
-.loading { order: 70; }
+.trend-squeeze-screen-panel { order: 80; }
+.vcp-audit-panel { order: 90; }
+.lifecycle-audit-panel { order: 100; }
+.loading { order: 110; }
 .panel-note { padding: 9px 14px; color: var(--text-secondary); font-size: 12px; border-bottom: 1px solid var(--border); }
 .panel-empty { padding: 18px 14px; color: var(--text-secondary); }
 .vcp-table { min-width: 1120px; }
