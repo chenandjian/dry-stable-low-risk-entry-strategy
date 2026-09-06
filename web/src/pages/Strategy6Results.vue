@@ -132,9 +132,9 @@
       </details>
     </section>
 
-    <section v-for="group in candidateGroups" :key="group.type" class="panel" :data-test="`candidate-group-${group.type}`">
+    <section v-for="group in candidateGroups" :key="group.type" class="panel formal-candidate-panel" :data-test="`candidate-group-${group.type}`">
       <div class="panel-header"><span>{{ group.title }}</span><span class="panel-count">{{ group.items.length }}</span></div>
-      <div class="table-scroll">
+      <div class="table-scroll candidate-table-scroll">
         <table class="candidate-table">
           <thead>
             <tr>
@@ -144,7 +144,7 @@
             </tr>
           </thead>
           <tbody>
-            <tr v-for="c in group.items" :key="c.code" :data-test="`candidate-row-${c.code}`" class="clickable" @click="openCandidate(c)">
+            <tr v-for="c in group.items" :key="c.code" :data-test="`candidate-row-${c.code}`" class="clickable" :class="{ selected: selected?.code === c.code }" @click="openCandidate(c)">
               <td><span class="code">{{ c.code }}</span> {{ c.name }}</td>
               <td>{{ fmt(c.current_price) }}</td>
               <td class="score">{{ fmt(c.total_score, 0) }}</td>
@@ -214,6 +214,7 @@
               :key="c.code"
               :data-test="`vcp-row-${c.code}`"
               class="clickable"
+              :class="{ selected: selected?.code === c.code }"
               @click="openCandidate(c)"
             >
               <td><span class="code">{{ c.code }}</span> {{ c.name }}</td>
@@ -309,7 +310,7 @@
       </div>
     </section>
 
-    <section v-if="lifecycleAuditRows.length" class="panel">
+    <section v-if="lifecycleAuditRows.length" class="panel lifecycle-audit-panel">
       <div class="panel-header">生命周期退出/冷却审计</div>
       <div class="table-scroll">
         <table class="lifecycle-table">
@@ -340,6 +341,17 @@
           <button data-test="candidate-detail-close" class="detail-action" type="button" aria-label="关闭候选详情" @click="closeCandidate">关闭</button>
         </div>
       </div>
+      <div data-test="candidate-detail-core" class="detail-core-grid">
+        <div><span>分类 / 总分 / 形态</span><strong>{{ candidateTypeText(selected) }} · {{ fmt(selected.total_score, 0) }}分 · {{ label('patternType', selected.pattern_type || 'UNKNOWN') }}</strong></div>
+        <div><span>强势启动</span><strong>{{ label('startType', selected.start_type) }} / {{ label('startGrade', selected.start_grade) }} · 启动后{{ selected.days_since_start ?? 0 }}日</strong></div>
+        <div><span>支撑</span><strong>{{ label('supportStatus', selected.support_status) }} · 关键 {{ fmt(selected.key_support_price) }} · 前置 {{ fmt(selected.prior_key_support_price) }}</strong></div>
+        <div><span>尾段</span><strong>{{ label('tailPathSummary', authoritativeSummary(selected)) }} · {{ tailVolumeDisplay(selected, true) }}</strong></div>
+        <div><span>止损</span><strong>{{ fmt(selected.stop_loss_price) }}</strong></div>
+        <div><span>客观目标 / 客观RR2</span><strong>{{ fmt(selected.objective_target_1 ?? selected.target_price_1) }} / {{ fmt(selected.objective_target_2 ?? selected.target_price_2) }} · {{ fmt(selected.objective_rr_2 ?? selected.risk_reward_ratio_2) }}</strong></div>
+        <div class="detail-core-risk"><span>风险/警告</span><strong>{{ joinedLabels('tag', [...(selected.risk_tags || []), ...(selected.warn_tags || []), ...(selected.reject_reasons || [])], ' / ') }}</strong></div>
+      </div>
+      <details data-test="candidate-detail-full-analysis" class="detail-full-analysis">
+        <summary>展开完整分析</summary>
       <div class="detail-grid">
         <div v-if="selected.vcp_observation_eligible"><span>VCP生命周期</span><strong>{{ label('vcpStatus', selected.vcp_lifecycle_status) }} · {{ selected.vcp_pattern_start_date || '--' }} 至 {{ selected.vcp_pattern_end_date || '--' }}</strong></div>
         <div v-if="selected.vcp_observation_eligible"><span>VCP关键位</span><strong>支点 {{ fmt(selected.vcp_pivot_price) }} · 结构低点 {{ fmt(selected.vcp_structure_low) }} · 距支点 {{ pct(selected.vcp_distance_to_pivot_pct) }}</strong></div>
@@ -497,6 +509,7 @@
         <span v-for="tag in selected.reject_reasons || []" :key="'x' + tag" class="tag risk">{{ label('tag', tag) }}</span>
         <span v-for="tag in selected.score_reasons || []" :key="'s' + tag" class="tag info">{{ label('tag', tag) }}</span>
       </div>
+      </details>
     </section>
 
     <div class="loading" v-if="loading">加载中...</div>
@@ -1460,7 +1473,7 @@ export default {
 </script>
 
 <style scoped>
-.strategy6-results { padding: 22px 24px 40px; color: var(--text-primary); }
+.strategy6-results { display: flex; flex-direction: column; padding: 22px 24px 40px; color: var(--text-primary); }
 .page-header { display: flex; justify-content: space-between; gap: 24px; align-items: flex-end; margin-bottom: 12px; padding-bottom: 14px; border-bottom: 1px solid var(--border); }
 .page-title-block { min-width: 320px; }
 .terminal-kicker { display: block; margin-bottom: 7px; color: var(--gold); font: 10px/1 var(--font-mono); letter-spacing: 0.16em; }
@@ -1516,10 +1529,18 @@ p { margin: 0; color: var(--text-muted); font-size: 12px; }
 .market-raw-data summary:hover { color: var(--accent); background: var(--bg-hover); }
 .vcp-panel { border-color: rgba(20, 184, 166, 0.35); }
 .vcp-audit-panel { border-color: rgba(239, 68, 68, 0.28); }
+.formal-candidate-panel { order: 10; }
+.detail-inline { order: 20; }
+.vcp-panel { order: 30; }
+.trend-squeeze-screen-panel { order: 40; }
+.vcp-audit-panel { order: 50; }
+.lifecycle-audit-panel { order: 60; }
+.loading { order: 70; }
 .panel-note { padding: 9px 14px; color: var(--text-secondary); font-size: 12px; border-bottom: 1px solid var(--border); }
 .panel-empty { padding: 18px 14px; color: var(--text-secondary); }
 .vcp-table { min-width: 1120px; }
 .table-scroll { overflow-x: auto; }
+.candidate-table-scroll { max-height: 360px; overflow: auto; }
 .candidate-table { width: 100%; min-width: 1520px; border-collapse: collapse; font-size: 13px; }
 .trend-screen-table { width: 100%; min-width: 1180px; border-collapse: collapse; font-size: 12px; }
 .trend-screen-table th, .trend-screen-table td { padding: 10px 12px; border-bottom: 1px solid var(--border); text-align: left; vertical-align: middle; white-space: nowrap; }
@@ -1531,10 +1552,12 @@ th { position: sticky; top: 0; z-index: 2; background: #0d1520; color: var(--tex
 td { vertical-align: top; }
 .clickable { cursor: pointer; }
 .clickable:hover { background: var(--bg-hover); }
+.clickable.selected { background: rgba(79, 125, 255, 0.12); }
 .candidate-table th:first-child, .candidate-table td:first-child,
 .vcp-table th:first-child, .vcp-table td:first-child { position: sticky; left: 0; z-index: 3; background: var(--bg-panel); box-shadow: 1px 0 0 var(--border); }
 .candidate-table th:first-child, .vcp-table th:first-child { z-index: 4; background: #0d1520; }
 .candidate-table .clickable:hover td:first-child, .vcp-table .clickable:hover td:first-child { background: var(--bg-hover); }
+.candidate-table .clickable.selected td:first-child, .vcp-table .clickable.selected td:first-child { background: #14223a; }
 .code { color: var(--accent); font-family: var(--font-mono); }
 .score, .rr { color: var(--gold); font-weight: 700; }
 .tag.risk { background: rgba(239, 68, 68, 0.16); color: #fca5a5; }
@@ -1546,6 +1569,14 @@ td { vertical-align: top; }
 .detail-header-actions { display: flex; align-items: center; gap: 8px; }
 .detail-action { height: 30px; padding: 5px 12px; color: var(--text-primary); background: transparent; border: 1px solid var(--border-light); border-radius: var(--radius-sm); cursor: pointer; white-space: nowrap; }
 .detail-action:hover { color: var(--accent); border-color: var(--accent); }
+.detail-core-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 1px; padding: 12px 14px; background: var(--border); }
+.detail-core-grid > div { display: flex; min-height: 58px; flex-direction: column; gap: 4px; padding: 10px 11px; background: var(--bg-panel); }
+.detail-core-grid span { color: var(--text-secondary); font-size: 12px; }
+.detail-core-grid strong { color: var(--text-primary); }
+.detail-core-risk { grid-column: 1 / -1; }
+.detail-full-analysis { border-top: 1px solid var(--border); }
+.detail-full-analysis > summary { padding: 10px 14px; color: var(--accent); cursor: pointer; font-size: 12px; font-weight: 700; user-select: none; }
+.detail-full-analysis > summary:hover { background: var(--bg-hover); }
 .detail-grid { padding: 12px 14px 14px; display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 1px; background: var(--border); }
 .detail-grid div { display: flex; flex-direction: column; gap: 4px; min-height: 58px; padding: 10px 11px; background: var(--bg-panel); }
 .detail-grid span { color: var(--text-secondary); font-size: 12px; }

@@ -690,6 +690,29 @@ describe('Strategy6Results', () => {
     ).toBeTruthy()
   })
 
+  it('places a compact collapsed detail between formal and VCP candidate pools', async () => {
+    const wrapper = mount(Strategy6Results, {
+      global: { mocks: { $route: { query: { task: 's6-task' } } } },
+    })
+    await flushUi()
+
+    await wrapper.find('[data-test="candidate-row-000001"]').trigger('click')
+    await nextTick()
+
+    const formalPanels = wrapper.findAll('[data-test^="candidate-group-"]')
+    const detail = wrapper.find('[data-test="candidate-detail-inline"]')
+    const firstVcpPanel = wrapper.findAll('[data-test^="vcp-group-"]')[0]
+    const fullAnalysis = wrapper.find('[data-test="candidate-detail-full-analysis"]')
+
+    expect(wrapper.findAll('.candidate-table-scroll').length).toBe(formalPanels.length)
+    expect(wrapper.find('[data-test="candidate-detail-core"]').text()).toContain('客观RR2')
+    expect(wrapper.find('[data-test="candidate-detail-core"]').text()).toContain('风险/警告')
+    expect(fullAnalysis.attributes('open')).toBeUndefined()
+    expect(formalPanels[formalPanels.length - 1].classes()).toContain('formal-candidate-panel')
+    expect(detail.classes()).toContain('detail-inline')
+    expect(firstVcpPanel.classes()).toContain('vcp-panel')
+  })
+
   it('closes the inline candidate detail without changing the selected task', async () => {
     const wrapper = mount(Strategy6Results, {
       global: { mocks: { $route: { query: { task: 's6-task' } } } },
