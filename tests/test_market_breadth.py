@@ -75,6 +75,61 @@ def _seed_strategy6_signal() -> None:
     conn.commit()
 
 
+def _seed_replaceable_three_day_market_data(db_path: str) -> dict[str, list[dict]]:
+    db.init_db(db_path)
+    conn = db.get_conn()
+    conn.executemany(
+        "INSERT INTO stock_pool(code,name,market) VALUES(?,?,?)",
+        [
+            ("000001", "上涨样本", "SZ"),
+            ("000002", "下跌样本", "SZ"),
+            ("600001", "平盘样本", "SH"),
+        ],
+    )
+    conn.commit()
+    series = {
+        "000001": [
+            {"date": "2026-01-05", "open": 10, "high": 10, "low": 10, "close": 10, "volume": 1},
+            {"date": "2026-01-06", "open": 11, "high": 11, "low": 11, "close": 11, "volume": 1},
+            {"date": "2026-01-07", "open": 12, "high": 12, "low": 12, "close": 12, "volume": 1},
+        ],
+        "000002": [
+            {"date": "2026-01-05", "open": 10, "high": 10, "low": 10, "close": 10, "volume": 1},
+            {"date": "2026-01-06", "open": 9, "high": 9, "low": 9, "close": 9, "volume": 1},
+            {"date": "2026-01-07", "open": 8, "high": 8, "low": 8, "close": 8, "volume": 1},
+        ],
+        "600001": [
+            {"date": "2026-01-05", "open": 10, "high": 10, "low": 10, "close": 10, "volume": 1},
+            {"date": "2026-01-06", "open": 10, "high": 10, "low": 10, "close": 10, "volume": 1},
+            {"date": "2026-01-07", "open": 10, "high": 10, "low": 10, "close": 10, "volume": 1},
+        ],
+    }
+    for code, rows in series.items():
+        db.replace_ohlc_with_metadata(
+            code,
+            rows,
+            source="tickflow",
+            fetched_at="2026-01-07 10:00:00",
+        )
+    for symbol, base in (
+        ("sh000001", 3000),
+        ("sz399001", 10000),
+        ("sz399006", 2000),
+        ("hs300", 4000),
+    ):
+        db.upsert_market_index_ohlc(
+            symbol,
+            [
+                {"date": "2026-01-05", "open": base, "high": base, "low": base, "close": base, "volume": 1},
+                {"date": "2026-01-06", "open": base + 10, "high": base + 10, "low": base + 10, "close": base + 10, "volume": 1},
+                {"date": "2026-01-07", "open": base + 20, "high": base + 20, "low": base + 20, "close": base + 20, "volume": 1},
+            ],
+            source="tickflow",
+        )
+    conn.commit()
+    return series
+
+
 def test_market_breadth_uses_exact_previous_market_date_and_audits_missing_rows(tmp_path):
     _seed_market_data(str(tmp_path / "breadth.db"))
 
@@ -160,6 +215,85 @@ def test_market_breadth_invalidates_historical_cache_when_ohlc_revision_changes(
     conn.execute("UPDATE daily_ohlc SET close=9 WHERE code='000001' AND date='2026-01-06'")
     conn.execute("UPDATE daily_ohlc_metadata SET fetched_at='2026-01-07 11:00:00' WHERE code='000001'")
     conn.commit()
+    second = build_market_breadth_history(start_date="2026-01-06", end_date="2026-01-07")
+
+    assert second["rows"][0]["up_count"] == 0
+    assert second["rows"][0]["down_count"] == 2
+
+
+def test_market_breadth_keeps_historical_cache_when_only_fetch_time_changes(tmp_path):
+    series = _seed_replaceable_three_day_market_data(str(tmp_path / "stable-revision.db"))
+    build_market_breadth_history(start_date="2026-01-06", end_date="2026-01-07")
+    conn = db.get_conn()
+    conn.execute(
+        "UPDATE market_breadth_daily SET calculated_at='2000-01-01 00:00:00' WHERE trade_date='2026-01-06'"
+    )
+    conn.commit()
+
+    for code, rows in series.items():
+        db.replace_ohlc_with_metadata(
+            code,
+            rows,
+            source="tickflow",
+            fetched_at="2026-01-07 11:00:00",
+        )
+    build_market_breadth_history(start_date="2026-01-06", end_date="2026-01-07")
+
+    calculated_at = conn.execute(
+        "SELECT calculated_at FROM market_breadth_daily WHERE trade_date='2026-01-06'"
+    ).fetchone()[0]
+    assert calculated_at == "2000-01-01 00:00:00"
+
+
+def test_market_breadth_keeps_history_when_formal_writer_only_appends_new_day(tmp_path):
+    series = _seed_replaceable_three_day_market_data(str(tmp_path / "append-revision.db"))
+    build_market_breadth_history(start_date="2026-01-06", end_date="2026-01-07")
+    conn = db.get_conn()
+    conn.execute(
+        "UPDATE market_breadth_daily SET calculated_at='2000-01-01 00:00:00' WHERE trade_date='2026-01-06'"
+    )
+    conn.commit()
+
+    for code, rows in series.items():
+        appended = [*rows, {**rows[-1], "date": "2026-01-08"}]
+        db.replace_ohlc_with_metadata(
+            code,
+            appended,
+            source="tickflow",
+            fetched_at="2026-01-08 15:30:00",
+        )
+    for symbol, base in (
+        ("sh000001", 3020),
+        ("sz399001", 10020),
+        ("sz399006", 2020),
+        ("hs300", 4020),
+    ):
+        db.upsert_market_index_ohlc(
+            symbol,
+            [{"date": "2026-01-08", "open": base, "high": base, "low": base, "close": base, "volume": 1}],
+            source="tickflow",
+        )
+    build_market_breadth_history(start_date="2026-01-06", end_date="2026-01-08")
+
+    calculated_at = conn.execute(
+        "SELECT calculated_at FROM market_breadth_daily WHERE trade_date='2026-01-06'"
+    ).fetchone()[0]
+    assert calculated_at == "2000-01-01 00:00:00"
+
+
+def test_market_breadth_rebuilds_history_when_formal_writer_changes_close(tmp_path):
+    series = _seed_replaceable_three_day_market_data(str(tmp_path / "changed-revision.db"))
+    first = build_market_breadth_history(start_date="2026-01-06", end_date="2026-01-07")
+    assert first["rows"][0]["up_count"] == 1
+
+    corrected = [dict(row) for row in series["000001"]]
+    corrected[1].update({"open": 9, "high": 9, "low": 9, "close": 9})
+    db.replace_ohlc_with_metadata(
+        "000001",
+        corrected,
+        source="tickflow",
+        fetched_at="2026-01-07 11:00:00",
+    )
     second = build_market_breadth_history(start_date="2026-01-06", end_date="2026-01-07")
 
     assert second["rows"][0]["up_count"] == 0

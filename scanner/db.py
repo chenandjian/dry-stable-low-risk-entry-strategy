@@ -6,6 +6,7 @@ Single database file at data/cuphandle.db with tables:
 """
 
 import json
+import hashlib
 import sqlite3
 import os
 import threading
@@ -59,7 +60,8 @@ def init_db(path: str = "data/cuphandle.db"):
                 first_date    TEXT,
                 latest_date   TEXT,
                 fetched_at    TEXT,
-                repair_run_id TEXT
+                repair_run_id TEXT,
+                breadth_revision TEXT
             );
 
             CREATE TABLE IF NOT EXISTS market_index_ohlc (
@@ -140,6 +142,7 @@ def init_db(path: str = "data/cuphandle.db"):
             CREATE INDEX IF NOT EXISTS idx_candidates_task ON candidates(task_id);
             CREATE INDEX IF NOT EXISTS idx_candidates_score ON candidates(score DESC);
         ''')
+        _ensure_column(conn, "daily_ohlc_metadata", "breadth_revision", "TEXT")
         _ensure_candidate_columns(conn)
         _ensure_scan_task_columns(conn)
         _ensure_task_stocks_table(conn)
@@ -925,11 +928,15 @@ def get_conn() -> sqlite3.Connection:
 def save_stock_pool(stocks: list[dict]):
     """Replace stock pool table with new data."""
     conn = get_conn()
+    old_codes = {row[0] for row in conn.execute("SELECT code FROM stock_pool").fetchall()}
+    new_codes = {stock["code"] for stock in stocks}
     conn.execute("DELETE FROM stock_pool")
     conn.executemany(
         "INSERT INTO stock_pool (code, name, market) VALUES (?, ?, ?)",
         [(s["code"], s["name"], s.get("market", "")) for s in stocks]
     )
+    if old_codes != new_codes:
+        conn.execute("DELETE FROM market_breadth_daily")
     conn.commit()
 
 
@@ -960,6 +967,7 @@ def save_ohlc(code: str, data: list[dict]):
         [(code, d["date"], d.get("open"), d.get("high"), d.get("low"),
           d.get("close"), d.get("volume"), d.get("turnover")) for d in data]
     )
+    conn.execute("DELETE FROM market_breadth_daily")
     conn.commit()
 
 
@@ -1032,10 +1040,15 @@ def replace_ohlc_with_metadata(
     if not data:
         raise ValueError("replacement OHLC data must not be empty")
     rows = sorted(data, key=lambda row: row["date"])
+    breadth_revision = _daily_close_revision(rows)
     fetched_at = fetched_at or datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     conn = get_conn()
     try:
         conn.execute("BEGIN IMMEDIATE")
+        previous_metadata = conn.execute(
+            "SELECT latest_date, breadth_revision FROM daily_ohlc_metadata WHERE code=?",
+            (code,),
+        ).fetchone()
         conn.execute("DELETE FROM daily_ohlc WHERE code = ?", (code,))
         conn.executemany(
             """INSERT INTO daily_ohlc (code, date, open, high, low, close, volume, turnover)
@@ -1056,8 +1069,9 @@ def replace_ohlc_with_metadata(
         )
         conn.execute(
             """INSERT INTO daily_ohlc_metadata
-               (code, source, price_basis, row_count, first_date, latest_date, fetched_at, repair_run_id)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+               (code, source, price_basis, row_count, first_date, latest_date, fetched_at,
+                repair_run_id, breadth_revision)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                ON CONFLICT(code) DO UPDATE SET
                  source=excluded.source,
                  price_basis=excluded.price_basis,
@@ -1065,7 +1079,8 @@ def replace_ohlc_with_metadata(
                  first_date=excluded.first_date,
                  latest_date=excluded.latest_date,
                  fetched_at=excluded.fetched_at,
-                 repair_run_id=excluded.repair_run_id""",
+                 repair_run_id=excluded.repair_run_id,
+                 breadth_revision=excluded.breadth_revision""",
             (
                 code,
                 source,
@@ -1075,12 +1090,45 @@ def replace_ohlc_with_metadata(
                 rows[-1]["date"],
                 fetched_at,
                 repair_run_id,
+                breadth_revision,
             ),
         )
+        if _ohlc_replacement_changes_cached_history(previous_metadata, rows, breadth_revision):
+            conn.execute("DELETE FROM market_breadth_daily")
         conn.commit()
     except Exception:
         conn.rollback()
         raise
+
+
+def _daily_close_revision(rows: list[dict]) -> str:
+    """Return a stable digest for fields used by market-breadth direction."""
+    digest = hashlib.sha256()
+    for row in rows:
+        close = row.get("close")
+        close_value = "null" if close is None else format(float(close), ".15g")
+        digest.update(f"{row['date']}|{close_value}\n".encode("ascii"))
+    return digest.hexdigest()
+
+
+def _ohlc_replacement_changes_cached_history(
+    previous_metadata: tuple | None,
+    rows: list[dict],
+    new_revision: str,
+) -> bool:
+    """Return whether replacement can change an already cached breadth day."""
+    if previous_metadata is None:
+        return True
+    previous_latest_date, previous_revision = previous_metadata
+    if not previous_revision:
+        return True
+    if previous_revision == new_revision:
+        return False
+    if previous_latest_date and rows[-1]["date"] > previous_latest_date:
+        previous_prefix = [row for row in rows if row["date"] <= previous_latest_date]
+        if previous_prefix and _daily_close_revision(previous_prefix) == previous_revision:
+            return False
+    return True
 
 
 def get_ohlc_metadata(code: str) -> dict | None:

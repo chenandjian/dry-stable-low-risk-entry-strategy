@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from bisect import bisect_right
 from datetime import date
+import hashlib
 import threading
 
 from scanner import db
@@ -72,13 +73,21 @@ def _load_first_dates(conn) -> list[str]:
 
 
 def _source_revision(conn) -> str:
-    metadata = conn.execute(
-        """SELECT COUNT(*), COALESCE(SUM(row_count),0), COALESCE(MIN(first_date),''),
-                  COALESCE(MAX(latest_date),''), COALESCE(MAX(fetched_at),'')
-           FROM daily_ohlc_metadata"""
-    ).fetchone()
-    stock_pool_count = int(conn.execute("SELECT COUNT(*) FROM stock_pool").fetchone()[0] or 0)
-    return ":".join(str(value or "") for value in (*metadata, stock_pool_count))
+    digest = hashlib.sha256()
+    metadata_rows = conn.execute(
+        """SELECT code, row_count, first_date, latest_date, fetched_at, breadth_revision
+           FROM daily_ohlc_metadata ORDER BY code"""
+    ).fetchall()
+    for code, row_count, first_date, latest_date, fetched_at, breadth_revision in metadata_rows:
+        # Legacy rows do not yet have a content digest. Keep fetched_at in their
+        # revision until the next formal OHLC replacement writes one.
+        content_revision = breadth_revision or f"legacy:{fetched_at or ''}"
+        digest.update(
+            f"{code}|{row_count}|{first_date or ''}|{latest_date or ''}|{content_revision}\n".encode("utf-8")
+        )
+    for (code,) in conn.execute("SELECT code FROM stock_pool ORDER BY code").fetchall():
+        digest.update(f"pool:{code}\n".encode("utf-8"))
+    return f"breadth-v2:{digest.hexdigest()}"
 
 
 def _invalidate_stale_cache(conn) -> str:
@@ -87,6 +96,9 @@ def _invalidate_stale_cache(conn) -> str:
         "SELECT source_revision FROM market_breadth_cache_state WHERE id=1"
     ).fetchone()
     cached_count = int(conn.execute("SELECT COUNT(*) FROM market_breadth_daily").fetchone()[0] or 0)
+    has_legacy_metadata = conn.execute(
+        "SELECT 1 FROM daily_ohlc_metadata WHERE breadth_revision IS NULL LIMIT 1"
+    ).fetchone() is not None
     if state is None and cached_count:
         # One-time migration for caches produced before revision tracking existed.
         conn.execute(
@@ -96,7 +108,12 @@ def _invalidate_stale_cache(conn) -> str:
         conn.commit()
     elif state is not None and state[0] != revision:
         with conn:
-            conn.execute("DELETE FROM market_breadth_daily")
+            # Formal writers invalidate only when an existing historical close
+            # changed. Append-only updates leave older breadth rows reusable.
+            # Legacy metadata cannot prove that distinction, so it remains
+            # conservatively full-invalidated until refreshed once.
+            if has_legacy_metadata:
+                conn.execute("DELETE FROM market_breadth_daily")
             conn.execute(
                 "UPDATE market_breadth_cache_state SET source_revision=?, updated_at=datetime('now') WHERE id=1",
                 (revision,),
@@ -196,7 +213,7 @@ def _ensure_breadth_cache(conn, calendar: list[tuple[str, str]]) -> dict[str, tu
                     SELECT code, date, close,
                            LAG(date) OVER (PARTITION BY code ORDER BY date) AS previous_date,
                            LAG(close) OVER (PARTITION BY code ORDER BY date) AS previous_close
-                    FROM daily_ohlc
+                    FROM daily_ohlc INDEXED BY sqlite_autoindex_daily_ohlc_1
                     WHERE date BETWEEN ? AND ?
                 )
                 SELECT moves.date,
