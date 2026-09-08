@@ -49,6 +49,8 @@ describe('Strategy6BatchEvaluation', () => {
           bodySupportZoneLow: 19.3, bodySupportZoneHigh: 19.7,
           bodySupportPivotCount: 2, bodySupportIndependentTouchCount: 2,
           bodySupportReasons: ['FAILED_BREAK_BODY_FLOOR'], bodySupportRisks: [],
+          latestTurnover: 632000000, turnover5Min: 632000000, latestTurnover5Min: true,
+          latestClose: 20, ma5: 20.25, closeBelowMa5: true, closeToMa5Pct: -0.012346,
           latestBarPatterns: [{
             code: 'VALID_BODY_LOW', name: '有效实体低点', matched: true,
             status: 'CONFIRMING', signal_type: 'FAILED_BREAK_RECLAIM',
@@ -57,6 +59,16 @@ describe('Strategy6BatchEvaluation', () => {
             distance_to_floor_pct: -0.0026,
             reasons: ['LATEST_LOW_BREAK_RECLAIMED_BY_BODY'],
             risks: ['REQUIRES_TWO_COMPLETED_BARS_TO_CONFIRM_PIVOT'],
+          }, {
+            code: 'HAMMER', name: '阳线锤子线', matched: true,
+            status: 'DETECTED', signal_type: 'BULLISH_HAMMER',
+            evaluation_date: '2026-08-25', body_bottom: 19.8, body_top: 20,
+            metrics: {
+              body_ratio: 0.2, lower_shadow_to_body: 3.5,
+              upper_shadow_to_body: 0.05, range_to_previous_close: 0.05,
+              range_to_atr14: 1.2,
+            },
+            reasons: ['LATEST_BAR_EFFECTIVE_HAMMER'], risks: [],
           }],
         },
         {
@@ -103,11 +115,17 @@ describe('Strategy6BatchEvaluation', () => {
     expect(wrapper.text()).toContain('强势趋势收缩初筛')
     expect(wrapper.text()).toContain('EMA150 18.00')
     expect(wrapper.text()).toContain('股价不高于10元')
-    expect(wrapper.text()).toContain('实体支撑底评分')
-    expect(wrapper.text()).toContain('8 / 10')
     expect(wrapper.text()).toContain('最新交易日K线形态')
     expect(wrapper.text()).toContain('有效实体低点')
+    expect(wrapper.text()).toContain('阳线锤子线')
+    expect(wrapper.text()).toContain('下影/实体 3.50倍')
+    expect(wrapper.text()).toContain('振幅/ATR14 1.20倍')
     expect(wrapper.text()).toContain('假跌破收回')
+    expect(wrapper.text()).toContain('5日成交额最低')
+    expect(wrapper.text()).toContain('收盘低于MA5')
+    expect(wrapper.text()).not.toContain('5日涨跌')
+    expect(wrapper.text()).not.toContain('实体支撑底评分')
+    expect(wrapper.text()).not.toContain('当前分类')
     expect(wrapper.text()).toContain('本地没有K线数据')
   })
 

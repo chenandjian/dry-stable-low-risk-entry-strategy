@@ -434,6 +434,7 @@ class Strategy6LatestBarPattern:
     zone_low: float | None = None
     zone_high: float | None = None
     distance_to_floor_pct: float | None = None
+    metrics: dict[str, float] = field(default_factory=dict)
     reasons: list[str] = field(default_factory=list)
     risks: list[str] = field(default_factory=list)
 
@@ -898,6 +899,7 @@ class Strategy6Evaluation:
                     "zone_low": item.zone_low,
                     "zone_high": item.zone_high,
                     "distance_to_floor_pct": item.distance_to_floor_pct,
+                    "metrics": item.metrics,
                     "reasons": item.reasons,
                     "risks": item.risks,
                 }

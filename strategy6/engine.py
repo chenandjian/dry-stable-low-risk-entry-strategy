@@ -18,6 +18,7 @@ from strategy6.filters import (
     hard_filter_reasons,
 )
 from strategy6.indicators import _atr, calculate_indicators
+from strategy6.latest_bar_patterns import evaluate_latest_bar_patterns
 from strategy6.market import compute_relative_strength_20, evaluate_market_context, has_relative_strength_20_market
 from strategy6.models import (
     Strategy6BoxTail,
@@ -100,6 +101,10 @@ class StrongVcpTailEngine:
             phase,
             support,
             self.config["body_support"],
+        )
+        body_support.latest_bar_patterns = evaluate_latest_bar_patterns(
+            rows,
+            body_support.latest_bar_patterns,
         )
         previous_consolidation_start_index = None
         previous_key_support_price = None
