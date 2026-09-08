@@ -85,10 +85,10 @@
                 <td><span class="status" :class="item.tailPass ? 'pass' : 'fail'">{{ item.tailPass ? '量稳价干通过' : '尾部未通过' }}</span></td>
                 <td>{{ ratio(item.tailVolumeRatio) }}</td>
                 <td :class="item.volumeSlope10 < 0 ? 'positive' : 'negative'">{{ item.volumeSlope10 < 0 ? '缩量' : '未缩量' }}</td>
-                <td><strong>{{ flagText(item.latestTurnover5Min) }}</strong><small>{{ amountText(item.latestTurnover) }}</small></td>
-                <td><strong>{{ flagText(item.closeBelowMa5) }}</strong><small>{{ ma5Text(item) }}</small></td>
+                <td :data-test="`turnover-min-${item.code}`" :class="{ 'requirement-hit': item.latestTurnover5Min === true }"><strong>{{ flagText(item.latestTurnover5Min) }}</strong><small>{{ amountText(item.latestTurnover) }}</small></td>
+                <td :data-test="`below-ma5-${item.code}`" :class="{ 'requirement-hit': item.closeBelowMa5 === true }"><strong>{{ flagText(item.closeBelowMa5) }}</strong><small>{{ ma5Text(item) }}</small></td>
                 <td>{{ pct(item.closeRange5) }}</td>
-                <td>{{ latestBarPatternSummary(item) }}</td>
+                <td :data-test="`latest-pattern-${item.code}`" :class="{ 'requirement-hit': hasMatchedLatestBarPattern(item) }">{{ latestBarPatternSummary(item) }}</td>
                 <td><strong>{{ item.totalScore }} / 100</strong></td>
               </tr>
               <tr v-if="expanded.has(item.code)" class="detail-row">
@@ -310,6 +310,7 @@ function breakdownText(score = {}) {
   return `启动 ${score.strongStart || 0} + 形态 ${score.pattern || 0} + 支撑 ${score.support || 0} + 尾部 ${score.tail || 0} + 盈亏比 ${score.objectiveRiskReward || 0} + 强弱风险 ${score.relativeStrengthRisk || 0}`
 }
 function latestBarPatternItems(item) { return Array.isArray(item.latestBarPatterns) ? item.latestBarPatterns : [] }
+function hasMatchedLatestBarPattern(item) { return latestBarPatternItems(item).some(pattern => pattern.matched) }
 function latestBarPatternSummary(item) {
   const matched = latestBarPatternItems(item).filter(pattern => pattern.matched)
   return matched.length ? matched.map(pattern => pattern.name).join(' / ') : '未识别到配置形态'
@@ -355,6 +356,7 @@ button { padding: 9px 22px; color: #111; background: var(--gold); border: 0; bor
 .table-wrap { overflow-x: auto; }table { width: 100%; border-collapse: collapse; font-size: 12px; }th { padding: 10px 9px; text-align: left; color: var(--text-muted); border-bottom: 1px solid var(--border); white-space: nowrap; }td { padding: 11px 9px; border-bottom: 1px solid rgba(54,70,90,.55); white-space: nowrap; }td small { display: block; color: var(--text-muted); margin-top: 3px; }.score-row { cursor: pointer; }.score-row:hover { background: rgba(255,255,255,.025); }.rank { color: var(--gold); font-family: var(--font-mono); }
 .code-copy { display: inline-flex; align-items: center; gap: 6px; padding: 0; color: #dce7f4; background: transparent; border: 0; font: 12px var(--font-mono); cursor: copy; }.code-copy:hover strong { color: var(--gold); text-decoration: underline; }.code-copy span { color: var(--gold); font: 10px var(--font-mono); }
 .tail-score { font: 700 15px var(--font-mono); }.tail-score.excellent { color: #f2c66d; }.tail-score.good,.positive { color: var(--up-red); }.tail-score.weak,.negative { color: var(--down-green); }
+.requirement-hit { color: var(--up-red); font-weight: 700; }
 .status { padding: 3px 7px; border: 1px solid; }.status.pass { color: var(--up-red); border-color: rgba(223,72,72,.45); }.status.fail { color: var(--text-muted); border-color: var(--border); }
 .detail-row td { padding: 0; background: #09111b; }.detail-grid { padding: 14px 18px; display: grid; grid-template-columns: repeat(3,1fr); gap: 24px; white-space: normal; }.detail-grid h3 { color: var(--text-secondary); font-size: 12px; margin: 0 0 8px; }.detail-grid p { margin: 5px 0; }.evidence { color: #d8b35f; }.risk { color: #e57575; }.muted { color: var(--text-muted); }
 .error-item { display: grid; grid-template-columns: 100px 150px 1fr; padding: 9px 0; border-top: 1px solid var(--border); }.error-item em { color: var(--danger); font-style: normal; }
