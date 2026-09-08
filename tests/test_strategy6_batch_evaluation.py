@@ -149,3 +149,40 @@ def test_batch_service_uses_local_data_and_prioritizes_tail_score(monkeypatch):
     assert result["errors"] == [{
         "code": "000000", "name": "", "error": "KLINE_NOT_FOUND", "message": "本地没有K线数据",
     }]
+
+
+def test_batch_display_metrics_mark_latest_turnover_minimum_and_close_below_ma5():
+    from strategy6.batch_evaluator import _batch_display_metrics
+
+    rows = [
+        {"date": f"2026-01-{day:02d}", "close": close, "turnover": turnover}
+        for day, close, turnover in (
+            (1, 10.0, 500),
+            (2, 10.0, 400),
+            (3, 10.0, 300),
+            (4, 10.0, 200),
+            (5, 9.0, 100),
+        )
+    ]
+
+    metrics = _batch_display_metrics(rows)
+
+    assert metrics["latestTurnover"] == 100
+    assert metrics["turnover5Min"] == 100
+    assert metrics["latestTurnover5Min"] is True
+    assert metrics["latestClose"] == 9.0
+    assert metrics["ma5"] == 9.8
+    assert metrics["closeBelowMa5"] is True
+    assert metrics["closeToMa5Pct"] == -0.081633
+
+
+def test_batch_display_metrics_return_unknown_when_five_valid_values_are_unavailable():
+    from strategy6.batch_evaluator import _batch_display_metrics
+
+    metrics = _batch_display_metrics([
+        {"date": "2026-01-01", "close": 10.0, "turnover": 0},
+        {"date": "2026-01-02", "close": 10.0, "turnover": 100},
+    ])
+
+    assert metrics["latestTurnover5Min"] is None
+    assert metrics["closeBelowMa5"] is None

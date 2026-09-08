@@ -1,6 +1,8 @@
 """Read-only batch evaluation for user-supplied Strategy6 stocks."""
 from __future__ import annotations
 
+import math
+
 from scanner import db
 from strategy6.engine import StrongVcpTailEngine
 
@@ -39,7 +41,7 @@ def evaluate_strategy6_batch(codes: list[str], config: dict) -> dict:
         except Exception as exc:
             errors.append(_error(code, name, "EVALUATION_FAILED", str(exc)))
             continue
-        results.append(_summarize(evaluation, metadata))
+        results.append(_summarize(evaluation, metadata, _batch_display_metrics(rows)))
 
     results.sort(
         key=lambda item: (
@@ -59,11 +61,12 @@ def evaluate_strategy6_batch(codes: list[str], config: dict) -> dict:
     }
 
 
-def _summarize(evaluation, metadata: dict) -> dict:
+def _summarize(evaluation, metadata: dict, display_metrics: dict | None = None) -> dict:
     row = evaluation.to_candidate_dict()
     dry_tail = evaluation.dry_tail
     score = evaluation.score
     return {
+        **(display_metrics or {}),
         "code": row["code"],
         "name": row.get("name", ""),
         "evaluationDate": row.get("evaluation_date", ""),
@@ -144,6 +147,35 @@ def _summarize(evaluation, metadata: dict) -> dict:
         "bodySupportModelVersion": row.get("body_support_model_version", ""),
         "latestBarPatterns": row.get("latest_bar_patterns", []),
     }
+
+
+def _batch_display_metrics(rows: list[dict]) -> dict:
+    selected = rows[-5:]
+    amounts = [_positive_number(row.get("amount", row.get("turnover"))) for row in selected]
+    closes = [_positive_number(row.get("close")) for row in selected]
+    latest_amount = amounts[-1] if amounts else None
+    latest_close = closes[-1] if closes else None
+    amount_ready = len(selected) == 5 and all(value is not None for value in amounts)
+    close_ready = len(selected) == 5 and all(value is not None for value in closes)
+    minimum_amount = min(amounts) if amount_ready else None
+    ma5 = sum(closes) / 5 if close_ready else None
+    return {
+        "latestTurnover": latest_amount,
+        "turnover5Min": minimum_amount,
+        "latestTurnover5Min": latest_amount <= minimum_amount if amount_ready else None,
+        "latestClose": latest_close,
+        "ma5": round(ma5, 6) if ma5 is not None else None,
+        "closeBelowMa5": latest_close < ma5 if close_ready else None,
+        "closeToMa5Pct": round(latest_close / ma5 - 1, 6) if close_ready and ma5 else None,
+    }
+
+
+def _positive_number(value) -> float | None:
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    return number if math.isfinite(number) and number > 0 else None
 
 
 def _error(code: str, name: str, error: str, message: str) -> dict:

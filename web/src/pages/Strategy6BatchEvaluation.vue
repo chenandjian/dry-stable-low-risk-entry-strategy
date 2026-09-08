@@ -61,7 +61,7 @@
           <thead>
             <tr>
               <th>排名</th><th>股票</th><th>评价日</th><th>尾部质量</th><th>尾部结论</th><th>量比</th>
-              <th>量能趋势</th><th>5日收盘波动</th><th>5日涨跌</th><th>实体支撑底评分</th><th>最新交易日K线形态</th><th>策略总分</th><th>当前分类</th>
+              <th>量能趋势</th><th>5日成交额最低</th><th>收盘低于MA5</th><th>5日收盘波动</th><th>最新交易日K线形态</th><th>策略总分</th>
             </tr>
           </thead>
           <tbody>
@@ -85,15 +85,14 @@
                 <td><span class="status" :class="item.tailPass ? 'pass' : 'fail'">{{ item.tailPass ? '量稳价干通过' : '尾部未通过' }}</span></td>
                 <td>{{ ratio(item.tailVolumeRatio) }}</td>
                 <td :class="item.volumeSlope10 < 0 ? 'positive' : 'negative'">{{ item.volumeSlope10 < 0 ? '缩量' : '未缩量' }}</td>
+                <td><strong>{{ flagText(item.latestTurnover5Min) }}</strong><small>{{ amountText(item.latestTurnover) }}</small></td>
+                <td><strong>{{ flagText(item.closeBelowMa5) }}</strong><small>{{ ma5Text(item) }}</small></td>
                 <td>{{ pct(item.closeRange5) }}</td>
-                <td :class="numberClass(item.return5)">{{ signedPct(item.return5) }}</td>
-                <td><strong>{{ item.bodySupportScore ?? 0 }} / 10</strong><small>{{ bodySupportStatusText(item.bodySupportStatus) }}</small></td>
                 <td>{{ latestBarPatternSummary(item) }}</td>
                 <td><strong>{{ item.totalScore }} / 100</strong></td>
-                <td>{{ candidateText(item.candidateType) }}</td>
               </tr>
               <tr v-if="expanded.has(item.code)" class="detail-row">
-                <td colspan="13">
+                <td colspan="12">
                   <div class="detail-grid">
                     <div>
                       <h3>强势趋势收缩初筛</h3>
@@ -106,20 +105,19 @@
                       <p v-for="reason in item.strongTrendSqueezeReasons || []" :key="reason" class="risk">{{ trendReasonText(reason) }}</p>
                     </div>
                     <div>
-                      <h3>实体支撑底评分</h3>
-                      <p><strong>{{ item.bodySupportScore ?? 0 }} / 10</strong> · {{ bodySupportStatusText(item.bodySupportStatus) }} · {{ bodySupportTypeText(item.bodySupportType) }}</p>
-                      <p>支撑 {{ price(item.bodySupportFloorPrice) }} · 区间 {{ priceRange(item.bodySupportZoneLow, item.bodySupportZoneHigh) }}</p>
-                      <p>有效拐点 {{ item.bodySupportPivotCount ?? 0 }} · 独立测试 {{ item.bodySupportIndependentTouchCount ?? 0 }}</p>
-                      <p>恢复 {{ item.bodySupportRecoveryPass ? '通过' : '未通过' }} · {{ ratio(item.bodySupportRecoveryAtr) }} ATR · 低价拒绝率 {{ nullablePct(item.bodySupportRejectionRatio) }}</p>
-                      <p class="muted">独立诊断分，不计入策略6总分</p>
-                    </div>
-                    <div>
                       <h3>最新交易日K线形态</h3>
                       <template v-for="pattern in latestBarPatternItems(item)" :key="pattern.code">
                         <p :class="pattern.matched ? 'evidence' : 'muted'">{{ pattern.name }} · {{ pattern.matched ? '命中' : '未命中' }} · {{ latestPatternStatusText(pattern.status) }}</p>
-                        <p>路径 {{ latestPatternTypeText(pattern.signal_type) }} · 实体 {{ priceRange(pattern.body_bottom, pattern.body_top) }}</p>
-                        <p>支撑区 {{ priceRange(pattern.zone_low, pattern.zone_high) }} · 距支撑 {{ nullablePct(pattern.distance_to_floor_pct) }}</p>
+                        <template v-if="pattern.code === 'HAMMER'">
+                          <p>实体占比 {{ metricPct(pattern, 'body_ratio') }} · 下影/实体 {{ metricRatio(pattern, 'lower_shadow_to_body') }} · 上影/实体 {{ metricRatio(pattern, 'upper_shadow_to_body') }}</p>
+                          <p>振幅/前收 {{ metricPct(pattern, 'range_to_previous_close') }} · 振幅/ATR14 {{ metricRatio(pattern, 'range_to_atr14') }}</p>
+                        </template>
+                        <template v-else>
+                          <p>路径 {{ latestPatternTypeText(pattern.signal_type) }} · 实体 {{ priceRange(pattern.body_bottom, pattern.body_top) }}</p>
+                          <p>支撑区 {{ priceRange(pattern.zone_low, pattern.zone_high) }} · 距支撑 {{ nullablePct(pattern.distance_to_floor_pct) }}</p>
+                        </template>
                         <p v-for="reason in pattern.reasons || []" :key="reason" :class="pattern.matched ? 'evidence' : 'muted'">{{ bodyEvidenceText(reason) }}</p>
+                        <p v-for="risk in pattern.risks || []" :key="risk" class="risk">{{ latestPatternRiskText(risk) }}</p>
                       </template>
                     </div>
                     <div>
@@ -268,11 +266,10 @@ function ratio(value) { return Number(value || 0).toFixed(2) }
 function price(value) { return value == null || value === '' ? '--' : Number(value).toFixed(2) }
 function priceRange(low, high) { return `${price(low)} - ${price(high)}` }
 function nullablePct(value) { return value == null ? '--' : signedPct(value) }
-function numberClass(value) { return Number(value) >= 0 ? 'positive' : 'negative' }
 function scoreClass(value) { return value >= 18 ? 'excellent' : value >= 14 ? 'good' : 'weak' }
-function candidateText(value) {
-  return { KEY_CANDIDATE: '重点候选', READY_CANDIDATE: '准备候选', WATCH_CANDIDATE: '观察候选', REJECTED: '未入选' }[value] || value
-}
+function flagText(value) { return value == null ? '数据不足' : value ? '是' : '否' }
+function amountText(value) { return value == null ? '--' : `${(Number(value) / 100000000).toFixed(2)}亿` }
+function ma5Text(item) { return item.ma5 == null ? '--' : `${price(item.latestClose)} / ${price(item.ma5)}` }
 function phaseText(value) {
   return {
     PHASE_VALID: '阶段有效', START_NOT_FOUND: '未识别强势启动', START_TOO_RECENT: '启动时间过近',
@@ -317,19 +314,25 @@ function latestBarPatternSummary(item) {
   const matched = latestBarPatternItems(item).filter(pattern => pattern.matched)
   return matched.length ? matched.map(pattern => pattern.name).join(' / ') : '未识别到配置形态'
 }
-function bodySupportStatusText(value) {
-  return { BODY_SUPPORT_STRONG: '强实体支撑', BODY_SUPPORT_CONFIRMED: '实体支撑已确认', BODY_SUPPORT_FORMING: '实体支撑形成中', BODY_SUPPORT_WEAKENED: '实体支撑转弱', BODY_SUPPORT_BROKEN: '实体支撑失效', BODY_SUPPORT_NONE: '无有效实体支撑', DISABLED: '未启用' }[value] || value || '--'
-}
-function bodySupportTypeText(value) {
-  return { SINGLE_BODY_PIVOT: '单实体拐点', FLAT_BODY_FLOOR: '水平实体底', RISING_BODY_FLOOR: '抬高实体底', FAILED_BREAK_BODY_FLOOR: '假跌破实体底', COMPOSITE_BODY_FLOOR: '复合实体底', NONE: '未识别' }[value] || value || '--'
-}
-function latestPatternStatusText(value) { return { CONFIRMING: '后续确认中', CONFIRMED: '已确认', NOT_MATCHED: '未命中' }[value] || value || '--' }
+function latestPatternStatusText(value) { return { DETECTED: '当日识别', CONFIRMING: '后续确认中', CONFIRMED: '已确认', NOT_MATCHED: '未命中' }[value] || value || '--' }
 function latestPatternTypeText(value) {
-  return { FAILED_BREAK_RECLAIM: '假跌破收回', BODY_FLOOR_HOLD: '守住实体支撑', POTENTIAL_BODY_PIVOT: '潜在实体拐点', HIGHER_BODY_LOW: '更高实体低点', NONE: '无' }[value] || value || '--'
+  return { FAILED_BREAK_RECLAIM: '假跌破收回', BODY_FLOOR_HOLD: '守住实体支撑', POTENTIAL_BODY_PIVOT: '潜在实体拐点', HIGHER_BODY_LOW: '更高实体低点', BULLISH_HAMMER: '阳线锤子', BEARISH_HAMMER: '阴线锤子', NONE: '无' }[value] || value || '--'
 }
 function bodyEvidenceText(value) {
-  return { LATEST_LOW_BREAK_RECLAIMED_BY_BODY: '盘中跌破后实体收回', LATEST_BODY_HELD_SUPPORT_ZONE: '实体守住支撑区', LATEST_BODY_POTENTIAL_PIVOT: '最新实体形成潜在低点', LATEST_BAR_NO_VALID_BODY_LOW: '最新K线未形成有效实体低点' }[value] || value
+  return { LATEST_LOW_BREAK_RECLAIMED_BY_BODY: '盘中跌破后实体收回', LATEST_BODY_HELD_SUPPORT_ZONE: '实体守住支撑区', LATEST_BODY_POTENTIAL_PIVOT: '最新实体形成潜在低点', LATEST_BAR_NO_VALID_BODY_LOW: '最新K线未形成有效实体低点', LATEST_BAR_EFFECTIVE_HAMMER: '最新交易日形成有效锤子线' }[value] || value
 }
+function latestPatternRiskText(value) {
+  return {
+    HAMMER_ATR14_DATA_INSUFFICIENT: '不足15根K线，无法计算ATR14', HAMMER_OHLC_INVALID: 'OHLC数据非法',
+    HAMMER_ZERO_RANGE_OR_BODY: '零振幅、零实体或ATR14无效', HAMMER_BODY_RATIO_LT_10PCT: '实体占比低于10%',
+    HAMMER_BODY_RATIO_GT_25PCT: '实体占比超过25%', HAMMER_LOWER_SHADOW_LT_BODY_2: '下影线不足实体2倍',
+    HAMMER_UPPER_SHADOW_GT_BODY_0_1: '上影线超过实体10%', HAMMER_RANGE_LT_PREVIOUS_CLOSE_0_8PCT: '总振幅不足前收盘0.8%',
+    HAMMER_RANGE_LT_ATR14_0_5: '总振幅不足ATR14的50%', BEARISH_HAMMER_REQUIRES_CONFIRMATION: '阴线锤子反转力度较弱，仍需确认',
+    REQUIRES_TWO_COMPLETED_BARS_TO_CONFIRM_PIVOT: '需要后续两根完整K线确认实体拐点',
+  }[value] || value
+}
+function metricPct(pattern, key) { const value = pattern.metrics?.[key]; return value == null ? '--' : pct(value) }
+function metricRatio(pattern, key) { const value = pattern.metrics?.[key]; return value == null ? '--' : `${Number(value).toFixed(2)}倍` }
 </script>
 
 <style scoped>
