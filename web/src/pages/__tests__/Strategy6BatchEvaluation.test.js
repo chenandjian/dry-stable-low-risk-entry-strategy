@@ -83,6 +83,9 @@ describe('Strategy6BatchEvaluation', () => {
           trendHigh250: 15, trendCloseToHighRatio: 0.6333,
           trendEma150: 10, trendEma200: 10.5, trendSqueezeOn: false,
           strongTrendSqueezeReasons: ['CLOSE_LE_10', 'EMA150_LE_EMA200'],
+          latestTurnover: 780000000, turnover5Min: 632000000, latestTurnover5Min: false,
+          latestClose: 9.5, ma5: 9.4, closeBelowMa5: false, closeToMa5Pct: 0.010638,
+          latestBarPatterns: [],
         },
       ],
       errors: [{ code: '000000', name: '', error: 'KLINE_NOT_FOUND', message: '本地没有K线数据' }],
@@ -189,5 +192,30 @@ describe('Strategy6BatchEvaluation', () => {
     expect(wrapper.text()).toContain('来源任务 s6-20260903-153000')
     expect(wrapper.text()).toContain('已导入并完成评分 2 只')
     expect(wrapper.text()).toContain('评分结果')
+  })
+
+  it('filters each result field like an Excel auto-filter and can clear all filters', async () => {
+    const wrapper = mount(Strategy6BatchEvaluation)
+    await wrapper.get('[data-test="batch-submit"]').trigger('click')
+    await flushUi()
+
+    expect(wrapper.findAll('.score-row')).toHaveLength(2)
+
+    await wrapper.get('[data-test="filter-turnover-min"]').setValue('yes')
+    await flushUi()
+    expect(wrapper.findAll('.score-row')).toHaveLength(1)
+    expect(wrapper.text()).toContain('显示 1 / 2')
+    expect(wrapper.text()).toContain('300604')
+    expect(wrapper.text()).not.toContain('601857')
+
+    await wrapper.get('[data-test="filter-tail-score-min"]').setValue('20')
+    await flushUi()
+    expect(wrapper.findAll('.score-row')).toHaveLength(0)
+    expect(wrapper.text()).toContain('没有符合当前筛选条件的股票')
+
+    await wrapper.get('[data-test="clear-table-filters"]').trigger('click')
+    await flushUi()
+    expect(wrapper.findAll('.score-row')).toHaveLength(2)
+    expect(wrapper.text()).toContain('显示 2 / 2')
   })
 })
