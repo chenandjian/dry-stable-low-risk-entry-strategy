@@ -127,6 +127,12 @@ describe('Strategy6BatchEvaluation', () => {
     expect(wrapper.text()).not.toContain('实体支撑底评分')
     expect(wrapper.text()).not.toContain('当前分类')
     expect(wrapper.text()).toContain('本地没有K线数据')
+    expect(wrapper.get('[data-test="turnover-min-300604"]').classes()).toContain('requirement-hit')
+    expect(wrapper.get('[data-test="below-ma5-300604"]').classes()).toContain('requirement-hit')
+    expect(wrapper.get('[data-test="latest-pattern-300604"]').classes()).toContain('requirement-hit')
+    expect(wrapper.get('[data-test="turnover-min-601857"]').classes()).not.toContain('requirement-hit')
+    expect(wrapper.get('[data-test="below-ma5-601857"]').classes()).not.toContain('requirement-hit')
+    expect(wrapper.get('[data-test="latest-pattern-601857"]').classes()).not.toContain('requirement-hit')
   })
 
   it('rejects invalid input before sending the request', async () => {
