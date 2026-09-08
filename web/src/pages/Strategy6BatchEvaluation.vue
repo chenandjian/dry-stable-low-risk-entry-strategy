@@ -51,10 +51,18 @@
       <div><span>数据模式</span><strong>仅本地</strong></div>
     </section>
 
-    <section v-if="results.length" class="terminal-panel result-panel">
+    <section v-if="allResults.length" class="terminal-panel result-panel">
       <div class="panel-title">
         <div><span>02</span><strong>评分结果</strong></div>
-        <small>尾部得分相同时按策略总分排序</small>
+        <div class="filter-summary">
+          <small>显示 {{ results.length }} / {{ allResults.length }} · 尾部得分相同时按策略总分排序</small>
+          <button
+            data-test="clear-table-filters"
+            class="clear-filter-button"
+            :disabled="!hasActiveFilters"
+            @click="clearTableFilters"
+          >清除筛选</button>
+        </div>
       </div>
       <div class="table-wrap">
         <table>
@@ -62,6 +70,25 @@
             <tr>
               <th>排名</th><th>股票</th><th>评价日</th><th>尾部质量</th><th>尾部结论</th><th>量比</th>
               <th>量能趋势</th><th>5日成交额最低</th><th>收盘低于MA5</th><th>5日收盘波动</th><th>最新交易日K线形态</th><th>策略总分</th>
+            </tr>
+            <tr class="filter-row">
+              <th></th>
+              <th><input v-model.trim="tableFilters.stock" data-test="filter-stock" placeholder="代码/名称" /></th>
+              <th>
+                <select v-model="tableFilters.evaluationDate" data-test="filter-evaluation-date">
+                  <option value="">全部日期</option>
+                  <option v-for="date in evaluationDates" :key="date" :value="date">{{ date }}</option>
+                </select>
+              </th>
+              <th><div class="range-filter"><input v-model="tableFilters.tailQualityMin" data-test="filter-tail-score-min" type="number" min="0" max="20" placeholder="最低" /><input v-model="tableFilters.tailQualityMax" type="number" min="0" max="20" placeholder="最高" /></div></th>
+              <th><select v-model="tableFilters.tailPass" data-test="filter-tail-pass"><option value="">全部</option><option value="pass">通过</option><option value="fail">未通过</option></select></th>
+              <th><div class="range-filter"><input v-model="tableFilters.volumeRatioMin" type="number" step="0.01" placeholder="最低" /><input v-model="tableFilters.volumeRatioMax" type="number" step="0.01" placeholder="最高" /></div></th>
+              <th><select v-model="tableFilters.volumeTrend"><option value="">全部</option><option value="shrinking">缩量</option><option value="not_shrinking">未缩量</option></select></th>
+              <th><select v-model="tableFilters.turnoverMin" data-test="filter-turnover-min"><option value="">全部</option><option value="yes">是</option><option value="no">否</option><option value="unknown">数据不足</option></select></th>
+              <th><select v-model="tableFilters.belowMa5"><option value="">全部</option><option value="yes">是</option><option value="no">否</option><option value="unknown">数据不足</option></select></th>
+              <th><div class="range-filter percent-filter"><input v-model="tableFilters.closeRangeMin" type="number" step="0.1" placeholder="最低%" /><input v-model="tableFilters.closeRangeMax" type="number" step="0.1" placeholder="最高%" /></div></th>
+              <th><select v-model="tableFilters.latestPattern"><option value="">全部</option><option value="matched">已识别</option><option value="unmatched">未识别</option></select></th>
+              <th><div class="range-filter"><input v-model="tableFilters.totalScoreMin" type="number" min="0" max="100" placeholder="最低" /><input v-model="tableFilters.totalScoreMax" type="number" min="0" max="100" placeholder="最高" /></div></th>
             </tr>
           </thead>
           <tbody>
@@ -139,6 +166,9 @@
                 </td>
               </tr>
             </template>
+            <tr v-if="!results.length" class="empty-filter-row">
+              <td colspan="12">没有符合当前筛选条件的股票，请调整条件或清除筛选。</td>
+            </tr>
           </tbody>
         </table>
       </div>
@@ -168,13 +198,17 @@ const errorMessage = ref('')
 const copiedCode = ref('')
 const response = ref(null)
 const expanded = reactive(new Set())
+const tableFilters = reactive(createEmptyTableFilters())
 
 const parsedCodes = computed(() => [...new Set(
   rawCodes.value.split(/[\s,，;；]+/).map(code => code.trim()).filter(Boolean),
 )])
-const results = computed(() => response.value?.results || [])
+const allResults = computed(() => response.value?.results || [])
+const results = computed(() => allResults.value.filter(matchesTableFilters))
 const errors = computed(() => response.value?.errors || [])
-const tailPassedCount = computed(() => results.value.filter(item => item.tailPass).length)
+const tailPassedCount = computed(() => allResults.value.filter(item => item.tailPass).length)
+const evaluationDates = computed(() => [...new Set(allResults.value.map(item => item.evaluationDate).filter(Boolean))].sort().reverse())
+const hasActiveFilters = computed(() => Object.values(tableFilters).some(value => value !== ''))
 
 watch(rawCodes, value => {
   try {
@@ -197,6 +231,7 @@ async function runEvaluation() {
   errorMessage.value = ''
   copiedCode.value = ''
   response.value = null
+  clearTableFilters()
   const invalid = parsedCodes.value.filter(code => !/^\d{6}$/.test(code))
   if (!parsedCodes.value.length) {
     errorMessage.value = '请至少输入一个股票代码'
@@ -222,6 +257,52 @@ async function runEvaluation() {
   } finally {
     loading.value = false
   }
+}
+
+function createEmptyTableFilters() {
+  return {
+    stock: '', evaluationDate: '', tailQualityMin: '', tailQualityMax: '', tailPass: '',
+    volumeRatioMin: '', volumeRatioMax: '', volumeTrend: '', turnoverMin: '', belowMa5: '',
+    closeRangeMin: '', closeRangeMax: '', latestPattern: '', totalScoreMin: '', totalScoreMax: '',
+  }
+}
+
+function matchesNumberRange(value, minimum, maximum, multiplier = 1) {
+  if (value == null || value === '') return minimum === '' && maximum === ''
+  const numeric = Number(value)
+  if (!Number.isFinite(numeric)) return minimum === '' && maximum === ''
+  const comparable = numeric * multiplier
+  if (minimum !== '' && comparable < Number(minimum)) return false
+  if (maximum !== '' && comparable > Number(maximum)) return false
+  return true
+}
+
+function matchesBooleanFilter(value, filter) {
+  if (!filter) return true
+  if (filter === 'unknown') return value == null
+  return filter === 'yes' ? value === true : value === false
+}
+
+function matchesTableFilters(item) {
+  const stockQuery = tableFilters.stock.toLowerCase()
+  if (stockQuery && !`${item.code || ''} ${item.name || ''}`.toLowerCase().includes(stockQuery)) return false
+  if (tableFilters.evaluationDate && item.evaluationDate !== tableFilters.evaluationDate) return false
+  if (!matchesNumberRange(item.tailQualityScore, tableFilters.tailQualityMin, tableFilters.tailQualityMax)) return false
+  if (tableFilters.tailPass === 'pass' && item.tailPass !== true) return false
+  if (tableFilters.tailPass === 'fail' && item.tailPass === true) return false
+  if (!matchesNumberRange(item.tailVolumeRatio, tableFilters.volumeRatioMin, tableFilters.volumeRatioMax)) return false
+  if (tableFilters.volumeTrend === 'shrinking' && !(Number(item.volumeSlope10) < 0)) return false
+  if (tableFilters.volumeTrend === 'not_shrinking' && Number(item.volumeSlope10) < 0) return false
+  if (!matchesBooleanFilter(item.latestTurnover5Min, tableFilters.turnoverMin)) return false
+  if (!matchesBooleanFilter(item.closeBelowMa5, tableFilters.belowMa5)) return false
+  if (!matchesNumberRange(item.closeRange5, tableFilters.closeRangeMin, tableFilters.closeRangeMax, 100)) return false
+  if (tableFilters.latestPattern === 'matched' && !hasMatchedLatestBarPattern(item)) return false
+  if (tableFilters.latestPattern === 'unmatched' && hasMatchedLatestBarPattern(item)) return false
+  return matchesNumberRange(item.totalScore, tableFilters.totalScoreMin, tableFilters.totalScoreMax)
+}
+
+function clearTableFilters() {
+  Object.assign(tableFilters, createEmptyTableFilters())
 }
 
 async function importTrendSqueezeScreen() {
@@ -347,6 +428,7 @@ h1 { margin: 8px 0; font-size: 26px; } .page-header p { color: var(--text-second
 .input-panel,.result-panel,.error-panel { padding: 16px; margin-bottom: 16px; }
 .panel-title { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; color: var(--text-muted); }
 .panel-title div { display: flex; gap: 10px; align-items: center; }.panel-title div span { color: var(--gold); font: 12px var(--font-mono); }.panel-title strong { color: var(--text-primary); }
+.panel-title .filter-summary { justify-content: flex-end; }.clear-filter-button { padding: 5px 10px; color: var(--gold); background: transparent; border: 1px solid rgba(214,168,74,.45); font-size: 11px; }
 textarea { width: 100%; box-sizing: border-box; resize: vertical; padding: 13px; color: #dce7f4; background: #080f18; border: 1px solid #273648; font: 13px/1.7 var(--font-mono); }
 .input-actions { display: flex; justify-content: space-between; align-items: center; margin-top: 12px; color: var(--text-muted); }.input-actions strong { color: var(--gold); }
 .input-buttons { display: flex; gap: 10px; align-items: center; }.secondary-button { color: var(--gold); background: transparent; border: 1px solid rgba(214,168,74,.6); }.import-message { color: var(--gold); margin: 10px 0 0; font: 12px var(--font-mono); }
@@ -354,6 +436,7 @@ button { padding: 9px 22px; color: #111; background: var(--gold); border: 0; bor
 .form-error { color: var(--danger); margin: 10px 0 0; }
 .summary-strip { display: grid; grid-template-columns: repeat(5,1fr); gap: 1px; background: var(--border); border: 1px solid var(--border); margin-bottom: 16px; }.summary-strip div { background: #0c1420; padding: 12px 16px; display: flex; flex-direction: column; }.summary-strip span { color: var(--text-muted); font-size: 11px; }.summary-strip strong { margin-top: 4px; font: 18px var(--font-mono); }
 .table-wrap { overflow-x: auto; }table { width: 100%; border-collapse: collapse; font-size: 12px; }th { padding: 10px 9px; text-align: left; color: var(--text-muted); border-bottom: 1px solid var(--border); white-space: nowrap; }td { padding: 11px 9px; border-bottom: 1px solid rgba(54,70,90,.55); white-space: nowrap; }td small { display: block; color: var(--text-muted); margin-top: 3px; }.score-row { cursor: pointer; }.score-row:hover { background: rgba(255,255,255,.025); }.rank { color: var(--gold); font-family: var(--font-mono); }
+.filter-row th { padding: 6px 5px 9px; background: #09111b; }.filter-row input,.filter-row select { width: 100%; min-width: 82px; box-sizing: border-box; padding: 6px 7px; color: var(--text-secondary); background: #080f18; border: 1px solid #273648; border-radius: 2px; font: 11px var(--font-mono); }.filter-row input:focus,.filter-row select:focus { outline: none; border-color: rgba(214,168,74,.75); }.range-filter { display: grid; grid-template-columns: repeat(2, minmax(58px, 1fr)); gap: 4px; min-width: 126px; }.percent-filter { min-width: 146px; }.empty-filter-row td { padding: 24px; color: var(--text-muted); text-align: center; }
 .code-copy { display: inline-flex; align-items: center; gap: 6px; padding: 0; color: #dce7f4; background: transparent; border: 0; font: 12px var(--font-mono); cursor: copy; }.code-copy:hover strong { color: var(--gold); text-decoration: underline; }.code-copy span { color: var(--gold); font: 10px var(--font-mono); }
 .tail-score { font: 700 15px var(--font-mono); }.tail-score.excellent { color: #f2c66d; }.tail-score.good,.positive { color: var(--up-red); }.tail-score.weak,.negative { color: var(--down-green); }
 .requirement-hit { color: var(--up-red); font-weight: 700; }
