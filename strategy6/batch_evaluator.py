@@ -151,18 +151,36 @@ def _summarize(evaluation, metadata: dict, display_metrics: dict | None = None) 
 
 def _batch_display_metrics(rows: list[dict]) -> dict:
     selected = rows[-5:]
+    previous_five = rows[-6:-1]
     amounts = [_positive_number(row.get("amount", row.get("turnover"))) for row in selected]
+    previous_amounts = [
+        _positive_number(row.get("amount", row.get("turnover")))
+        for row in previous_five
+    ]
     closes = [_positive_number(row.get("close")) for row in selected]
     latest_amount = amounts[-1] if amounts else None
     latest_close = closes[-1] if closes else None
     amount_ready = len(selected) == 5 and all(value is not None for value in amounts)
     close_ready = len(selected) == 5 and all(value is not None for value in closes)
     minimum_amount = min(amounts) if amount_ready else None
+    previous_average = (
+        sum(previous_amounts) / 5
+        if len(previous_five) == 5 and all(value is not None for value in previous_amounts)
+        else None
+    )
+    latest_to_previous_average = (
+        latest_amount / previous_average
+        if latest_amount is not None and previous_average
+        else None
+    )
     ma5 = sum(closes) / 5 if close_ready else None
     return {
         "latestTurnover": latest_amount,
         "turnover5Min": minimum_amount,
         "latestTurnover5Min": latest_amount <= minimum_amount if amount_ready else None,
+        "previous5TurnoverAverage": round(previous_average, 6) if previous_average is not None else None,
+        "latestToPrevious5TurnoverRatio": round(latest_to_previous_average, 6) if latest_to_previous_average is not None else None,
+        "latestTurnoverBelowPrevious5Avg60": latest_to_previous_average <= 0.60 if latest_to_previous_average is not None else None,
         "latestClose": latest_close,
         "ma5": round(ma5, 6) if ma5 is not None else None,
         "closeBelowMa5": latest_close < ma5 if close_ready else None,

@@ -161,15 +161,19 @@ def test_batch_display_metrics_mark_latest_turnover_minimum_and_close_below_ma5(
             (2, 10.0, 400),
             (3, 10.0, 300),
             (4, 10.0, 200),
-            (5, 9.0, 100),
+            (5, 10.0, 100),
+            (6, 9.0, 50),
         )
     ]
 
     metrics = _batch_display_metrics(rows)
 
-    assert metrics["latestTurnover"] == 100
-    assert metrics["turnover5Min"] == 100
+    assert metrics["latestTurnover"] == 50
+    assert metrics["turnover5Min"] == 50
     assert metrics["latestTurnover5Min"] is True
+    assert metrics["previous5TurnoverAverage"] == 300
+    assert metrics["latestToPrevious5TurnoverRatio"] == 0.166667
+    assert metrics["latestTurnoverBelowPrevious5Avg60"] is True
     assert metrics["latestClose"] == 9.0
     assert metrics["ma5"] == 9.8
     assert metrics["closeBelowMa5"] is True
@@ -185,4 +189,5 @@ def test_batch_display_metrics_return_unknown_when_five_valid_values_are_unavail
     ])
 
     assert metrics["latestTurnover5Min"] is None
+    assert metrics["latestTurnoverBelowPrevious5Avg60"] is None
     assert metrics["closeBelowMa5"] is None
