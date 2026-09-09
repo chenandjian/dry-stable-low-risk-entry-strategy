@@ -92,7 +92,20 @@
                 <div class="collection-filter">
                   <select v-model="tableFilters.collectionPatternCode"><option value="">全部形态</option><option value="SLOW_ROUNDED_BASE">缓跌圆底</option></select>
                   <select v-model="tableFilters.collectionPatternStatus" data-test="filter-collection-pattern-status"><option value="">全部状态</option><option value="strong">强匹配</option><option value="matched">已匹配</option><option value="forming">形成中</option><option value="not_matched">未匹配</option><option value="data_insufficient">数据不足</option></select>
-                  <select v-model="tableFilters.collectionPatternGrade" data-test="filter-collection-pattern-grade"><option value="">全部等级</option><option value="S">S</option><option value="A">A</option><option value="B">B</option><option value="C">C</option><option value="UNQUALIFIED">未达标</option></select>
+                  <details class="grade-multiselect">
+                    <summary>{{ collectionGradeFilterLabel }}</summary>
+                    <div class="grade-options">
+                      <label v-for="option in collectionGradeOptions" :key="option.value">
+                        <input
+                          v-model="tableFilters.collectionPatternGrades"
+                          type="checkbox"
+                          :value="option.value"
+                          :data-test="`filter-collection-pattern-grade-${option.value}`"
+                        >
+                        {{ option.label }}
+                      </label>
+                    </div>
+                  </details>
                   <div class="range-filter"><input v-model="tableFilters.collectionPatternScoreMin" data-test="filter-collection-pattern-score-min" type="number" min="0" max="100" placeholder="最低分" /><input v-model="tableFilters.collectionPatternScoreMax" type="number" min="0" max="100" placeholder="最高分" /></div>
                 </div>
               </th>
@@ -241,7 +254,17 @@ const results = computed(() => allResults.value.filter(matchesTableFilters))
 const errors = computed(() => response.value?.errors || [])
 const tailPassedCount = computed(() => allResults.value.filter(item => item.tailPass).length)
 const evaluationDates = computed(() => [...new Set(allResults.value.map(item => item.evaluationDate).filter(Boolean))].sort().reverse())
-const hasActiveFilters = computed(() => Object.values(tableFilters).some(value => value !== ''))
+const collectionGradeOptions = [
+  { value: 'S', label: 'S' }, { value: 'A', label: 'A' },
+  { value: 'B', label: 'B' }, { value: 'C', label: 'C' },
+  { value: 'UNQUALIFIED', label: '未达标' },
+]
+const collectionGradeFilterLabel = computed(() => {
+  const selected = tableFilters.collectionPatternGrades
+  if (!selected.length) return '全部等级'
+  return selected.map(value => collectionGradeOptions.find(option => option.value === value)?.label || value).join('、')
+})
+const hasActiveFilters = computed(() => Object.values(tableFilters).some(value => Array.isArray(value) ? value.length > 0 : value !== ''))
 
 watch(rawCodes, value => {
   try {
@@ -297,7 +320,7 @@ function createEmptyTableFilters() {
     stock: '', evaluationDate: '', tailQualityMin: '', tailQualityMax: '', tailPass: '',
     volumeRatioMin: '', volumeRatioMax: '', volumeTrend: '', turnoverMin: '', turnoverExtreme: '', belowMa5: '',
     closeRangeMin: '', closeRangeMax: '', latestPattern: '',
-    collectionPatternCode: '', collectionPatternStatus: '', collectionPatternGrade: '',
+    collectionPatternCode: '', collectionPatternStatus: '', collectionPatternGrades: [],
     collectionPatternScoreMin: '', collectionPatternScoreMax: '', totalScoreMin: '', totalScoreMax: '',
   }
 }
@@ -345,7 +368,7 @@ function matchesTableFilters(item) {
   if (tableFilters.collectionPatternStatus === 'forming' && !selectedPatterns.some(pattern => pattern.status === 'FORMING')) return false
   if (tableFilters.collectionPatternStatus === 'not_matched' && !selectedPatterns.some(pattern => pattern.status === 'NOT_MATCHED')) return false
   if (tableFilters.collectionPatternStatus === 'data_insufficient' && !selectedPatterns.some(pattern => pattern.status === 'DATA_INSUFFICIENT')) return false
-  if (tableFilters.collectionPatternGrade && !selectedPatterns.some(pattern => pattern.grade === tableFilters.collectionPatternGrade)) return false
+  if (tableFilters.collectionPatternGrades.length && !selectedPatterns.some(pattern => tableFilters.collectionPatternGrades.includes(pattern.grade))) return false
   if ((tableFilters.collectionPatternScoreMin !== '' || tableFilters.collectionPatternScoreMax !== '') && !selectedPatterns.some(pattern => matchesNumberRange(pattern.score, tableFilters.collectionPatternScoreMin, tableFilters.collectionPatternScoreMax))) return false
   return matchesNumberRange(item.totalScore, tableFilters.totalScoreMin, tableFilters.totalScoreMax)
 }
@@ -532,6 +555,7 @@ button { padding: 9px 22px; color: #111; background: var(--gold); border: 0; bor
 .summary-strip { display: grid; grid-template-columns: repeat(5,1fr); gap: 1px; background: var(--border); border: 1px solid var(--border); margin-bottom: 16px; }.summary-strip div { background: #0c1420; padding: 12px 16px; display: flex; flex-direction: column; }.summary-strip span { color: var(--text-muted); font-size: 11px; }.summary-strip strong { margin-top: 4px; font: 18px var(--font-mono); }
 .table-wrap { overflow-x: auto; }table { width: 100%; border-collapse: collapse; font-size: 12px; }th { padding: 10px 9px; text-align: left; color: var(--text-muted); border-bottom: 1px solid var(--border); white-space: nowrap; }td { padding: 11px 9px; border-bottom: 1px solid rgba(54,70,90,.55); white-space: nowrap; }td small { display: block; color: var(--text-muted); margin-top: 3px; }.score-row { cursor: pointer; }.score-row:hover { background: rgba(255,255,255,.025); }.rank { color: var(--gold); font-family: var(--font-mono); }
 .filter-row th { padding: 6px 5px 9px; background: #09111b; }.filter-row input,.filter-row select { width: 100%; min-width: 82px; box-sizing: border-box; padding: 6px 7px; color: var(--text-secondary); background: #080f18; border: 1px solid #273648; border-radius: 2px; font: 11px var(--font-mono); }.filter-row input:focus,.filter-row select:focus { outline: none; border-color: rgba(214,168,74,.75); }.range-filter { display: grid; grid-template-columns: repeat(2, minmax(58px, 1fr)); gap: 4px; min-width: 126px; }.stacked-filter,.collection-filter { display: grid; gap: 4px; min-width: 145px; }.collection-filter { min-width: 170px; }.percent-filter { min-width: 146px; }.empty-filter-row td { padding: 24px; color: var(--text-muted); text-align: center; }
+.grade-multiselect { border: 1px solid #273648; background: #080f18; color: var(--text-secondary); font: 11px var(--font-mono); }.grade-multiselect summary { padding: 6px 7px; cursor: pointer; list-style-position: inside; }.grade-options { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 5px 8px; padding: 7px; border-top: 1px solid #273648; }.grade-options label { display: flex; align-items: center; gap: 5px; white-space: nowrap; cursor: pointer; }.grade-options input { width: auto; min-width: 0; margin: 0; accent-color: var(--gold); }
 .code-copy { display: inline-flex; align-items: center; gap: 6px; padding: 0; color: #dce7f4; background: transparent; border: 0; font: 12px var(--font-mono); cursor: copy; }.code-copy:hover strong { color: var(--gold); text-decoration: underline; }.code-copy span { color: var(--gold); font: 10px var(--font-mono); }
 .tail-score { font: 700 15px var(--font-mono); }.tail-score.excellent { color: #f2c66d; }.tail-score.good,.positive { color: var(--up-red); }.tail-score.weak,.negative { color: var(--down-green); }
 .requirement-hit { color: var(--up-red); font-weight: 700; }
