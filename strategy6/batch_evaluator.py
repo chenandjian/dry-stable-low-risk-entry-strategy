@@ -4,6 +4,7 @@ from __future__ import annotations
 import math
 
 from scanner import db
+from strategy6.collection_patterns import evaluate_collection_patterns
 from strategy6.engine import StrongVcpTailEngine
 
 
@@ -41,7 +42,9 @@ def evaluate_strategy6_batch(codes: list[str], config: dict) -> dict:
         except Exception as exc:
             errors.append(_error(code, name, "EVALUATION_FAILED", str(exc)))
             continue
-        results.append(_summarize(evaluation, metadata, _batch_display_metrics(rows)))
+        summary = _summarize(evaluation, metadata, _batch_display_metrics(rows))
+        summary["klineCollectionPatterns"] = evaluate_collection_patterns(rows)
+        results.append(summary)
 
     results.sort(
         key=lambda item: (

@@ -69,7 +69,7 @@
           <thead>
             <tr>
               <th>排名</th><th>股票</th><th>评价日</th><th>尾部质量</th><th>尾部结论</th><th>量比</th>
-              <th>量能趋势</th><th>5日成交额最低</th><th>收盘低于MA5</th><th>5日收盘波动</th><th>最新交易日K线形态</th><th>策略总分</th>
+              <th>量能趋势</th><th>5日成交额最低</th><th>收盘低于MA5</th><th>5日收盘波动</th><th>最新交易日K线形态</th><th>K线集合形态</th><th>策略总分</th>
             </tr>
             <tr class="filter-row">
               <th></th>
@@ -88,6 +88,14 @@
               <th><select v-model="tableFilters.belowMa5"><option value="">全部</option><option value="yes">是</option><option value="no">否</option><option value="unknown">数据不足</option></select></th>
               <th><div class="range-filter percent-filter"><input v-model="tableFilters.closeRangeMin" type="number" step="0.1" placeholder="最低%" /><input v-model="tableFilters.closeRangeMax" type="number" step="0.1" placeholder="最高%" /></div></th>
               <th><select v-model="tableFilters.latestPattern"><option value="">全部</option><option value="matched">已识别</option><option value="unmatched">未识别</option><option value="INVERTED_HAMMER">倒锤形/射击之星</option></select></th>
+              <th>
+                <div class="collection-filter">
+                  <select v-model="tableFilters.collectionPatternCode"><option value="">全部形态</option><option value="SLOW_ROUNDED_BASE">缓跌圆底</option></select>
+                  <select v-model="tableFilters.collectionPatternStatus" data-test="filter-collection-pattern-status"><option value="">全部状态</option><option value="strong">强匹配</option><option value="matched">已匹配</option><option value="forming">形成中</option><option value="not_matched">未匹配</option><option value="data_insufficient">数据不足</option></select>
+                  <select v-model="tableFilters.collectionPatternGrade" data-test="filter-collection-pattern-grade"><option value="">全部等级</option><option value="S">S</option><option value="A">A</option><option value="B">B</option><option value="C">C</option><option value="UNQUALIFIED">未达标</option></select>
+                  <div class="range-filter"><input v-model="tableFilters.collectionPatternScoreMin" data-test="filter-collection-pattern-score-min" type="number" min="0" max="100" placeholder="最低分" /><input v-model="tableFilters.collectionPatternScoreMax" type="number" min="0" max="100" placeholder="最高分" /></div>
+                </div>
+              </th>
               <th><div class="range-filter"><input v-model="tableFilters.totalScoreMin" type="number" min="0" max="100" placeholder="最低" /><input v-model="tableFilters.totalScoreMax" type="number" min="0" max="100" placeholder="最高" /></div></th>
             </tr>
           </thead>
@@ -120,10 +128,14 @@
                 <td :data-test="`below-ma5-${item.code}`" :class="{ 'requirement-hit': item.closeBelowMa5 === true }"><strong>{{ flagText(item.closeBelowMa5) }}</strong><small>{{ ma5Text(item) }}</small></td>
                 <td>{{ pct(item.closeRange5) }}</td>
                 <td :data-test="`latest-pattern-${item.code}`" :class="{ 'requirement-hit': hasMatchedLatestBarPattern(item) }">{{ latestBarPatternSummary(item) }}</td>
+                <td :data-test="`collection-pattern-${item.code}`" :class="{ 'requirement-hit': hasMatchedCollectionPattern(item) }">
+                  {{ collectionPatternSummary(item) }}
+                  <small>{{ collectionPatternRange(item) }}</small>
+                </td>
                 <td><strong>{{ item.totalScore }} / 100</strong></td>
               </tr>
               <tr v-if="expanded.has(item.code)" class="detail-row">
-                <td colspan="12">
+                <td colspan="13">
                   <div class="detail-grid">
                     <div>
                       <h3>强势趋势收缩初筛</h3>
@@ -153,6 +165,22 @@
                       </template>
                     </div>
                     <div>
+                      <h3>K线集合形态</h3>
+                      <template v-for="pattern in collectionPatternItems(item)" :key="pattern.code">
+                        <p :class="pattern.matched ? 'evidence' : 'muted'">{{ pattern.name }} {{ patternGradeText(pattern.grade) }} · {{ collectionPatternStatusText(pattern.status) }} · {{ numberText(pattern.score) }}分</p>
+                        <p>识别区间 {{ pattern.startDate || '--' }} 至 {{ pattern.endDate || '--' }} · {{ pattern.windowDays || 0 }}个交易日</p>
+                        <p>回撤 {{ featurePct(pattern, 'pullbackDepth') }} · 收跌中位数 {{ featurePct(pattern, 'medianDownPct') }}</p>
+                        <p>前/中/后斜率 {{ featureSignedPct(pattern, 'earlySlope') }} / {{ featureSignedPct(pattern, 'middleSlope') }} / {{ featureSignedPct(pattern, 'lateSlope') }}</p>
+                        <p>底部停留 {{ featureNumber(pattern, 'bottomDays', 0) }}日 / {{ featurePct(pattern, 'bottomDwellRatio') }} · 低点后 {{ featureNumber(pattern, 'barsAfterLow', 0) }}日</p>
+                        <p>前/后波动 {{ featurePct(pattern, 'earlyRange') }} / {{ featurePct(pattern, 'lateRange') }} · 收缩比 {{ featureRatio(pattern, 'rangeContractionRatio') }}</p>
+                        <p>缓跌 {{ componentScore(pattern, 'slowPullback', 15) }} · 减速 {{ componentScore(pattern, 'deceleration', 25) }} · 底部宽度 {{ componentScore(pattern, 'bottomWidth', 20) }} · 低点后整理 {{ componentScore(pattern, 'afterLow', 10) }}</p>
+                        <p>波动收缩 {{ componentScore(pattern, 'volatilityContraction', 12) }} · 收盘聚集 {{ componentScore(pattern, 'closeClustering', 8) }} · K线重叠 {{ componentScore(pattern, 'overlapImprovement', 5) }} · 非V型 {{ componentScore(pattern, 'noVReversal', 5) }}</p>
+                        <p v-for="reason in pattern.reasons || []" :key="reason" class="evidence">{{ collectionPatternReasonText(reason) }}</p>
+                        <p v-for="warning in pattern.warnings || []" :key="warning" class="risk">{{ collectionPatternWarningText(warning) }}</p>
+                      </template>
+                      <p v-if="!collectionPatternItems(item).length" class="muted">暂无集合形态诊断</p>
+                    </div>
+                    <div>
                       <h3>尾部依据</h3>
                       <p v-for="reason in item.tailReasons" :key="reason" class="evidence">{{ tailReasonText(reason) }}</p>
                       <p v-if="!item.tailReasons?.length" class="muted">暂无加分依据</p>
@@ -172,7 +200,7 @@
               </tr>
             </template>
             <tr v-if="!results.length" class="empty-filter-row">
-              <td colspan="12">没有符合当前筛选条件的股票，请调整条件或清除筛选。</td>
+              <td colspan="13">没有符合当前筛选条件的股票，请调整条件或清除筛选。</td>
             </tr>
           </tbody>
         </table>
@@ -268,7 +296,9 @@ function createEmptyTableFilters() {
   return {
     stock: '', evaluationDate: '', tailQualityMin: '', tailQualityMax: '', tailPass: '',
     volumeRatioMin: '', volumeRatioMax: '', volumeTrend: '', turnoverMin: '', turnoverExtreme: '', belowMa5: '',
-    closeRangeMin: '', closeRangeMax: '', latestPattern: '', totalScoreMin: '', totalScoreMax: '',
+    closeRangeMin: '', closeRangeMax: '', latestPattern: '',
+    collectionPatternCode: '', collectionPatternStatus: '', collectionPatternGrade: '',
+    collectionPatternScoreMin: '', collectionPatternScoreMax: '', totalScoreMin: '', totalScoreMax: '',
   }
 }
 
@@ -305,6 +335,18 @@ function matchesTableFilters(item) {
   if (tableFilters.latestPattern === 'matched' && !hasMatchedLatestBarPattern(item)) return false
   if (tableFilters.latestPattern === 'unmatched' && hasMatchedLatestBarPattern(item)) return false
   if (tableFilters.latestPattern === 'INVERTED_HAMMER' && !latestBarPatternItems(item).some(pattern => pattern.code === 'INVERTED_HAMMER' && pattern.matched)) return false
+  const collectionPatterns = collectionPatternItems(item)
+  const selectedPatterns = tableFilters.collectionPatternCode
+    ? collectionPatterns.filter(pattern => pattern.code === tableFilters.collectionPatternCode)
+    : collectionPatterns
+  if (tableFilters.collectionPatternCode && !selectedPatterns.length) return false
+  if (tableFilters.collectionPatternStatus === 'strong' && !selectedPatterns.some(pattern => pattern.strongMatched)) return false
+  if (tableFilters.collectionPatternStatus === 'matched' && !selectedPatterns.some(pattern => pattern.matched)) return false
+  if (tableFilters.collectionPatternStatus === 'forming' && !selectedPatterns.some(pattern => pattern.status === 'FORMING')) return false
+  if (tableFilters.collectionPatternStatus === 'not_matched' && !selectedPatterns.some(pattern => pattern.status === 'NOT_MATCHED')) return false
+  if (tableFilters.collectionPatternStatus === 'data_insufficient' && !selectedPatterns.some(pattern => pattern.status === 'DATA_INSUFFICIENT')) return false
+  if (tableFilters.collectionPatternGrade && !selectedPatterns.some(pattern => pattern.grade === tableFilters.collectionPatternGrade)) return false
+  if ((tableFilters.collectionPatternScoreMin !== '' || tableFilters.collectionPatternScoreMax !== '') && !selectedPatterns.some(pattern => matchesNumberRange(pattern.score, tableFilters.collectionPatternScoreMin, tableFilters.collectionPatternScoreMax))) return false
   return matchesNumberRange(item.totalScore, tableFilters.totalScoreMin, tableFilters.totalScoreMax)
 }
 
@@ -432,6 +474,42 @@ function metricPct(pattern, key) { const value = pattern.metrics?.[key]; return 
 function metricRatio(pattern, key) { const value = pattern.metrics?.[key]; return value == null ? '--' : `${Number(value).toFixed(2)}倍` }
 function metricSignedPct(pattern, key) { const value = pattern.metrics?.[key]; return value == null ? '--' : signedPct(value) }
 function metricPrice(pattern, key) { return price(pattern.metrics?.[key]) }
+function collectionPatternItems(item) { return Array.isArray(item.klineCollectionPatterns) ? item.klineCollectionPatterns : [] }
+function hasMatchedCollectionPattern(item) { return collectionPatternItems(item).some(pattern => pattern.matched) }
+function primaryCollectionPattern(item) { return collectionPatternItems(item)[0] || null }
+function collectionPatternSummary(item) {
+  const pattern = primaryCollectionPattern(item)
+  if (!pattern) return '未识别集合形态'
+  return pattern.matched
+    ? `${pattern.name} ${patternGradeText(pattern.grade)} · ${numberText(pattern.score)}`
+    : `未识别 · 最高${numberText(pattern.score)}`
+}
+function collectionPatternRange(item) {
+  const pattern = primaryCollectionPattern(item)
+  return pattern?.startDate && pattern?.endDate ? `${pattern.startDate} 至 ${pattern.endDate}` : '--'
+}
+function collectionPatternStatusText(value) { return { STRONG_MATCHED: '强匹配', MATCHED: '已匹配', FORMING: '形成中', NOT_MATCHED: '未匹配', DATA_INSUFFICIENT: '数据不足', DATA_INVALID: '最新K线非法', EVALUATION_FAILED: '诊断失败' }[value] || value || '--' }
+function patternGradeText(value) { return value === 'UNQUALIFIED' ? '未达标' : value || '--' }
+function numberText(value) { return value == null ? '--' : Number(value).toFixed(Number(value) % 1 ? 1 : 0) }
+function featureNumber(pattern, key, digits = 2) { const value = pattern.features?.[key]; return value == null ? '--' : Number(value).toFixed(digits) }
+function featurePct(pattern, key) { const value = pattern.features?.[key]; return value == null ? '--' : `${(Number(value) * 100).toFixed(2)}%` }
+function featureSignedPct(pattern, key) { const value = pattern.features?.[key]; return value == null ? '--' : signedPct(value) }
+function featureRatio(pattern, key) { const value = pattern.features?.[key]; return value == null ? '--' : Number(value).toFixed(2) }
+function componentScore(pattern, key, maximum) { const value = pattern.componentScores?.[key]; return `${numberText(value)} / ${maximum}` }
+function collectionPatternReasonText(value) {
+  return {
+    PULLBACK_PACE_GENTLE: '回调节奏温和', DECLINE_DECELERATING: '下跌速度总体减慢',
+    BOTTOM_AREA_HAS_TIME_WIDTH: '低位形成时间宽度', LATE_PATH_STABILIZING: '后半段价格逐渐稳定',
+    NO_V_REVERSAL: '未出现急跌V反',
+  }[value] || value
+}
+function collectionPatternWarningText(value) {
+  return {
+    PATTERN_DATA_INSUFFICIENT: '有效K线不足10个交易日', LATEST_BAR_INVALID: '最新交易日K线数据非法，未回退旧日期', PATTERN_EVALUATION_FAILED: '集合形态诊断执行失败', PRIOR_PULLBACK_MISSING: '窗口前段缺少有效回调',
+    DECLINE_NOT_DECELERATING: '下跌速度尚未改善', BOTTOM_AREA_TOO_NARROW: '底部停留时间不足',
+    LATE_PATH_NOT_STABLE: '后半段尚未稳定', V_REVERSAL_OR_ALREADY_EXTENDED: '疑似V型反转或已明显离开底部',
+  }[value] || value
+}
 </script>
 
 <style scoped>
@@ -453,7 +531,7 @@ button { padding: 9px 22px; color: #111; background: var(--gold); border: 0; bor
 .form-error { color: var(--danger); margin: 10px 0 0; }
 .summary-strip { display: grid; grid-template-columns: repeat(5,1fr); gap: 1px; background: var(--border); border: 1px solid var(--border); margin-bottom: 16px; }.summary-strip div { background: #0c1420; padding: 12px 16px; display: flex; flex-direction: column; }.summary-strip span { color: var(--text-muted); font-size: 11px; }.summary-strip strong { margin-top: 4px; font: 18px var(--font-mono); }
 .table-wrap { overflow-x: auto; }table { width: 100%; border-collapse: collapse; font-size: 12px; }th { padding: 10px 9px; text-align: left; color: var(--text-muted); border-bottom: 1px solid var(--border); white-space: nowrap; }td { padding: 11px 9px; border-bottom: 1px solid rgba(54,70,90,.55); white-space: nowrap; }td small { display: block; color: var(--text-muted); margin-top: 3px; }.score-row { cursor: pointer; }.score-row:hover { background: rgba(255,255,255,.025); }.rank { color: var(--gold); font-family: var(--font-mono); }
-.filter-row th { padding: 6px 5px 9px; background: #09111b; }.filter-row input,.filter-row select { width: 100%; min-width: 82px; box-sizing: border-box; padding: 6px 7px; color: var(--text-secondary); background: #080f18; border: 1px solid #273648; border-radius: 2px; font: 11px var(--font-mono); }.filter-row input:focus,.filter-row select:focus { outline: none; border-color: rgba(214,168,74,.75); }.range-filter { display: grid; grid-template-columns: repeat(2, minmax(58px, 1fr)); gap: 4px; min-width: 126px; }.stacked-filter { display: grid; gap: 4px; min-width: 145px; }.percent-filter { min-width: 146px; }.empty-filter-row td { padding: 24px; color: var(--text-muted); text-align: center; }
+.filter-row th { padding: 6px 5px 9px; background: #09111b; }.filter-row input,.filter-row select { width: 100%; min-width: 82px; box-sizing: border-box; padding: 6px 7px; color: var(--text-secondary); background: #080f18; border: 1px solid #273648; border-radius: 2px; font: 11px var(--font-mono); }.filter-row input:focus,.filter-row select:focus { outline: none; border-color: rgba(214,168,74,.75); }.range-filter { display: grid; grid-template-columns: repeat(2, minmax(58px, 1fr)); gap: 4px; min-width: 126px; }.stacked-filter,.collection-filter { display: grid; gap: 4px; min-width: 145px; }.collection-filter { min-width: 170px; }.percent-filter { min-width: 146px; }.empty-filter-row td { padding: 24px; color: var(--text-muted); text-align: center; }
 .code-copy { display: inline-flex; align-items: center; gap: 6px; padding: 0; color: #dce7f4; background: transparent; border: 0; font: 12px var(--font-mono); cursor: copy; }.code-copy:hover strong { color: var(--gold); text-decoration: underline; }.code-copy span { color: var(--gold); font: 10px var(--font-mono); }
 .tail-score { font: 700 15px var(--font-mono); }.tail-score.excellent { color: #f2c66d; }.tail-score.good,.positive { color: var(--up-red); }.tail-score.weak,.negative { color: var(--down-green); }
 .requirement-hit { color: var(--up-red); font-weight: 700; }
