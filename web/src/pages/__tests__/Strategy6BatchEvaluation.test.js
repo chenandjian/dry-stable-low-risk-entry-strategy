@@ -83,6 +83,26 @@ describe('Strategy6BatchEvaluation', () => {
             reasons: ['LATEST_BAR_EFFECTIVE_INVERTED_HAMMER'],
             risks: ['INVERTED_HAMMER_REQUIRES_CONFIRMATION'],
           }],
+          klineCollectionPatterns: [{
+            code: 'SLOW_ROUNDED_BASE', name: '缓跌圆底', matched: true,
+            strongMatched: true, status: 'MATCHED', score: 84, grade: 'A',
+            startDate: '2026-08-07', endDate: '2026-08-25', windowDays: 14,
+            features: {
+              pullbackDepth: 0.098, medianDownPct: 0.012,
+              earlySlope: -0.007, middleSlope: -0.003, lateSlope: -0.0005,
+              slopeImprovementRatio: 0.61, bottomDays: 5, bottomDwellRatio: 0.36,
+              barsAfterLow: 4, afterLowRatio: 0.29,
+              earlyRange: 0.09, lateRange: 0.061, rangeContractionRatio: 0.68,
+              lateCluster80: 0.047, earlyOverlap: 0.41, lateOverlap: 0.66,
+            },
+            componentScores: {
+              slowPullback: 13, deceleration: 22, bottomWidth: 16,
+              afterLow: 8, volatilityContraction: 10, closeClustering: 7,
+              overlapImprovement: 4, noVReversal: 4,
+            },
+            reasons: ['PULLBACK_PACE_GENTLE', 'DECLINE_DECELERATING'],
+            warnings: [],
+          }],
         },
         {
           code: '601857', name: '中国石油', evaluationDate: '2026-08-25',
@@ -101,6 +121,12 @@ describe('Strategy6BatchEvaluation', () => {
           latestTurnoverBelowPrevious5Avg60: false,
           latestClose: 9.5, ma5: 9.4, closeBelowMa5: false, closeToMa5Pct: 0.010638,
           latestBarPatterns: [],
+          klineCollectionPatterns: [{
+            code: 'SLOW_ROUNDED_BASE', name: '缓跌圆底', matched: false,
+            strongMatched: false, status: 'NOT_MATCHED', score: 58, grade: 'UNQUALIFIED',
+            startDate: '2026-08-12', endDate: '2026-08-25', windowDays: 10,
+            features: {}, componentScores: {}, reasons: [], warnings: ['PRIOR_PULLBACK_MISSING'],
+          }],
         },
       ],
       errors: [{ code: '000000', name: '', error: 'KLINE_NOT_FOUND', message: '本地没有K线数据' }],
@@ -137,6 +163,11 @@ describe('Strategy6BatchEvaluation', () => {
     expect(wrapper.text()).toContain('有效实体低点')
     expect(wrapper.text()).toContain('阳线锤子线')
     expect(wrapper.text()).toContain('阳线倒锤子线')
+    expect(wrapper.text()).toContain('K线集合形态')
+    expect(wrapper.text()).toContain('缓跌圆底 A · 84')
+    expect(wrapper.text()).toContain('2026-08-07 至 2026-08-25')
+    expect(wrapper.text()).toContain('回撤 9.80%')
+    expect(wrapper.text()).toContain('减速 22 / 25')
     expect(wrapper.text()).toContain('此前5日趋势 -3.00%')
     expect(wrapper.text()).toContain('倒锤子线仍需后续交易日确认')
     expect(wrapper.text()).toContain('下影/实体 3.50倍')
@@ -219,6 +250,23 @@ describe('Strategy6BatchEvaluation', () => {
     await wrapper.get('[data-test="batch-submit"]').trigger('click')
     await flushUi()
 
+    expect(wrapper.findAll('.score-row')).toHaveLength(2)
+
+    await wrapper.get('[data-test="filter-collection-pattern-status"]').setValue('matched')
+    await flushUi()
+    expect(wrapper.findAll('.score-row')).toHaveLength(1)
+    expect(wrapper.text()).toContain('300604')
+
+    await wrapper.get('[data-test="filter-collection-pattern-grade"]').setValue('A')
+    await flushUi()
+    expect(wrapper.findAll('.score-row')).toHaveLength(1)
+
+    await wrapper.get('[data-test="filter-collection-pattern-score-min"]').setValue('85')
+    await flushUi()
+    expect(wrapper.findAll('.score-row')).toHaveLength(0)
+
+    await wrapper.get('[data-test="clear-table-filters"]').trigger('click')
+    await flushUi()
     expect(wrapper.findAll('.score-row')).toHaveLength(2)
 
     await wrapper.get('[data-test="filter-turnover-min"]').setValue('yes')

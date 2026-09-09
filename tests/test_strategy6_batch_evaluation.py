@@ -136,6 +136,11 @@ def test_batch_service_uses_local_data_and_prioritizes_tail_score(monkeypatch):
             return FakeEvaluation(code)
 
     monkeypatch.setattr(batch_evaluator, "StrongVcpTailEngine", FakeEngine)
+    monkeypatch.setattr(
+        batch_evaluator,
+        "evaluate_collection_patterns",
+        lambda rows_arg: [{"code": "SLOW_ROUNDED_BASE", "name": "缓跌圆底", "matched": True, "score": 82}],
+    )
 
     result = batch_evaluator.evaluate_strategy6_batch(
         ["601857", "000000", "300604"], {"strategy6": {}}
@@ -146,6 +151,9 @@ def test_batch_service_uses_local_data_and_prioritizes_tail_score(monkeypatch):
     assert result["results"][0]["tailScore"] == 19
     assert result["results"][0]["tailPass"] is True
     assert result["results"][0]["dataSource"] == "tickflow"
+    assert result["results"][0]["klineCollectionPatterns"] == [{
+        "code": "SLOW_ROUNDED_BASE", "name": "缓跌圆底", "matched": True, "score": 82,
+    }]
     assert result["errors"] == [{
         "code": "000000", "name": "", "error": "KLINE_NOT_FOUND", "message": "本地没有K线数据",
     }]
