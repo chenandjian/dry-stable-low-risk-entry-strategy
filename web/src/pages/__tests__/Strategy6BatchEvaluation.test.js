@@ -50,6 +50,8 @@ describe('Strategy6BatchEvaluation', () => {
           bodySupportPivotCount: 2, bodySupportIndependentTouchCount: 2,
           bodySupportReasons: ['FAILED_BREAK_BODY_FLOOR'], bodySupportRisks: [],
           latestTurnover: 632000000, turnover5Min: 632000000, latestTurnover5Min: true,
+          previous5TurnoverAverage: 1264000000, latestToPrevious5TurnoverRatio: 0.5,
+          latestTurnoverBelowPrevious5Avg60: true,
           latestClose: 20, ma5: 20.25, closeBelowMa5: true, closeToMa5Pct: -0.012346,
           latestBarPatterns: [{
             code: 'VALID_BODY_LOW', name: '有效实体低点', matched: true,
@@ -69,6 +71,17 @@ describe('Strategy6BatchEvaluation', () => {
               range_to_atr14: 1.2,
             },
             reasons: ['LATEST_BAR_EFFECTIVE_HAMMER'], risks: [],
+          }, {
+            code: 'INVERTED_HAMMER', name: '阳线倒锤子线', matched: true,
+            status: 'DETECTED', signal_type: 'BULLISH_INVERTED_HAMMER',
+            evaluation_date: '2026-08-25', body_bottom: 19.8, body_top: 20,
+            metrics: {
+              body_ratio: 0.2, lower_shadow_to_body: 0.05,
+              upper_shadow_to_body: 3.5, range_to_previous_close: 0.05,
+              range_to_atr14: 1.2, context_return_5: -0.03, context_ma5: 20.1,
+            },
+            reasons: ['LATEST_BAR_EFFECTIVE_INVERTED_HAMMER'],
+            risks: ['INVERTED_HAMMER_REQUIRES_CONFIRMATION'],
           }],
         },
         {
@@ -84,6 +97,8 @@ describe('Strategy6BatchEvaluation', () => {
           trendEma150: 10, trendEma200: 10.5, trendSqueezeOn: false,
           strongTrendSqueezeReasons: ['CLOSE_LE_10', 'EMA150_LE_EMA200'],
           latestTurnover: 780000000, turnover5Min: 632000000, latestTurnover5Min: false,
+          previous5TurnoverAverage: 975000000, latestToPrevious5TurnoverRatio: 0.8,
+          latestTurnoverBelowPrevious5Avg60: false,
           latestClose: 9.5, ma5: 9.4, closeBelowMa5: false, closeToMa5Pct: 0.010638,
           latestBarPatterns: [],
         },
@@ -121,6 +136,9 @@ describe('Strategy6BatchEvaluation', () => {
     expect(wrapper.text()).toContain('最新交易日K线形态')
     expect(wrapper.text()).toContain('有效实体低点')
     expect(wrapper.text()).toContain('阳线锤子线')
+    expect(wrapper.text()).toContain('阳线倒锤子线')
+    expect(wrapper.text()).toContain('此前5日趋势 -3.00%')
+    expect(wrapper.text()).toContain('倒锤子线仍需后续交易日确认')
     expect(wrapper.text()).toContain('下影/实体 3.50倍')
     expect(wrapper.text()).toContain('振幅/ATR14 1.20倍')
     expect(wrapper.text()).toContain('假跌破收回')
@@ -136,6 +154,8 @@ describe('Strategy6BatchEvaluation', () => {
     expect(wrapper.get('[data-test="turnover-min-601857"]').classes()).not.toContain('requirement-hit')
     expect(wrapper.get('[data-test="below-ma5-601857"]').classes()).not.toContain('requirement-hit')
     expect(wrapper.get('[data-test="latest-pattern-601857"]').classes()).not.toContain('requirement-hit')
+    expect(wrapper.get('[data-test="turnover-extreme-300604"]').classes()).toContain('requirement-hit')
+    expect(wrapper.text()).toContain('今日/前5日均 50.0%')
   })
 
   it('rejects invalid input before sending the request', async () => {
@@ -207,6 +227,10 @@ describe('Strategy6BatchEvaluation', () => {
     expect(wrapper.text()).toContain('显示 1 / 2')
     expect(wrapper.text()).toContain('300604')
     expect(wrapper.text()).not.toContain('601857')
+
+    await wrapper.get('[data-test="filter-turnover-extreme"]').setValue('yes')
+    await flushUi()
+    expect(wrapper.findAll('.score-row')).toHaveLength(1)
 
     await wrapper.get('[data-test="filter-tail-score-min"]').setValue('20')
     await flushUi()

@@ -84,10 +84,10 @@
               <th><select v-model="tableFilters.tailPass" data-test="filter-tail-pass"><option value="">全部</option><option value="pass">通过</option><option value="fail">未通过</option></select></th>
               <th><div class="range-filter"><input v-model="tableFilters.volumeRatioMin" type="number" step="0.01" placeholder="最低" /><input v-model="tableFilters.volumeRatioMax" type="number" step="0.01" placeholder="最高" /></div></th>
               <th><select v-model="tableFilters.volumeTrend"><option value="">全部</option><option value="shrinking">缩量</option><option value="not_shrinking">未缩量</option></select></th>
-              <th><select v-model="tableFilters.turnoverMin" data-test="filter-turnover-min"><option value="">全部</option><option value="yes">是</option><option value="no">否</option><option value="unknown">数据不足</option></select></th>
+              <th><div class="stacked-filter"><select v-model="tableFilters.turnoverMin" data-test="filter-turnover-min"><option value="">5日最低：全部</option><option value="yes">5日最低：是</option><option value="no">5日最低：否</option><option value="unknown">5日最低：数据不足</option></select><select v-model="tableFilters.turnoverExtreme" data-test="filter-turnover-extreme"><option value="">极致缩量：全部</option><option value="yes">极致缩量：是</option><option value="no">极致缩量：否</option><option value="unknown">极致缩量：数据不足</option></select></div></th>
               <th><select v-model="tableFilters.belowMa5"><option value="">全部</option><option value="yes">是</option><option value="no">否</option><option value="unknown">数据不足</option></select></th>
               <th><div class="range-filter percent-filter"><input v-model="tableFilters.closeRangeMin" type="number" step="0.1" placeholder="最低%" /><input v-model="tableFilters.closeRangeMax" type="number" step="0.1" placeholder="最高%" /></div></th>
-              <th><select v-model="tableFilters.latestPattern"><option value="">全部</option><option value="matched">已识别</option><option value="unmatched">未识别</option></select></th>
+              <th><select v-model="tableFilters.latestPattern"><option value="">全部</option><option value="matched">已识别</option><option value="unmatched">未识别</option><option value="INVERTED_HAMMER">倒锤形/射击之星</option></select></th>
               <th><div class="range-filter"><input v-model="tableFilters.totalScoreMin" type="number" min="0" max="100" placeholder="最低" /><input v-model="tableFilters.totalScoreMax" type="number" min="0" max="100" placeholder="最高" /></div></th>
             </tr>
           </thead>
@@ -112,7 +112,11 @@
                 <td><span class="status" :class="item.tailPass ? 'pass' : 'fail'">{{ item.tailPass ? '量稳价干通过' : '尾部未通过' }}</span></td>
                 <td>{{ ratio(item.tailVolumeRatio) }}</td>
                 <td :class="item.volumeSlope10 < 0 ? 'positive' : 'negative'">{{ item.volumeSlope10 < 0 ? '缩量' : '未缩量' }}</td>
-                <td :data-test="`turnover-min-${item.code}`" :class="{ 'requirement-hit': item.latestTurnover5Min === true }"><strong>{{ flagText(item.latestTurnover5Min) }}</strong><small>{{ amountText(item.latestTurnover) }}</small></td>
+                <td :data-test="`turnover-min-${item.code}`" :class="{ 'requirement-hit': item.latestTurnover5Min === true }">
+                  <strong>5日最低 {{ flagText(item.latestTurnover5Min) }}</strong>
+                  <small>{{ amountText(item.latestTurnover) }}</small>
+                  <small :data-test="`turnover-extreme-${item.code}`" :class="{ 'requirement-hit': item.latestTurnoverBelowPrevious5Avg60 === true }">今日/前5日均 {{ turnoverRatioText(item.latestToPrevious5TurnoverRatio) }} · 极致缩量 {{ flagText(item.latestTurnoverBelowPrevious5Avg60) }}</small>
+                </td>
                 <td :data-test="`below-ma5-${item.code}`" :class="{ 'requirement-hit': item.closeBelowMa5 === true }"><strong>{{ flagText(item.closeBelowMa5) }}</strong><small>{{ ma5Text(item) }}</small></td>
                 <td>{{ pct(item.closeRange5) }}</td>
                 <td :data-test="`latest-pattern-${item.code}`" :class="{ 'requirement-hit': hasMatchedLatestBarPattern(item) }">{{ latestBarPatternSummary(item) }}</td>
@@ -135,9 +139,10 @@
                       <h3>最新交易日K线形态</h3>
                       <template v-for="pattern in latestBarPatternItems(item)" :key="pattern.code">
                         <p :class="pattern.matched ? 'evidence' : 'muted'">{{ pattern.name }} · {{ pattern.matched ? '命中' : '未命中' }} · {{ latestPatternStatusText(pattern.status) }}</p>
-                        <template v-if="pattern.code === 'HAMMER'">
+                        <template v-if="pattern.code === 'HAMMER' || pattern.code === 'INVERTED_HAMMER'">
                           <p>实体占比 {{ metricPct(pattern, 'body_ratio') }} · 下影/实体 {{ metricRatio(pattern, 'lower_shadow_to_body') }} · 上影/实体 {{ metricRatio(pattern, 'upper_shadow_to_body') }}</p>
                           <p>振幅/前收 {{ metricPct(pattern, 'range_to_previous_close') }} · 振幅/ATR14 {{ metricRatio(pattern, 'range_to_atr14') }}</p>
+                          <p v-if="pattern.code === 'INVERTED_HAMMER'">此前5日趋势 {{ metricSignedPct(pattern, 'context_return_5') }} · 此前5日均价 {{ metricPrice(pattern, 'context_ma5') }}</p>
                         </template>
                         <template v-else>
                           <p>路径 {{ latestPatternTypeText(pattern.signal_type) }} · 实体 {{ priceRange(pattern.body_bottom, pattern.body_top) }}</p>
@@ -262,7 +267,7 @@ async function runEvaluation() {
 function createEmptyTableFilters() {
   return {
     stock: '', evaluationDate: '', tailQualityMin: '', tailQualityMax: '', tailPass: '',
-    volumeRatioMin: '', volumeRatioMax: '', volumeTrend: '', turnoverMin: '', belowMa5: '',
+    volumeRatioMin: '', volumeRatioMax: '', volumeTrend: '', turnoverMin: '', turnoverExtreme: '', belowMa5: '',
     closeRangeMin: '', closeRangeMax: '', latestPattern: '', totalScoreMin: '', totalScoreMax: '',
   }
 }
@@ -294,10 +299,12 @@ function matchesTableFilters(item) {
   if (tableFilters.volumeTrend === 'shrinking' && !(Number(item.volumeSlope10) < 0)) return false
   if (tableFilters.volumeTrend === 'not_shrinking' && Number(item.volumeSlope10) < 0) return false
   if (!matchesBooleanFilter(item.latestTurnover5Min, tableFilters.turnoverMin)) return false
+  if (!matchesBooleanFilter(item.latestTurnoverBelowPrevious5Avg60, tableFilters.turnoverExtreme)) return false
   if (!matchesBooleanFilter(item.closeBelowMa5, tableFilters.belowMa5)) return false
   if (!matchesNumberRange(item.closeRange5, tableFilters.closeRangeMin, tableFilters.closeRangeMax, 100)) return false
   if (tableFilters.latestPattern === 'matched' && !hasMatchedLatestBarPattern(item)) return false
   if (tableFilters.latestPattern === 'unmatched' && hasMatchedLatestBarPattern(item)) return false
+  if (tableFilters.latestPattern === 'INVERTED_HAMMER' && !latestBarPatternItems(item).some(pattern => pattern.code === 'INVERTED_HAMMER' && pattern.matched)) return false
   return matchesNumberRange(item.totalScore, tableFilters.totalScoreMin, tableFilters.totalScoreMax)
 }
 
@@ -350,6 +357,7 @@ function nullablePct(value) { return value == null ? '--' : signedPct(value) }
 function scoreClass(value) { return value >= 18 ? 'excellent' : value >= 14 ? 'good' : 'weak' }
 function flagText(value) { return value == null ? '数据不足' : value ? '是' : '否' }
 function amountText(value) { return value == null ? '--' : `${(Number(value) / 100000000).toFixed(2)}亿` }
+function turnoverRatioText(value) { return value == null ? '--' : `${(Number(value) * 100).toFixed(1)}%` }
 function ma5Text(item) { return item.ma5 == null ? '--' : `${price(item.latestClose)} / ${price(item.ma5)}` }
 function phaseText(value) {
   return {
@@ -398,10 +406,10 @@ function latestBarPatternSummary(item) {
 }
 function latestPatternStatusText(value) { return { DETECTED: '当日识别', CONFIRMING: '后续确认中', CONFIRMED: '已确认', NOT_MATCHED: '未命中' }[value] || value || '--' }
 function latestPatternTypeText(value) {
-  return { FAILED_BREAK_RECLAIM: '假跌破收回', BODY_FLOOR_HOLD: '守住实体支撑', POTENTIAL_BODY_PIVOT: '潜在实体拐点', HIGHER_BODY_LOW: '更高实体低点', BULLISH_HAMMER: '阳线锤子', BEARISH_HAMMER: '阴线锤子', NONE: '无' }[value] || value || '--'
+  return { FAILED_BREAK_RECLAIM: '假跌破收回', BODY_FLOOR_HOLD: '守住实体支撑', POTENTIAL_BODY_PIVOT: '潜在实体拐点', HIGHER_BODY_LOW: '更高实体低点', BULLISH_HAMMER: '阳线锤子', BEARISH_HAMMER: '阴线锤子', BULLISH_INVERTED_HAMMER: '阳线倒锤子', BEARISH_INVERTED_HAMMER: '阴线倒锤子', SHOOTING_STAR: '射击之星', UPPER_SHADOW_HAMMER_UNCLEAR: '上影锤形位置不明确', NONE: '无' }[value] || value || '--'
 }
 function bodyEvidenceText(value) {
-  return { LATEST_LOW_BREAK_RECLAIMED_BY_BODY: '盘中跌破后实体收回', LATEST_BODY_HELD_SUPPORT_ZONE: '实体守住支撑区', LATEST_BODY_POTENTIAL_PIVOT: '最新实体形成潜在低点', LATEST_BAR_NO_VALID_BODY_LOW: '最新K线未形成有效实体低点', LATEST_BAR_EFFECTIVE_HAMMER: '最新交易日形成有效锤子线' }[value] || value
+  return { LATEST_LOW_BREAK_RECLAIMED_BY_BODY: '盘中跌破后实体收回', LATEST_BODY_HELD_SUPPORT_ZONE: '实体守住支撑区', LATEST_BODY_POTENTIAL_PIVOT: '最新实体形成潜在低点', LATEST_BAR_NO_VALID_BODY_LOW: '最新K线未形成有效实体低点', LATEST_BAR_EFFECTIVE_HAMMER: '最新交易日形成有效锤子线', LATEST_BAR_EFFECTIVE_INVERTED_HAMMER: '回调背景下形成有效倒锤子线' }[value] || value
 }
 function latestPatternRiskText(value) {
   return {
@@ -410,11 +418,20 @@ function latestPatternRiskText(value) {
     HAMMER_BODY_RATIO_GT_25PCT: '实体占比超过25%', HAMMER_LOWER_SHADOW_LT_BODY_2: '下影线不足实体2倍',
     HAMMER_UPPER_SHADOW_GT_BODY_0_1: '上影线超过实体10%', HAMMER_RANGE_LT_PREVIOUS_CLOSE_0_8PCT: '总振幅不足前收盘0.8%',
     HAMMER_RANGE_LT_ATR14_0_5: '总振幅不足ATR14的50%', BEARISH_HAMMER_REQUIRES_CONFIRMATION: '阴线锤子反转力度较弱，仍需确认',
+    INVERTED_HAMMER_ATR14_DATA_INSUFFICIENT: '不足15根K线，无法计算倒锤子线', INVERTED_HAMMER_OHLC_INVALID: '倒锤子线OHLC数据非法',
+    INVERTED_HAMMER_ZERO_RANGE_OR_BODY: '倒锤子线零振幅、零实体或ATR14无效', INVERTED_HAMMER_CONTEXT_DATA_INSUFFICIENT: '倒锤子线位置判断数据不足',
+    INVERTED_HAMMER_BODY_RATIO_LT_10PCT: '倒锤子线实体占比低于10%', INVERTED_HAMMER_BODY_RATIO_GT_25PCT: '倒锤子线实体占比超过25%',
+    INVERTED_HAMMER_UPPER_SHADOW_LT_BODY_2: '倒锤子线上影线不足实体2倍', INVERTED_HAMMER_LOWER_SHADOW_GT_BODY_0_1: '倒锤子线下影线超过实体10%',
+    INVERTED_HAMMER_RANGE_LT_PREVIOUS_CLOSE_0_8PCT: '倒锤子线总振幅不足前收盘0.8%', INVERTED_HAMMER_RANGE_LT_ATR14_0_5: '倒锤子线总振幅不足ATR14的50%',
+    INVERTED_HAMMER_REQUIRES_CONFIRMATION: '倒锤子线仍需后续交易日确认', SHOOTING_STAR_AFTER_RISE: '上涨背景下属于射击之星风险',
+    INVERTED_HAMMER_CONTEXT_UNCLEAR: '上影锤形K线位置不明确，不作为有效倒锤子线',
     REQUIRES_TWO_COMPLETED_BARS_TO_CONFIRM_PIVOT: '需要后续两根完整K线确认实体拐点',
   }[value] || value
 }
 function metricPct(pattern, key) { const value = pattern.metrics?.[key]; return value == null ? '--' : pct(value) }
 function metricRatio(pattern, key) { const value = pattern.metrics?.[key]; return value == null ? '--' : `${Number(value).toFixed(2)}倍` }
+function metricSignedPct(pattern, key) { const value = pattern.metrics?.[key]; return value == null ? '--' : signedPct(value) }
+function metricPrice(pattern, key) { return price(pattern.metrics?.[key]) }
 </script>
 
 <style scoped>
@@ -436,7 +453,7 @@ button { padding: 9px 22px; color: #111; background: var(--gold); border: 0; bor
 .form-error { color: var(--danger); margin: 10px 0 0; }
 .summary-strip { display: grid; grid-template-columns: repeat(5,1fr); gap: 1px; background: var(--border); border: 1px solid var(--border); margin-bottom: 16px; }.summary-strip div { background: #0c1420; padding: 12px 16px; display: flex; flex-direction: column; }.summary-strip span { color: var(--text-muted); font-size: 11px; }.summary-strip strong { margin-top: 4px; font: 18px var(--font-mono); }
 .table-wrap { overflow-x: auto; }table { width: 100%; border-collapse: collapse; font-size: 12px; }th { padding: 10px 9px; text-align: left; color: var(--text-muted); border-bottom: 1px solid var(--border); white-space: nowrap; }td { padding: 11px 9px; border-bottom: 1px solid rgba(54,70,90,.55); white-space: nowrap; }td small { display: block; color: var(--text-muted); margin-top: 3px; }.score-row { cursor: pointer; }.score-row:hover { background: rgba(255,255,255,.025); }.rank { color: var(--gold); font-family: var(--font-mono); }
-.filter-row th { padding: 6px 5px 9px; background: #09111b; }.filter-row input,.filter-row select { width: 100%; min-width: 82px; box-sizing: border-box; padding: 6px 7px; color: var(--text-secondary); background: #080f18; border: 1px solid #273648; border-radius: 2px; font: 11px var(--font-mono); }.filter-row input:focus,.filter-row select:focus { outline: none; border-color: rgba(214,168,74,.75); }.range-filter { display: grid; grid-template-columns: repeat(2, minmax(58px, 1fr)); gap: 4px; min-width: 126px; }.percent-filter { min-width: 146px; }.empty-filter-row td { padding: 24px; color: var(--text-muted); text-align: center; }
+.filter-row th { padding: 6px 5px 9px; background: #09111b; }.filter-row input,.filter-row select { width: 100%; min-width: 82px; box-sizing: border-box; padding: 6px 7px; color: var(--text-secondary); background: #080f18; border: 1px solid #273648; border-radius: 2px; font: 11px var(--font-mono); }.filter-row input:focus,.filter-row select:focus { outline: none; border-color: rgba(214,168,74,.75); }.range-filter { display: grid; grid-template-columns: repeat(2, minmax(58px, 1fr)); gap: 4px; min-width: 126px; }.stacked-filter { display: grid; gap: 4px; min-width: 145px; }.percent-filter { min-width: 146px; }.empty-filter-row td { padding: 24px; color: var(--text-muted); text-align: center; }
 .code-copy { display: inline-flex; align-items: center; gap: 6px; padding: 0; color: #dce7f4; background: transparent; border: 0; font: 12px var(--font-mono); cursor: copy; }.code-copy:hover strong { color: var(--gold); text-decoration: underline; }.code-copy span { color: var(--gold); font: 10px var(--font-mono); }
 .tail-score { font: 700 15px var(--font-mono); }.tail-score.excellent { color: #f2c66d; }.tail-score.good,.positive { color: var(--up-red); }.tail-score.weak,.negative { color: var(--down-green); }
 .requirement-hit { color: var(--up-red); font-weight: 700; }
