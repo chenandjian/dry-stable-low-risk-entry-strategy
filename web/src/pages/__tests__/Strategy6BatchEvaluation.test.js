@@ -7,6 +7,10 @@ const api = {
   getLatestStrategy6TrendSqueezeScreen: vi.fn(),
 }
 vi.mock('../../composables/useApi.js', () => ({ useApi: () => api }))
+const { downloadTradingViewWatchlist } = vi.hoisted(() => ({
+  downloadTradingViewWatchlist: vi.fn(),
+}))
+vi.mock('../../utils/tradingViewExport.js', () => ({ downloadTradingViewWatchlist }))
 
 import Strategy6BatchEvaluation from '../Strategy6BatchEvaluation.vue'
 
@@ -199,17 +203,32 @@ describe('Strategy6BatchEvaluation', () => {
     expect(wrapper.text()).toContain('股票代码必须为6位数字')
   })
 
-  it('copies a result stock code without expanding the row', async () => {
+  it('copies a result stock code and expands details when the stock row is clicked', async () => {
     const wrapper = mount(Strategy6BatchEvaluation)
     await wrapper.get('[data-test="batch-submit"]').trigger('click')
     await flushUi()
 
-    await wrapper.get('[data-test="copy-code-300604"]').trigger('click')
+    await wrapper.findAll('.score-row')[0].trigger('click')
     await flushUi()
 
     expect(navigator.clipboard.writeText).toHaveBeenCalledWith('300604')
     expect(wrapper.text()).toContain('已复制')
-    expect(wrapper.find('.detail-row').exists()).toBe(false)
+    expect(wrapper.find('.detail-row').exists()).toBe(true)
+  })
+
+  it('exports only the currently filtered rows in TradingView order', async () => {
+    const wrapper = mount(Strategy6BatchEvaluation)
+    await wrapper.get('[data-test="batch-submit"]').trigger('click')
+    await flushUi()
+    await wrapper.get('[data-test="filter-turnover-min"]').setValue('yes')
+    await flushUi()
+
+    await wrapper.get('[data-test="export-tradingview-filtered"]').trigger('click')
+
+    expect(downloadTradingViewWatchlist).toHaveBeenCalledTimes(1)
+    const request = downloadTradingViewWatchlist.mock.calls[0][0]
+    expect(request.rows.map(row => row.code)).toEqual(['300604'])
+    expect(request.filename).toMatch(/^strategy6-batch-filtered-\d{8}-\d{6}\.txt$/)
   })
 
   it('restores the last entered stock pool after the page is reopened', async () => {
