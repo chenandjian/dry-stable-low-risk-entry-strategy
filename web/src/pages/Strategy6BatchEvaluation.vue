@@ -16,7 +16,7 @@
     <section class="input-panel terminal-panel">
       <div class="panel-title">
         <div><span>01</span><strong>输入股票池</strong></div>
-        <small>每行、空格或逗号分隔；自动去重，最多200只；自动记住上次输入</small>
+        <small>支持代码列表或带“商品代码/股票代码”的CSV；自动去重，最多200只；自动记住上次输入</small>
       </div>
       <textarea
         v-model="rawCodes"
@@ -26,7 +26,10 @@
         placeholder="601857&#10;601899&#10;002371"
       />
       <div class="input-actions">
-        <span>已识别 <strong>{{ parsedCodes.length }}</strong> 只</span>
+        <span>
+          已识别 <strong>{{ parsedCodes.length }}</strong> 只
+          <small v-if="parsedInput.format === 'csv'" data-test="input-format-hint">· CSV 股票池 · 从“{{ parsedInput.sourceColumn }}”列提取</small>
+        </span>
         <div class="input-buttons">
           <button
             data-test="import-trend-squeeze-screen"
@@ -239,6 +242,7 @@
 import { computed, reactive, ref, watch } from 'vue'
 import { useApi } from '../composables/useApi.js'
 import { downloadTradingViewWatchlist } from '../utils/tradingViewExport.js'
+import { parseStockCodeInput } from '../utils/stockCodeInputParser.js'
 
 const api = useApi()
 const STOCK_POOL_STORAGE_KEY = 'strategy6.batchEvaluation.stockPool.v1'
@@ -253,9 +257,8 @@ const response = ref(null)
 const expanded = reactive(new Set())
 const tableFilters = reactive(createEmptyTableFilters())
 
-const parsedCodes = computed(() => [...new Set(
-  rawCodes.value.split(/[\s,，;；]+/).map(code => code.trim()).filter(Boolean),
-)])
+const parsedInput = computed(() => parseStockCodeInput(rawCodes.value))
+const parsedCodes = computed(() => parsedInput.value.codes)
 const allResults = computed(() => response.value?.results || [])
 const results = computed(() => allResults.value.filter(matchesTableFilters))
 const errors = computed(() => response.value?.errors || [])
@@ -295,7 +298,7 @@ async function runEvaluation() {
   copiedCode.value = ''
   response.value = null
   clearTableFilters()
-  const invalid = parsedCodes.value.filter(code => !/^\d{6}$/.test(code))
+  const invalid = parsedInput.value.invalidCodes
   if (!parsedCodes.value.length) {
     errorMessage.value = '请至少输入一个股票代码'
     return false

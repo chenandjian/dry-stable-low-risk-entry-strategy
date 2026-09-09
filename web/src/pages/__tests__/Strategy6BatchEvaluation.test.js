@@ -203,6 +203,26 @@ describe('Strategy6BatchEvaluation', () => {
     expect(wrapper.text()).toContain('股票代码必须为6位数字')
   })
 
+  it('recognizes a TradingView CSV stock pool and evaluates only its code column', async () => {
+    const wrapper = mount(Strategy6BatchEvaluation)
+    const csv = [
+      '商品代码,描述,价格,价格 - 货币,"价格变动 %, 1天"',
+      '601857,中国石油,11.32,CNY,0.17',
+      '601138,工业富联,65.24,CNY,0.75',
+      '600938,中国海油,34.18,CNY,-0.61',
+    ].join('\n')
+
+    await wrapper.get('[data-test="batch-codes"]').setValue(csv)
+    expect(wrapper.get('[data-test="input-format-hint"]').text()).toContain('CSV 股票池')
+    expect(wrapper.get('[data-test="input-format-hint"]').text()).toContain('商品代码')
+    expect(wrapper.text()).toContain('已识别 3 只')
+
+    await wrapper.get('[data-test="batch-submit"]').trigger('click')
+    await flushUi()
+
+    expect(api.evaluateStrategy6Batch).toHaveBeenCalledWith(['601857', '601138', '600938'])
+  })
+
   it('copies a result stock code and expands details when the stock row is clicked', async () => {
     const wrapper = mount(Strategy6BatchEvaluation)
     await wrapper.get('[data-test="batch-submit"]').trigger('click')
