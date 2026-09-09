@@ -57,6 +57,12 @@
         <div class="filter-summary">
           <small>显示 {{ results.length }} / {{ allResults.length }} · 尾部得分相同时按策略总分排序</small>
           <button
+            data-test="export-tradingview-filtered"
+            class="clear-filter-button"
+            :disabled="!results.length"
+            @click="exportTradingView"
+          >导出筛选结果（{{ results.length }}）</button>
+          <button
             data-test="clear-table-filters"
             class="clear-filter-button"
             :disabled="!hasActiveFilters"
@@ -114,14 +120,14 @@
           </thead>
           <tbody>
             <template v-for="(item, index) in results" :key="item.code">
-              <tr class="score-row" @click="toggle(item.code)">
+              <tr class="score-row" @click="handleStockClick(item.code)">
                 <td class="rank">{{ index + 1 }}</td>
                 <td>
                   <button
                     class="code-copy"
                     :data-test="`copy-code-${item.code}`"
                     :title="`复制股票代码 ${item.code}`"
-                    @click.stop="copyCode(item.code)"
+                    @click.stop="handleStockClick(item.code)"
                   >
                     <strong>{{ item.code }}</strong>
                     <span v-if="copiedCode === item.code">已复制</span>
@@ -232,6 +238,7 @@
 <script setup>
 import { computed, reactive, ref, watch } from 'vue'
 import { useApi } from '../composables/useApi.js'
+import { downloadTradingViewWatchlist } from '../utils/tradingViewExport.js'
 
 const api = useApi()
 const STOCK_POOL_STORAGE_KEY = 'strategy6.batchEvaluation.stockPool.v1'
@@ -403,6 +410,10 @@ async function importTrendSqueezeScreen() {
 function toggle(code) {
   expanded.has(code) ? expanded.delete(code) : expanded.add(code)
 }
+function handleStockClick(code) {
+  toggle(code)
+  void copyCode(code)
+}
 async function copyCode(code) {
   try {
     errorMessage.value = ''
@@ -412,6 +423,16 @@ async function copyCode(code) {
   } catch (error) {
     errorMessage.value = `复制失败：${error?.message || '无法访问剪贴板'}`
   }
+}
+function exportTradingView() {
+  downloadTradingViewWatchlist({
+    filename: `strategy6-batch-filtered-${filenameTimestamp(new Date())}.txt`,
+    rows: results.value,
+  })
+}
+function filenameTimestamp(value) {
+  const pad = number => String(number).padStart(2, '0')
+  return `${value.getFullYear()}${pad(value.getMonth() + 1)}${pad(value.getDate())}-${pad(value.getHours())}${pad(value.getMinutes())}${pad(value.getSeconds())}`
 }
 function pct(value) { return `${(Number(value || 0) * 100).toFixed(2)}%` }
 function signedPct(value) { const n = Number(value || 0) * 100; return `${n >= 0 ? '+' : ''}${n.toFixed(2)}%` }
