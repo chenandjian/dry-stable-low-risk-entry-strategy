@@ -257,9 +257,17 @@ describe('Strategy6BatchEvaluation', () => {
     expect(wrapper.findAll('.score-row')).toHaveLength(1)
     expect(wrapper.text()).toContain('300604')
 
-    await wrapper.get('[data-test="filter-collection-pattern-grade"]').setValue('A')
+    await wrapper.get('[data-test="clear-table-filters"]').trigger('click')
+    await flushUi()
+    await wrapper.get('[data-test="filter-collection-pattern-grade-A"]').setValue(true)
+    await wrapper.get('[data-test="filter-collection-pattern-grade-UNQUALIFIED"]').setValue(true)
+    await flushUi()
+    expect(wrapper.findAll('.score-row')).toHaveLength(2)
+
+    await wrapper.get('[data-test="filter-collection-pattern-grade-UNQUALIFIED"]').setValue(false)
     await flushUi()
     expect(wrapper.findAll('.score-row')).toHaveLength(1)
+    expect(wrapper.text()).toContain('300604')
 
     await wrapper.get('[data-test="filter-collection-pattern-score-min"]').setValue('85')
     await flushUi()
