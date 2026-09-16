@@ -223,6 +223,7 @@ describe('Strategy6BatchEvaluation', () => {
     const boxes = wrapper.findAll('input[type="checkbox"]').filter(box => ['A', 'A+'].includes(box.element.value) && !box.attributes('data-test'))
     for (const box of boxes) await box.setValue(true)
     expect(wrapper.findAll('.score-row')).toHaveLength(2)
+
   })
 
   it('recognizes a TradingView CSV stock pool and evaluates only its code column', async () => {
@@ -310,6 +311,8 @@ describe('Strategy6BatchEvaluation', () => {
     const wrapper = mount(Strategy6BatchEvaluation)
     await wrapper.get('[data-test="batch-submit"]').trigger('click')
     await flushUi()
+    const tableWidth = wrapper.get('table').attributes('style')
+    expect(wrapper.findAll('colgroup col')).toHaveLength(14)
 
     expect(wrapper.findAll('.score-row')).toHaveLength(2)
 
@@ -333,6 +336,7 @@ describe('Strategy6BatchEvaluation', () => {
     await wrapper.get('[data-test="filter-collection-pattern-score-min"]').setValue('85')
     await flushUi()
     expect(wrapper.findAll('.score-row')).toHaveLength(0)
+    expect(wrapper.get('table').attributes('style')).toBe(tableWidth)
 
     await wrapper.get('[data-test="clear-table-filters"]').trigger('click')
     await flushUi()
