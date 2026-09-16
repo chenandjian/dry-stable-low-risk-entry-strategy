@@ -203,6 +203,28 @@ describe('Strategy6BatchEvaluation', () => {
     expect(wrapper.text()).toContain('股票代码必须为6位数字')
   })
 
+  it('bounds rendered rows after a full evaluation while filtering and exporting the entire result', async () => {
+    const payload = await api.evaluateStrategy6Batch()
+    payload.results = Array.from({ length: 132 }, (_, index) => ({
+      ...payload.results[0], code: String(600000 + index),
+      klineCollectionPatterns: [{ ...payload.results[0].klineCollectionPatterns[0], grade: index < 60 ? 'A' : 'B' }],
+    }))
+    const wrapper = mount(Strategy6BatchEvaluation)
+    await wrapper.get('[data-test="batch-submit"]').trigger('click')
+    await flushUi()
+    expect(wrapper.findAll('.score-row')).toHaveLength(25)
+    await wrapper.get('[data-test="batch-page-next"]').trigger('click')
+    expect(wrapper.findAll('.score-row')[0].text()).toContain('600025')
+    await wrapper.get('[data-test="collection-grade-toggle"]').trigger('click')
+    await wrapper.get('[data-test="filter-collection-pattern-grade-A"]').setValue(true)
+    expect(wrapper.text()).toContain('显示 60 / 132')
+    expect(wrapper.findAll('.score-row')).toHaveLength(25)
+    expect(wrapper.findAll('.score-row')[0].text()).toContain('600000')
+    await wrapper.get('[data-test="export-tradingview-filtered"]').trigger('click')
+    expect(downloadTradingViewWatchlist.mock.calls[0][0].rows).toHaveLength(60)
+    expect(api.evaluateStrategy6Batch).toHaveBeenCalledTimes(2)
+  })
+
   it('filters EMA confirmation independently from score and supports multiple grades', async () => {
     const payload = await api.evaluateStrategy6Batch()
     payload.results[0].emaCompression = { status: 'EXTREME', extreme: true, score: 78, grade: 'A', metrics: { spreadMean5: 0.28, compressionStreak: 9 } }
