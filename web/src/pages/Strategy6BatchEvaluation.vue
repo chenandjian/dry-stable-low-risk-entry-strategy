@@ -85,7 +85,15 @@
               <th><input v-model.trim="tableFilters.stock" data-test="filter-stock" placeholder="代码/名称" /></th>
               <th>
                 <select v-model="tableFilters.emaStatus" data-test="filter-ema-status"><option value="">全部确认状态</option><option value="EXTREME">极致缠绕（含非常极致）</option><option value="ULTRA_EXTREME">非常极致</option><option value="NOT_CONFIRMED">未确认</option><option value="DATA_INSUFFICIENT">数据不足</option></select>
-                <details class="grade-multiselect"><summary>评分等级（可复选）</summary><label v-for="grade in ['S', 'A+', 'A', 'B', 'C', 'NONE']" :key="grade"><input v-model="tableFilters.emaGrades" type="checkbox" :value="grade">{{ grade === 'NONE' ? '未达标' : grade }}</label></details>
+                <details class="grade-multiselect">
+                  <summary>{{ tableFilters.emaGrades.length ? `已选：${tableFilters.emaGrades.map(grade => grade === 'NONE' ? '未达标' : grade).join('、')}` : '评分等级（可复选）' }}</summary>
+                  <div class="grade-options" data-test="ema-grade-options" style="grid-template-columns: 1fr">
+                    <label v-for="option in emaGradeOptions" :key="option.value">
+                      <input v-model="tableFilters.emaGrades" type="checkbox" :value="option.value">
+                      <span>{{ option.label }}</span>
+                    </label>
+                  </div>
+                </details>
                 <div class="range-filter"><input v-model="tableFilters.emaMin" type="number" placeholder="最低分"><input v-model="tableFilters.emaMax" type="number" placeholder="最高分"></div>
                 <input v-model="tableFilters.emaWidth" type="number" step="0.01" placeholder="5日均宽上限%">
                 <input v-model="tableFilters.emaDays" type="number" min="0" placeholder="连续最少天数">
@@ -289,6 +297,14 @@ const collectionGradeOptions = [
   { value: 'S', label: 'S' }, { value: 'A', label: 'A' },
   { value: 'B', label: 'B' }, { value: 'C', label: 'C' },
   { value: 'UNQUALIFIED', label: '未达标' },
+]
+const emaGradeOptions = [
+  { value: 'S', label: 'S · 极致缠绕（90–100分）' },
+  { value: 'A+', label: 'A+ · 非常强（80–89分）' },
+  { value: 'A', label: 'A · 高度缠绕（70–79分）' },
+  { value: 'B', label: 'B · 明显收敛（60–69分）' },
+  { value: 'C', label: 'C · 普通收敛（50–59分）' },
+  { value: 'NONE', label: '未达标（低于50分）' },
 ]
 const collectionGradeFilterLabel = computed(() => {
   const selected = tableFilters.collectionPatternGrades
