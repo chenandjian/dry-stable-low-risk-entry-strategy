@@ -203,6 +203,23 @@ describe('Strategy6BatchEvaluation', () => {
     expect(wrapper.text()).toContain('股票代码必须为6位数字')
   })
 
+  it('filters EMA confirmation independently from score and supports multiple grades', async () => {
+    const payload = await api.evaluateStrategy6Batch()
+    payload.results[0].emaCompression = { status: 'EXTREME', extreme: true, score: 78, grade: 'A', metrics: { spreadMean5: 0.28, compressionStreak: 9 } }
+    payload.results[1].emaCompression = { status: 'NOT_CONFIRMED', extreme: false, score: 85, grade: 'A+', metrics: { spreadMean5: 0.3, compressionStreak: 5 } }
+    const wrapper = mount(Strategy6BatchEvaluation)
+    await wrapper.get('[data-test="batch-submit"]').trigger('click')
+    await flushUi()
+    expect(wrapper.text()).toContain('5日均宽 0.280%')
+    await wrapper.get('[data-test="filter-ema-status"]').setValue('EXTREME')
+    expect(wrapper.findAll('.score-row')).toHaveLength(1)
+    expect(wrapper.findAll('.score-row')[0].text()).toContain('300604')
+    await wrapper.get('[data-test="clear-table-filters"]').trigger('click')
+    const boxes = wrapper.findAll('input[type="checkbox"]').filter(box => ['A', 'A+'].includes(box.element.value) && !box.attributes('data-test'))
+    for (const box of boxes) await box.setValue(true)
+    expect(wrapper.findAll('.score-row')).toHaveLength(2)
+  })
+
   it('recognizes a TradingView CSV stock pool and evaluates only its code column', async () => {
     const wrapper = mount(Strategy6BatchEvaluation)
     const csv = [
