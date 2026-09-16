@@ -73,6 +73,11 @@
           >清除筛选</button>
         </div>
       </div>
+      <nav class="result-pagination" aria-label="评分结果分页">
+        <span>共 {{ results.length }} 只 · 第 {{ resultPage }} / {{ resultPageCount }} 页 · 每页25只</span>
+        <button class="clear-filter-button" :disabled="resultPage <= 1" @click="resultPage--">上一页</button>
+        <button data-test="batch-page-next" class="clear-filter-button" :disabled="resultPage >= resultPageCount" @click="resultPage++">下一页</button>
+      </nav>
       <div class="table-wrap">
         <table :style="{ width: `${resultColumnWidths.reduce((total, width) => total + width, 0)}px` }">
           <colgroup>
@@ -98,15 +103,15 @@
               <th><select v-model="tableFilters.volumeTrend"><option value="">全部</option><option value="shrinking">缩量</option><option value="not_shrinking">未缩量</option></select></th>
               <th>
                 <select v-model="tableFilters.emaStatus" data-test="filter-ema-status"><option value="">全部确认状态</option><option value="EXTREME">极致缠绕（含非常极致）</option><option value="ULTRA_EXTREME">非常极致</option><option value="NOT_CONFIRMED">未确认</option><option value="DATA_INSUFFICIENT">数据不足</option></select>
-                <details class="grade-multiselect">
-                  <summary>{{ tableFilters.emaGrades.length ? `已选：${tableFilters.emaGrades.map(grade => grade === 'NONE' ? '未达标' : grade).join('、')}` : '评分等级（可复选）' }}</summary>
-                  <div class="grade-options" data-test="ema-grade-options" style="grid-template-columns: 1fr">
+                <div class="grade-multiselect">
+                  <button class="grade-toggle" :aria-expanded="emaGradesOpen" @click="emaGradesOpen = !emaGradesOpen">{{ tableFilters.emaGrades.length ? `已选：${tableFilters.emaGrades.map(grade => grade === 'NONE' ? '未达标' : grade).join('、')}` : '评分等级（可复选）' }}</button>
+                  <div v-show="emaGradesOpen" class="grade-options" data-test="ema-grade-options" style="grid-template-columns: 1fr">
                     <label v-for="option in emaGradeOptions" :key="option.value">
                       <input v-model="tableFilters.emaGrades" type="checkbox" :value="option.value">
                       <span>{{ option.label }}</span>
                     </label>
                   </div>
-                </details>
+                </div>
                 <div class="range-filter"><input v-model="tableFilters.emaMin" type="number" placeholder="最低分"><input v-model="tableFilters.emaMax" type="number" placeholder="最高分"></div>
                 <input v-model="tableFilters.emaWidth" type="number" step="0.01" placeholder="5日均宽上限%">
                 <input v-model="tableFilters.emaDays" type="number" min="0" placeholder="连续最少天数">
@@ -119,9 +124,9 @@
                 <div class="collection-filter">
                   <select v-model="tableFilters.collectionPatternCode"><option value="">全部形态</option><option value="SLOW_ROUNDED_BASE">缓跌圆底</option></select>
                   <select v-model="tableFilters.collectionPatternStatus" data-test="filter-collection-pattern-status"><option value="">全部状态</option><option value="strong">强匹配</option><option value="matched">已匹配</option><option value="forming">形成中</option><option value="not_matched">未匹配</option><option value="data_insufficient">数据不足</option></select>
-                  <details class="grade-multiselect">
-                    <summary>{{ collectionGradeFilterLabel }}</summary>
-                    <div class="grade-options">
+                  <div class="grade-multiselect">
+                    <button class="grade-toggle" data-test="collection-grade-toggle" :aria-expanded="collectionGradesOpen" @click="collectionGradesOpen = !collectionGradesOpen">{{ collectionGradeFilterLabel }}（可复选）</button>
+                    <div v-show="collectionGradesOpen" class="grade-options">
                       <label v-for="option in collectionGradeOptions" :key="option.value">
                         <input
                           v-model="tableFilters.collectionPatternGrades"
@@ -132,7 +137,7 @@
                         {{ option.label }}
                       </label>
                     </div>
-                  </details>
+                  </div>
                   <div class="range-filter"><input v-model="tableFilters.collectionPatternScoreMin" data-test="filter-collection-pattern-score-min" type="number" min="0" max="100" placeholder="最低分" /><input v-model="tableFilters.collectionPatternScoreMax" type="number" min="0" max="100" placeholder="最高分" /></div>
                 </div>
               </th>
@@ -140,9 +145,9 @@
             </tr>
           </thead>
           <tbody>
-            <template v-for="(item, index) in results" :key="item.code">
+            <template v-for="(item, index) in pagedResults" :key="item.code">
               <tr class="score-row" @click="handleStockClick(item.code)">
-                <td class="rank">{{ index + 1 }}</td>
+                <td class="rank">{{ (resultPage - 1) * RESULT_PAGE_SIZE + index + 1 }}</td>
                 <td>
                   <button
                     class="code-copy"
@@ -295,6 +300,13 @@ const parsedInput = computed(() => parseStockCodeInput(rawCodes.value))
 const parsedCodes = computed(() => parsedInput.value.codes)
 const allResults = computed(() => response.value?.results || [])
 const results = computed(() => allResults.value.filter(matchesTableFilters))
+const RESULT_PAGE_SIZE = 25
+const resultPage = ref(1)
+const collectionGradesOpen = ref(false)
+const emaGradesOpen = ref(false)
+const resultPageCount = computed(() => Math.max(1, Math.ceil(results.value.length / RESULT_PAGE_SIZE)))
+const pagedResults = computed(() => results.value.slice((resultPage.value - 1) * RESULT_PAGE_SIZE, resultPage.value * RESULT_PAGE_SIZE))
+watch(results, () => { resultPage.value = 1 })
 const errors = computed(() => response.value?.errors || [])
 const tailPassedCount = computed(() => allResults.value.filter(item => item.tailPass).length)
 const evaluationDates = computed(() => [...new Set(allResults.value.map(item => item.evaluationDate).filter(Boolean))].sort().reverse())
@@ -339,6 +351,9 @@ async function runEvaluation() {
   errorMessage.value = ''
   copiedCode.value = ''
   response.value = null
+  expanded.clear()
+  collectionGradesOpen.value = false
+  emaGradesOpen.value = false
   clearTableFilters()
   const invalid = parsedInput.value.invalidCodes
   if (!parsedCodes.value.length) {
@@ -613,6 +628,10 @@ function collectionPatternWarningText(value) {
 </script>
 
 <style scoped>
+.result-pagination { display: flex; justify-content: flex-end; align-items: center; gap: 12px; margin-bottom: 12px; color: var(--text-muted); font-size: 12px; }
+.grade-toggle { width: 100%; padding: 6px 7px; color: var(--text-secondary); background: transparent; text-align: left; font: inherit; border-radius: 0; }
+.grade-toggle::before { content: '▸ '; }
+.grade-toggle[aria-expanded="true"]::before { content: '▾ '; }
 /* Keep filter controls stationary when result rows disappear or grades expand. */
 .table-wrap table { table-layout: fixed; }
 .table-wrap td { overflow-wrap: anywhere; white-space: normal; }
