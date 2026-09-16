@@ -77,12 +77,19 @@
         <table>
           <thead>
             <tr>
-              <th>排名</th><th>股票</th><th>评价日</th><th>尾部质量</th><th>尾部结论</th><th>量比</th>
+              <th>排名</th><th>股票</th><th>EMA极致缠绕</th><th>评价日</th><th>尾部质量</th><th>尾部结论</th><th>量比</th>
               <th>量能趋势</th><th>5日成交额最低</th><th>收盘低于MA5</th><th>5日收盘波动</th><th>最新交易日K线形态</th><th>K线集合形态</th><th>策略总分</th>
             </tr>
             <tr class="filter-row">
               <th></th>
               <th><input v-model.trim="tableFilters.stock" data-test="filter-stock" placeholder="代码/名称" /></th>
+              <th>
+                <select v-model="tableFilters.emaStatus" data-test="filter-ema-status"><option value="">全部确认状态</option><option value="EXTREME">极致缠绕（含非常极致）</option><option value="ULTRA_EXTREME">非常极致</option><option value="NOT_CONFIRMED">未确认</option><option value="DATA_INSUFFICIENT">数据不足</option></select>
+                <details class="grade-multiselect"><summary>评分等级（可复选）</summary><label v-for="grade in ['S', 'A+', 'A', 'B', 'C', 'NONE']" :key="grade"><input v-model="tableFilters.emaGrades" type="checkbox" :value="grade">{{ grade === 'NONE' ? '未达标' : grade }}</label></details>
+                <div class="range-filter"><input v-model="tableFilters.emaMin" type="number" placeholder="最低分"><input v-model="tableFilters.emaMax" type="number" placeholder="最高分"></div>
+                <input v-model="tableFilters.emaWidth" type="number" step="0.01" placeholder="5日均宽上限%">
+                <input v-model="tableFilters.emaDays" type="number" min="0" placeholder="连续最少天数">
+              </th>
               <th>
                 <select v-model="tableFilters.evaluationDate" data-test="filter-evaluation-date">
                   <option value="">全部日期</option>
@@ -137,6 +144,11 @@
                   </button>
                   <small>{{ item.name || '名称未收录' }}</small>
                 </td>
+                <td :class="{ 'requirement-hit': item.emaCompression?.extreme }">
+                  <strong>{{ emaStatusText(item.emaCompression?.status) }}</strong>
+                  <small>评分 {{ item.emaCompression?.score ?? '--' }} / 100 · {{ item.emaCompression?.grade || '--' }}</small>
+                  <small>5日均宽 {{ emaNumber(item.emaCompression?.metrics?.spreadMean5) }}% · 连续 {{ item.emaCompression?.metrics?.compressionStreak ?? '--' }}日</small>
+                </td>
                 <td>{{ item.evaluationDate || '--' }}</td>
                 <td><strong class="tail-score" :class="scoreClass(item.tailQualityScore)">{{ item.tailQualityScore }} / 20</strong><small>计入 {{ item.tailScore }} / 20</small></td>
                 <td><span class="status" :class="item.tailPass ? 'pass' : 'fail'">{{ item.tailPass ? '量稳价干通过' : '尾部未通过' }}</span></td>
@@ -157,8 +169,17 @@
                 <td><strong>{{ item.totalScore }} / 100</strong></td>
               </tr>
               <tr v-if="expanded.has(item.code)" class="detail-row">
-                <td colspan="13">
+                <td colspan="14">
                   <div class="detail-grid">
+                    <div>
+                      <h3>EMA极致缠绕</h3>
+                      <p>{{ emaStatusText(item.emaCompression?.status) }} · 评分与确认状态独立</p>
+                      <p>EMA5 / 10 / 20：{{ emaNumber(item.emaCompression?.metrics?.ema5) }} / {{ emaNumber(item.emaCompression?.metrics?.ema10) }} / {{ emaNumber(item.emaCompression?.metrics?.ema20) }}</p>
+                      <p v-for="(label, key) in emaMetricLabels" :key="key">{{ label }}：{{ emaNumber(item.emaCompression?.metrics?.[key]) }}%</p>
+                      <p>收紧比 {{ emaNumber(item.emaCompression?.metrics?.compressionChange) }}（≤0.90收紧，0.90–1.10稳定，>1.10张开）</p>
+                      <p v-for="reason in item.emaCompression?.reasons || []" :key="reason" class="evidence">{{ reason }}</p>
+                      <p v-for="reason in item.emaCompression?.failReasons || []" :key="reason" class="risk">{{ reason }}</p>
+                    </div>
                     <div>
                       <h3>强势趋势收缩初筛</h3>
                       <p :class="item.strongTrendSqueezePass ? 'evidence' : 'risk'">
@@ -222,7 +243,7 @@
               </tr>
             </template>
             <tr v-if="!results.length" class="empty-filter-row">
-              <td colspan="13">没有符合当前筛选条件的股票，请调整条件或清除筛选。</td>
+              <td colspan="14">没有符合当前筛选条件的股票，请调整条件或清除筛选。</td>
             </tr>
           </tbody>
         </table>
@@ -327,6 +348,7 @@ async function runEvaluation() {
 
 function createEmptyTableFilters() {
   return {
+    emaStatus: '', emaGrades: [], emaMin: '', emaMax: '', emaWidth: '', emaDays: '',
     stock: '', evaluationDate: '', tailQualityMin: '', tailQualityMax: '', tailPass: '',
     volumeRatioMin: '', volumeRatioMax: '', volumeTrend: '', turnoverMin: '', turnoverExtreme: '', belowMa5: '',
     closeRangeMin: '', closeRangeMax: '', latestPattern: '',
@@ -352,6 +374,12 @@ function matchesBooleanFilter(value, filter) {
 }
 
 function matchesTableFilters(item) {
+  const ema = item.emaCompression
+  if (tableFilters.emaStatus === 'EXTREME' ? !ema?.extreme : tableFilters.emaStatus && ema?.status !== tableFilters.emaStatus) return false
+  if (tableFilters.emaGrades.length && !tableFilters.emaGrades.includes(ema?.grade)) return false
+  if (!matchesNumberRange(ema?.score, tableFilters.emaMin, tableFilters.emaMax)) return false
+  if (!matchesNumberRange(ema?.metrics?.spreadMean5, '', tableFilters.emaWidth)) return false
+  if (!matchesNumberRange(ema?.metrics?.compressionStreak, tableFilters.emaDays, '')) return false
   const stockQuery = tableFilters.stock.toLowerCase()
   if (stockQuery && !`${item.code || ''} ${item.name || ''}`.toLowerCase().includes(stockQuery)) return false
   if (tableFilters.evaluationDate && item.evaluationDate !== tableFilters.evaluationDate) return false
@@ -386,6 +414,10 @@ function matchesTableFilters(item) {
 function clearTableFilters() {
   Object.assign(tableFilters, createEmptyTableFilters())
 }
+
+const emaMetricLabels = { spreadNow: '当前带宽', spreadMean3: '3日平均', spreadMean5: '5日平均', spreadMax5: '5日最大', spreadStd5: '5日标准差', historicalPercentile: '此前120日百分位', ema20Change5: 'EMA20五日变化' }
+function emaNumber(value) { return value == null ? '--' : Number(value).toFixed(3) }
+function emaStatusText(value) { return { ULTRA_EXTREME: '非常极致 · 已确认', EXTREME: '极致缠绕 · 已确认', NOT_CONFIRMED: '未确认', DATA_INSUFFICIENT: '数据不足', DATA_INVALID: '数据异常', CONFIG_INVALID: '配置异常' }[value] || '尚未计算' }
 
 async function importTrendSqueezeScreen() {
   errorMessage.value = ''

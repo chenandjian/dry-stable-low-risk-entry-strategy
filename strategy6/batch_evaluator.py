@@ -6,6 +6,7 @@ import math
 from scanner import db
 from strategy6.collection_patterns import evaluate_collection_patterns
 from strategy6.engine import StrongVcpTailEngine
+from strategy6.ema_compression import evaluate_ema_compression
 
 
 MARKET_SYMBOLS = ("sh000001", "sz399001", "sz399006", "hs300")
@@ -44,6 +45,7 @@ def evaluate_strategy6_batch(codes: list[str], config: dict) -> dict:
             continue
         summary = _summarize(evaluation, metadata, _batch_display_metrics(rows))
         summary["klineCollectionPatterns"] = evaluate_collection_patterns(rows)
+        summary["emaCompression"] = evaluate_ema_compression(rows, config.get("strategy6", {}).get("ema_compression"))
         results.append(summary)
 
     results.sort(
