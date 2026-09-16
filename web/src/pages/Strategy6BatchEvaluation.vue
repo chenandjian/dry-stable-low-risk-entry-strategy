@@ -74,7 +74,10 @@
         </div>
       </div>
       <div class="table-wrap">
-        <table>
+        <table :style="{ width: `${resultColumnWidths.reduce((total, width) => total + width, 0)}px` }">
+          <colgroup>
+            <col v-for="(width, index) in resultColumnWidths" :key="index" :style="{ width: `${width}px` }">
+          </colgroup>
           <thead>
             <tr>
               <th>排名</th><th>股票</th><th>评价日</th><th>尾部质量</th><th>尾部结论</th><th>量比</th>
@@ -268,7 +271,7 @@
 </template>
 
 <script setup>
-import { computed, reactive, ref, watch } from 'vue'
+import { computed, reactive, ref, shallowRef, watch } from 'vue'
 import { useApi } from '../composables/useApi.js'
 import { downloadTradingViewWatchlist } from '../utils/tradingViewExport.js'
 import { parseStockCodeInput } from '../utils/stockCodeInputParser.js'
@@ -282,7 +285,9 @@ const importLoading = ref(false)
 const importMessage = ref('')
 const errorMessage = ref('')
 const copiedCode = ref('')
-const response = ref(null)
+// Results are replaced as a snapshot; filters never mutate the nested diagnostics.
+const response = shallowRef(null)
+const resultColumnWidths = [55, 120, 115, 150, 150, 145, 110, 270, 270, 150, 155, 220, 220, 145]
 const expanded = reactive(new Set())
 const tableFilters = reactive(createEmptyTableFilters())
 
@@ -608,6 +613,10 @@ function collectionPatternWarningText(value) {
 </script>
 
 <style scoped>
+/* Keep filter controls stationary when result rows disappear or grades expand. */
+.table-wrap table { table-layout: fixed; }
+.table-wrap td { overflow-wrap: anywhere; white-space: normal; }
+.table-wrap .detail-row td { white-space: normal; }
 .batch-page { padding: 24px; color: var(--text-primary); }
 .page-header { display: flex; justify-content: space-between; gap: 24px; margin-bottom: 18px; }
 .eyebrow { color: var(--gold); font: 11px/1 var(--font-mono); letter-spacing: .18em; }
