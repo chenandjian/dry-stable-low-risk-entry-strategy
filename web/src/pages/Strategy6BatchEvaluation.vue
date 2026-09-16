@@ -77,12 +77,22 @@
         <table>
           <thead>
             <tr>
-              <th>排名</th><th>股票</th><th>EMA极致缠绕</th><th>评价日</th><th>尾部质量</th><th>尾部结论</th><th>量比</th>
-              <th>量能趋势</th><th>5日成交额最低</th><th>收盘低于MA5</th><th>5日收盘波动</th><th>最新交易日K线形态</th><th>K线集合形态</th><th>策略总分</th>
+              <th>排名</th><th>股票</th><th>评价日</th><th>尾部质量</th><th>尾部结论</th><th>量比</th>
+              <th>量能趋势</th><th>EMA极致缠绕</th><th>5日成交额最低</th><th>收盘低于MA5</th><th>5日收盘波动</th><th>最新交易日K线形态</th><th>K线集合形态</th><th>策略总分</th>
             </tr>
             <tr class="filter-row">
               <th></th>
               <th><input v-model.trim="tableFilters.stock" data-test="filter-stock" placeholder="代码/名称" /></th>
+              <th>
+                <select v-model="tableFilters.evaluationDate" data-test="filter-evaluation-date">
+                  <option value="">全部日期</option>
+                  <option v-for="date in evaluationDates" :key="date" :value="date">{{ date }}</option>
+                </select>
+              </th>
+              <th><div class="range-filter"><input v-model="tableFilters.tailQualityMin" data-test="filter-tail-score-min" type="number" min="0" max="20" placeholder="最低" /><input v-model="tableFilters.tailQualityMax" type="number" min="0" max="20" placeholder="最高" /></div></th>
+              <th><select v-model="tableFilters.tailPass" data-test="filter-tail-pass"><option value="">全部</option><option value="pass">通过</option><option value="fail">未通过</option></select></th>
+              <th><div class="range-filter"><input v-model="tableFilters.volumeRatioMin" type="number" step="0.01" placeholder="最低" /><input v-model="tableFilters.volumeRatioMax" type="number" step="0.01" placeholder="最高" /></div></th>
+              <th><select v-model="tableFilters.volumeTrend"><option value="">全部</option><option value="shrinking">缩量</option><option value="not_shrinking">未缩量</option></select></th>
               <th>
                 <select v-model="tableFilters.emaStatus" data-test="filter-ema-status"><option value="">全部确认状态</option><option value="EXTREME">极致缠绕（含非常极致）</option><option value="ULTRA_EXTREME">非常极致</option><option value="NOT_CONFIRMED">未确认</option><option value="DATA_INSUFFICIENT">数据不足</option></select>
                 <details class="grade-multiselect">
@@ -98,16 +108,6 @@
                 <input v-model="tableFilters.emaWidth" type="number" step="0.01" placeholder="5日均宽上限%">
                 <input v-model="tableFilters.emaDays" type="number" min="0" placeholder="连续最少天数">
               </th>
-              <th>
-                <select v-model="tableFilters.evaluationDate" data-test="filter-evaluation-date">
-                  <option value="">全部日期</option>
-                  <option v-for="date in evaluationDates" :key="date" :value="date">{{ date }}</option>
-                </select>
-              </th>
-              <th><div class="range-filter"><input v-model="tableFilters.tailQualityMin" data-test="filter-tail-score-min" type="number" min="0" max="20" placeholder="最低" /><input v-model="tableFilters.tailQualityMax" type="number" min="0" max="20" placeholder="最高" /></div></th>
-              <th><select v-model="tableFilters.tailPass" data-test="filter-tail-pass"><option value="">全部</option><option value="pass">通过</option><option value="fail">未通过</option></select></th>
-              <th><div class="range-filter"><input v-model="tableFilters.volumeRatioMin" type="number" step="0.01" placeholder="最低" /><input v-model="tableFilters.volumeRatioMax" type="number" step="0.01" placeholder="最高" /></div></th>
-              <th><select v-model="tableFilters.volumeTrend"><option value="">全部</option><option value="shrinking">缩量</option><option value="not_shrinking">未缩量</option></select></th>
               <th><div class="stacked-filter"><select v-model="tableFilters.turnoverMin" data-test="filter-turnover-min"><option value="">5日最低：全部</option><option value="yes">5日最低：是</option><option value="no">5日最低：否</option><option value="unknown">5日最低：数据不足</option></select><select v-model="tableFilters.turnoverExtreme" data-test="filter-turnover-extreme"><option value="">极致缩量：全部</option><option value="yes">极致缩量：是</option><option value="no">极致缩量：否</option><option value="unknown">极致缩量：数据不足</option></select></div></th>
               <th><select v-model="tableFilters.belowMa5"><option value="">全部</option><option value="yes">是</option><option value="no">否</option><option value="unknown">数据不足</option></select></th>
               <th><div class="range-filter percent-filter"><input v-model="tableFilters.closeRangeMin" type="number" step="0.1" placeholder="最低%" /><input v-model="tableFilters.closeRangeMax" type="number" step="0.1" placeholder="最高%" /></div></th>
@@ -152,16 +152,16 @@
                   </button>
                   <small>{{ item.name || '名称未收录' }}</small>
                 </td>
-                <td :class="{ 'requirement-hit': item.emaCompression?.extreme }">
-                  <strong>{{ emaStatusText(item.emaCompression?.status) }}</strong>
-                  <small>评分 {{ item.emaCompression?.score ?? '--' }} / 100 · {{ item.emaCompression?.grade || '--' }}</small>
-                  <small>5日均宽 {{ emaNumber(item.emaCompression?.metrics?.spreadMean5) }}% · 连续 {{ item.emaCompression?.metrics?.compressionStreak ?? '--' }}日</small>
-                </td>
                 <td>{{ item.evaluationDate || '--' }}</td>
                 <td><strong class="tail-score" :class="scoreClass(item.tailQualityScore)">{{ item.tailQualityScore }} / 20</strong><small>计入 {{ item.tailScore }} / 20</small></td>
                 <td><span class="status" :class="item.tailPass ? 'pass' : 'fail'">{{ item.tailPass ? '量稳价干通过' : '尾部未通过' }}</span></td>
                 <td>{{ ratio(item.tailVolumeRatio) }}</td>
                 <td :class="item.volumeSlope10 < 0 ? 'positive' : 'negative'">{{ item.volumeSlope10 < 0 ? '缩量' : '未缩量' }}</td>
+                <td :class="{ 'requirement-hit': item.emaCompression?.extreme }">
+                  <strong>{{ emaStatusText(item.emaCompression?.status) }}</strong>
+                  <small>评分 {{ item.emaCompression?.score ?? '--' }} / 100 · {{ item.emaCompression?.grade || '--' }}</small>
+                  <small>5日均宽 {{ emaNumber(item.emaCompression?.metrics?.spreadMean5) }}% · 连续 {{ item.emaCompression?.metrics?.compressionStreak ?? '--' }}日</small>
+                </td>
                 <td :data-test="`turnover-min-${item.code}`" :class="{ 'requirement-hit': item.latestTurnover5Min === true }">
                   <strong>5日最低 {{ flagText(item.latestTurnover5Min) }}</strong>
                   <small>{{ amountText(item.latestTurnover) }}</small>
