@@ -37,3 +37,19 @@ def test_september_18_is_rebound_not_current_exhaustion(code):
     assert not result['matched']
     assert result['status'] == 'REBOUNDED'
     assert result['confirmationDays'] == 0
+
+
+def test_600673_reobserved_on_current_evidence_without_two_new_down_days():
+    result = evaluate('600673', '2026-09-11')
+    assert result['status'] == 'NORMAL'
+    assert result['matched']
+    assert result['score'] == 80
+    assert result['phaseMetrics']['floorDate'] == '2026-09-11'
+    assert result['phaseMetrics']['floorPrice'] == 30.03
+    assert result['phaseMetrics']['floorDistanceAtr'] < 1
+
+
+def test_600673_weak_close_is_not_forced_into_confirmation():
+    result = evaluate('600673', '2026-08-28')
+    assert not result['matched']
+    assert result['metrics']['closeSupportPath'] == 'NONE'

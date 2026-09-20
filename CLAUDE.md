@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-批量评分 `sellingExhaustion`（`strategy6/selling_exhaustion.py`）当前V2：仅展示与筛选，不参与正式策略评分、资格或排序。四因子原始分不变，但需回调背景且贴近本轮底部，已反弹不能确认；锚点不随5日窗口抬高，新回调或回踩原底部才可恢复观察。最近5日至少2个收跌日；当前破位保护取最近3日，新低<=1、刺破<=0.30 ATR，相等不算新低。位置ATR取本轮初始ATR与前一日ATR较小值。评分等级与确认强度独立。配置为 `strategy6.selling_exhaustion`，缺省值在模块DEFAULTS；当前口径和真实历史匹配清单见 `docs/reviews/2026-09-20-selling-exhaustion-v2.md`。
+批量评分 `sellingExhaustion`（`strategy6/selling_exhaustion.py`）当前V3：仅展示与筛选，不参与正式策略评分、资格或排序。四因子原始分不变，保留V2的回调背景、离底和反弹排除及3日破位保护。新增反弹退出后至少两日持续承接且原始确认全部通过的回踩恢复路径；恢复必须补记反弹期间真实低点，再校验距离。五日收盘位置不足时，近3日均值>=0.55、比前2日提高>=0.10、最近两日各自>=普通阈值可补普通确认，但不加分或直接升级强/极致确认。评分等级与确认强度独立。配置为 `strategy6.selling_exhaustion`，缺省值在模块DEFAULTS；规则、真实历史匹配清单和局限见 `docs/reviews/2026-09-20-selling-exhaustion-v3.md`。
 
 CupHandleScan — A股杯柄结构（Cup & Handle）自动扫描系统。Python 3.10+。
 
