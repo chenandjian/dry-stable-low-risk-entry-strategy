@@ -4,6 +4,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
+批量评分新增 `sellingExhaustion`（`strategy6/selling_exhaustion.py`）：仅展示与筛选，不参与正式策略评分、资格或排序。最近5日与此前15日比较下跌量/跌幅，ATR14为Wilder；普通确认也要求新低次数<=1、单次刺破<=0.30 ATR，相等不算新低。评分等级与确认强度独立，异常/样本不足返回空分数。配置为 `strategy6.selling_exhaustion`，缺省值在模块DEFAULTS；验收记录见 `docs/reviews/2026-09-20-selling-exhaustion.md`。
+
 CupHandleScan — A股杯柄结构（Cup & Handle）自动扫描系统。Python 3.10+。
 
 ## Commands
