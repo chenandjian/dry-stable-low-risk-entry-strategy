@@ -248,6 +248,31 @@ describe('Strategy6BatchEvaluation', () => {
 
   })
 
+  it('filters selling exhaustion by exclusive strengths, grades, score and streak without changing export scope', async () => {
+    const payload = await api.evaluateStrategy6Batch()
+    payload.results[0].sellingExhaustion = { status: 'STRONG', matched: true, score: 77, grade: 'A', confirmationDays: 3, metrics: { downVolumeDecay: .61, lowShiftAtr: -.08 } }
+    payload.results[1].sellingExhaustion = { status: 'NOT_CONFIRMED', matched: false, score: 85, grade: 'A+', confirmationDays: 0, metrics: {} }
+    const wrapper = mount(Strategy6BatchEvaluation)
+    await wrapper.get('[data-test="batch-submit"]').trigger('click')
+    await flushUi()
+    expect(wrapper.text()).toContain('跌不动')
+    expect(wrapper.text()).toContain('0.610')
+    await wrapper.get('[data-test="exhaustion-status-STRONG"]').setValue(true)
+    expect(wrapper.findAll('.score-row')).toHaveLength(1)
+    await wrapper.get('[data-test="exhaustion-status-NOT_CONFIRMED"]').setValue(true)
+    expect(wrapper.findAll('.score-row')).toHaveLength(2)
+    await wrapper.get('[data-test="exhaustion-grade-A"]').setValue(true)
+    await wrapper.get('[data-test="exhaustion-days"]').setValue('3')
+    expect(wrapper.findAll('.score-row')).toHaveLength(1)
+    await wrapper.get('[data-test="exhaustion-min"]').setValue('80')
+    expect(wrapper.findAll('.score-row')).toHaveLength(0)
+    await wrapper.get('[data-test="exhaustion-min"]').setValue('70')
+    await wrapper.get('[data-test="export-tradingview-filtered"]').trigger('click')
+    expect(downloadTradingViewWatchlist.mock.calls[0][0].rows).toHaveLength(1)
+    await wrapper.get('[data-test="clear-table-filters"]').trigger('click')
+    expect(wrapper.findAll('.score-row')).toHaveLength(2)
+  })
+
   it('recognizes a TradingView CSV stock pool and evaluates only its code column', async () => {
     const wrapper = mount(Strategy6BatchEvaluation)
     const csv = [
@@ -334,7 +359,7 @@ describe('Strategy6BatchEvaluation', () => {
     await wrapper.get('[data-test="batch-submit"]').trigger('click')
     await flushUi()
     const tableWidth = wrapper.get('table').attributes('style')
-    expect(wrapper.findAll('colgroup col')).toHaveLength(14)
+    expect(wrapper.findAll('colgroup col')).toHaveLength(15)
 
     expect(wrapper.findAll('.score-row')).toHaveLength(2)
 

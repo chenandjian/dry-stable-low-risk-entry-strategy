@@ -86,7 +86,7 @@
           <thead>
             <tr>
               <th>排名</th><th>股票</th><th>评价日</th><th>尾部质量</th><th>尾部结论</th><th>量比</th>
-              <th>量能趋势</th><th>EMA极致缠绕</th><th>5日成交额最低</th><th>收盘低于MA5</th><th>5日收盘波动</th><th>最新交易日K线形态</th><th>K线集合形态</th><th>策略总分</th>
+              <th>量能趋势</th><th>跌不动（卖压衰竭）</th><th>EMA极致缠绕</th><th>5日成交额最低</th><th>收盘低于MA5</th><th>5日收盘波动</th><th>最新交易日K线形态</th><th>K线集合形态</th><th>策略总分</th>
             </tr>
             <tr class="filter-row">
               <th></th>
@@ -101,6 +101,17 @@
               <th><select v-model="tableFilters.tailPass" data-test="filter-tail-pass"><option value="">全部</option><option value="pass">通过</option><option value="fail">未通过</option></select></th>
               <th><div class="range-filter"><input v-model="tableFilters.volumeRatioMin" type="number" step="0.01" placeholder="最低" /><input v-model="tableFilters.volumeRatioMax" type="number" step="0.01" placeholder="最高" /></div></th>
               <th><select v-model="tableFilters.volumeTrend"><option value="">全部</option><option value="shrinking">缩量</option><option value="not_shrinking">未缩量</option></select></th>
+              <th>
+                <div class="grade-multiselect">
+                  <button class="grade-toggle" :aria-expanded="exhaustionFiltersOpen" @click="exhaustionFiltersOpen = !exhaustionFiltersOpen">确认强度 / 等级（可复选）{{ tableFilters.exhaustionStatuses.length + tableFilters.exhaustionGrades.length ? ` · 已选${tableFilters.exhaustionStatuses.length + tableFilters.exhaustionGrades.length}项` : '' }}</button>
+                  <div v-show="exhaustionFiltersOpen" class="grade-options" style="grid-template-columns: 1fr">
+                    <label v-for="(label, status) in exhaustionStatuses" :key="status"><input v-model="tableFilters.exhaustionStatuses" type="checkbox" :value="status" :data-test="`exhaustion-status-${status}`"><span>{{ label }}</span></label>
+                    <label v-for="grade in ['S', 'A+', 'A', 'B', 'C', 'NONE']" :key="grade"><input v-model="tableFilters.exhaustionGrades" type="checkbox" :value="grade" :data-test="`exhaustion-grade-${grade}`"><span>{{ grade === 'NONE' ? '未达级（低于50分）' : `${grade}级` }}</span></label>
+                  </div>
+                </div>
+                <div class="range-filter"><input v-model="tableFilters.exhaustionMin" data-test="exhaustion-min" type="number" min="0" max="100" placeholder="最低分"><input v-model="tableFilters.exhaustionMax" type="number" min="0" max="100" placeholder="最高分"></div>
+                <input v-model="tableFilters.exhaustionDays" data-test="exhaustion-days" type="number" min="0" placeholder="连续确认最少天数">
+              </th>
               <th>
                 <select v-model="tableFilters.emaStatus" data-test="filter-ema-status"><option value="">全部确认状态</option><option value="EXTREME">极致缠绕（含非常极致）</option><option value="ULTRA_EXTREME">非常极致</option><option value="NOT_CONFIRMED">未确认</option><option value="DATA_INSUFFICIENT">数据不足</option></select>
                 <div class="grade-multiselect">
@@ -165,6 +176,12 @@
                 <td><span class="status" :class="item.tailPass ? 'pass' : 'fail'">{{ item.tailPass ? '量稳价干通过' : '尾部未通过' }}</span></td>
                 <td>{{ ratio(item.tailVolumeRatio) }}</td>
                 <td :class="item.volumeSlope10 < 0 ? 'positive' : 'negative'">{{ item.volumeSlope10 < 0 ? '缩量' : '未缩量' }}</td>
+                <td :class="{ 'requirement-hit': item.sellingExhaustion?.matched }">
+                  <strong>{{ exhaustionStatuses[item.sellingExhaustion?.status] || '尚未计算' }}</strong>
+                  <small>评分 {{ item.sellingExhaustion?.score ?? '--' }} / 100 · {{ item.sellingExhaustion?.grade || '--' }}</small>
+                  <small>下跌量比 {{ emaNumber(item.sellingExhaustion?.metrics?.downVolumeDecay) }} · 低点 {{ emaNumber(item.sellingExhaustion?.metrics?.lowShiftAtr) }} ATR</small>
+                  <small>连续确认 {{ item.sellingExhaustion?.confirmationDays ?? '--' }}日</small>
+                </td>
                 <td :class="{ 'requirement-hit': item.emaCompression?.extreme }">
                   <strong>{{ emaStatusText(item.emaCompression?.status) }}</strong>
                   <small>评分 {{ item.emaCompression?.score ?? '--' }} / 100 · {{ item.emaCompression?.grade || '--' }}</small>
@@ -185,8 +202,16 @@
                 <td><strong>{{ item.totalScore }} / 100</strong></td>
               </tr>
               <tr v-if="expanded.has(item.code)" class="detail-row">
-                <td colspan="14">
+                <td colspan="15">
                   <div class="detail-grid">
+                    <div>
+                      <h3>跌不动（卖压衰竭）</h3>
+                      <p>独立诊断，不计入策略总分；评分等级与确认强度独立。</p>
+                      <p v-for="(label, key) in exhaustionMetricLabels" :key="key">{{ label }}：{{ emaNumber(item.sellingExhaustion?.metrics?.[key]) }}</p>
+                      <p v-for="reason in item.sellingExhaustion?.reasons || []" :key="reason" class="evidence">{{ reason }}</p>
+                      <p v-for="reason in item.sellingExhaustion?.failReasons || []" :key="reason" class="risk">{{ reason }}</p>
+                      <p v-for="warning in item.sellingExhaustion?.warnings || []" :key="warning" class="risk">{{ warning }}</p>
+                    </div>
                     <div>
                       <h3>EMA极致缠绕</h3>
                       <p>{{ emaStatusText(item.emaCompression?.status) }} · 评分与确认状态独立</p>
@@ -259,7 +284,7 @@
               </tr>
             </template>
             <tr v-if="!results.length" class="empty-filter-row">
-              <td colspan="14">没有符合当前筛选条件的股票，请调整条件或清除筛选。</td>
+              <td colspan="15">没有符合当前筛选条件的股票，请调整条件或清除筛选。</td>
             </tr>
           </tbody>
         </table>
@@ -292,7 +317,7 @@ const errorMessage = ref('')
 const copiedCode = ref('')
 // Results are replaced as a snapshot; filters never mutate the nested diagnostics.
 const response = shallowRef(null)
-const resultColumnWidths = [55, 120, 115, 150, 150, 145, 110, 270, 270, 150, 155, 220, 220, 145]
+const resultColumnWidths = [55, 120, 115, 150, 150, 145, 110, 270, 270, 270, 150, 155, 220, 220, 145]
 const expanded = reactive(new Set())
 const tableFilters = reactive(createEmptyTableFilters())
 
@@ -304,6 +329,9 @@ const RESULT_PAGE_SIZE = 25
 const resultPage = ref(1)
 const collectionGradesOpen = ref(false)
 const emaGradesOpen = ref(false)
+const exhaustionFiltersOpen = ref(false)
+const exhaustionStatuses = { NORMAL: '普通确认', STRONG: '强确认', ULTRA: '极致确认', NOT_CONFIRMED: '未确认', SAMPLE_INSUFFICIENT: '下跌样本不足', DATA_INSUFFICIENT: '历史数据不足', DATA_INVALID: '数据异常', CONFIG_INVALID: '配置无效' }
+const exhaustionMetricLabels = { downVolumeDecay: '下跌量比', lowShiftAtr: '低点变化（ATR）', downMoveDecay: '下跌幅度比', closePositionMean5: '5日平均收盘位置', newLowCount5: '5日新低次数', newLowDepthAtr: '最大刺破（ATR）', downVolumeRatio5: '5日下跌量占比', downVolumeMedianDecay: '下跌量中位数比', recentDownDays5: '近期下跌样本数', previousDownDays: '前期下跌样本数', atr14: 'Wilder ATR14' }
 const resultPageCount = computed(() => Math.max(1, Math.ceil(results.value.length / RESULT_PAGE_SIZE)))
 const pagedResults = computed(() => results.value.slice((resultPage.value - 1) * RESULT_PAGE_SIZE, resultPage.value * RESULT_PAGE_SIZE))
 watch(results, () => { resultPage.value = 1 })
@@ -354,6 +382,7 @@ async function runEvaluation() {
   expanded.clear()
   collectionGradesOpen.value = false
   emaGradesOpen.value = false
+  exhaustionFiltersOpen.value = false
   clearTableFilters()
   const invalid = parsedInput.value.invalidCodes
   if (!parsedCodes.value.length) {
@@ -384,6 +413,7 @@ async function runEvaluation() {
 
 function createEmptyTableFilters() {
   return {
+    exhaustionStatuses: [], exhaustionGrades: [], exhaustionMin: '', exhaustionMax: '', exhaustionDays: '',
     emaStatus: '', emaGrades: [], emaMin: '', emaMax: '', emaWidth: '', emaDays: '',
     stock: '', evaluationDate: '', tailQualityMin: '', tailQualityMax: '', tailPass: '',
     volumeRatioMin: '', volumeRatioMax: '', volumeTrend: '', turnoverMin: '', turnoverExtreme: '', belowMa5: '',
@@ -410,6 +440,11 @@ function matchesBooleanFilter(value, filter) {
 }
 
 function matchesTableFilters(item) {
+  const exhaustion = item.sellingExhaustion
+  if (tableFilters.exhaustionStatuses.length && !tableFilters.exhaustionStatuses.includes(exhaustion?.status)) return false
+  if (tableFilters.exhaustionGrades.length && !tableFilters.exhaustionGrades.includes(exhaustion?.grade)) return false
+  if (!matchesNumberRange(exhaustion?.score, tableFilters.exhaustionMin, tableFilters.exhaustionMax)) return false
+  if (!matchesNumberRange(exhaustion?.confirmationDays, tableFilters.exhaustionDays, '')) return false
   const ema = item.emaCompression
   if (tableFilters.emaStatus === 'EXTREME' ? !ema?.extreme : tableFilters.emaStatus && ema?.status !== tableFilters.emaStatus) return false
   if (tableFilters.emaGrades.length && !tableFilters.emaGrades.includes(ema?.grade)) return false

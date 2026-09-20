@@ -151,6 +151,15 @@ def test_batch_service_uses_local_data_and_prioritizes_tail_score(monkeypatch):
     assert result["results"][0]["tailScore"] == 19
     assert result["results"][0]["tailPass"] is True
     assert result["results"][0]["dataSource"] == "tickflow"
+    assert result["results"][0]["sellingExhaustion"]["status"] == "DATA_INSUFFICIENT"
+    assert result["results"][0]["sellingExhaustion"]["score"] is None
+    baseline = result
+    changed = batch_evaluator.evaluate_strategy6_batch(
+        ["601857", "000000", "300604"], {"strategy6": {"selling_exhaustion": {"normal": [-1, 0, 0, 0]}}}
+    )
+    assert changed['results'][0]['sellingExhaustion']['status'] == 'CONFIG_INVALID'
+    assert [{k: v for k, v in r.items() if k != 'sellingExhaustion'} for r in changed['results']] == [
+        {k: v for k, v in r.items() if k != 'sellingExhaustion'} for r in baseline['results']]
     assert result["results"][0]["klineCollectionPatterns"] == [{
         "code": "SLOW_ROUNDED_BASE", "name": "缓跌圆底", "matched": True, "score": 82,
     }]
