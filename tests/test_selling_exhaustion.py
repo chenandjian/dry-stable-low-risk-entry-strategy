@@ -237,3 +237,44 @@ def test_large_daily_bounce_is_excluded_even_when_three_day_return_is_small():
     assert phase['phaseMetrics']['rise3Atr'] <= .5
     assert phase['phaseMetrics']['rise1Atr'] > .5
     assert phase['phase'] == 'REBOUNDED'
+
+
+def test_recent_sustained_absorption_can_replace_lagging_five_day_mean():
+    rows = pullback_bars()
+    for row, position in zip(rows[-5:], [.05, .05, .55, .60, .60]):
+        row['high'] = row['low'] + (row['close']-row['low'])/position
+    result = evaluate_selling_exhaustion(rows)
+    assert result['metrics']['closePositionMean5'] < .45
+    assert result['matched']
+    assert result['status'] == 'NORMAL'
+    assert result['metrics']['closeSupportPath'] == 'RECENT_IMPROVEMENT'
+    assert result['componentScores'][3] < 7  # Confirmation does not inflate raw score.
+
+
+@pytest.mark.parametrize('positions', [[.05, .05, .05, .05, .95], [.05, .05, .8, .8, .05]])
+def test_one_good_candle_or_latest_failed_absorption_cannot_replace_mean(positions):
+    rows = pullback_bars()
+    for row, position in zip(rows[-5:], positions):
+        row['high'] = row['low'] + (row['close']-row['low'])/position
+    result = evaluate_selling_exhaustion(rows)
+    assert not result['matched']
+    assert result['metrics']['closeSupportPath'] == 'NONE'
+
+
+def test_invalid_absorption_configuration():
+    assert evaluate_selling_exhaustion(bars(), {'close_improvement_min': -1})['status'] == 'CONFIG_INVALID'
+
+
+@pytest.mark.parametrize('weak_last_close', [False, True])
+def test_reobservation_requires_two_supportive_closes_and_all_raw_gates(weak_last_close):
+    from strategy6.selling_exhaustion import _config, _phases
+    rows = pullback_bars()
+    for price in (100.0, 100.05, 99.5):
+        rows.append(dict(date=str(date(2025, 1, 1)+timedelta(days=len(rows))),
+                         open=price, close=price, high=price+.2, low=price-.6, volume=400))
+    if weak_last_close:
+        rows[-1]['high'] = 101.5
+    phases = _phases(rows, [1]*len(rows), _config(None))
+    assert phases[-3]['phase'] == phases[-2]['phase'] == 'REBOUNDED'
+    assert phases[-1]['phase'] == ('REBOUNDED' if weak_last_close else 'PULLBACK')
+    assert phases[-1]['phaseMetrics']['floorPrice'] == phases[-3]['phaseMetrics']['floorPrice']

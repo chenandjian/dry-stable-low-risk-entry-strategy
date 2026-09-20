@@ -288,6 +288,22 @@ describe('Strategy6BatchEvaluation', () => {
     expect(wrapper.find('.score-row').text()).toContain('601857')
   })
 
+  it('explains recent absorption improvement without changing the score or filters', async () => {
+    const payload = await api.evaluateStrategy6Batch()
+    payload.results[0].sellingExhaustion = { status: 'NORMAL', matched: true, score: 73, grade: 'A', confirmationDays: 1, metrics: { closeSupportPath: 'RECENT_IMPROVEMENT', closePositionMean3: .61, closePositionPrevious2: .21, closePositionImprovement: .40 } }
+    const wrapper = mount(Strategy6BatchEvaluation)
+    await wrapper.get('[data-test="batch-submit"]').trigger('click')
+    await flushUi()
+    await wrapper.get('[data-test="exhaustion-status-NORMAL"]').setValue(true)
+    expect(wrapper.findAll('.score-row')).toHaveLength(1)
+    await wrapper.find('.score-row').trigger('click')
+    await flushUi()
+    expect(wrapper.text()).toContain('近期持续改善（仅普通确认，不加分）')
+    expect(wrapper.text()).toContain('0.610')
+    expect(wrapper.text()).toContain('0.210')
+    expect(wrapper.text()).toContain('0.400')
+  })
+
   it('recognizes a TradingView CSV stock pool and evaluates only its code column', async () => {
     const wrapper = mount(Strategy6BatchEvaluation)
     const csv = [

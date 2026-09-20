@@ -211,6 +211,8 @@
                       <p>回调起算 {{ item.sellingExhaustion?.phaseMetrics?.pullbackStartDate || '--' }} · 前高 {{ item.sellingExhaustion?.phaseMetrics?.peakDate || '--' }}</p>
                       <p>底部 {{ emaNumber(item.sellingExhaustion?.phaseMetrics?.floorPrice) }}（{{ item.sellingExhaustion?.phaseMetrics?.floorDate || '--' }}） · 本轮起始ATR {{ emaNumber(item.sellingExhaustion?.phaseMetrics?.anchorAtr) }} · 位置判断ATR {{ emaNumber(item.sellingExhaustion?.phaseMetrics?.positionAtr) }}</p>
                       <p>离底 {{ emaNumber(item.sellingExhaustion?.phaseMetrics?.floorDistanceAtr) }} ATR · 当日净上涨 {{ emaNumber(item.sellingExhaustion?.phaseMetrics?.rise1Atr) }} ATR · 3日净上涨 {{ emaNumber(item.sellingExhaustion?.phaseMetrics?.rise3Atr) }} ATR</p>
+                      <p>承接判断：{{ ({ FIVE_DAY_MEAN: '5日平均达标', RECENT_IMPROVEMENT: '近期持续改善（仅普通确认，不加分）', NONE: '未达标' })[item.sellingExhaustion?.metrics?.closeSupportPath] || '--' }}</p>
+                      <p>近3日收盘位置 {{ emaNumber(item.sellingExhaustion?.metrics?.closePositionMean3) }} · 前2日 {{ emaNumber(item.sellingExhaustion?.metrics?.closePositionPrevious2) }} · 改善 {{ emaNumber(item.sellingExhaustion?.metrics?.closePositionImprovement) }}</p>
                       <p v-for="(label, key) in exhaustionMetricLabels" :key="key">{{ label }}：{{ emaNumber(item.sellingExhaustion?.metrics?.[key]) }}</p>
                       <p v-for="reason in item.sellingExhaustion?.reasons || []" :key="reason" class="evidence">{{ reason }}</p>
                       <p v-for="reason in item.sellingExhaustion?.failReasons || []" :key="reason" class="risk">{{ reason }}</p>
