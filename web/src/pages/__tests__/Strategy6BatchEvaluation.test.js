@@ -248,20 +248,21 @@ describe('Strategy6BatchEvaluation', () => {
 
   })
 
-  it('filters selling exhaustion by exclusive strengths, grades, score and streak without changing export scope', async () => {
+  it('offers only three useful exhaustion strengths, minimum score and streak with filtered export', async () => {
     const payload = await api.evaluateStrategy6Batch()
     payload.results[0].sellingExhaustion = { status: 'STRONG', matched: true, score: 77, grade: 'A', confirmationDays: 3, metrics: { downVolumeDecay: .61, lowShiftAtr: -.08 } }
-    payload.results[1].sellingExhaustion = { status: 'NOT_CONFIRMED', matched: false, score: 85, grade: 'A+', confirmationDays: 0, metrics: {} }
+    payload.results[1].sellingExhaustion = { status: 'NORMAL', matched: true, score: 85, grade: 'A+', confirmationDays: 1, metrics: {} }
     const wrapper = mount(Strategy6BatchEvaluation)
     await wrapper.get('[data-test="batch-submit"]').trigger('click')
     await flushUi()
     expect(wrapper.text()).toContain('跌不动')
     expect(wrapper.text()).toContain('0.610')
+    expect(wrapper.findAll('[data-test^="exhaustion-status-"]').map(box => box.element.value)).toEqual(['NORMAL', 'STRONG', 'ULTRA'])
+    expect(wrapper.findAll('[data-test^="exhaustion-grade-"]')).toHaveLength(0)
     await wrapper.get('[data-test="exhaustion-status-STRONG"]').setValue(true)
     expect(wrapper.findAll('.score-row')).toHaveLength(1)
-    await wrapper.get('[data-test="exhaustion-status-NOT_CONFIRMED"]').setValue(true)
+    await wrapper.get('[data-test="exhaustion-status-NORMAL"]').setValue(true)
     expect(wrapper.findAll('.score-row')).toHaveLength(2)
-    await wrapper.get('[data-test="exhaustion-grade-A"]').setValue(true)
     await wrapper.get('[data-test="exhaustion-days"]').setValue('3')
     expect(wrapper.findAll('.score-row')).toHaveLength(1)
     await wrapper.get('[data-test="exhaustion-min"]').setValue('80')
