@@ -180,6 +180,7 @@
                   <small>评分 {{ item.sellingExhaustion?.score ?? '--' }} / 100 · {{ item.sellingExhaustion?.grade || '--' }}</small>
                   <small>下跌量比 {{ emaNumber(item.sellingExhaustion?.metrics?.downVolumeDecay) }} · 低点 {{ emaNumber(item.sellingExhaustion?.metrics?.lowShiftAtr) }} ATR</small>
                   <small>连续确认 {{ item.sellingExhaustion?.confirmationDays ?? '--' }}日</small>
+                  <small>离本轮底部 {{ emaNumber(item.sellingExhaustion?.phaseMetrics?.floorDistanceAtr) }} ATR</small>
                 </td>
                 <td :class="{ 'requirement-hit': item.emaCompression?.extreme }">
                   <strong>{{ emaStatusText(item.emaCompression?.status) }}</strong>
@@ -206,6 +207,10 @@
                     <div>
                       <h3>跌不动（卖压衰竭）</h3>
                       <p>独立诊断，不计入策略总分；评分等级与确认强度独立。</p>
+                      <p>阶段：{{ exhaustionPhaseLabels[item.sellingExhaustion?.phase] || '尚未计算' }} · 高分不代表当前仍处于回调尾部。</p>
+                      <p>回调起算 {{ item.sellingExhaustion?.phaseMetrics?.pullbackStartDate || '--' }} · 前高 {{ item.sellingExhaustion?.phaseMetrics?.peakDate || '--' }}</p>
+                      <p>底部 {{ emaNumber(item.sellingExhaustion?.phaseMetrics?.floorPrice) }}（{{ item.sellingExhaustion?.phaseMetrics?.floorDate || '--' }}） · 本轮起始ATR {{ emaNumber(item.sellingExhaustion?.phaseMetrics?.anchorAtr) }} · 位置判断ATR {{ emaNumber(item.sellingExhaustion?.phaseMetrics?.positionAtr) }}</p>
+                      <p>离底 {{ emaNumber(item.sellingExhaustion?.phaseMetrics?.floorDistanceAtr) }} ATR · 当日净上涨 {{ emaNumber(item.sellingExhaustion?.phaseMetrics?.rise1Atr) }} ATR · 3日净上涨 {{ emaNumber(item.sellingExhaustion?.phaseMetrics?.rise3Atr) }} ATR</p>
                       <p v-for="(label, key) in exhaustionMetricLabels" :key="key">{{ label }}：{{ emaNumber(item.sellingExhaustion?.metrics?.[key]) }}</p>
                       <p v-for="reason in item.sellingExhaustion?.reasons || []" :key="reason" class="evidence">{{ reason }}</p>
                       <p v-for="reason in item.sellingExhaustion?.failReasons || []" :key="reason" class="risk">{{ reason }}</p>
@@ -329,8 +334,9 @@ const resultPage = ref(1)
 const collectionGradesOpen = ref(false)
 const emaGradesOpen = ref(false)
 const exhaustionFiltersOpen = ref(false)
-const exhaustionStatuses = { NORMAL: '普通确认', STRONG: '强确认', ULTRA: '极致确认', NOT_CONFIRMED: '未确认', SAMPLE_INSUFFICIENT: '下跌样本不足', DATA_INSUFFICIENT: '历史数据不足', DATA_INVALID: '数据异常', CONFIG_INVALID: '配置无效' }
-const exhaustionMetricLabels = { downVolumeDecay: '下跌量比', lowShiftAtr: '低点变化（ATR）', downMoveDecay: '下跌幅度比', closePositionMean5: '5日平均收盘位置', newLowCount5: '5日新低次数', newLowDepthAtr: '最大刺破（ATR）', downVolumeRatio5: '5日下跌量占比', downVolumeMedianDecay: '下跌量中位数比', recentDownDays5: '近期下跌样本数', previousDownDays: '前期下跌样本数', atr14: 'Wilder ATR14' }
+const exhaustionStatuses = { NORMAL: '普通确认', STRONG: '强确认', ULTRA: '极致确认', NOT_CONFIRMED: '未确认', SAMPLE_INSUFFICIENT: '下跌样本不足', DATA_INSUFFICIENT: '历史数据不足', DATA_INVALID: '数据异常', CONFIG_INVALID: '配置无效', REBOUNDED: '已反弹（退出确认）', NO_PULLBACK: '无有效回调背景' }
+const exhaustionPhaseLabels = { PULLBACK: '回调观察中', REBOUNDED: '已反弹', NO_PULLBACK: '无有效回调', UNKNOWN: '不可判定' }
+const exhaustionMetricLabels = { downVolumeDecay: '下跌量比', lowShiftAtr: '低点变化（ATR）', downMoveDecay: '下跌幅度比', closePositionMean5: '5日平均收盘位置', newLowCount3: '最近3日新低次数（防护）', newLowDepthAtr3: '最近3日最大刺破ATR（防护）', newLowCount5: '5日新低次数（统计）', newLowDepthAtr: '5日最大刺破ATR（统计）', downVolumeRatio5: '5日下跌量占比', downVolumeMedianDecay: '下跌量中位数比', recentDownDays5: '近期下跌样本数', previousDownDays: '前期下跌样本数', atr14: 'Wilder ATR14' }
 const resultPageCount = computed(() => Math.max(1, Math.ceil(results.value.length / RESULT_PAGE_SIZE)))
 const pagedResults = computed(() => results.value.slice((resultPage.value - 1) * RESULT_PAGE_SIZE, resultPage.value * RESULT_PAGE_SIZE))
 watch(results, () => { resultPage.value = 1 })

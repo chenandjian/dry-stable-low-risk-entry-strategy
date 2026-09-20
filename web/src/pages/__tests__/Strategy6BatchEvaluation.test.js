@@ -274,6 +274,20 @@ describe('Strategy6BatchEvaluation', () => {
     expect(wrapper.findAll('.score-row')).toHaveLength(2)
   })
 
+  it('shows rebounded high-score stocks without treating them as confirmed', async () => {
+    const payload = await api.evaluateStrategy6Batch()
+    payload.results[0].sellingExhaustion = { status: 'REBOUNDED', matched: false, score: 100, grade: 'S', confirmationDays: 0, phase: 'REBOUNDED', phaseMetrics: { floorDistanceAtr: 2.4 }, metrics: {} }
+    payload.results[1].sellingExhaustion = { status: 'STRONG', matched: true, score: 80, grade: 'A+', confirmationDays: 2, phase: 'PULLBACK', metrics: {} }
+    const wrapper = mount(Strategy6BatchEvaluation)
+    await wrapper.get('[data-test="batch-submit"]').trigger('click')
+    await flushUi()
+    expect(wrapper.text()).toContain('已反弹（退出确认）')
+    expect(wrapper.text()).toContain('2.400 ATR')
+    await wrapper.get('[data-test="exhaustion-status-STRONG"]').setValue(true)
+    expect(wrapper.findAll('.score-row')).toHaveLength(1)
+    expect(wrapper.find('.score-row').text()).toContain('601857')
+  })
+
   it('recognizes a TradingView CSV stock pool and evaluates only its code column', async () => {
     const wrapper = mount(Strategy6BatchEvaluation)
     const csv = [

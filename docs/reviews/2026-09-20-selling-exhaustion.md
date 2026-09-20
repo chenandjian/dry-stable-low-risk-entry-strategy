@@ -1,5 +1,7 @@
 # 批量评分：跌不动（卖压衰竭）
 
+> 本文记录V1历史实现；当前已升级V2，以同目录2026-09-20-selling-exhaustion-v2.md为准。
+
 ## 实现边界
 
 - 新增 `strategy6/selling_exhaustion.py`，只由批量评分服务调用。
