@@ -103,13 +103,12 @@
               <th><select v-model="tableFilters.volumeTrend"><option value="">全部</option><option value="shrinking">缩量</option><option value="not_shrinking">未缩量</option></select></th>
               <th>
                 <div class="grade-multiselect">
-                  <button class="grade-toggle" :aria-expanded="exhaustionFiltersOpen" @click="exhaustionFiltersOpen = !exhaustionFiltersOpen">确认强度 / 等级（可复选）{{ tableFilters.exhaustionStatuses.length + tableFilters.exhaustionGrades.length ? ` · 已选${tableFilters.exhaustionStatuses.length + tableFilters.exhaustionGrades.length}项` : '' }}</button>
+                  <button class="grade-toggle" :aria-expanded="exhaustionFiltersOpen" @click="exhaustionFiltersOpen = !exhaustionFiltersOpen">{{ tableFilters.exhaustionStatuses.length ? tableFilters.exhaustionStatuses.map(status => exhaustionStatuses[status]).join('、') : '全部 · 确认强度（可复选）' }}</button>
                   <div v-show="exhaustionFiltersOpen" class="grade-options" style="grid-template-columns: 1fr">
-                    <label v-for="(label, status) in exhaustionStatuses" :key="status"><input v-model="tableFilters.exhaustionStatuses" type="checkbox" :value="status" :data-test="`exhaustion-status-${status}`"><span>{{ label }}</span></label>
-                    <label v-for="grade in ['S', 'A+', 'A', 'B', 'C', 'NONE']" :key="grade"><input v-model="tableFilters.exhaustionGrades" type="checkbox" :value="grade" :data-test="`exhaustion-grade-${grade}`"><span>{{ grade === 'NONE' ? '未达级（低于50分）' : `${grade}级` }}</span></label>
+                    <label v-for="status in ['NORMAL', 'STRONG', 'ULTRA']" :key="status"><input v-model="tableFilters.exhaustionStatuses" type="checkbox" :value="status" :data-test="`exhaustion-status-${status}`"><span>{{ exhaustionStatuses[status] }}</span></label>
                   </div>
                 </div>
-                <div class="range-filter"><input v-model="tableFilters.exhaustionMin" data-test="exhaustion-min" type="number" min="0" max="100" placeholder="最低分"><input v-model="tableFilters.exhaustionMax" type="number" min="0" max="100" placeholder="最高分"></div>
+                <input v-model="tableFilters.exhaustionMin" data-test="exhaustion-min" type="number" min="0" max="100" placeholder="最低分">
                 <input v-model="tableFilters.exhaustionDays" data-test="exhaustion-days" type="number" min="0" placeholder="连续确认最少天数">
               </th>
               <th>
@@ -413,7 +412,7 @@ async function runEvaluation() {
 
 function createEmptyTableFilters() {
   return {
-    exhaustionStatuses: [], exhaustionGrades: [], exhaustionMin: '', exhaustionMax: '', exhaustionDays: '',
+    exhaustionStatuses: [], exhaustionMin: '', exhaustionDays: '',
     emaStatus: '', emaGrades: [], emaMin: '', emaMax: '', emaWidth: '', emaDays: '',
     stock: '', evaluationDate: '', tailQualityMin: '', tailQualityMax: '', tailPass: '',
     volumeRatioMin: '', volumeRatioMax: '', volumeTrend: '', turnoverMin: '', turnoverExtreme: '', belowMa5: '',
@@ -442,8 +441,7 @@ function matchesBooleanFilter(value, filter) {
 function matchesTableFilters(item) {
   const exhaustion = item.sellingExhaustion
   if (tableFilters.exhaustionStatuses.length && !tableFilters.exhaustionStatuses.includes(exhaustion?.status)) return false
-  if (tableFilters.exhaustionGrades.length && !tableFilters.exhaustionGrades.includes(exhaustion?.grade)) return false
-  if (!matchesNumberRange(exhaustion?.score, tableFilters.exhaustionMin, tableFilters.exhaustionMax)) return false
+  if (!matchesNumberRange(exhaustion?.score, tableFilters.exhaustionMin, '')) return false
   if (!matchesNumberRange(exhaustion?.confirmationDays, tableFilters.exhaustionDays, '')) return false
   const ema = item.emaCompression
   if (tableFilters.emaStatus === 'EXTREME' ? !ema?.extreme : tableFilters.emaStatus && ema?.status !== tableFilters.emaStatus) return false
