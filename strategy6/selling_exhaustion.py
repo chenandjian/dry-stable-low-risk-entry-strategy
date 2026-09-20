@@ -10,8 +10,13 @@ DEFAULTS = {
     'ultra': [.60, 0, .60, .60],
     'new_low_count_max': 1,
     'new_low_depth_atr_max': .30,
-    'recent_down_days_min': 1,
+    'recent_down_days_min': 2,
     'previous_down_days_min': 3,
+    'phase_lookback': 20,
+    'phase_pullback_atr_min': 1.0,
+    'phase_max_floor_distance_atr': 1.0,
+    'phase_max_rise_3_atr': .5,
+    'phase_max_rise_1_atr': .5,
     'score_tables': [
         [[.50, 30], [.60, 27], [.70, 24], [.80, 20], [.90, 12], [1, 5]],
         [[.30, 30], [.10, 28], [0, 25], [-.10, 22], [-.20, 18], [-.30, 14], [-.50, 6]],
@@ -39,6 +44,11 @@ def _config(config):
             raise ValueError(key)
     if isinstance(cfg['new_low_depth_atr_max'], bool) or not isfinite(cfg['new_low_depth_atr_max']) or cfg['new_low_depth_atr_max'] < 0:
         raise ValueError('depth')
+    if type(cfg['phase_lookback']) is not int or not 5 <= cfg['phase_lookback'] <= 60:
+        raise ValueError('phase lookback')
+    for key in ('phase_pullback_atr_min', 'phase_max_floor_distance_atr', 'phase_max_rise_3_atr', 'phase_max_rise_1_atr'):
+        if isinstance(cfg[key], bool) or not isfinite(cfg[key]) or cfg[key] <= 0:
+            raise ValueError(key)
     if len(cfg['score_tables']) != 4:
         raise ValueError('score tables')
     for i, (table, cap) in enumerate(zip(cfg['score_tables'], (30, 30, 25, 15))):
@@ -52,8 +62,9 @@ def _config(config):
 
 
 def evaluate_selling_exhaustion(rows, config=None):
-    result = dict(modelVersion='DOWNSIDE_SELLING_EXHAUSTION_V1', status='DATA_INSUFFICIENT',
+    result = dict(modelVersion='DOWNSIDE_SELLING_EXHAUSTION_V2', status='DATA_INSUFFICIENT',
                   matched=False, score=None, grade=None, confirmationDays=0, metrics={},
+                  phase='UNKNOWN', phaseMetrics={},
                   componentScores=[], reasons=[], failReasons=[], warnings=[],
                   evaluationDate=rows[-1].get('date', '') if rows else '')
     try:
@@ -80,14 +91,84 @@ def evaluate_selling_exhaustion(rows, config=None):
     atrs[14] = mean(trs[:14])
     for i in range(15, len(bars)):
         atrs[i] = (atrs[i-1] * 13 + trs[i-1]) / 14
-    latest = _at(bars, atrs, len(bars)-1, cfg)
+    phases = _phases(bars, atrs, cfg)
+    latest = _with_phase(_at(bars, atrs, len(bars)-1, cfg), phases[-1])
     result.update(latest)
     if result['matched']:
         for i in range(len(bars)-1, 58, -1):
-            if not _at(bars, atrs, i, cfg)['matched']:
+            if not _with_phase(_at(bars, atrs, i, cfg), phases[i])['matched']:
                 break
             result['confirmationDays'] += 1
     result['warnings'] = ['日线代理指标，不代表主动卖单统计或买入信号；不判断真实跌停及绝对流动性']
+    return result
+
+
+def _phases(bars, atrs, cfg):
+    """Causal episodes; resume only on a new pullback or an original-floor retest."""
+    snapshots = []
+    phase, floor, floor_date, anchor_atr = 'NO_PULLBACK', None, '', None
+    peak_date, start_date, released_at = '', '', 0
+    for i, bar in enumerate(bars):
+        if i < 15 or not atrs[i-1] or atrs[i-1] <= 0:
+            snapshots.append(dict(phase='NO_PULLBACK', phaseMetrics={}, phaseReasons=['尚无有效回调背景']))
+            continue
+        if phase != 'PULLBACK':
+            left = max(0, i-cfg['phase_lookback']+1, released_at)
+            peak = max(range(left, i+1), key=lambda j: (bars[j]['close'], j))
+            downs = sum(bars[j]['close'] < bars[j-1]['close'] for j in range(peak+1, i+1))
+            if downs >= 2 and bars[peak]['close']-bar['close'] >= cfg['phase_pullback_atr_min']*atrs[i-1]:
+                phase = 'PULLBACK'
+                anchor_atr = atrs[i-1]
+                bottom = min(range(peak, i+1), key=lambda j: bars[j]['low'])
+                floor, floor_date = bars[bottom]['low'], bars[bottom]['date']
+                peak_date, start_date = bars[peak]['date'], bar['date']
+            elif phase == 'REBOUNDED' and downs >= 2:
+                scale = min(anchor_atr, atrs[i-1])
+                # A retest of the original bottom is not an elevated new floor.
+                if (bar['close']-floor <= cfg['phase_max_floor_distance_atr']*scale
+                        and bar['close']-bars[i-3]['close'] <= cfg['phase_max_rise_3_atr']*scale
+                        and bar['close']-bars[i-1]['close'] <= cfg['phase_max_rise_1_atr']*scale):
+                    phase = 'PULLBACK'
+        if phase == 'PULLBACK' and bar['low'] < floor:
+            floor, floor_date = bar['low'], bar['date']
+        # Never widen the bottom zone with an old large ATR or today's surge.
+        position_atr = min(anchor_atr, atrs[i-1]) if anchor_atr else None
+        distance = (bar['close']-floor)/position_atr if position_atr else None
+        rise = (bar['close']-bars[i-3]['close'])/position_atr if position_atr else None
+        rise_one = (bar['close']-bars[i-1]['close'])/position_atr if position_atr else None
+        reasons = []
+        if phase == 'PULLBACK':
+            if distance > cfg['phase_max_floor_distance_atr']:
+                reasons.append(f'离本轮底部{distance:.3f} ATR，超过{cfg["phase_max_floor_distance_atr"]} ATR')
+            if rise > cfg['phase_max_rise_3_atr']:
+                reasons.append(f'最近3日净上涨{rise:.3f} ATR，超过{cfg["phase_max_rise_3_atr"]} ATR')
+            if rise_one > cfg['phase_max_rise_1_atr']:
+                reasons.append(f'当日净上涨{rise_one:.3f} ATR，超过{cfg["phase_max_rise_1_atr"]} ATR')
+            if reasons:
+                phase, released_at = 'REBOUNDED', i
+        if phase == 'REBOUNDED' and not reasons:
+            reasons = ['本轮已反弹，尚未形成新回调或回踩原底部的证据']
+        if phase == 'NO_PULLBACK':
+            reasons = [f'尚无有效回调背景：需从近期收盘高点回落至少{cfg["phase_pullback_atr_min"]} ATR且至少2个收跌日']
+        snapshots.append(dict(phase=phase, phaseReasons=reasons,
+                              phaseMetrics=dict(floorPrice=floor, floorDate=floor_date,
+                                                anchorAtr=anchor_atr, positionAtr=position_atr, peakDate=peak_date,
+                                                pullbackStartDate=start_date,
+                                                floorDistanceAtr=distance, rise3Atr=rise, rise1Atr=rise_one)))
+    return snapshots
+
+
+def _with_phase(result, snapshot):
+    result.update(phase=snapshot['phase'], phaseMetrics=snapshot['phaseMetrics'])
+    if result['status'] == 'DATA_INVALID':
+        return result
+    if snapshot['phase'] != 'PULLBACK':
+        result['matched'] = False
+        if snapshot['phase'] == 'REBOUNDED':
+            result['status'] = 'REBOUNDED'
+        elif result['status'] != 'SAMPLE_INSUFFICIENT':
+            result['status'] = 'NO_PULLBACK'
+        result['failReasons'] += snapshot['phaseReasons']
     return result
 
 
@@ -99,7 +180,7 @@ def _at(bars, atrs, end, cfg):
         return {**base, 'status': 'DATA_INVALID', 'failReasons': ['ATR无效或最近5日存在一字K线，无法判定承接']}
     recent_down = [i for i in range(end-4, end+1) if bars[i]['close'] < bars[i-1]['close']]
     previous_down = [i for i in range(end-19, end-4) if bars[i]['close'] < bars[i-1]['close']]
-    if len(recent_down) < cfg['recent_down_days_min'] or len(previous_down) < cfg['previous_down_days_min']:
+    if not recent_down or len(previous_down) < cfg['previous_down_days_min']:
         return {**base, 'status': 'SAMPLE_INSUFFICIENT', 'failReasons': ['下跌日样本不足'],
                 'metrics': dict(recentDownDays5=len(recent_down), previousDownDays=len(previous_down))}
     volume = mean(bars[i]['volume'] for i in recent_down) / mean(bars[i]['volume'] for i in previous_down)
@@ -109,17 +190,18 @@ def _at(bars, atrs, end, cfg):
     depths = [max(0, min(r['low'] for r in bars[i-5:i])-bars[i]['low']) / atrs[i]
               if atrs[i] and atrs[i] > 0 else 0 for i in range(end-4, end+1)]
     count, depth = sum(d > 0 for d in depths), max(depths)
+    current_count, current_depth = sum(d > 0 for d in depths[-3:]), max(depths[-3:])
     values = [volume, low, move, close]
     def passes(limits):
         return [volume <= limits[0], low >= limits[1], move <= limits[2], close >= limits[3]]
-    checks = passes(cfg['normal']) + [count <= cfg['new_low_count_max'], depth <= cfg['new_low_depth_atr_max']]
+    checks = passes(cfg['normal']) + [current_count <= cfg['new_low_count_max'], current_depth <= cfg['new_low_depth_atr_max'], len(recent_down) >= cfg['recent_down_days_min']]
     matched = all(checks)
-    status = 'NOT_CONFIRMED'
+    status = 'NOT_CONFIRMED' if len(recent_down) >= cfg['recent_down_days_min'] else 'SAMPLE_INSUFFICIENT'
     if matched:
         status = 'NORMAL'
-        if all(passes(cfg['strong'])) and count <= 1:
+        if all(passes(cfg['strong'])) and current_count <= 1:
             status = 'STRONG'
-        if all(passes(cfg['ultra'])) and count == 0:
+        if all(passes(cfg['ultra'])) and current_count == 0:
             status = 'ULTRA'
     components = [next((points for limit, points in table if (value >= limit if i in (1, 3) else value <= limit)), 0)
                   for i, (value, table) in enumerate(zip(values, cfg['score_tables']))]
@@ -128,8 +210,9 @@ def _at(bars, atrs, end, cfg):
               f'低点变化 {low:.3f} ATR（要求≥{cfg["normal"][1]}）',
               f'跌幅比 {move:.3f}（要求≤{cfg["normal"][2]}）',
               f'收盘位置 {close:.3f}（要求≥{cfg["normal"][3]}）',
-              f'5日新低次数 {count}（要求≤{cfg["new_low_count_max"]}）',
-              f'最大刺破 {depth:.3f} ATR（要求≤{cfg["new_low_depth_atr_max"]}）']
+              f'最近3日新低次数 {current_count}（要求≤{cfg["new_low_count_max"]}）',
+              f'最近3日最大刺破 {current_depth:.3f} ATR（要求≤{cfg["new_low_depth_atr_max"]}）',
+              f'最近5日下跌样本 {len(recent_down)}（要求≥{cfg["recent_down_days_min"]}）']
     return dict(status=status, matched=matched, score=score,
                 grade=next((g for floor, g in [(90, 'S'), (80, 'A+'), (70, 'A'), (60, 'B'), (50, 'C')] if score >= floor), 'NONE'),
                 componentScores=components,
@@ -137,6 +220,7 @@ def _at(bars, atrs, end, cfg):
                 failReasons=[s for s, ok in zip(labels, checks) if not ok],
                 metrics=dict(downVolumeDecay=volume, lowShiftAtr=low, downMoveDecay=move,
                              closePositionMean5=close, newLowCount5=count, newLowDepthAtr=depth,
+                             newLowCount3=current_count, newLowDepthAtr3=current_depth,
                              recentDownDays5=len(recent_down), previousDownDays=len(previous_down),
                              downVolumeRatio5=sum(bars[i]['volume'] for i in recent_down)/sum(r['volume'] for r in recent),
                              downVolumeMedianDecay=median(bars[i]['volume'] for i in recent_down)/median(bars[i]['volume'] for i in previous_down),
