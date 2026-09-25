@@ -225,6 +225,32 @@ describe('Strategy6BatchEvaluation', () => {
     expect(api.evaluateStrategy6Batch).toHaveBeenCalledTimes(2)
   })
 
+  it.each(['exhaustion', 'ema', 'collection'])('clears only the %s multiselect without clearing other filters', async (group) => {
+    const wrapper = mount(Strategy6BatchEvaluation)
+    await wrapper.get('[data-test="batch-submit"]').trigger('click')
+    await flushUi()
+    const selectors = {
+      exhaustion: '[data-test^="exhaustion-status-"]',
+      ema: '[data-test="ema-grade-options"] input[type="checkbox"]',
+      collection: '[data-test^="filter-collection-pattern-grade-"]',
+    }
+    await wrapper.get(`[data-test="clear-${group}-selection"]`).element.closest('.grade-multiselect').querySelector('.grade-toggle').click()
+    expect(wrapper.get(`[data-test="clear-${group}-selection"]`).isVisible()).toBe(true)
+    expect(wrapper.get(`[data-test="clear-${group}-selection"]`).element.disabled).toBe(true)
+    for (const selector of Object.values(selectors)) {
+      for (const box of wrapper.findAll(selector).slice(0, 2)) await box.setValue(true)
+    }
+    await wrapper.get('[data-test="filter-tail-score-min"]').setValue('10')
+    await wrapper.get(`[data-test="clear-${group}-selection"]`).trigger('click')
+    await flushUi()
+    for (const [key, selector] of Object.entries(selectors)) {
+      expect(wrapper.findAll(selector).filter(box => box.element.checked)).toHaveLength(key === group ? 0 : 2)
+    }
+    expect(wrapper.get('[data-test="filter-tail-score-min"]').element.value).toBe('10')
+    expect(wrapper.get(`[data-test="clear-${group}-selection"]`).element.disabled).toBe(true)
+    expect(api.evaluateStrategy6Batch).toHaveBeenCalledTimes(1)
+  })
+
   it('filters EMA confirmation independently from score and supports multiple grades', async () => {
     const payload = await api.evaluateStrategy6Batch()
     payload.results[0].emaCompression = { status: 'EXTREME', extreme: true, score: 78, grade: 'A', metrics: { spreadMean5: 0.28, compressionStreak: 9 } }
