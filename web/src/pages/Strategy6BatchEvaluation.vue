@@ -105,6 +105,7 @@
                 <div class="grade-multiselect">
                   <button class="grade-toggle" :aria-expanded="exhaustionFiltersOpen" @click="exhaustionFiltersOpen = !exhaustionFiltersOpen">{{ tableFilters.exhaustionStatuses.length ? tableFilters.exhaustionStatuses.map(status => exhaustionStatuses[status]).join('、') : '全部 · 确认强度（可复选）' }}</button>
                   <div v-show="exhaustionFiltersOpen" class="grade-options" style="grid-template-columns: 1fr">
+                    <button type="button" class="clear-selection-button" data-test="clear-exhaustion-selection" :disabled="!tableFilters.exhaustionStatuses.length" @click="tableFilters.exhaustionStatuses = []">取消选择</button>
                     <label v-for="status in ['NORMAL', 'STRONG', 'ULTRA']" :key="status"><input v-model="tableFilters.exhaustionStatuses" type="checkbox" :value="status" :data-test="`exhaustion-status-${status}`"><span>{{ exhaustionStatuses[status] }}</span></label>
                   </div>
                 </div>
@@ -116,6 +117,7 @@
                 <div class="grade-multiselect">
                   <button class="grade-toggle" :aria-expanded="emaGradesOpen" @click="emaGradesOpen = !emaGradesOpen">{{ tableFilters.emaGrades.length ? `已选：${tableFilters.emaGrades.map(grade => grade === 'NONE' ? '未达标' : grade).join('、')}` : '评分等级（可复选）' }}</button>
                   <div v-show="emaGradesOpen" class="grade-options" data-test="ema-grade-options" style="grid-template-columns: 1fr">
+                    <button type="button" class="clear-selection-button" data-test="clear-ema-selection" :disabled="!tableFilters.emaGrades.length" @click="tableFilters.emaGrades = []">取消选择</button>
                     <label v-for="option in emaGradeOptions" :key="option.value">
                       <input v-model="tableFilters.emaGrades" type="checkbox" :value="option.value">
                       <span>{{ option.label }}</span>
@@ -137,6 +139,7 @@
                   <div class="grade-multiselect">
                     <button class="grade-toggle" data-test="collection-grade-toggle" :aria-expanded="collectionGradesOpen" @click="collectionGradesOpen = !collectionGradesOpen">{{ collectionGradeFilterLabel }}（可复选）</button>
                     <div v-show="collectionGradesOpen" class="grade-options">
+                      <button type="button" class="clear-selection-button" data-test="clear-collection-selection" :disabled="!tableFilters.collectionPatternGrades.length" @click="tableFilters.collectionPatternGrades = []">取消选择</button>
                       <label v-for="option in collectionGradeOptions" :key="option.value">
                         <input
                           v-model="tableFilters.collectionPatternGrades"
@@ -688,6 +691,8 @@ h1 { margin: 8px 0; font-size: 26px; } .page-header p { color: var(--text-second
 .panel-title { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; color: var(--text-muted); }
 .panel-title div { display: flex; gap: 10px; align-items: center; }.panel-title div span { color: var(--gold); font: 12px var(--font-mono); }.panel-title strong { color: var(--text-primary); }
 .panel-title .filter-summary { justify-content: flex-end; }.clear-filter-button { padding: 5px 10px; color: var(--gold); background: transparent; border: 1px solid rgba(214,168,74,.45); font-size: 11px; }
+.clear-selection-button { grid-column: 1 / -1; justify-self: end; padding: 3px 7px; color: var(--gold); background: transparent; border: 1px solid rgba(214,168,74,.45); font-size: 11px; cursor: pointer; }
+.clear-selection-button:disabled { opacity: .4; cursor: default; }
 textarea { width: 100%; box-sizing: border-box; resize: vertical; padding: 13px; color: #dce7f4; background: #080f18; border: 1px solid #273648; font: 13px/1.7 var(--font-mono); }
 .input-actions { display: flex; justify-content: space-between; align-items: center; margin-top: 12px; color: var(--text-muted); }.input-actions strong { color: var(--gold); }
 .input-buttons { display: flex; gap: 10px; align-items: center; }.secondary-button { color: var(--gold); background: transparent; border: 1px solid rgba(214,168,74,.6); }.import-message { color: var(--gold); margin: 10px 0 0; font: 12px var(--font-mono); }
