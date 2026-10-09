@@ -49,6 +49,7 @@ from scanner.strategy_engine import (
 )
 from scanner.index_source import fetch_market_index_daily
 from scanner.market_breadth import MarketBreadthDataChanging, build_market_breadth_history
+from scanner.trend_squeeze_breadth import build_trend_squeeze_breadth
 from scanner.pattern_detector import CupHandleResult
 from scanner.single_stock_backtest import (
     DataCoverageError,
@@ -2965,6 +2966,23 @@ async def market_breadth_history(
             {"error": "MARKET_DATA_UPDATING", "message": str(exc)},
             status_code=409,
         )
+
+
+@app.get("/api/market-breadth/trend-squeeze-history")
+async def trend_squeeze_breadth_history(
+    start_date: str | None = None, end_date: str | None = None,
+    limit: int = 2000, stock_date: str | None = None,
+):
+    config = load_config()
+    db.init_db(config.get('data', {}).get('database_path', 'data/cuphandle.db'))
+    try:
+        return await asyncio.to_thread(build_trend_squeeze_breadth,
+                                       start_date=start_date, end_date=end_date,
+                                       limit=limit, stock_date=stock_date)
+    except (TypeError, ValueError) as exc:
+        return JSONResponse({'error': 'INVALID_TREND_BREADTH_QUERY', 'message': str(exc)}, status_code=400)
+    except MarketBreadthDataChanging as exc:
+        return JSONResponse({'error': 'MARKET_DATA_UPDATING', 'message': str(exc)}, status_code=409)
 
 
 # ====== Strategy2 API ======

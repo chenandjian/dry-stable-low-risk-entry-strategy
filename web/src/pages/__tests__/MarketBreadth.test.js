@@ -63,7 +63,7 @@ const getMarketBreadthHistory = vi.fn().mockResolvedValue({
 })
 
 vi.mock('../../composables/useApi.js', () => ({
-  useApi: () => ({ getMarketBreadthHistory }),
+  useApi: () => ({ getMarketBreadthHistory, getTrendSqueezeBreadthHistory: vi.fn().mockResolvedValue({ rows: [] }) }),
 }))
 
 import MarketBreadth from '../MarketBreadth.vue'
