@@ -146,6 +146,7 @@ MA和分位不跨缺失/低覆盖日期拼接。可靠需覆盖>=90%且成功评
 独立加载不阻塞原涨跌家数板块，正在更新的数据返回重试提示。进程缓存依数据库及WAL文件变化检测失效；数据库内日志写入也可能保守触发重新内容校验。
 
 ## 验收
+- main合并代码状态 `7d53ebe` 最终完整门禁：后端1780通过、9跳过（371.17秒）；前端175通过，生产build与compileall成功。随后仅补记此验收结果，不改变代码。
 - 后端完整回归：`python -m pytest tests/ -q --ignore=tests/test_akshare_hist.py --ignore=tests/test_tushare_hist.py`，1778通过、9跳过；后续补充的股票池范围和15:10边界通过专项验证。
 - 最终模块专项：`python -m pytest tests/test_trend_squeeze_breadth.py tests/test_strategy6_strong_trend_squeeze.py tests/test_market_breadth.py -q`，31通过，包括新增模块9项、原初筛13项及原市场宽度9项。
 - 前端 `npm --prefix web test -- --run`：175通过；生产build成功，有既有大包/Vite弃用警告。
