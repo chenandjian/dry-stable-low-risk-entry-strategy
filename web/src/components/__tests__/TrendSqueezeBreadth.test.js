@@ -29,13 +29,21 @@ describe('TrendSqueezeBreadth', () => {
     expect(wrapper.text()).toContain('600001')
     expect(mocks.api).toHaveBeenCalledTimes(2)
     const option = mocks.chart.setOption.mock.calls.at(-1)[0]
-    expect(option.xAxis.data).toEqual(rows.map(r => r.date))
+    expect(option.xAxis[0].data).toEqual(rows.map(r => r.date))
+    expect(option.xAxis[1].data).toEqual(rows.map(r => r.date))
     expect(option.series[0].data).toEqual([1, 2])
     expect(option.series[3].data).toEqual([null, null])
+    expect(option.series[2].xAxisIndex).toBe(1)
+    expect(option.dataZoom[0].xAxisIndex).toEqual([0, 1])
+    expect(option.yAxis[1].min({ min: 1.1, max: 2.1 })).toBeCloseTo(.9)
+    expect(option.yAxis[1].max({ min: 1.1, max: 2.1 })).toBeCloseTo(2.3)
+    expect(option.tooltip.formatter([{ dataIndex: 0 }])).toContain('1.00%')
+    mocks.chart.containPixel.mockImplementation(({ gridIndex }) => gridIndex === 1)
     mocks.on.mock.calls.at(-1)[1]({ offsetX: 100, offsetY: 200 })
     await flushPromises()
     expect(wrapper.get('[data-test="trend-date"]').element.value).toBe('2026-09-01')
     expect(wrapper.text()).toContain('000001')
+    expect(mocks.chart.convertFromPixel).toHaveBeenLastCalledWith({ gridIndex: 1 }, [100, 200])
     wrapper.unmount()
     expect(mocks.chart.dispose).toHaveBeenCalled()
   })
@@ -54,6 +62,22 @@ describe('TrendSqueezeBreadth', () => {
     await flushPromises()
     expect(wrapper.text()).toContain('600002')
     expect(wrapper.text()).not.toContain('000009')
+    wrapper.unmount()
+  })
+
+  it('keeps low-coverage outliers off the ratio plot and handles an empty ratio axis', async () => {
+    const history = [...rows, { ...rows[1], date: '2026-09-03', data_quality: 'LOW_COVERAGE', screen_count: 77, screen_ratio: 1 }]
+    mocks.api.mockImplementation(params => Promise.resolve(params.stock_date
+      ? { selection: { available: true, stocks: [] } } : { rows: history }))
+    const wrapper = mount(TrendSqueezeBreadth)
+    await flushPromises()
+    const option = mocks.chart.setOption.mock.calls.at(-1)[0]
+    expect(option.series[0].data).toEqual([1, 2, 77])
+    expect(option.series[2].data).toEqual([1, 2, null])
+    expect(option.yAxis[1].min({ min: Infinity, max: -Infinity })).toBe(0)
+    expect(option.yAxis[1].max({ min: Infinity, max: -Infinity })).toBe(1)
+    expect(option.yAxis[1].min({ min: 0, max: 0 })).toBe(0)
+    expect(option.yAxis[1].max({ min: 100, max: 100 })).toBe(100)
     wrapper.unmount()
   })
 

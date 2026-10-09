@@ -18,8 +18,8 @@
         <div><span>初筛占比 MA5 / MA20</span><strong>{{ pct(current.screen_ma5) }} / {{ pct(current.screen_ma20) }}</strong><small>120日分位 {{ pct(current.screen_percentile120) }}</small></div>
         <div><span>覆盖率 {{ pct(current.coverage_rate) }}</span><strong>{{ current.environment }}</strong><small>{{ current.data_quality === 'RELIABLE' ? '可靠数据' : '覆盖或样本不足，暂停环境判断' }}</small></div>
       </div>
-      <div ref="chartElement" class="chart" data-test="trend-breadth-chart" aria-label="历史强势股与收缩初筛数量和占比"></div>
-      <p class="footnote">点击曲线选择历史日期。数量左轴、占比右轴；低覆盖仍可核查数量，均线与环境判断需可靠连续数据。当前股票池的历史可见范围会随数据覆盖变化。</p>
+      <div ref="chartElement" class="chart" data-test="trend-breadth-chart" aria-label="上图历史股票数量，下图初筛占比及均线"></div>
+      <p class="footnote">上图看数量，下图单独比较初筛占比、MA5与MA20。占比纵轴随可见数据自适应，不固定从0开始；两图同步缩放，点击任一图选择历史日期。低覆盖日期的占比留空，数量仍可核查。</p>
       <div class="history-table"><table><thead><tr><th>日期</th><th>初筛数</th><th>长期强势数</th><th>初筛占比</th><th>覆盖率</th><th>机会环境</th></tr></thead><tbody>
         <tr v-for="row in [...visibleRows].reverse().slice((historyPage-1)*20, historyPage*20)" :key="row.date" :class="{ selected: row.date === selectedDate }" @click="selectedDate = row.date"><td>{{ row.date }}</td><td>{{ count(row.screen_count) }}</td><td>{{ count(row.strong_count) }}</td><td>{{ pct(row.screen_ratio) }}</td><td>{{ pct(row.coverage_rate) }}</td><td>{{ row.environment }}</td></tr>
       </tbody></table></div>
@@ -96,23 +96,44 @@ function renderChart() {
     chart = echarts.init(chartElement.value)
     chart.getZr().on('click', event => {
       const point = [event.offsetX, event.offsetY]
-      if (!chart.containPixel({ gridIndex: 0 }, point)) return
-      const [index] = chart.convertFromPixel({ gridIndex: 0 }, point)
+      const gridIndex = [0, 1].find(index => chart.containPixel({ gridIndex: index }, point))
+      if (gridIndex === undefined) return
+      const [index] = chart.convertFromPixel({ gridIndex }, point)
       const row = visibleRows.value[Math.round(index)]
       if (row) selectedDate.value = row.date
     })
   }
-  chart.setOption({ animation: false, tooltip: { trigger: 'axis' },
-    legend: { textStyle: { color: '#9ba8bb' }, data: ['初筛数量', '长期强势数量', '初筛占比', '占比MA5', '占比MA20'] },
-    grid: { left: 55, right: 58, top: 40, bottom: 50 },
-    xAxis: { type: 'category', data: visibleRows.value.map(r => r.date), axisLabel: { color: '#74839a' } },
-    yAxis: [{ type: 'value', min: 0, name: '只', axisLabel: { color: '#74839a' } }, { type: 'value', min: 0, max: 100, name: '%', axisLabel: { color: '#74839a' } }],
-    dataZoom: [{ type: 'inside' }, { type: 'slider', height: 18, bottom: 8 }],
-    series: [
-      ['初筛数量', 'screen_count', 0, '#d6a84a'], ['长期强势数量', 'strong_count', 0, '#e75b5b'],
-      ['初筛占比', 'screen_ratio', 1, '#65a4ff'], ['占比MA5', 'screen_ma5', 1, '#b785f4'], ['占比MA20', 'screen_ma20', 1, '#20ad72'],
-    ].map(([name, field, axis, color]) => ({ name, type: 'line', showSymbol: false, yAxisIndex: axis,
-      connectNulls: false, data: visibleRows.value.map(r => typeof r[field] === 'number' ? r[field]*(axis ? 100 : 1) : null),
+  const series = [
+    ['初筛数量', 'screen_count', 0, '#d6a84a'], ['长期强势数量', 'strong_count', 0, '#e75b5b'],
+    ['初筛占比', 'screen_ratio', 1, '#65a4ff'], ['占比MA5', 'screen_ma5', 1, '#b785f4'], ['占比MA20', 'screen_ma20', 1, '#20ad72'],
+  ]
+  const valueFor = (row, field, axis) => typeof row[field] === 'number' && (!axis || row.data_quality === 'RELIABLE') ? row[field]*(axis ? 100 : 1) : null
+  const axisPadding = ({ min, max }) => Math.max((max-min)*.15, .2)
+  const dates = visibleRows.value.map(r => r.date)
+  chart.setOption({ animation: false,
+    tooltip: { trigger: 'axis', formatter(params) {
+      const row = visibleRows.value[params?.[0]?.dataIndex]
+      if (!row) return ''
+      const day = String(row.date).replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char])
+      return [day, ...series.map(([name, field, axis, color]) => {
+        const value = valueFor(row, field, axis)
+        return `<span style="color:${color}">${name}</span>：${value === null ? '--' : axis ? `${value.toFixed(2)}%` : `${value}只`}`
+      })].join('<br>')
+    } },
+    axisPointer: { link: [{ xAxisIndex: 'all' }] },
+    legend: { type: 'scroll', textStyle: { color: '#9ba8bb' }, data: ['初筛数量', '长期强势数量', '初筛占比', '占比MA5', '占比MA20'] },
+    title: [{ text: '初筛与长期强势 · 数量', left: 60, top: 38, textStyle: { color: '#9ba8bb', fontSize: 13 } },
+      { text: '初筛占比 · 独立比例尺', left: 60, top: '47%', textStyle: { color: '#9ba8bb', fontSize: 13 } }],
+    grid: [{ left: 60, right: 28, top: 72, height: '29%' }, { left: 60, right: 28, top: '54%', bottom: 58 }],
+    xAxis: [0, 1].map(gridIndex => ({ type: 'category', gridIndex, data: dates, axisLabel: { color: '#74839a', show: gridIndex === 1 } })),
+    yAxis: [{ type: 'value', gridIndex: 0, min: 0, name: '只', axisLabel: { color: '#74839a' } },
+      { type: 'value', gridIndex: 1, scale: true, name: '%',
+        min: value => Number.isFinite(value.min) ? Math.max(0, value.min-axisPadding(value)) : 0,
+        max: value => Number.isFinite(value.max) ? Math.min(100, value.max+axisPadding(value)) : 1,
+        axisLabel: { color: '#74839a', formatter: value => `${value.toFixed(2)}%` } }],
+    dataZoom: [{ type: 'inside', xAxisIndex: [0, 1] }, { type: 'slider', xAxisIndex: [0, 1], height: 18, bottom: 8 }],
+    series: series.map(([name, field, axis, color]) => ({ name, type: 'line', showSymbol: false, xAxisIndex: axis, yAxisIndex: axis,
+      connectNulls: false, data: visibleRows.value.map(r => valueFor(r, field, axis)),
       lineStyle: { color, width: 1.5 }, itemStyle: { color } })),
   }, true)
 }
@@ -124,5 +145,5 @@ onBeforeUnmount(() => { alive = false; request++; window.removeEventListener('re
 </script>
 
 <style scoped>
-.trend-breadth{margin:16px 0;padding:16px;background:var(--bg-panel);border:1px solid var(--border)}header,.toolbar{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap}header strong{font-size:18px}small{display:block;color:var(--text-muted);margin-top:4px}button,select{padding:5px 9px;background:var(--bg-card);border:1px solid var(--border);color:var(--text-secondary);cursor:pointer}button:disabled{opacity:.4;cursor:default}button.active{border-color:var(--accent)}.notice,.footnote{color:var(--text-muted);font-size:12px;line-height:1.7}.error{color:var(--danger)}.toolbar{margin:12px 0}.toolbar button{margin-right:5px}.metrics{display:grid;grid-template-columns:repeat(5,1fr);gap:10px}.metrics div{background:var(--bg-card);padding:12px}.metrics span{color:var(--text-muted);font-size:12px}.metrics strong{display:block;margin-top:5px;font-size:17px}.chart{height:330px}.history-table{overflow:auto}table{width:100%;border-collapse:collapse;white-space:nowrap}th,td{padding:8px 10px;border-bottom:1px solid var(--border);text-align:left}th{color:var(--text-muted)}tbody tr{cursor:pointer}tr.selected{background:rgba(101,164,255,.1)}.stocks{display:flex;gap:8px;flex-wrap:wrap;max-height:320px;overflow:auto}.stocks span{padding:7px 10px;background:var(--bg-card)}.up{color:var(--up-red)}.down{color:var(--down-green)}@media(max-width:1000px){.metrics{grid-template-columns:repeat(2,1fr)}}
+.trend-breadth{margin:16px 0;padding:16px;background:var(--bg-panel);border:1px solid var(--border)}header,.toolbar{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap}header strong{font-size:18px}small{display:block;color:var(--text-muted);margin-top:4px}button,select{padding:5px 9px;background:var(--bg-card);border:1px solid var(--border);color:var(--text-secondary);cursor:pointer}button:disabled{opacity:.4;cursor:default}button.active{border-color:var(--accent)}.notice,.footnote{color:var(--text-muted);font-size:12px;line-height:1.7}.error{color:var(--danger)}.toolbar{margin:12px 0}.toolbar button{margin-right:5px}.metrics{display:grid;grid-template-columns:repeat(5,1fr);gap:10px}.metrics div{background:var(--bg-card);padding:12px}.metrics span{color:var(--text-muted);font-size:12px}.metrics strong{display:block;margin-top:5px;font-size:17px}.chart{height:640px}.history-table{overflow:auto}table{width:100%;border-collapse:collapse;white-space:nowrap}th,td{padding:8px 10px;border-bottom:1px solid var(--border);text-align:left}th{color:var(--text-muted)}tbody tr{cursor:pointer}tr.selected{background:rgba(101,164,255,.1)}.stocks{display:flex;gap:8px;flex-wrap:wrap;max-height:320px;overflow:auto}.stocks span{padding:7px 10px;background:var(--bg-card)}.up{color:var(--up-red)}.down{color:var(--down-green)}@media(max-width:1000px){.metrics{grid-template-columns:repeat(2,1fr)}}
 </style>
