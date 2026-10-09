@@ -12,6 +12,8 @@
       </div>
     </header>
 
+    <TrendSqueezeBreadth />
+
     <section v-if="error" class="notice error">{{ error }}</section>
     <section v-if="loading" class="terminal-panel loading">正在读取真实历史涨跌家数…</section>
 
@@ -160,6 +162,7 @@
 import * as echarts from 'echarts'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useApi } from '../composables/useApi.js'
+import TrendSqueezeBreadth from '../components/TrendSqueezeBreadth.vue'
 import {
   buildMarketConclusion,
   calcBreadthPercentile,

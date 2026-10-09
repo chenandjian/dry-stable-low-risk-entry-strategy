@@ -20,6 +20,26 @@ from strategy6.models import (
 from strategy6.strong_trend_squeeze import evaluate_strong_trend_squeeze
 
 
+def test_history_matches_every_formal_prefix_and_is_causal():
+    from strategy6.strong_trend_squeeze import evaluate_strong_trend_squeeze_history
+    rows = _passing_rows()
+    history = evaluate_strong_trend_squeeze_history(rows)
+    assert len(history) == len(rows)
+    for end in range(249, len(rows)+1):
+        assert history[end-1] == evaluate_strong_trend_squeeze(rows[:end])
+    assert evaluate_strong_trend_squeeze_history(rows[:260]) == history[:260]
+
+
+def test_history_invalid_future_bar_does_not_contaminate_past():
+    from strategy6.strong_trend_squeeze import evaluate_strong_trend_squeeze_history
+    rows = _passing_rows()
+    valid = evaluate_strong_trend_squeeze_history(rows)
+    rows[-1]['low'] = -1
+    invalid = evaluate_strong_trend_squeeze_history(rows)
+    assert invalid[:-1] == valid[:-1]
+    assert not invalid[-1].calculable
+
+
 def _row(index: int, close: float, *, high: float | None = None, low: float | None = None) -> dict:
     day = date(2024, 1, 1) + timedelta(days=index)
     return {
