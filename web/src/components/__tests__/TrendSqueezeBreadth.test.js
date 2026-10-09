@@ -6,7 +6,7 @@ vi.mock('echarts', () => ({ init: () => mocks.chart }))
 import TrendSqueezeBreadth from '../TrendSqueezeBreadth.vue'
 
 const rows = [1, 2].map(i => ({ date: `2026-09-0${i}`, screen_count: i, strong_count: 20,
-  screen_ratio: .01*i, evaluated_count: 1000, eligible_count: 1000, coverage_rate: 1,
+  screen_ratio: .01*i, strong_ratio: .1*i, strong_ma5: .09*i, strong_ma20: .08*i, evaluated_count: 1000, eligible_count: 1000, coverage_rate: 1,
   data_quality: 'RELIABLE', screen_change: i === 2 ? 1 : null, screen_ma5: null,
   screen_ma20: null, screen_percentile120: null, environment: '数据不足，暂不判断' }))
 beforeEach(() => {
@@ -34,16 +34,23 @@ describe('TrendSqueezeBreadth', () => {
     expect(option.series[0].data).toEqual([1, 2])
     expect(option.series[3].data).toEqual([null, null])
     expect(option.series[2].xAxisIndex).toBe(1)
-    expect(option.dataZoom[0].xAxisIndex).toEqual([0, 1])
+    expect(option.dataZoom[0].xAxisIndex).toEqual([0, 1, 2])
+    expect(option.xAxis[2].data).toEqual(rows.map(r => r.date))
+    expect(option.series[5].data).toEqual([10, 20])
+    expect(option.series[6].data).toEqual([9, 18])
+    expect(option.series[7].data).toEqual([8, 16])
+    expect(option.series[5].yAxisIndex).toBe(2)
+    expect(wrapper.text()).toContain('长期强势占比 MA5 / MA20')
     expect(option.yAxis[1].min({ min: 1.1, max: 2.1 })).toBeCloseTo(.9)
     expect(option.yAxis[1].max({ min: 1.1, max: 2.1 })).toBeCloseTo(2.3)
     expect(option.tooltip.formatter([{ dataIndex: 0 }])).toContain('1.00%')
-    mocks.chart.containPixel.mockImplementation(({ gridIndex }) => gridIndex === 1)
+    expect(option.tooltip.formatter([{ dataIndex: 0 }])).toContain('10.00%')
+    mocks.chart.containPixel.mockImplementation(({ gridIndex }) => gridIndex === 2)
     mocks.on.mock.calls.at(-1)[1]({ offsetX: 100, offsetY: 200 })
     await flushPromises()
     expect(wrapper.get('[data-test="trend-date"]').element.value).toBe('2026-09-01')
     expect(wrapper.text()).toContain('000001')
-    expect(mocks.chart.convertFromPixel).toHaveBeenLastCalledWith({ gridIndex: 1 }, [100, 200])
+    expect(mocks.chart.convertFromPixel).toHaveBeenLastCalledWith({ gridIndex: 2 }, [100, 200])
     wrapper.unmount()
     expect(mocks.chart.dispose).toHaveBeenCalled()
   })
@@ -74,6 +81,8 @@ describe('TrendSqueezeBreadth', () => {
     const option = mocks.chart.setOption.mock.calls.at(-1)[0]
     expect(option.series[0].data).toEqual([1, 2, 77])
     expect(option.series[2].data).toEqual([1, 2, null])
+    expect(option.series[5].data).toEqual([10, 20, null])
+    expect(option.series[6].data).toEqual([9, 18, null])
     expect(option.yAxis[1].min({ min: Infinity, max: -Infinity })).toBe(0)
     expect(option.yAxis[1].max({ min: Infinity, max: -Infinity })).toBe(1)
     expect(option.yAxis[1].min({ min: 0, max: 0 })).toBe(0)
