@@ -149,6 +149,14 @@ def test_batch_service_uses_local_data_and_prioritizes_tail_score(monkeypatch):
     assert [item["code"] for item in result["results"]] == ["300604", "601857"]
     assert result["results"][0]["tailQualityScore"] == 19
     assert result["results"][0]["risingSupport"]["status"] == "DATA_INSUFFICIENT"
+    assert result["results"][0]["priceConvergence"]["matched"] is None
+    with monkeypatch.context() as temporary:
+        temporary.setattr(batch_evaluator, "evaluate_price_convergence", lambda rows: {"matched": True})
+        convergence_changed = batch_evaluator.evaluate_strategy6_batch(
+            ["601857", "000000", "300604"], {"strategy6": {}}
+        )
+    assert [{k: v for k, v in r.items() if k != "priceConvergence"} for r in convergence_changed["results"]] == [
+        {k: v for k, v in r.items() if k != "priceConvergence"} for r in result["results"]]
     original_diagnostic = batch_evaluator.evaluate_rising_support
     monkeypatch.setattr(batch_evaluator, "evaluate_rising_support", lambda rows: {"matched": True})
     diagnostic_changed = batch_evaluator.evaluate_strategy6_batch(

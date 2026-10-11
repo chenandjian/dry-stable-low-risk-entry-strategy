@@ -86,7 +86,7 @@
           <thead>
             <tr>
               <th>排名</th><th>股票</th><th>评价日</th><th>尾部质量</th><th>尾部结论</th><th>量比</th>
-              <th>量能趋势</th><th>低点抬高（支撑）</th><th>跌不动（卖压衰竭）</th><th>EMA极致缠绕</th><th>5日成交额最低</th><th>收盘低于MA5</th><th>5日收盘波动</th><th>最新交易日K线形态</th><th>K线集合形态</th><th>策略总分</th>
+              <th>量能趋势</th><th>低点抬高（支撑）</th><th>高低点收敛</th><th>跌不动（卖压衰竭）</th><th>EMA极致缠绕</th><th>5日成交额最低</th><th>收盘低于MA5</th><th>5日收盘波动</th><th>最新交易日K线形态</th><th>K线集合形态</th><th>策略总分</th>
             </tr>
             <tr class="filter-row">
               <th></th>
@@ -102,6 +102,7 @@
               <th><div class="range-filter"><input v-model="tableFilters.volumeRatioMin" type="number" step="0.01" placeholder="最低" /><input v-model="tableFilters.volumeRatioMax" type="number" step="0.01" placeholder="最高" /></div></th>
               <th><select v-model="tableFilters.volumeTrend"><option value="">全部</option><option value="shrinking">缩量</option><option value="not_shrinking">未缩量</option></select></th>
               <th><select v-model="tableFilters.risingSupport" data-test="filter-rising-support"><option value="">全部</option><option value="yes">是</option><option value="no">否</option><option value="unknown">数据不足/未计算</option></select></th>
+              <th><select v-model="tableFilters.convergence" data-test="filter-convergence"><option value="">全部</option><option value="yes">是</option><option value="no">否</option><option value="forming">待确认</option><option value="unknown">数据不足/未计算</option></select><input v-model="tableFilters.contractionMin" data-test="filter-contraction-min" type="number" min="0" max="100" step="1" placeholder="最低收窄比例%"></th>
               <th>
                 <div class="grade-multiselect">
                   <button class="grade-toggle" :aria-expanded="exhaustionFiltersOpen" @click="exhaustionFiltersOpen = !exhaustionFiltersOpen">{{ tableFilters.exhaustionStatuses.length ? tableFilters.exhaustionStatuses.map(status => exhaustionStatuses[status]).join('、') : '全部 · 确认强度（可复选）' }}</button>
@@ -184,6 +185,12 @@
                   <small>支撑 {{ emaNumber(item.risingSupport?.supportPrice) }} · 距离 {{ emaNumber(item.risingSupport?.distancePct) }}%</small>
                   <small>{{ item.risingSupport?.reasonText || '尚未计算' }}</small>
                 </td>
+                <td :data-test="`convergence-${item.code}`" :class="{ 'requirement-hit': item.priceConvergence?.matched === true }">
+                  <strong>{{ item.priceConvergence?.status === 'FORMING' ? '待确认' : flagText(item.priceConvergence?.matched) }}</strong>
+                  <small>支撑 {{ emaNumber(item.priceConvergence?.supportPrice) }} · 压力 {{ emaNumber(item.priceConvergence?.pressurePrice) }}</small>
+                  <small>区间收窄 {{ emaNumber(item.priceConvergence?.contractionPct) }}%</small>
+                  <small>{{ item.priceConvergence?.reasonText || '尚未计算' }}</small>
+                </td>
                 <td :class="{ 'requirement-hit': item.sellingExhaustion?.matched }">
                   <strong>{{ exhaustionStatuses[item.sellingExhaustion?.status] || '尚未计算' }}</strong>
                   <small>评分 {{ item.sellingExhaustion?.score ?? '--' }} / 100 · {{ item.sellingExhaustion?.grade || '--' }}</small>
@@ -211,8 +218,20 @@
                 <td><strong>{{ item.totalScore }} / 100</strong></td>
               </tr>
               <tr v-if="expanded.has(item.code)" class="detail-row">
-                <td colspan="16">
+                <td colspan="17">
                   <div class="detail-grid">
+                    <div>
+                      <h3>高低点收敛</h3>
+                      <p>支撑抬高与压力下移须在同段交替整理中配对；仅展示筛选，不计分，不代表向上突破或买入信号。</p>
+                      <p>{{ item.priceConvergence?.reasonText || '尚未计算' }}</p>
+                      <p>区间 {{ emaNumber(item.priceConvergence?.previousWidth) }} → {{ emaNumber(item.priceConvergence?.currentWidth) }} · 收窄 {{ emaNumber(item.priceConvergence?.contractionPct) }}%</p>
+                      <p v-for="zone in item.priceConvergence?.matchedLowZones || []" :key="`paired-low-${zone.lowDate}`">本次配对支撑 {{ zone.lowDate }} / {{ emaNumber(zone.low) }}</p>
+                      <p v-for="zone in item.priceConvergence?.matchedHighZones || []" :key="`paired-high-${zone.highDate}`">本次配对压力 {{ zone.highDate }} / {{ emaNumber(zone.high) }}</p>
+                      <p>下列为全部已识别区域，未必参与本次配对：</p>
+                      <p v-for="zone in item.priceConvergence?.lowZones || []" :key="`low-${zone.startDate}`">支撑 {{ zone.lowDate }} / {{ emaNumber(zone.low) }} · 确认 {{ zone.confirmedDate }}</p>
+                      <p v-for="zone in item.priceConvergence?.highZones || []" :key="`high-${zone.startDate}`">压力 {{ zone.highDate }} / {{ emaNumber(zone.high) }} · 确认 {{ zone.confirmedDate }}</p>
+                      <p v-if="item.priceConvergence?.breachDate">{{ item.priceConvergence.breachDate }}：{{ item.priceConvergence.breachType === 'WICK' ? '最高价刺破超过容差，不等于突破成功' : '收盘越过旧压力，需重新确认' }}</p>
+                    </div>
                     <div>
                       <h3>低点抬高（支撑）</h3>
                       <p>最近60日支撑区诊断，仅展示与筛选，不计分。0.5ATR固定宽度合并回踩，保留真实最低价；区域间1%容错不向下累积。</p>
@@ -307,7 +326,7 @@
               </tr>
             </template>
             <tr v-if="!results.length" class="empty-filter-row">
-              <td colspan="16">没有符合当前筛选条件的股票，请调整条件或清除筛选。</td>
+              <td colspan="17">没有符合当前筛选条件的股票，请调整条件或清除筛选。</td>
             </tr>
           </tbody>
         </table>
@@ -340,7 +359,7 @@ const errorMessage = ref('')
 const copiedCode = ref('')
 // Results are replaced as a snapshot; filters never mutate the nested diagnostics.
 const response = shallowRef(null)
-const resultColumnWidths = [55, 120, 115, 150, 150, 145, 110, 220, 270, 270, 270, 150, 155, 220, 220, 145]
+const resultColumnWidths = [55, 120, 115, 150, 150, 145, 110, 220, 260, 270, 270, 270, 150, 155, 220, 220, 145]
 const expanded = reactive(new Set())
 const tableFilters = reactive(createEmptyTableFilters())
 
@@ -437,7 +456,7 @@ async function runEvaluation() {
 
 function createEmptyTableFilters() {
   return {
-    risingSupport: '',
+    risingSupport: '', convergence: '', contractionMin: '',
     exhaustionStatuses: [], exhaustionMin: '', exhaustionDays: '',
     emaStatus: '', emaGrades: [], emaMin: '', emaMax: '', emaWidth: '', emaDays: '',
     stock: '', evaluationDate: '', tailQualityMin: '', tailQualityMax: '', tailPass: '',
@@ -465,6 +484,13 @@ function matchesBooleanFilter(value, filter) {
 }
 
 function matchesTableFilters(item) {
+  const convergence = item.priceConvergence
+  if (tableFilters.convergence === 'forming') {
+    if (convergence?.status !== 'FORMING') return false
+  } else if (tableFilters.convergence === 'no') {
+    if (convergence?.matched !== false || convergence?.status === 'FORMING') return false
+  } else if (!matchesBooleanFilter(convergence?.matched, tableFilters.convergence)) return false
+  if (!matchesNumberRange(convergence?.contractionPct, tableFilters.contractionMin, '')) return false
   if (!matchesBooleanFilter(item.risingSupport?.matched, tableFilters.risingSupport)) return false
   const exhaustion = item.sellingExhaustion
   if (tableFilters.exhaustionStatuses.length && !tableFilters.exhaustionStatuses.includes(exhaustion?.status)) return false

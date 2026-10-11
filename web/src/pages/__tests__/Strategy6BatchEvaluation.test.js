@@ -22,6 +22,30 @@ async function flushUi() {
 }
 
 describe('Strategy6BatchEvaluation', () => {
+  it('shows convergence independently and filters ratio, pending and unknown results', async () => {
+    api.evaluateStrategy6Batch.mockResolvedValue({ ok: true, results: [
+      { code: '603976', tailQualityScore: 18, totalScore: 80, priceConvergence: { matched: true, status: 'MATCHED', contractionPct: 42.39, supportPrice: 27.8, pressurePrice: 34.01, reasonText: '上下边界收敛' } },
+      { code: '002832', tailQualityScore: 19, totalScore: 90, priceConvergence: { matched: false, status: 'FORMING', contractionPct: null } },
+      { code: '300765', tailQualityScore: 10, totalScore: 60 },
+    ] })
+    const wrapper = mount(Strategy6BatchEvaluation)
+    await wrapper.get('[data-test="batch-submit"]').trigger('click')
+    await flushUi()
+    expect(wrapper.text()).toContain('高低点收敛')
+    expect(wrapper.get('[data-test="convergence-603976"]').text()).toContain('42.39')
+    await wrapper.get('[data-test="filter-convergence"]').setValue('yes')
+    expect(wrapper.findAll('.score-row')).toHaveLength(1)
+    await wrapper.get('[data-test="filter-contraction-min"]').setValue('50')
+    expect(wrapper.findAll('.score-row')).toHaveLength(0)
+    await wrapper.get('[data-test="clear-table-filters"]').trigger('click')
+    await wrapper.get('[data-test="filter-convergence"]').setValue('forming')
+    expect(wrapper.find('.score-row').text()).toContain('002832')
+    await wrapper.get('[data-test="filter-convergence"]').setValue('unknown')
+    expect(wrapper.find('.score-row').text()).toContain('300765')
+    await wrapper.get('[data-test="export-tradingview-filtered"]').trigger('click')
+    expect(downloadTradingViewWatchlist.mock.calls[0][0].rows.map(item => item.code)).toEqual(['300765'])
+    wrapper.unmount()
+  })
   it('filters rising support without changing scores and clears the selection', async () => {
     api.evaluateStrategy6Batch.mockResolvedValue({ ok: true, results: [
       { code: '603259', tailQualityScore: 18, totalScore: 80, risingSupport: { matched: true, status: 'MATCHED', supportPrice: 149.7, distancePct: 5.41, zones: [], reasonText: '支撑抬高且当前守住' } },
@@ -438,7 +462,7 @@ describe('Strategy6BatchEvaluation', () => {
     await wrapper.get('[data-test="batch-submit"]').trigger('click')
     await flushUi()
     const tableWidth = wrapper.get('table').attributes('style')
-    expect(wrapper.findAll('colgroup col')).toHaveLength(16)
+    expect(wrapper.findAll('colgroup col')).toHaveLength(17)
 
     expect(wrapper.findAll('.score-row')).toHaveLength(2)
 
