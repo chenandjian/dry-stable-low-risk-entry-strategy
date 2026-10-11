@@ -22,6 +22,28 @@ async function flushUi() {
 }
 
 describe('Strategy6BatchEvaluation', () => {
+  it('filters rising support without changing scores and clears the selection', async () => {
+    api.evaluateStrategy6Batch.mockResolvedValue({ ok: true, results: [
+      { code: '603259', tailQualityScore: 18, totalScore: 80, risingSupport: { matched: true, status: 'MATCHED', supportPrice: 149.7, distancePct: 5.41, zones: [], reasonText: '支撑抬高且当前守住' } },
+      { code: '600060', tailQualityScore: 19, totalScore: 90, risingSupport: { matched: false, status: 'NOT_MATCHED', zones: [] } },
+      { code: '300765', tailQualityScore: 10, totalScore: 60 },
+    ] })
+    const wrapper = mount(Strategy6BatchEvaluation)
+    await wrapper.get('[data-test="batch-submit"]').trigger('click')
+    await flushUi()
+    expect(wrapper.text()).toContain('低点抬高（支撑）')
+    expect(wrapper.get('[data-test="rising-support-603259"]').text()).toContain('149.70')
+    await wrapper.get('[data-test="filter-rising-support"]').setValue('yes')
+    expect(wrapper.findAll('.score-row')).toHaveLength(1)
+    expect(wrapper.find('.score-row').text()).toContain('603259')
+    await wrapper.get('[data-test="export-tradingview-filtered"]').trigger('click')
+    expect(downloadTradingViewWatchlist.mock.calls[0][0].rows.map(item => item.code)).toEqual(['603259'])
+    await wrapper.get('[data-test="filter-rising-support"]').setValue('unknown')
+    expect(wrapper.find('.score-row').text()).toContain('300765')
+    await wrapper.get('[data-test="clear-table-filters"]').trigger('click')
+    expect(wrapper.findAll('.score-row')).toHaveLength(3)
+    wrapper.unmount()
+  })
   beforeEach(() => {
     vi.clearAllMocks()
     localStorage.clear()
@@ -416,7 +438,7 @@ describe('Strategy6BatchEvaluation', () => {
     await wrapper.get('[data-test="batch-submit"]').trigger('click')
     await flushUi()
     const tableWidth = wrapper.get('table').attributes('style')
-    expect(wrapper.findAll('colgroup col')).toHaveLength(15)
+    expect(wrapper.findAll('colgroup col')).toHaveLength(16)
 
     expect(wrapper.findAll('.score-row')).toHaveLength(2)
 
