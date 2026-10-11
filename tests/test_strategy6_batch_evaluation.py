@@ -148,6 +148,15 @@ def test_batch_service_uses_local_data_and_prioritizes_tail_score(monkeypatch):
 
     assert [item["code"] for item in result["results"]] == ["300604", "601857"]
     assert result["results"][0]["tailQualityScore"] == 19
+    assert result["results"][0]["risingSupport"]["status"] == "DATA_INSUFFICIENT"
+    original_diagnostic = batch_evaluator.evaluate_rising_support
+    monkeypatch.setattr(batch_evaluator, "evaluate_rising_support", lambda rows: {"matched": True})
+    diagnostic_changed = batch_evaluator.evaluate_strategy6_batch(
+        ["601857", "000000", "300604"], {"strategy6": {}}
+    )
+    assert [{k: v for k, v in r.items() if k != "risingSupport"} for r in diagnostic_changed["results"]] == [
+        {k: v for k, v in r.items() if k != "risingSupport"} for r in result["results"]]
+    monkeypatch.setattr(batch_evaluator, "evaluate_rising_support", original_diagnostic)
     assert result["results"][0]["tailScore"] == 19
     assert result["results"][0]["tailPass"] is True
     assert result["results"][0]["dataSource"] == "tickflow"

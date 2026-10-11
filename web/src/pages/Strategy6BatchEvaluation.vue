@@ -86,7 +86,7 @@
           <thead>
             <tr>
               <th>排名</th><th>股票</th><th>评价日</th><th>尾部质量</th><th>尾部结论</th><th>量比</th>
-              <th>量能趋势</th><th>跌不动（卖压衰竭）</th><th>EMA极致缠绕</th><th>5日成交额最低</th><th>收盘低于MA5</th><th>5日收盘波动</th><th>最新交易日K线形态</th><th>K线集合形态</th><th>策略总分</th>
+              <th>量能趋势</th><th>低点抬高（支撑）</th><th>跌不动（卖压衰竭）</th><th>EMA极致缠绕</th><th>5日成交额最低</th><th>收盘低于MA5</th><th>5日收盘波动</th><th>最新交易日K线形态</th><th>K线集合形态</th><th>策略总分</th>
             </tr>
             <tr class="filter-row">
               <th></th>
@@ -101,6 +101,7 @@
               <th><select v-model="tableFilters.tailPass" data-test="filter-tail-pass"><option value="">全部</option><option value="pass">通过</option><option value="fail">未通过</option></select></th>
               <th><div class="range-filter"><input v-model="tableFilters.volumeRatioMin" type="number" step="0.01" placeholder="最低" /><input v-model="tableFilters.volumeRatioMax" type="number" step="0.01" placeholder="最高" /></div></th>
               <th><select v-model="tableFilters.volumeTrend"><option value="">全部</option><option value="shrinking">缩量</option><option value="not_shrinking">未缩量</option></select></th>
+              <th><select v-model="tableFilters.risingSupport" data-test="filter-rising-support"><option value="">全部</option><option value="yes">是</option><option value="no">否</option><option value="unknown">数据不足/未计算</option></select></th>
               <th>
                 <div class="grade-multiselect">
                   <button class="grade-toggle" :aria-expanded="exhaustionFiltersOpen" @click="exhaustionFiltersOpen = !exhaustionFiltersOpen">{{ tableFilters.exhaustionStatuses.length ? tableFilters.exhaustionStatuses.map(status => exhaustionStatuses[status]).join('、') : '全部 · 确认强度（可复选）' }}</button>
@@ -178,6 +179,11 @@
                 <td><span class="status" :class="item.tailPass ? 'pass' : 'fail'">{{ item.tailPass ? '量稳价干通过' : '尾部未通过' }}</span></td>
                 <td>{{ ratio(item.tailVolumeRatio) }}</td>
                 <td :class="item.volumeSlope10 < 0 ? 'positive' : 'negative'">{{ item.volumeSlope10 < 0 ? '缩量' : '未缩量' }}</td>
+                <td :data-test="`rising-support-${item.code}`" :class="{ 'requirement-hit': item.risingSupport?.matched === true }">
+                  <strong>{{ flagText(item.risingSupport?.matched) }}</strong>
+                  <small>支撑 {{ emaNumber(item.risingSupport?.supportPrice) }} · 距离 {{ emaNumber(item.risingSupport?.distancePct) }}%</small>
+                  <small>{{ item.risingSupport?.reasonText || '尚未计算' }}</small>
+                </td>
                 <td :class="{ 'requirement-hit': item.sellingExhaustion?.matched }">
                   <strong>{{ exhaustionStatuses[item.sellingExhaustion?.status] || '尚未计算' }}</strong>
                   <small>评分 {{ item.sellingExhaustion?.score ?? '--' }} / 100 · {{ item.sellingExhaustion?.grade || '--' }}</small>
@@ -205,8 +211,16 @@
                 <td><strong>{{ item.totalScore }} / 100</strong></td>
               </tr>
               <tr v-if="expanded.has(item.code)" class="detail-row">
-                <td colspan="15">
+                <td colspan="16">
                   <div class="detail-grid">
+                    <div>
+                      <h3>低点抬高（支撑）</h3>
+                      <p>最近60日支撑区诊断，仅展示与筛选，不计分。0.5ATR固定宽度合并回踩，保留真实最低价；区域间1%容错不向下累积。</p>
+                      <p>{{ item.risingSupport?.reasonText || '尚未计算' }}</p>
+                      <p v-for="zone in item.risingSupport?.zones || []" :key="zone.startDate">{{ zone.startDate }} 至 {{ zone.endDate }} · 最低 {{ emaNumber(zone.low) }}（{{ zone.lowDate }}） · {{ zone.touchCount }}次回踩 · 确认 {{ zone.confirmedDate }}</p>
+                      <p v-if="item.risingSupport?.pendingLow">尚未确认低点：{{ item.risingSupport.pendingLow.date }} / {{ emaNumber(item.risingSupport.pendingLow.price) }}</p>
+                      <p>支撑有效不等于买入信号；价格可能已远离支撑。</p>
+                    </div>
                     <div>
                       <h3>跌不动（卖压衰竭）</h3>
                       <p>独立诊断，不计入策略总分；评分等级与确认强度独立。</p>
@@ -293,7 +307,7 @@
               </tr>
             </template>
             <tr v-if="!results.length" class="empty-filter-row">
-              <td colspan="15">没有符合当前筛选条件的股票，请调整条件或清除筛选。</td>
+              <td colspan="16">没有符合当前筛选条件的股票，请调整条件或清除筛选。</td>
             </tr>
           </tbody>
         </table>
@@ -326,7 +340,7 @@ const errorMessage = ref('')
 const copiedCode = ref('')
 // Results are replaced as a snapshot; filters never mutate the nested diagnostics.
 const response = shallowRef(null)
-const resultColumnWidths = [55, 120, 115, 150, 150, 145, 110, 270, 270, 270, 150, 155, 220, 220, 145]
+const resultColumnWidths = [55, 120, 115, 150, 150, 145, 110, 220, 270, 270, 270, 150, 155, 220, 220, 145]
 const expanded = reactive(new Set())
 const tableFilters = reactive(createEmptyTableFilters())
 
@@ -423,6 +437,7 @@ async function runEvaluation() {
 
 function createEmptyTableFilters() {
   return {
+    risingSupport: '',
     exhaustionStatuses: [], exhaustionMin: '', exhaustionDays: '',
     emaStatus: '', emaGrades: [], emaMin: '', emaMax: '', emaWidth: '', emaDays: '',
     stock: '', evaluationDate: '', tailQualityMin: '', tailQualityMax: '', tailPass: '',
@@ -450,6 +465,7 @@ function matchesBooleanFilter(value, filter) {
 }
 
 function matchesTableFilters(item) {
+  if (!matchesBooleanFilter(item.risingSupport?.matched, tableFilters.risingSupport)) return false
   const exhaustion = item.sellingExhaustion
   if (tableFilters.exhaustionStatuses.length && !tableFilters.exhaustionStatuses.includes(exhaustion?.status)) return false
   if (!matchesNumberRange(exhaustion?.score, tableFilters.exhaustionMin, '')) return false
