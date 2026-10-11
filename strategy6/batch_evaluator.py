@@ -9,6 +9,7 @@ from strategy6.engine import StrongVcpTailEngine
 from strategy6.ema_compression import evaluate_ema_compression
 from strategy6.selling_exhaustion import evaluate_selling_exhaustion
 from strategy6.rising_support import evaluate_rising_support
+from strategy6.price_convergence import evaluate_price_convergence
 
 
 MARKET_SYMBOLS = ("sh000001", "sz399001", "sz399006", "hs300")
@@ -50,6 +51,7 @@ def evaluate_strategy6_batch(codes: list[str], config: dict) -> dict:
         summary["emaCompression"] = evaluate_ema_compression(rows, config.get("strategy6", {}).get("ema_compression"))
         summary["sellingExhaustion"] = evaluate_selling_exhaustion(rows, config.get("strategy6", {}).get("selling_exhaustion"))
         summary["risingSupport"] = evaluate_rising_support(rows)
+        summary["priceConvergence"] = evaluate_price_convergence(rows)
         results.append(summary)
 
     results.sort(
