@@ -1,5 +1,25 @@
 const validNumber = value => typeof value === 'number' && Number.isFinite(value)
 
+export function calcLimitSentiment(upCount, downCount) {
+  if (![upCount, downCount].every(value => Number.isSafeInteger(value) && value >= 0)) return null
+  return (upCount - downCount) / (upCount + downCount + 20)
+}
+
+export function enrichLimitSentimentRows(rows) {
+  const values = rows.map(row => ({
+    ...row,
+    limitSentiment: row.dataQuality === 'RELIABLE' && Number.isSafeInteger(row.limitEstimateSampleCount) && row.limitEstimateSampleCount > 0
+      ? calcLimitSentiment(row.estimatedLimitUpCount, row.estimatedLimitDownCount) : null,
+  }))
+  return values.map((row, index) => {
+    const window = values.slice(Math.max(0, index - 4), index + 1)
+    // Use the original market calendar before filtering unreliable dates out of the plot.
+    const complete = window.length === 5 && window.every((item, i) => validNumber(item.limitSentiment)
+      && (i === 0 || item.previousTradeDate === window[i - 1].date))
+    return { ...row, limitSentimentMA5: complete ? window.reduce((sum, item) => sum + item.limitSentiment, 0) / 5 : null }
+  })
+}
+
 export function calcBreadthRate(upCount, downCount) {
   const up = Number(upCount)
   const down = Number(downCount)
