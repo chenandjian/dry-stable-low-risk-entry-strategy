@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 
 const chartMocks = vi.hoisted(() => {
@@ -65,12 +65,20 @@ const getMarketBreadthHistory = vi.fn().mockResolvedValue({
   },
   rows,
 })
+const getTrendSqueezeBreadthHistory = vi.fn().mockResolvedValue({ rows: [] })
 
 vi.mock('../../composables/useApi.js', () => ({
-  useApi: () => ({ getMarketBreadthHistory, getTrendSqueezeBreadthHistory: vi.fn().mockResolvedValue({ rows: [] }) }),
+  useApi: () => ({ getMarketBreadthHistory, getTrendSqueezeBreadthHistory }),
 }))
 
 import MarketBreadth from '../MarketBreadth.vue'
+
+beforeEach(() => {
+  vi.clearAllMocks()
+  chartMocks.charts.length = 0
+  getMarketBreadthHistory.mockReset().mockResolvedValue({ meta: {}, rows })
+  getTrendSqueezeBreadthHistory.mockReset().mockResolvedValue({ rows: [] })
+})
 
 describe('MarketBreadth', () => {
   it('shows conclusion-first breadth analysis and linked research charts', async () => {
@@ -97,6 +105,8 @@ describe('MarketBreadth', () => {
     expect(chartMocks.connect).toHaveBeenCalled()
     expect(chartMocks.charts[0].setOption).toHaveBeenCalled()
     expect(chartMocks.charts[1].setOption).toHaveBeenCalled()
+    expect(getTrendSqueezeBreadthHistory).not.toHaveBeenCalled()
+    expect(chartMocks.charts[0].setOption).toHaveBeenCalledTimes(2) // One render per progressive snapshot.
 
     const breadthOption = chartMocks.charts[0].setOption.mock.calls.at(-1)[0]
     const indexOption = chartMocks.charts[1].setOption.mock.calls.at(-1)[0]
@@ -117,6 +127,37 @@ describe('MarketBreadth', () => {
     expect(tooltip).toContain('估算跌停')
     expect(limitOption.xAxis.data).toEqual(indexOption.xAxis.data)
 
+    wrapper.unmount()
+  })
+
+  it('shows the recent snapshot while complete history is pending and ignores a late unmounted response', async () => {
+    let finish
+    getMarketBreadthHistory.mockResolvedValueOnce({ rows }).mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
+    const wrapper = mount(MarketBreadth)
+    await flushPromises()
+    expect(getMarketBreadthHistory.mock.calls.map(([params]) => params.limit)).toEqual([30, 1500])
+    expect(wrapper.text()).toContain('市场偏弱')
+    expect(wrapper.text()).toContain('正在补齐完整历史')
+    expect(chartMocks.charts[0].setOption).toHaveBeenCalledTimes(1)
+    expect(getTrendSqueezeBreadthHistory).not.toHaveBeenCalled()
+    wrapper.unmount()
+    finish({ rows: reliableRows })
+    await flushPromises()
+    expect(chartMocks.charts[0].setOption).toHaveBeenCalledTimes(1)
+    expect(chartMocks.charts[0].dispose).toHaveBeenCalledTimes(1)
+  })
+
+  it('keeps recent data when complete history fails and allows retry without hiding charts', async () => {
+    getMarketBreadthHistory.mockResolvedValueOnce({ rows }).mockRejectedValueOnce(new Error('完整历史暂不可用'))
+    const wrapper = mount(MarketBreadth)
+    await flushPromises()
+    expect(wrapper.text()).toContain('完整历史加载失败')
+    expect(wrapper.text()).toContain('市场偏弱')
+    expect(wrapper.find('[data-test="breadth-chart"]').exists()).toBe(true)
+    await wrapper.get('[data-test="retry-breadth-history"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).not.toContain('完整历史加载失败')
+    expect(wrapper.find('[data-test="breadth-chart"]').exists()).toBe(true)
     wrapper.unmount()
   })
 })

@@ -411,3 +411,39 @@ def test_market_breadth_api_returns_real_history_without_changing_strategy(tmp_p
     invalid = TestClient(server_mod.app).get("/api/market-breadth/history?start_date=not-a-date")
     assert invalid.status_code == 400
     assert invalid.json()["error"] == "INVALID_MARKET_BREADTH_QUERY"
+
+
+def test_market_breadth_initializes_database_off_event_loop(monkeypatch):
+    import asyncio
+    import threading
+    event_thread = threading.get_ident()
+    initialized = []
+    monkeypatch.setattr(server_mod, 'load_config', lambda: {'data': {'database_path': 'unused.db'}})
+    monkeypatch.setattr(db, 'init_db', lambda path: initialized.append(threading.get_ident()))
+    monkeypatch.setattr(server_mod, 'build_market_breadth_history', lambda **kwargs: {'rows': []})
+    asyncio.run(server_mod.market_breadth_history())
+    assert initialized and initialized[0] != event_thread
+
+
+def test_refresh_preserves_off_calendar_gap_semantics(tmp_path):
+    _seed_market_data(str(tmp_path / 'off-calendar.db'))
+    conn = db.get_conn()
+    conn.executemany('INSERT INTO daily_ohlc VALUES(?,?,?,?,?,?,?,?)',
+                     [_bar('000001', '2026-01-07', 10), _bar('000001', '2026-01-08', 11)])
+    for symbol in ('sh000001', 'sz399001', 'sz399006', 'hs300'):
+        conn.execute('INSERT INTO market_index_ohlc(symbol,date,close) VALUES(?,?,?)', (symbol,'2026-01-08',100))
+    conn.commit()
+    payload = build_market_breadth_history(start_date='2026-01-08', end_date='2026-01-08')
+    assert payload['rows'] == []  # Jan 7 is not a market date; do not silently skip the bad bar.
+
+
+def test_small_market_breadth_refresh_seeks_by_date(tmp_path):
+    _seed_market_data(str(tmp_path / 'date-seek.db'))
+    statements = []
+    db.get_conn().set_trace_callback(statements.append)
+    try:
+        result = build_market_breadth_history()
+    finally:
+        db.get_conn().set_trace_callback(None)
+    assert result['rows'][-1]['up_count'] == 1
+    assert any('WITH moves AS' in sql and 'INDEXED BY idx_ohlc_date' in sql for sql in statements)

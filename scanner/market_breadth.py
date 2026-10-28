@@ -209,6 +209,10 @@ def _ensure_breadth_cache(conn, calendar: list[tuple[str, str]]) -> dict[str, tu
         pair_map = dict(calendar)
         query_start = min(pair_map[trade_date] for trade_date in rebuild_dates)
         query_end = max(rebuild_dates)
+        # A date seek avoids scanning the complete code/date index for warm daily refreshes.
+        # Broad reconstructions retain the ordered scan, which benchmarks faster than random joins.
+        source_index = ("idx_ohlc_date" if (date.fromisoformat(query_end) - date.fromisoformat(query_start)).days <= 21
+                        else "sqlite_autoindex_daily_ohlc_1")
         conn.execute(
             """CREATE TEMP TABLE IF NOT EXISTS temp_market_breadth_calendar (
                    trade_date TEXT PRIMARY KEY,
@@ -221,11 +225,11 @@ def _ensure_breadth_cache(conn, calendar: list[tuple[str, str]]) -> dict[str, tu
             [(trade_date, pair_map[trade_date]) for trade_date in rebuild_dates],
         )
         rebuilt = conn.execute(
-            """WITH moves AS (
+            f"""WITH moves AS (
                     SELECT code, date, close,
                            LAG(date) OVER (PARTITION BY code ORDER BY date) AS previous_date,
                            LAG(close) OVER (PARTITION BY code ORDER BY date) AS previous_close
-                    FROM daily_ohlc INDEXED BY sqlite_autoindex_daily_ohlc_1
+                    FROM daily_ohlc INDEXED BY {source_index}
                     WHERE date BETWEEN ? AND ?
                 )
                 , classified AS (

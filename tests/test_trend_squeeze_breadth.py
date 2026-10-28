@@ -147,3 +147,15 @@ def test_unfinished_today_is_excluded_until_close_confirmation(tmp_path, monkeyp
     assert build_trend_squeeze_breadth()['rows'][-1]['date'] == rows[-2]['date']
     clock = clock.replace(minute=10)
     assert build_trend_squeeze_breadth()['rows'][-1]['date'] == rows[-1]['date']
+
+
+def test_trend_endpoint_initializes_database_off_event_loop(monkeypatch):
+    import asyncio
+    import threading
+    event_thread = threading.get_ident()
+    initialized = []
+    monkeypatch.setattr(server, 'load_config', lambda: {'data': {'database_path': 'unused.db'}})
+    monkeypatch.setattr(db, 'init_db', lambda path: initialized.append(threading.get_ident()))
+    monkeypatch.setattr(server, 'build_trend_squeeze_breadth', lambda **kwargs: {'rows': []})
+    asyncio.run(server.trend_squeeze_breadth_history())
+    assert initialized and initialized[0] != event_thread
