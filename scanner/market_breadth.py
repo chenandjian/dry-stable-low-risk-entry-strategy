@@ -24,6 +24,7 @@ INDEX_NAMES = {
 }
 TRADING_CANDIDATE_TYPES = {"READY_CANDIDATE", "KEY_CANDIDATE", "WATCH_CANDIDATE"}
 _CACHE_BUILD_LOCK = threading.Lock()
+LIMIT_ESTIMATE_METHOD = "LOCAL_ADJUSTED_RETURN_ESTIMATE_V1"
 
 
 class MarketBreadthDataChanging(RuntimeError):
@@ -85,8 +86,8 @@ def _source_revision(conn) -> str:
         digest.update(
             f"{code}|{row_count}|{first_date or ''}|{latest_date or ''}|{content_revision}\n".encode("utf-8")
         )
-    for (code,) in conn.execute("SELECT code FROM stock_pool ORDER BY code").fetchall():
-        digest.update(f"pool:{code}\n".encode("utf-8"))
+    for code, name in conn.execute("SELECT code, name FROM stock_pool ORDER BY code").fetchall():
+        digest.update(f"pool:{code}|{name}\n".encode("utf-8"))
     return f"breadth-v2:{digest.hexdigest()}"
 
 
@@ -178,17 +179,28 @@ def _load_strategy6_signals(conn, start_date: str, end_date: str) -> dict[str, d
     return signals
 
 
-def _ensure_breadth_cache(conn, calendar: list[tuple[str, str]]) -> dict[str, tuple[int, int, int]]:
+def _limit_estimate_revision(conn) -> str:
+    digest = hashlib.sha256(LIMIT_ESTIMATE_METHOD.encode())
+    for code, name in conn.execute("SELECT code, name FROM stock_pool ORDER BY code"):
+        digest.update(f"{code}|{name}\n".encode("utf-8"))
+    return digest.hexdigest()
+
+
+def _ensure_breadth_cache(conn, calendar: list[tuple[str, str]]) -> dict[str, tuple]:
     """Build missing breadth days and refresh the latest day from real bars."""
     if not calendar:
         return {}
     dates = [item[0] for item in calendar]
+    estimate_revision = _limit_estimate_revision(conn)
     placeholders = ",".join("?" for _ in dates)
     cached_rows = conn.execute(
-        f"SELECT trade_date, up_count, down_count, flat_count FROM market_breadth_daily WHERE trade_date IN ({placeholders})",
-        dates,
+        f"""SELECT trade_date, up_count, down_count, flat_count,
+                   estimated_limit_up_count, estimated_limit_down_count, limit_estimate_sample_count
+            FROM market_breadth_daily WHERE trade_date IN ({placeholders}) AND limit_estimate_revision=?""",
+        [*dates, estimate_revision],
     ).fetchall()
-    cached = {row[0]: (int(row[1]), int(row[2]), int(row[3])) for row in cached_rows}
+    cached = {row[0]: tuple(int(value or 0) for value in row[1:]) for row in cached_rows
+              if all(value is not None for value in row[4:])}
     # The latest day may still be receiving corrected bars, so it is always rebuilt.
     rebuild_dates = [trade_date for trade_date, _ in calendar if trade_date not in cached]
     if dates[-1] not in rebuild_dates:
@@ -216,38 +228,64 @@ def _ensure_breadth_cache(conn, calendar: list[tuple[str, str]]) -> dict[str, tu
                     FROM daily_ohlc INDEXED BY sqlite_autoindex_daily_ohlc_1
                     WHERE date BETWEEN ? AND ?
                 )
-                SELECT moves.date,
-                       SUM(CASE WHEN moves.close > moves.previous_close THEN 1 ELSE 0 END),
-                       SUM(CASE WHEN moves.close < moves.previous_close THEN 1 ELSE 0 END),
-                       SUM(CASE WHEN moves.close = moves.previous_close THEN 1 ELSE 0 END)
-                FROM moves
-                JOIN temp_market_breadth_calendar calendar
-                  ON calendar.trade_date=moves.date
-                 AND calendar.previous_trade_date=moves.previous_date
-                GROUP BY moves.date""",
+                , classified AS (
+                    SELECT moves.*,
+                           CASE WHEN s.code IS NULL OR LENGTH(s.code)<>6 OR s.code GLOB '*[^0-9]*'
+                                  OR INSTR(UPPER(s.name),'ST')>0 OR UPPER(TRIM(s.name)) LIKE 'N%'
+                                  OR UPPER(TRIM(s.name)) LIKE 'C%' OR TRIM(s.name)=''
+                                  OR NOT (moves.close>0 AND moves.close<1e999
+                                          AND moves.previous_close>0 AND moves.previous_close<1e999) THEN NULL
+                                WHEN SUBSTR(moves.code,1,3)='688' THEN 0.20
+                                WHEN SUBSTR(moves.code,1,3) IN ('300','301')
+                                     THEN CASE WHEN moves.date>='2020-08-24' THEN 0.20 ELSE 0.10 END
+                                WHEN (SUBSTR(moves.code,1,1) IN ('4','8') OR SUBSTR(moves.code,1,2)='92')
+                                     AND moves.date>='2021-11-15' THEN 0.30
+                                WHEN SUBSTR(moves.code,1,2) IN ('60','00') THEN 0.10
+                                ELSE NULL END AS limit_rate
+                    FROM moves
+                    JOIN temp_market_breadth_calendar calendar
+                      ON calendar.trade_date=moves.date
+                     AND calendar.previous_trade_date=moves.previous_date
+                    LEFT JOIN stock_pool s ON s.code=moves.code
+                )
+                SELECT date,
+                       SUM(CASE WHEN close > previous_close THEN 1 ELSE 0 END),
+                       SUM(CASE WHEN close < previous_close THEN 1 ELSE 0 END),
+                       SUM(CASE WHEN close = previous_close THEN 1 ELSE 0 END),
+                       SUM(CASE WHEN ABS((close/previous_close-1)-limit_rate)<=0.002000001 THEN 1 ELSE 0 END),
+                       SUM(CASE WHEN ABS((close/previous_close-1)+limit_rate)<=0.002000001 THEN 1 ELSE 0 END),
+                       SUM(CASE WHEN limit_rate IS NOT NULL THEN 1 ELSE 0 END)
+                FROM classified GROUP BY date""",
             (query_start, query_end),
         ).fetchall()
-        rebuilt_map = {row[0]: (int(row[1] or 0), int(row[2] or 0), int(row[3] or 0)) for row in rebuilt}
+        rebuilt_map = {row[0]: tuple(int(value or 0) for value in row[1:]) for row in rebuilt}
         with conn:
             for trade_date in rebuild_dates:
                 if trade_date not in rebuilt_map:
                     cached.pop(trade_date, None)
                     conn.execute("DELETE FROM market_breadth_daily WHERE trade_date=?", (trade_date,))
                     continue
-                up_count, down_count, flat_count = rebuilt_map[trade_date]
+                up_count, down_count, flat_count, limit_up, limit_down, sample_count = rebuilt_map[trade_date]
                 conn.execute(
                     """INSERT INTO market_breadth_daily
-                           (trade_date, previous_trade_date, up_count, down_count, flat_count, calculated_at)
-                       VALUES (?, ?, ?, ?, ?, datetime('now'))
+                           (trade_date, previous_trade_date, up_count, down_count, flat_count,
+                            estimated_limit_up_count, estimated_limit_down_count, limit_estimate_sample_count,
+                            limit_estimate_revision, calculated_at)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
                        ON CONFLICT(trade_date) DO UPDATE SET
                            previous_trade_date=excluded.previous_trade_date,
                            up_count=excluded.up_count,
                            down_count=excluded.down_count,
                            flat_count=excluded.flat_count,
+                           estimated_limit_up_count=excluded.estimated_limit_up_count,
+                           estimated_limit_down_count=excluded.estimated_limit_down_count,
+                           limit_estimate_sample_count=excluded.limit_estimate_sample_count,
+                           limit_estimate_revision=excluded.limit_estimate_revision,
                            calculated_at=datetime('now')""",
-                    (trade_date, pair_map[trade_date], up_count, down_count, flat_count),
+                    (trade_date, pair_map[trade_date], up_count, down_count, flat_count,
+                     limit_up, limit_down, sample_count, estimate_revision),
                 )
-                cached[trade_date] = (up_count, down_count, flat_count)
+                cached[trade_date] = rebuilt_map[trade_date]
     return cached
 
 
@@ -329,7 +367,7 @@ def build_market_breadth_history(
     signals = _load_strategy6_signals(conn, aggregates[0][0], last_date)
 
     result_rows = []
-    for trade_date, previous_trade_date, up_count, down_count, flat_count in aggregates:
+    for trade_date, previous_trade_date, up_count, down_count, flat_count, limit_up, limit_down, estimate_count in aggregates:
         up_count = int(up_count or 0)
         down_count = int(down_count or 0)
         flat_count = int(flat_count or 0)
@@ -363,6 +401,10 @@ def build_market_breadth_history(
             "up_count": up_count,
             "down_count": down_count,
             "flat_count": flat_count,
+            "estimated_limit_up_count": limit_up if estimate_count else None,
+            "estimated_limit_down_count": limit_down if estimate_count else None,
+            "estimated_limit_net_count": limit_up - limit_down if estimate_count else None,
+            "limit_estimate_sample_count": estimate_count,
             "valid_count": valid_count,
             "eligible_count": eligible_count,
             "unavailable_count": unavailable_count,
@@ -401,5 +443,9 @@ def _meta(common_start: str | None, common_end: str | None, row_count: int) -> d
         "row_count": row_count,
         "affects_strategy6": False,
         "signal_source": "RECORDED_COMPLETED_TASK_ONLY",
+        "limit_count_method": LIMIT_ESTIMATE_METHOD,
+        "limit_estimate_warning": "仅按本地前复权收盘涨跌幅估算接近涨跌幅上限的家数，非交易所真实涨跌停统计。"
+                                  "主板10%、创业板/科创板20%、北交所30%，容差±0.2个百分点；"
+                                  "排除当前名称ST/N/C、未知板块及缺前日数据。复权、历史ST状态、无涨跌幅限制日和价格取整均可能造成误差。",
         "warning": "当前股票池历史重建，存在幸存者偏差；策略6信号仅来自实际已完成任务，不代表每日完整回测。",
     }

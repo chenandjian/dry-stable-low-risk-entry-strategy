@@ -15,7 +15,7 @@
     <TrendSqueezeBreadth />
 
     <section v-if="error" class="notice error">{{ error }}</section>
-    <section v-if="loading" class="terminal-panel loading">正在读取真实历史涨跌家数…</section>
+    <section v-if="loading" class="terminal-panel loading">正在读取历史涨跌家数及涨跌停估算；首次升级可能需要重建历史缓存…</section>
 
     <template v-else-if="currentRow">
       <section class="conclusion terminal-panel" :class="currentRow.breadthLevel.className">
@@ -56,6 +56,12 @@
         <article class="metric terminal-panel relation-state">
           <span>市场状态</span><strong :style="{ color: relationColor(marketRelation) }">{{ marketRelation.label }}</strong>
           <small>指数{{ marketRelation.indexState.label }} · 个股{{ marketRelation.stockState.label }}</small>
+        </article>
+        <article class="metric terminal-panel">
+          <span>涨跌停家数（本地估算）</span>
+          <strong><b class="up-text" data-test="limit-up-estimate">{{ count(currentRow.estimatedLimitUpCount) }}</b> / <b class="down-text" data-test="limit-down-estimate">{{ count(currentRow.estimatedLimitDownCount) }}</b></strong>
+          <small>涨停 / 跌停 · 净差 {{ count(currentRow.estimatedLimitNetCount, true) }}</small>
+          <small>可估算样本 {{ count(currentRow.limitEstimateSampleCount) }}只</small>
         </article>
       </section>
 
@@ -124,18 +130,22 @@
           </label>
         </div>
         <div ref="indexChartElement" data-test="index-chart" class="echart index-echart" aria-label="主指数同日涨跌幅"></div>
-        <div class="chart-footnote"><span>红涨绿跌；金色只表示当天存在已保存的策略6正式候选任务。</span><span>拖动底部时间轴可同步缩放两张图。</span></div>
+        <div class="panel-title"><div><strong>涨跌停家数（本地估算）</strong></div><small>红色涨停 · 绿色跌停，均为接近涨跌幅上限的收盘家数</small></div>
+        <div ref="limitChartElement" data-test="limit-chart" class="echart limit-echart" aria-label="历史涨跌停家数本地估算"></div>
+        <p class="notice warning">{{ meta.limit_estimate_warning || '基于本地前复权日线估算，并非交易所真实涨跌停统计；主板10%、创业板/科创板20%、北交所30%，容差±0.2个百分点。排除当前ST/N/C名称、未知板块及缺前日数据；历史ST状态、复权、新股无涨跌幅限制日和价格取整可能产生误差。' }}</p>
+        <div class="chart-footnote"><span>红涨绿跌；金色只表示当天存在已保存的策略6正式候选任务。</span><span>拖动指数图底部时间轴可同步缩放三张图；缺失估算值留空。</span></div>
       </section>
 
       <section class="terminal-panel table-panel">
         <div class="panel-title"><div><span>05</span><strong>上涨占比最低的交易日</strong></div><small>仅统计可靠日期</small></div>
         <div class="table-wrap">
           <table>
-            <thead><tr><th>日期</th><th>上涨 / 下跌</th><th>上涨占比</th><th>MA5</th><th>宽度状态</th><th>{{ primaryIndexDefinition.name }}</th><th>指数 × 个股</th><th>策略6信号</th><th>覆盖率</th></tr></thead>
+            <thead><tr><th>日期</th><th>上涨 / 下跌</th><th>估算涨停 / 跌停</th><th>上涨占比</th><th>MA5</th><th>宽度状态</th><th>{{ primaryIndexDefinition.name }}</th><th>指数 × 个股</th><th>策略6信号</th><th>覆盖率</th></tr></thead>
             <tbody>
               <tr v-for="row in weakestRows" :key="row.date">
                 <td>{{ row.date }}</td>
                 <td><span class="up-text">{{ row.upCount }}</span> / <span class="down-text">{{ row.downCount }}</span></td>
+                <td><span class="up-text">{{ count(row.estimatedLimitUpCount) }}</span> / <span class="down-text">{{ count(row.estimatedLimitDownCount) }}</span><small>可估算 {{ count(row.limitEstimateSampleCount) }}只</small></td>
                 <td>{{ pct(row.breadthRate) }}</td><td>{{ pct(row.breadthMA5) }}</td><td>{{ row.breadthLevel.label }}</td>
                 <td :class="numberClass(row.indexes?.[primaryIndex]?.dailyReturn)">{{ signedPct(row.indexes?.[primaryIndex]?.dailyReturn) }}</td>
                 <td>{{ relationFor(row).label }}</td>
@@ -183,8 +193,10 @@ const visibleIndexSymbols = ref(['sh000001'])
 const showStrategySignals = ref(true)
 const breadthChartElement = ref(null)
 const indexChartElement = ref(null)
+const limitChartElement = ref(null)
 let breadthChart = null
 let indexChart = null
+let limitChart = null
 const chartGroup = 'market-breadth-linked'
 
 const indexDefinitions = [
@@ -215,6 +227,10 @@ function normalizeRow(item = {}) {
     upCount: Number(pick(item, 'upCount', 'up_count', 0)),
     downCount: Number(pick(item, 'downCount', 'down_count', 0)),
     flatCount: Number(pick(item, 'flatCount', 'flat_count', 0)),
+    estimatedLimitUpCount: pick(item, 'estimatedLimitUpCount', 'estimated_limit_up_count'),
+    estimatedLimitDownCount: pick(item, 'estimatedLimitDownCount', 'estimated_limit_down_count'),
+    estimatedLimitNetCount: pick(item, 'estimatedLimitNetCount', 'estimated_limit_net_count'),
+    limitEstimateSampleCount: pick(item, 'limitEstimateSampleCount', 'limit_estimate_sample_count'),
     unavailableCount: Number(pick(item, 'unavailableCount', 'unavailable_count', 0)),
     coverageRate: Number(pick(item, 'coverageRate', 'coverage_rate', item.coverage ?? 0)),
     dataQuality: pick(item, 'dataQuality', 'data_quality', 'RELIABLE'),
@@ -238,6 +254,7 @@ const weakestRows = computed(() => [...visibleRows.value].sort((a, b) => (a.brea
 
 function relationFor(row) { return getMarketRelation(row.indexes?.[primaryIndex.value]?.dailyReturn, row.breadthRate) }
 function pct(value) { return typeof value === 'number' && Number.isFinite(value) ? `${(value * 100).toFixed(1)}%` : '--' }
+function count(value, signed = false) { return typeof value === 'number' && Number.isFinite(value) ? `${signed && value > 0 ? '+' : ''}${value}` : '--' }
 function signedPct(value) { return typeof value === 'number' && Number.isFinite(value) ? `${value >= 0 ? '+' : ''}${(value * 100).toFixed(2)}%` : '--' }
 function price(value) { return typeof value === 'number' && Number.isFinite(value) ? value.toFixed(2) : '--' }
 function numberClass(value) { return Number(value) > 0 ? 'up-text' : Number(value) < 0 ? 'down-text' : '' }
@@ -287,6 +304,8 @@ function tooltipHtml(dataIndex) {
     <span style="color:#9ba8bb">市场宽度</span><br>
     上涨占比 <b style="color:${widthColor}">${pct(row.breadthRate)}</b> · MA5 <b style="color:${widthTrendColor}">${pct(row.breadthMA5)}</b><br>
     <span style="color:#e75b5b">上涨 ${row.upCount}</span> · <span style="color:#20ad72">下跌 ${row.downCount}</span> · 平盘 ${row.flatCount}<br>
+    估算涨停 <b style="color:#e75b5b">${count(row.estimatedLimitUpCount)}</b> · 估算跌停 <b style="color:#20ad72">${count(row.estimatedLimitDownCount)}</b><br>
+    估算净差 ${count(row.estimatedLimitNetCount, true)} · 可估算样本 ${count(row.limitEstimateSampleCount)}只<br>
     状态 <b style="color:${widthColor}">${escapeHtml(row.breadthLevel.label)}</b> · <b style="color:${widthTrendColor}">${escapeHtml(row.breadthTrend.label)}</b><br>
     <span style="color:#9ba8bb">${escapeHtml(primaryIndexDefinition.value.name)}</span><br>
     涨跌 <b style="color:${indexColor}">${signedPct(index?.dailyReturn)}</b> · 收盘 ${price(index?.close)}<br>
@@ -307,12 +326,14 @@ function commonTooltip() {
 }
 
 function renderCharts() {
-  if (!breadthChartElement.value || !indexChartElement.value || !visibleRows.value.length) return
+  if (!breadthChartElement.value || !indexChartElement.value || !limitChartElement.value || !visibleRows.value.length) return
   if (!breadthChart) {
     breadthChart = echarts.init(breadthChartElement.value)
     indexChart = echarts.init(indexChartElement.value)
+    limitChart = echarts.init(limitChartElement.value)
     breadthChart.group = chartGroup
     indexChart.group = chartGroup
+    limitChart.group = chartGroup
     echarts.connect(chartGroup)
   }
   const dates = visibleRows.value.map(row => row.date)
@@ -369,11 +390,25 @@ function renderCharts() {
         : { color: definition.color },
     })),
   }, true)
+
+  limitChart.setOption({
+    animation: false,
+    grid: { left: 58, right: 28, top: 32, bottom: 35 },
+    tooltip: { show: false, showContent: false, trigger: 'axis', axisPointer: { type: 'cross' } },
+    legend: { top: 4, textStyle: { color: '#9ba8bb' }, data: ['估算涨停', '估算跌停'] },
+    xAxis: { type: 'category', data: dates, axisLabel: { color: '#74839a' }, axisPointer: { show: true } },
+    yAxis: { type: 'value', min: 0, minInterval: 1, name: '家', axisLabel: { color: '#74839a' }, splitLine: { lineStyle: { color: 'rgba(100,120,150,.13)' } } },
+    dataZoom: [{ type: 'inside', xAxisIndex: 0 }],
+    series: [['估算涨停', 'estimatedLimitUpCount', '#e75b5b'], ['估算跌停', 'estimatedLimitDownCount', '#20ad72']].map(([name, field, color]) => ({
+      name, type: 'bar', barMaxWidth: 6, data: visibleRows.value.map(row => row[field]), itemStyle: { color },
+    })),
+  }, true)
 }
 
 function resizeCharts() {
   breadthChart?.resize()
   indexChart?.resize()
+  limitChart?.resize()
 }
 
 watch([visibleRows, primaryIndex, visibleIndexSymbols, showStrategySignals], async () => {
@@ -403,15 +438,18 @@ onBeforeUnmount(() => {
   echarts.disconnect(chartGroup)
   breadthChart?.dispose()
   indexChart?.dispose()
+  limitChart?.dispose()
   breadthChart = null
   indexChart = null
+  limitChart = null
 })
 </script>
 
 <style scoped>
+.limit-echart{height:250px}
 .breadth-page{max-width:1560px;margin:0 auto;padding:24px}.page-header{display:flex;justify-content:space-between;gap:24px;margin-bottom:18px}.eyebrow{color:var(--accent);font:11px var(--font-mono);letter-spacing:.16em}.page-header h1{margin:4px 0;font-size:26px}.page-header p{margin:0;color:var(--text-secondary)}.research-badge,.terminal-panel{background:var(--bg-panel);border:1px solid var(--border);box-shadow:var(--shadow-panel)}.research-badge{padding:13px 16px;min-width:260px}.research-badge span,.research-badge strong{display:block}.research-badge span{color:var(--gold);font:11px var(--font-mono)}.research-badge strong{margin-top:5px}.notice{padding:10px 14px;margin:12px 0;border:1px solid}.notice.warning{border-color:rgba(232,144,63,.45);background:var(--warn-orange-glow);color:#f0b16d}.notice.error{border-color:var(--danger);color:var(--danger)}.loading,.empty{padding:40px;text-align:center;color:var(--text-secondary)}
 .conclusion{display:flex;justify-content:space-between;align-items:center;gap:28px;padding:18px 20px;border-left:4px solid var(--border-light)}.conclusion.extreme-strong,.conclusion.strong{border-left-color:var(--up-red)}.conclusion.weak,.conclusion.extreme-weak{border-left-color:var(--down-green)}.conclusion span,.conclusion small{color:var(--text-muted)}.conclusion h2{margin:5px 0;font-size:24px}.conclusion p{margin:0;color:var(--text-secondary)}.relation-tag{min-width:250px;padding:11px 14px;background:var(--bg-card);border:1px solid var(--border)}.relation-tag>*{display:block}.relation-tag strong{margin:5px 0;font-size:18px}
-.summary-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:10px;margin:12px 0}.metric{padding:14px;border-top:2px solid var(--border-light)}.metric.breadth-state{border-top-color:var(--accent)}.metric.trend-state{border-top-color:var(--gold)}.metric.relation-state{border-top-color:var(--warn-orange)}.metric span,.metric small{display:block;color:var(--text-muted)}.metric strong{display:block;margin:6px 0;font:20px var(--font-mono)}.panel-title{display:flex;justify-content:space-between;align-items:center;padding:12px 15px;border-bottom:1px solid var(--border)}.panel-title>div:first-child{display:flex;gap:9px}.panel-title>div:first-child span{color:var(--accent);font-family:var(--font-mono)}.panel-title small{color:var(--text-muted)}
+.summary-grid{display:grid;grid-template-columns:repeat(6,1fr);gap:10px;margin:12px 0}.metric{padding:14px;border-top:2px solid var(--border-light)}.metric.breadth-state{border-top-color:var(--accent)}.metric.trend-state{border-top-color:var(--gold)}.metric.relation-state{border-top-color:var(--warn-orange)}.metric span,.metric small{display:block;color:var(--text-muted)}.metric strong{display:block;margin:6px 0;font:20px var(--font-mono)}.panel-title{display:flex;justify-content:space-between;align-items:center;padding:12px 15px;border-bottom:1px solid var(--border)}.panel-title>div:first-child{display:flex;gap:9px}.panel-title>div:first-child span{color:var(--accent);font-family:var(--font-mono)}.panel-title small{color:var(--text-muted)}
 .index-panel,.chart-panel,.table-panel{margin-top:12px}.index-grid{display:grid;grid-template-columns:repeat(4,1fr)}.index-grid button{padding:15px;border:0;border-right:1px solid var(--border);background:transparent;color:inherit;text-align:left;cursor:pointer}.index-grid button:last-child{border-right:0}.index-grid button.active{background:rgba(101,164,255,.07);box-shadow:inset 0 -2px var(--accent)}.index-grid span{display:block;color:var(--text-muted)}.index-grid strong{font:19px var(--font-mono);margin:5px 12px 5px 0}.index-grid em{font-style:normal;font-family:var(--font-mono)}
 .insight-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:12px}.insight-card dl{display:grid;grid-template-columns:1fr 1fr;gap:0;margin:0;padding:8px 15px}.insight-card dl div{display:flex;justify-content:space-between;padding:9px;border-bottom:1px solid var(--border)}.insight-card dt{color:var(--text-muted)}.insight-card dd{margin:0;font-family:var(--font-mono)}.insight-card>p{margin:4px 15px 15px;color:var(--text-secondary)}.level-stats{display:grid;grid-template-columns:repeat(5,1fr);gap:8px;padding:15px}.level-stats span{padding:10px;background:var(--bg-card);color:var(--text-muted);text-align:center}.level-stats b{display:block;margin:5px;color:var(--text-primary);font:20px var(--font-mono)}
 .chart-toolbar{gap:14px;flex-wrap:wrap}.controls,.range-buttons,.series-controls{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.controls label,.series-controls label{color:var(--text-secondary);font-size:12px}.range-buttons button{border:1px solid var(--border);background:var(--bg-card);color:var(--text-secondary);padding:5px 10px;cursor:pointer}.range-buttons button.active{border-color:var(--accent);color:#fff}.echart{width:100%}.breadth-echart{height:310px}.index-echart{height:260px}.series-controls{padding:9px 15px;border-top:1px solid var(--border);border-bottom:1px solid var(--border)}.series-controls strong{margin-right:8px}.chart-footnote{display:flex;justify-content:space-between;padding:8px 14px;color:var(--text-muted);font-size:11px}
