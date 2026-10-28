@@ -147,8 +147,89 @@ def test_market_breadth_uses_exact_previous_market_date_and_audits_missing_rows(
     assert row["data_quality"] == "LOW_COVERAGE"
     assert row["down_ratio"] == 1 / 3
     assert row["breadth"] == 0
+    assert row["estimated_limit_up_count"] == 1
+    assert row["estimated_limit_down_count"] == 1
+    assert row["limit_estimate_sample_count"] == 3
     assert row["indexes"]["sh000001"]["source"] == "tickflow"
     assert row["indexes"]["sh000001"]["daily_return"] == pytest.approx(10 / 3000)
+
+
+def test_limit_estimates_respect_board_bands_and_exclude_st_unknown_and_extreme_moves(tmp_path):
+    _seed_market_data(str(tmp_path / 'limits.db'))
+    conn = db.get_conn()
+    stocks = [('300001', '创业样本', 12.), ('688001', '科创样本', 8.),
+              ('920001', '北交样本', 13.), ('600002', 'ST样本', 11.),
+              ('999999', '未知板块', 11.), ('600003', '异常大涨', 14.),
+              ('600004', '接近上限', 10.98), ('600005', '普通大涨', 10.97),
+              ('600006', ' N新股样本', 11), ('600007', ' C新股样本', 11)]
+    conn.executemany('INSERT INTO stock_pool(code,name) VALUES(?,?)', [(x[0], x[1]) for x in stocks])
+    for code, _, close in stocks:
+        conn.executemany('INSERT INTO daily_ohlc VALUES(?,?,?,?,?,?,?,?)',
+                         [_bar(code, '2026-01-05', 10), _bar(code, '2026-01-06', close)])
+    conn.commit()
+    payload = build_market_breadth_history()
+    row = payload['rows'][-1]
+    assert row['estimated_limit_up_count'] == 4
+    assert row['estimated_limit_down_count'] == 2
+    assert row['limit_estimate_sample_count'] == 9
+    assert payload['meta']['limit_count_method'] == 'LOCAL_ADJUSTED_RETURN_ESTIMATE_V1'
+    assert row['estimated_limit_net_count'] == 2
+
+
+def test_limit_estimates_rebuild_old_cache_and_follow_name_changes(tmp_path):
+    _seed_replaceable_three_day_market_data(str(tmp_path / 'limit-cache.db'))
+    build_market_breadth_history()
+    conn = db.get_conn()
+    conn.execute("UPDATE market_breadth_daily SET estimated_limit_up_count=NULL,limit_estimate_revision=NULL")
+    conn.commit()
+    assert build_market_breadth_history()['rows'][0]['estimated_limit_up_count'] == 1
+    conn.execute("UPDATE stock_pool SET name='ST样本' WHERE code='000001'")
+    conn.commit()
+    row = build_market_breadth_history()['rows'][0]
+    assert row['estimated_limit_up_count'] == 0
+    assert row['limit_estimate_sample_count'] == 2
+
+
+def test_no_estimable_stocks_is_unknown_not_zero(tmp_path):
+    _seed_market_data(str(tmp_path / 'no-limits.db'))
+    conn = db.get_conn()
+    conn.execute("UPDATE stock_pool SET name='ST样本'")
+    conn.commit()
+    row = build_market_breadth_history()['rows'][-1]
+    assert row['limit_estimate_sample_count'] == 0
+    assert row['estimated_limit_up_count'] is None
+    assert row['estimated_limit_down_count'] is None
+    assert row['estimated_limit_net_count'] is None
+
+
+def test_limit_estimate_chinext_transition_uses_historical_date(tmp_path):
+    _seed_market_data(str(tmp_path / 'historical-limit.db'))
+    conn = db.get_conn()
+    conn.execute("INSERT INTO stock_pool(code,name) VALUES('300001','创业样本')")
+    conn.executemany('INSERT INTO daily_ohlc VALUES(?,?,?,?,?,?,?,?)',
+                     [_bar('300001', day, close) for day, close in
+                      [('2020-08-20', 10), ('2020-08-21', 11), ('2020-08-24', 13.2)]])
+    conn.commit()
+    for symbol in ('sh000001', 'sz399001', 'sz399006', 'hs300'):
+        db.upsert_market_index_ohlc(symbol, [
+            dict(date=day, open=100, high=100, low=100, close=100, volume=1)
+            for day in ('2020-08-20', '2020-08-21', '2020-08-24')], source='test')
+    payload = build_market_breadth_history(start_date='2020-08-21', end_date='2020-08-24')
+    assert [r['estimated_limit_up_count'] for r in payload['rows']] == [1, 1]
+
+
+def test_limit_cache_migration_preserves_legacy_rows(tmp_path):
+    import sqlite3
+    path = str(tmp_path / 'legacy-limit.db')
+    with sqlite3.connect(path) as conn:
+        conn.execute('''CREATE TABLE market_breadth_daily (
+            trade_date TEXT PRIMARY KEY, previous_trade_date TEXT NOT NULL,
+            up_count INTEGER NOT NULL, down_count INTEGER NOT NULL, flat_count INTEGER NOT NULL,
+            source_mode TEXT DEFAULT 'CURRENT_UNIVERSE_RECONSTRUCTION', calculated_at TEXT)''')
+        conn.execute("INSERT INTO market_breadth_daily VALUES('2026-01-06','2026-01-05',5,3,2,'CURRENT_UNIVERSE_RECONSTRUCTION','old')")
+    db.init_db(path)
+    row = db.get_conn().execute('SELECT up_count,estimated_limit_up_count,limit_estimate_revision FROM market_breadth_daily').fetchone()
+    assert tuple(row) == (5, None, None)
 
 
 def test_market_breadth_overlays_only_latest_completed_strategy6_trading_task(tmp_path):

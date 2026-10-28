@@ -27,6 +27,10 @@ const reliableRows = rates.map((rate, index) => {
     upCount,
     downCount: 4000 - upCount,
     flatCount: 100,
+    estimated_limit_up_count: index === 0 ? null : index + 10,
+    estimated_limit_down_count: index === 0 ? null : index + 2,
+    estimated_limit_net_count: index === 0 ? null : 8,
+    limit_estimate_sample_count: index === 0 ? 0 : 3900,
     validCount: 4100,
     unavailableCount: 900,
     coverage: 0.91,
@@ -89,7 +93,7 @@ describe('MarketBreadth', () => {
     expect(wrapper.text()).not.toContain('tickflow')
     expect(wrapper.find('[data-test="breadth-chart"]').exists()).toBe(true)
     expect(wrapper.find('[data-test="index-chart"]').exists()).toBe(true)
-    expect(chartMocks.init).toHaveBeenCalledTimes(2)
+    expect(chartMocks.init).toHaveBeenCalledTimes(3)
     expect(chartMocks.connect).toHaveBeenCalled()
     expect(chartMocks.charts[0].setOption).toHaveBeenCalled()
     expect(chartMocks.charts[1].setOption).toHaveBeenCalled()
@@ -101,6 +105,17 @@ describe('MarketBreadth', () => {
     expect(tooltip).toContain('color:#e75b5b')
     expect(tooltip).toContain('color:#20ad72')
     expect(tooltip).toContain('color:#e6a23c')
+    expect(wrapper.text()).toContain('涨跌停家数（本地估算）')
+    expect(wrapper.get('[data-test="limit-up-estimate"]').text()).toContain('19')
+    expect(wrapper.get('[data-test="limit-down-estimate"]').text()).toContain('11')
+    const limitOption = chartMocks.charts[2].setOption.mock.calls.at(-1)[0]
+    expect(limitOption.series[0].data[0]).toBeNull()
+    expect(limitOption.series[0].data.at(-1)).toBe(19)
+    expect(limitOption.series[1].data.at(-1)).toBe(11)
+    expect(limitOption.tooltip.showContent).toBe(false)
+    expect(tooltip).toContain('估算涨停')
+    expect(tooltip).toContain('估算跌停')
+    expect(limitOption.xAxis.data).toEqual(indexOption.xAxis.data)
 
     wrapper.unmount()
   })

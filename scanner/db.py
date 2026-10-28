@@ -3242,6 +3242,9 @@ def _ensure_market_breadth_daily_table(conn: sqlite3.Connection):
             updated_at TEXT NOT NULL DEFAULT (datetime('now'))
         )
     ''')
+    for column in ("estimated_limit_up_count", "estimated_limit_down_count", "limit_estimate_sample_count"):
+        _ensure_column(conn, "market_breadth_daily", column, "INTEGER")
+    _ensure_column(conn, "market_breadth_daily", "limit_estimate_revision", "TEXT")
 
 
 def _ensure_strategy6_trend_squeeze_screen_table(conn: sqlite3.Connection):
