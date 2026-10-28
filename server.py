@@ -2940,6 +2940,12 @@ async def strategy6_excel_report(task_id: str):
     )
 
 
+def _build_breadth_in_worker(path, builder, **kwargs):
+    # Schema checks and SQLite lock waits must not run on the server event loop.
+    db.init_db(path)
+    return builder(**kwargs)
+
+
 @app.get("/api/market-breadth/history")
 async def market_breadth_history(
     start_date: str | None = None,
@@ -2948,9 +2954,10 @@ async def market_breadth_history(
 ):
     """Return research-only breadth reconstructed from local real daily bars."""
     config = load_config()
-    db.init_db(config.get("data", {}).get("database_path", "data/cuphandle.db"))
     try:
         return await asyncio.to_thread(
+            _build_breadth_in_worker,
+            config.get("data", {}).get("database_path", "data/cuphandle.db"),
             build_market_breadth_history,
             start_date=start_date,
             end_date=end_date,
@@ -2974,9 +2981,10 @@ async def trend_squeeze_breadth_history(
     limit: int = 2000, stock_date: str | None = None,
 ):
     config = load_config()
-    db.init_db(config.get('data', {}).get('database_path', 'data/cuphandle.db'))
     try:
-        return await asyncio.to_thread(build_trend_squeeze_breadth,
+        return await asyncio.to_thread(_build_breadth_in_worker,
+                                       config.get('data', {}).get('database_path', 'data/cuphandle.db'),
+                                       build_trend_squeeze_breadth,
                                        start_date=start_date, end_date=end_date,
                                        limit=limit, stock_date=stock_date)
     except (TypeError, ValueError) as exc:

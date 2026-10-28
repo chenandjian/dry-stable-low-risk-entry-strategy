@@ -1,6 +1,7 @@
 <template>
   <section class="trend-breadth" data-test="trend-breadth-panel">
-    <header><div><strong>强势趋势收缩宽度</strong><small>每日真实历史初筛 · 适合本策略的机会环境</small></div><button type="button" :disabled="loading" @click="loadHistory">重新加载</button></header>
+    <header><div><strong>强势趋势收缩宽度</strong><small>每日真实历史初筛 · 适合本策略的机会环境</small></div><button type="button" :disabled="loading || disabled" @click="loadHistory">{{ hasLoaded ? '重新加载' : '加载强势历史' }}</button></header>
+    <p v-if="!hasLoaded && !loading" class="notice">{{ disabled ? '正在优先加载基础市场宽度，完成后可按需加载强势历史。' : '按需加载：完整初筛历史首次重建较耗时，不在打开页面时自动启动；点击上方按钮后计算。' }}</p>
     <p v-if="loading" class="notice">正在重建或读取历史初筛，首次计算可能需要一些时间；其他市场宽度数据可正常浏览。</p>
     <p v-if="error" class="notice error">{{ error }}</p>
     <template v-if="rows.length">
@@ -32,16 +33,18 @@
       <div v-else class="stocks"><span v-for="stock in selection?.stocks || []" :key="stock.code"><b>{{ stock.code }}</b> {{ stock.name }}</span></div>
       <p class="footnote">占比=匹配数÷成功评估数。环境提示使用各自120日占比分位：30%以下偏低、70%以上充足；长期强势高但收缩少时提示注意追涨。该展示约定尚未进行收益校准。</p>
     </template>
-    <p v-else-if="!loading && !error">本地指数或个股历史不足，暂无法展示强势收缩宽度。</p>
+    <p v-else-if="hasLoaded && !loading && !error">本地指数或个股历史不足，暂无法展示强势收缩宽度。</p>
   </section>
 </template>
 
 <script setup>
 import * as echarts from 'echarts'
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
 import { useApi } from '../composables/useApi.js'
 
 const api = useApi()
+const props = defineProps({ autoLoad: { type: Boolean, default: true }, disabled: { type: Boolean, default: false } })
+const hasLoaded = ref(false)
 const rows = shallowRef([])
 const meta = ref({})
 const loading = ref(false), error = ref(''), selectedDate = ref(''), range = ref(250), historyPage = ref(1)
@@ -54,6 +57,7 @@ const pct = value => typeof value === 'number' ? `${(value*100).toFixed(1)}%` : 
 const change = value => typeof value === 'number' ? `${value > 0 ? '+' : ''}${value}只` : '--'
 
 async function loadHistory() {
+  hasLoaded.value = true
   loading.value = true
   error.value = ''
   try {
@@ -70,8 +74,6 @@ async function loadHistory() {
     if (alive) error.value = exc.message || String(exc)
   } finally {
     if (alive) loading.value = false
-    await nextTick()
-    if (alive) renderChart()
   }
 }
 
@@ -142,8 +144,13 @@ function renderChart() {
 }
 const resize = () => chart?.resize()
 watch(selectedDate, day => loadStocks(day))
-watch(visibleRows, async () => { historyPage.value = 1; await nextTick(); if (alive) renderChart() })
-onMounted(() => { window.addEventListener('resize', resize); loadHistory() })
+watch(visibleRows, () => {
+  historyPage.value = 1
+  if (!alive) return
+  if (!visibleRows.value.length) { chart?.dispose(); chart = null; return }
+  renderChart()
+}, { flush: 'post' })
+onMounted(() => { window.addEventListener('resize', resize); if (props.autoLoad) loadHistory() })
 onBeforeUnmount(() => { alive = false; request++; window.removeEventListener('resize', resize); chart?.dispose() })
 </script>
 

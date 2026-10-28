@@ -12,12 +12,14 @@
       </div>
     </header>
 
-    <TrendSqueezeBreadth />
+    <TrendSqueezeBreadth :auto-load="false" :disabled="loading || historyLoading" />
 
-    <section v-if="error" class="notice error">{{ error }}</section>
+    <section v-if="error" class="notice error">{{ error }} <button :disabled="historyLoading" @click="loadCompleteHistory">重新加载</button></section>
     <section v-if="loading" class="terminal-panel loading">正在读取历史涨跌家数及涨跌停估算；首次升级可能需要重建历史缓存…</section>
+    <section v-if="historyLoading" class="notice warning">先显示最近30个市场交易日的可用数据，正在补齐完整历史；补齐前120日分位暂不计算，其余功能可用。</section>
+    <section v-if="historyError" class="notice error">{{ historyError }} <button data-test="retry-breadth-history" :disabled="historyLoading" @click="loadCompleteHistory">重试完整历史</button></section>
 
-    <template v-else-if="currentRow">
+    <template v-if="!loading && currentRow">
       <section class="conclusion terminal-panel" :class="currentRow.breadthLevel.className">
         <div>
           <span>当前结论</span>
@@ -164,13 +166,13 @@
       </section>
     </template>
 
-    <section v-else-if="!loading" class="terminal-panel empty">本地真实指数或个股历史不足，无法生成市场宽度。</section>
+    <section v-else-if="!loading && !historyLoading && !error && !historyError" class="terminal-panel empty">本地真实指数或个股历史不足，无法生成市场宽度。</section>
   </main>
 </template>
 
 <script setup>
 import * as echarts from 'echarts'
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
 import { useApi } from '../composables/useApi.js'
 import TrendSqueezeBreadth from '../components/TrendSqueezeBreadth.vue'
 import {
@@ -185,8 +187,9 @@ import {
 const api = useApi()
 const loading = ref(true)
 const error = ref('')
+const historyLoading = ref(false), historyError = ref('')
 const meta = ref({})
-const rows = ref([])
+const rows = shallowRef([])
 const range = ref(250)
 const primaryIndex = ref('sh000001')
 const visibleIndexSymbols = ref(['sh000001'])
@@ -198,6 +201,7 @@ let breadthChart = null
 let indexChart = null
 let limitChart = null
 const chartGroup = 'market-breadth-linked'
+let alive = true
 
 const indexDefinitions = [
   { symbol: 'sh000001', name: '上证指数', color: '#e75b5b' },
@@ -249,7 +253,7 @@ const marketRelation = computed(() => getMarketRelation(primaryIndexData.value?.
 const marketConclusion = computed(() => buildMarketConclusion(currentRow.value, marketRelation.value))
 const recent5 = computed(() => summarizeRecentBreadth(enrichedRows.value, primaryIndex.value, 5))
 const levelCounts20 = computed(() => countBreadthLevels(enrichedRows.value, 20))
-const breadthPercentile = computed(() => calcBreadthPercentile(enrichedRows.value.map(row => row.breadthRate), currentRow.value?.breadthRate, 120))
+const breadthPercentile = computed(() => enrichedRows.value.length >= 120 ? calcBreadthPercentile(enrichedRows.value.map(row => row.breadthRate), currentRow.value?.breadthRate, 120) : null)
 const weakestRows = computed(() => [...visibleRows.value].sort((a, b) => (a.breadthRate ?? 1) - (b.breadthRate ?? 1)).slice(0, 30))
 
 function relationFor(row) { return getMarketRelation(row.indexes?.[primaryIndex.value]?.dailyReturn, row.breadthRate) }
@@ -326,7 +330,8 @@ function commonTooltip() {
 }
 
 function renderCharts() {
-  if (!breadthChartElement.value || !indexChartElement.value || !limitChartElement.value || !visibleRows.value.length) return
+  if (!visibleRows.value.length) { disposeCharts(); return }
+  if (!breadthChartElement.value || !indexChartElement.value || !limitChartElement.value) return
   if (!breadthChart) {
     breadthChart = echarts.init(breadthChartElement.value)
     indexChart = echarts.init(indexChartElement.value)
@@ -411,37 +416,58 @@ function resizeCharts() {
   limitChart?.resize()
 }
 
-watch([visibleRows, primaryIndex, visibleIndexSymbols, showStrategySignals], async () => {
-  await nextTick()
-  renderCharts()
-}, { deep: true })
-
-onMounted(async () => {
-  window.addEventListener('resize', resizeCharts)
-  try {
-    const payload = await api.getMarketBreadthHistory({ limit: 1500 })
-    meta.value = payload.meta || {}
-    rows.value = (payload.rows || []).map(normalizeRow)
-    await nextTick()
-    renderCharts()
-  } catch (exc) {
-    error.value = `市场宽度加载失败：${exc.message || exc}`
-  } finally {
-    loading.value = false
-    await nextTick()
-    renderCharts()
-  }
-})
-
-onBeforeUnmount(() => {
-  window.removeEventListener('resize', resizeCharts)
-  echarts.disconnect(chartGroup)
+function disposeCharts() {
   breadthChart?.dispose()
   indexChart?.dispose()
   limitChart?.dispose()
   breadthChart = null
   indexChart = null
   limitChart = null
+}
+
+watch([visibleRows, primaryIndex, visibleIndexSymbols, showStrategySignals, loading], () => {
+  if (alive && !loading.value) renderCharts()
+}, { flush: 'post' })
+
+function acceptHistory(payload) {
+  meta.value = payload.meta || {}
+  rows.value = (payload.rows || []).map(normalizeRow)
+}
+
+async function loadCompleteHistory() {
+  historyLoading.value = true
+  historyError.value = ''
+  try {
+    const payload = await api.getMarketBreadthHistory({ limit: 1500 })
+    if (alive) { acceptHistory(payload); error.value = '' }
+  } catch (exc) {
+    if (alive) historyError.value = `完整历史加载失败，保留已加载数据：${exc.message || exc}`
+  } finally {
+    if (alive) historyLoading.value = false
+  }
+}
+
+onMounted(async () => {
+  window.addEventListener('resize', resizeCharts)
+  try {
+    const payload = await api.getMarketBreadthHistory({ limit: 30 })
+    if (!alive) return
+    acceptHistory(payload)
+    loading.value = false
+    await nextTick()
+    if (alive) await loadCompleteHistory()
+  } catch (exc) {
+    if (alive) error.value = `市场宽度加载失败：${exc.message || exc}`
+  } finally {
+    if (alive) loading.value = false
+  }
+})
+
+onBeforeUnmount(() => {
+  alive = false
+  window.removeEventListener('resize', resizeCharts)
+  echarts.disconnect(chartGroup)
+  disposeCharts()
 })
 </script>
 

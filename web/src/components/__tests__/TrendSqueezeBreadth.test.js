@@ -20,6 +20,19 @@ beforeEach(() => {
 })
 
 describe('TrendSqueezeBreadth', () => {
+  it('can defer expensive history until the user requests it', async () => {
+    const wrapper = mount(TrendSqueezeBreadth, { props: { autoLoad: false, disabled: true } })
+    await flushPromises()
+    expect(mocks.api).not.toHaveBeenCalled()
+    expect(wrapper.text()).not.toContain('本地指数或个股历史不足')
+    expect(wrapper.find('header button').element.disabled).toBe(true)
+    await wrapper.setProps({ disabled: false })
+    await wrapper.find('header button').trigger('click')
+    await flushPromises()
+    expect(mocks.api).toHaveBeenCalledTimes(2)
+    expect(mocks.chart.setOption).toHaveBeenCalledTimes(1)
+    wrapper.unmount()
+  })
   it('loads historical metrics, chart and the latest list independently', async () => {
     const wrapper = mount(TrendSqueezeBreadth)
     await flushPromises()
