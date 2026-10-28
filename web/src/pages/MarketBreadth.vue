@@ -60,9 +60,10 @@
           <small>指数{{ marketRelation.indexState.label }} · 个股{{ marketRelation.stockState.label }}</small>
         </article>
         <article class="metric terminal-panel">
-          <span>涨跌停家数（本地估算）</span>
-          <strong><b class="up-text" data-test="limit-up-estimate">{{ count(currentRow.estimatedLimitUpCount) }}</b> / <b class="down-text" data-test="limit-down-estimate">{{ count(currentRow.estimatedLimitDownCount) }}</b></strong>
-          <small>涨停 / 跌停 · 净差 {{ count(currentRow.estimatedLimitNetCount, true) }}</small>
+          <span>涨跌停情绪指数 S（本地估算）</span>
+          <strong :class="numberClass(currentRow.limitSentiment)" data-test="limit-s">{{ indicator(currentRow.limitSentiment) }}</strong>
+          <small>MA5 <b data-test="limit-s-ma5">{{ indicator(currentRow.limitSentimentMA5) }}</b></small>
+          <small>估算涨停 <b class="up-text" data-test="limit-up-estimate">{{ count(currentRow.estimatedLimitUpCount) }}</b> / 跌停 <b class="down-text" data-test="limit-down-estimate">{{ count(currentRow.estimatedLimitDownCount) }}</b> · 净差 {{ count(currentRow.estimatedLimitNetCount, true) }}</small>
           <small>可估算样本 {{ count(currentRow.limitEstimateSampleCount) }}只</small>
         </article>
       </section>
@@ -132,8 +133,9 @@
           </label>
         </div>
         <div ref="indexChartElement" data-test="index-chart" class="echart index-echart" aria-label="主指数同日涨跌幅"></div>
-        <div class="panel-title"><div><strong>涨跌停家数（本地估算）</strong></div><small>红色涨停 · 绿色跌停，均为接近涨跌幅上限的收盘家数</small></div>
-        <div ref="limitChartElement" data-test="limit-chart" class="echart limit-echart" aria-label="历史涨跌停家数本地估算"></div>
+        <div class="panel-title"><div><strong>涨跌停情绪指数 S（本地估算）</strong></div><small>红色为正 · 绿色为负 · 金色为MA5</small></div>
+        <div ref="limitChartElement" data-test="limit-chart" class="echart limit-echart" aria-label="历史涨跌停情绪指数S及MA5本地估算"></div>
+        <div class="chart-footnote"><span>S =（估算涨停家数 − 估算跌停家数）÷（估算涨停家数 + 估算跌停家数 + 20）</span><span>MA5为最近5个连续市场交易日S值的平均；不足5日或中间缺失则留空，不补0。数值不是收益率。</span></div>
         <p class="notice warning">{{ meta.limit_estimate_warning || '基于本地前复权日线估算，并非交易所真实涨跌停统计；主板10%、创业板/科创板20%、北交所30%，容差±0.2个百分点。排除当前ST/N/C名称、未知板块及缺前日数据；历史ST状态、复权、新股无涨跌幅限制日和价格取整可能产生误差。' }}</p>
         <div class="chart-footnote"><span>红涨绿跌；金色只表示当天存在已保存的策略6正式候选任务。</span><span>拖动指数图底部时间轴可同步缩放三张图；缺失估算值留空。</span></div>
       </section>
@@ -142,12 +144,13 @@
         <div class="panel-title"><div><span>05</span><strong>上涨占比最低的交易日</strong></div><small>仅统计可靠日期</small></div>
         <div class="table-wrap">
           <table>
-            <thead><tr><th>日期</th><th>上涨 / 下跌</th><th>估算涨停 / 跌停</th><th>上涨占比</th><th>MA5</th><th>宽度状态</th><th>{{ primaryIndexDefinition.name }}</th><th>指数 × 个股</th><th>策略6信号</th><th>覆盖率</th></tr></thead>
+            <thead><tr><th>日期</th><th>上涨 / 下跌</th><th>估算涨停 / 跌停</th><th>涨跌停S / MA5</th><th>上涨占比</th><th>MA5</th><th>宽度状态</th><th>{{ primaryIndexDefinition.name }}</th><th>指数 × 个股</th><th>策略6信号</th><th>覆盖率</th></tr></thead>
             <tbody>
               <tr v-for="row in weakestRows" :key="row.date">
                 <td>{{ row.date }}</td>
                 <td><span class="up-text">{{ row.upCount }}</span> / <span class="down-text">{{ row.downCount }}</span></td>
                 <td><span class="up-text">{{ count(row.estimatedLimitUpCount) }}</span> / <span class="down-text">{{ count(row.estimatedLimitDownCount) }}</span><small>可估算 {{ count(row.limitEstimateSampleCount) }}只</small></td>
+                <td :class="numberClass(row.limitSentiment)">{{ indicator(row.limitSentiment) }}<small>MA5 {{ indicator(row.limitSentimentMA5) }}</small></td>
                 <td>{{ pct(row.breadthRate) }}</td><td>{{ pct(row.breadthMA5) }}</td><td>{{ row.breadthLevel.label }}</td>
                 <td :class="numberClass(row.indexes?.[primaryIndex]?.dailyReturn)">{{ signedPct(row.indexes?.[primaryIndex]?.dailyReturn) }}</td>
                 <td>{{ relationFor(row).label }}</td>
@@ -180,6 +183,7 @@ import {
   calcBreadthPercentile,
   countBreadthLevels,
   enrichBreadthRows,
+  enrichLimitSentimentRows,
   getMarketRelation,
   summarizeRecentBreadth,
 } from '../utils/marketBreadth.js'
@@ -243,7 +247,8 @@ function normalizeRow(item = {}) {
   }
 }
 
-const reliableRows = computed(() => rows.value.filter(item => item.dataQuality === 'RELIABLE'))
+const limitSentimentRows = computed(() => enrichLimitSentimentRows(rows.value))
+const reliableRows = computed(() => limitSentimentRows.value.filter(item => item.dataQuality === 'RELIABLE'))
 const enrichedRows = computed(() => enrichBreadthRows(reliableRows.value))
 const visibleRows = computed(() => range.value ? enrichedRows.value.slice(-range.value) : enrichedRows.value)
 const currentRow = computed(() => enrichedRows.value.at(-1) || null)
@@ -259,6 +264,7 @@ const weakestRows = computed(() => [...visibleRows.value].sort((a, b) => (a.brea
 function relationFor(row) { return getMarketRelation(row.indexes?.[primaryIndex.value]?.dailyReturn, row.breadthRate) }
 function pct(value) { return typeof value === 'number' && Number.isFinite(value) ? `${(value * 100).toFixed(1)}%` : '--' }
 function count(value, signed = false) { return typeof value === 'number' && Number.isFinite(value) ? `${signed && value > 0 ? '+' : ''}${value}` : '--' }
+function indicator(value) { return typeof value === 'number' && Number.isFinite(value) ? value.toFixed(4) : '--' }
 function signedPct(value) { return typeof value === 'number' && Number.isFinite(value) ? `${value >= 0 ? '+' : ''}${(value * 100).toFixed(2)}%` : '--' }
 function price(value) { return typeof value === 'number' && Number.isFinite(value) ? value.toFixed(2) : '--' }
 function numberClass(value) { return Number(value) > 0 ? 'up-text' : Number(value) < 0 ? 'down-text' : '' }
@@ -310,6 +316,7 @@ function tooltipHtml(dataIndex) {
     <span style="color:#e75b5b">上涨 ${row.upCount}</span> · <span style="color:#20ad72">下跌 ${row.downCount}</span> · 平盘 ${row.flatCount}<br>
     估算涨停 <b style="color:#e75b5b">${count(row.estimatedLimitUpCount)}</b> · 估算跌停 <b style="color:#20ad72">${count(row.estimatedLimitDownCount)}</b><br>
     估算净差 ${count(row.estimatedLimitNetCount, true)} · 可估算样本 ${count(row.limitEstimateSampleCount)}只<br>
+    涨跌停指数 S <b>${indicator(row.limitSentiment)}</b> · S的MA5 <b style="color:#d6a84a">${indicator(row.limitSentimentMA5)}</b><br>
     状态 <b style="color:${widthColor}">${escapeHtml(row.breadthLevel.label)}</b> · <b style="color:${widthTrendColor}">${escapeHtml(row.breadthTrend.label)}</b><br>
     <span style="color:#9ba8bb">${escapeHtml(primaryIndexDefinition.value.name)}</span><br>
     涨跌 <b style="color:${indexColor}">${signedPct(index?.dailyReturn)}</b> · 收盘 ${price(index?.close)}<br>
@@ -400,13 +407,17 @@ function renderCharts() {
     animation: false,
     grid: { left: 58, right: 28, top: 32, bottom: 35 },
     tooltip: { show: false, showContent: false, trigger: 'axis', axisPointer: { type: 'cross' } },
-    legend: { top: 4, textStyle: { color: '#9ba8bb' }, data: ['估算涨停', '估算跌停'] },
+    legend: { top: 4, textStyle: { color: '#9ba8bb' }, data: ['涨跌停情绪指数 S', 'S 的 MA5'] },
     xAxis: { type: 'category', data: dates, axisLabel: { color: '#74839a' }, axisPointer: { show: true } },
-    yAxis: { type: 'value', min: 0, minInterval: 1, name: '家', axisLabel: { color: '#74839a' }, splitLine: { lineStyle: { color: 'rgba(100,120,150,.13)' } } },
+    yAxis: { type: 'value', min: -1, max: 1, name: 'S', axisLabel: { color: '#74839a', formatter: value => value.toFixed(2) }, splitLine: { lineStyle: { color: 'rgba(100,120,150,.13)' } } },
     dataZoom: [{ type: 'inside', xAxisIndex: 0 }],
-    series: [['估算涨停', 'estimatedLimitUpCount', '#e75b5b'], ['估算跌停', 'estimatedLimitDownCount', '#20ad72']].map(([name, field, color]) => ({
-      name, type: 'bar', barMaxWidth: 6, data: visibleRows.value.map(row => row[field]), itemStyle: { color },
-    })),
+    series: [
+      { name: '涨跌停情绪指数 S', type: 'bar', barMaxWidth: 6, data: visibleRows.value.map(row => row.limitSentiment),
+        itemStyle: { color: params => Number(params.value) > 0 ? '#e75b5b' : Number(params.value) < 0 ? '#20ad72' : '#9ba8bb' },
+        markLine: { silent: true, symbol: 'none', data: [{ yAxis: 0, name: '中性线' }], lineStyle: { color: '#74839a', type: 'dashed' } } },
+      { name: 'S 的 MA5', type: 'line', showSymbol: false, connectNulls: false, data: visibleRows.value.map(row => row.limitSentimentMA5),
+        lineStyle: { width: 2, color: '#d6a84a' }, itemStyle: { color: '#d6a84a' } },
+    ],
   }, true)
 }
 
