@@ -44,6 +44,7 @@ def scan_strategy6_all(
     """Run Strategy6 full-market scan using shared daily data service."""
     from scanner.stock_pool import get_a_stock_pool
 
+    total_started = time.perf_counter()
     db_path = config.get("data", {}).get("database_path", "data/cuphandle.db")
     db.init_db(db_path)
 
@@ -55,11 +56,14 @@ def scan_strategy6_all(
         stocks = get_a_stock_pool(config)
     db.save_task_stocks(task_id, stocks)
 
+    preparation_started = time.perf_counter()
     prepared_session = prepare_scan_daily_data(
         config,
         stocks,
         progress_callback=progress_callback,
     )
+    preparation_seconds = time.perf_counter() - preparation_started
+    logger.info("Strategy6 %s data preparation completed in %.3fs", task_id, preparation_seconds)
     if fetch_daily_fn is None and prepared_session is not None:
         fetch_daily_fn = prepared_session.fetch
 
@@ -84,6 +88,7 @@ def scan_strategy6_all(
 
     mgr = DataSourceManager()
     engine = StrongVcpTailEngine({"strategy6": cfg})
+    market_started = time.perf_counter()
     market_data_by_symbol = _load_market_data_by_symbol(config)
     market_target_date = build_cache_freshness_context(
         now=datetime.strptime(_now(), "%Y-%m-%d %H:%M:%S")
@@ -96,6 +101,7 @@ def scan_strategy6_all(
         ),
     )
     prior_vcp_states = db.get_latest_strategy6_vcp_states(exclude_task_id=task_id)
+    market_seconds = time.perf_counter() - market_started
     candidate_by_code: dict[str, dict] = {}
     candidate_lock = threading.Lock()
     busy_retries_by_code: dict[str, int] = {}
@@ -373,6 +379,11 @@ def scan_strategy6_all(
     elapsed = time.time() - start_time
     summary = db.refresh_scan_task_counts(task_id)
     candidates = list(candidate_by_code.values())
+    total_elapsed = time.perf_counter() - total_started
+    logger.info(
+        "Strategy6 %s completed: preparation=%.3fs market=%.3fs scan=%.3fs total=%.3fs stocks=%s",
+        task_id, preparation_seconds, market_seconds, elapsed, total_elapsed, summary["processed"],
+    )
     return {
         "candidates": candidates,
         "stats": {
@@ -385,6 +396,10 @@ def scan_strategy6_all(
             "candidates_found": len(candidates),
             "latest_trade_date": summary.get("latest_trade_date"),
             "elapsed_seconds": round(elapsed, 1),
+            "preparation_seconds": round(preparation_seconds, 3),
+            "market_seconds": round(market_seconds, 3),
+            "scan_seconds": round(elapsed, 3),
+            "total_elapsed_seconds": round(total_elapsed, 3),
             "speed": round(summary["processed"] / elapsed, 1) if elapsed > 0 else 0,
         },
         "task_id": task_id,

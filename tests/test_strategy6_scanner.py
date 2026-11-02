@@ -114,6 +114,11 @@ def test_strategy6_tickflow_prepared_scan_skips_legacy_task_reuse_lookup(tmp_pat
     )
 
     assert result["stats"]["failed"] == 0
+    stats = result["stats"]
+    assert stats["preparation_seconds"] >= 0
+    assert stats["market_seconds"] >= 0
+    assert stats["scan_seconds"] >= 0
+    assert stats["total_elapsed_seconds"] >= stats["scan_seconds"]
 
 
 def test_strategy6_tickflow_prepared_scan_uses_configured_local_workers(tmp_path, monkeypatch):

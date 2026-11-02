@@ -979,7 +979,11 @@ def get_ohlc(code: str, max_rows: int = 0) -> list[dict] | None:
     """
     conn = get_conn()
     query = "SELECT date, open, high, low, close, volume, turnover FROM daily_ohlc WHERE code = ? ORDER BY date"
-    rows = conn.execute(query, (code,)).fetchall()
+    if max_rows > 0:
+        query = "SELECT date, open, high, low, close, volume, turnover FROM daily_ohlc WHERE code = ? ORDER BY date DESC LIMIT ?"
+        rows = conn.execute(query, (code, max_rows)).fetchall()[::-1]
+    else:
+        rows = conn.execute(query, (code,)).fetchall()
     if not rows:
         return None
     if max_rows and len(rows) > max_rows:

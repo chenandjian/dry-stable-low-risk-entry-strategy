@@ -35,6 +35,11 @@ def evaluate_vcp_candidate_history(
     if not origin or not current or origin > current:
         return empty
 
+    from strategy6.indicators import normalize_rows
+
+    # Prefixes retain identical prev_close/amount values; normalize once per replay.
+    rows = normalize_rows(rows)
+
     config = copy.deepcopy(strategy_config)
     config["vcp_observer_enabled"] = False
     if engine_factory is None:
@@ -67,6 +72,7 @@ def evaluate_vcp_candidate_history(
             code=code,
             name=name,
             trading_days_override=len(visible_rows),
+            rows_normalized=True,
             market_data_by_symbol=visible_market,
         )
         if evaluation.candidate_type == "REJECTED":

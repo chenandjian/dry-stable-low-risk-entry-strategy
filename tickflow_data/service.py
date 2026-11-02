@@ -3,6 +3,7 @@ from __future__ import annotations
 import datetime as dt
 import time
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 
 from scanner import db
 
@@ -51,6 +52,7 @@ class TickFlowDailyUpdateService:
         history_days: int = 1100,
         overlap_days: int = 10,
         request_chunk_size: int = 100,
+        prefetch_batches: bool = False,
     ):
         if history_days <= 0 or overlap_days <= 0 or request_chunk_size <= 0:
             raise ValueError("history_days, overlap_days, and request_chunk_size must be positive")
@@ -58,6 +60,7 @@ class TickFlowDailyUpdateService:
         self.history_days = history_days
         self.overlap_days = overlap_days
         self.request_chunk_size = request_chunk_size
+        self.prefetch_batches = prefetch_batches
 
     def run(
         self,
@@ -105,7 +108,7 @@ class TickFlowDailyUpdateService:
                 continue
             result.symbol = symbol
             metadata = db.get_ohlc_metadata(code)
-            existing = db.get_ohlc(code) or []
+            existing = db.get_ohlc(code, max_rows=1) or []
             if mode == "backfill" or not existing or not metadata or metadata.get("source") != "tickflow":
                 result.request_mode = "full"
                 full_symbols.append(symbol)
@@ -152,6 +155,29 @@ class TickFlowDailyUpdateService:
         batch.elapsed_seconds = round(time.perf_counter() - started, 3)
         return batch
 
+    def _request_chunks(self, client, symbols: list[str], *, count: int):
+        chunks = iter(_chunks(symbols, self.request_chunk_size))
+        if not self.prefetch_batches:
+            for chunk in chunks:
+                yield chunk, None
+            return
+        first = next(chunks, None)
+        if first is None:
+            return
+        # Only requests run in the helper; validation, callbacks and SQLite stay
+        # on the caller thread. Retain at most the current and next batch.
+        with ThreadPoolExecutor(max_workers=1, thread_name_prefix="tickflow-prefetch") as executor:
+            chunk = first
+            pending = executor.submit(client.fetch, chunk, count=count)
+            while chunk is not None:
+                following = next(chunks, None)
+                next_pending = (
+                    executor.submit(client.fetch, following, count=count)
+                    if following is not None else None
+                )
+                yield chunk, pending
+                chunk, pending = following, next_pending
+
     def _fetch(
         self,
         client,
@@ -160,11 +186,12 @@ class TickFlowDailyUpdateService:
         count: int,
         results_by_code,
         on_result,
+        pending=None,
     ):
         if not symbols:
             return None
         try:
-            return client.fetch(symbols, count=count)
+            return pending.result() if pending is not None else client.fetch(symbols, count=count)
         except Exception as exc:
             for symbol in symbols:
                 result = results_by_code[self._code_for_symbol(symbol)]
@@ -185,7 +212,7 @@ class TickFlowDailyUpdateService:
         on_success,
         on_result,
     ) -> None:
-        for chunk in _chunks(symbols, self.request_chunk_size):
+        for chunk, pending in self._request_chunks(client, symbols, count=self.history_days):
             self._process_full_chunk(
                 client,
                 chunk,
@@ -194,6 +221,7 @@ class TickFlowDailyUpdateService:
                 run_id=run_id,
                 on_success=on_success,
                 on_result=on_result,
+                pending=pending,
             )
 
     def _process_full_chunk(
@@ -206,6 +234,7 @@ class TickFlowDailyUpdateService:
         run_id: str,
         on_success,
         on_result,
+        pending=None,
     ) -> None:
         fetched = self._fetch(
             client,
@@ -213,6 +242,7 @@ class TickFlowDailyUpdateService:
             count=self.history_days,
             results_by_code=results_by_code,
             on_result=on_result,
+            pending=pending,
         )
         if fetched is None:
             return
@@ -273,7 +303,7 @@ class TickFlowDailyUpdateService:
         on_result,
     ) -> list[str]:
         full_refresh: list[str] = []
-        for chunk in _chunks(symbols, self.request_chunk_size):
+        for chunk, pending in self._request_chunks(client, symbols, count=self.overlap_days):
             full_refresh.extend(
                 self._process_incremental_chunk(
                     client,
@@ -283,6 +313,7 @@ class TickFlowDailyUpdateService:
                     run_id=run_id,
                     on_success=on_success,
                     on_result=on_result,
+                    pending=pending,
                 )
             )
         return full_refresh
@@ -297,6 +328,7 @@ class TickFlowDailyUpdateService:
         run_id: str,
         on_success,
         on_result,
+        pending=None,
     ) -> list[str]:
         fetched = self._fetch(
             client,
@@ -304,6 +336,7 @@ class TickFlowDailyUpdateService:
             count=self.overlap_days,
             results_by_code=results_by_code,
             on_result=on_result,
+            pending=pending,
         )
         if fetched is None:
             return []
