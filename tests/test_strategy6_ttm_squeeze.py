@@ -31,6 +31,70 @@ TTM_CONFIG = {
 }
 
 
+def test_latest_ttm_only_regresses_current_and_previous_momentum(monkeypatch):
+    import strategy6.ttm_squeeze as module
+
+    calls = []
+    original = module._linear_regression_last
+
+    def counted(values):
+        calls.append(len(values))
+        return original(values)
+
+    monkeypatch.setattr(module, "_linear_regression_last", counted)
+    result = calculate_ttm_squeeze([_row(i) for i in range(1100)], TTM_CONFIG)
+    assert result.squeeze_on
+    assert result.squeeze_days == 1081
+    assert calls == [20, 20]
+
+
+@pytest.mark.parametrize("period,length", [(1, 40), (5, 40), (20, 40), (20, 41), (20, 1100), (50, 120)])
+@pytest.mark.parametrize("compact", [False, True])
+def test_optimized_ttm_matches_full_history_reference(period, length, compact):
+    import random
+    from dataclasses import asdict
+    from strategy6.ttm_squeeze import _sma_series
+
+    rng = random.Random(length + period)
+    rows = [_row(i, 10 + (0 if compact else rng.uniform(-1, 1))) for i in range(length)]
+    config = {**TTM_CONFIG, "momentum_period": period}
+    closes = [row["close"] for row in rows]
+    middle = _sma_series(closes, 20)
+    kc = _ema_series(closes, 20)
+    atr = _wilder_atr_series(rows, 20)
+    bands, flags = [], []
+    for i in range(length):
+        if middle[i] is None:
+            bands.append(None)
+            flags.append(False)
+            continue
+        dev = _population_stddev(closes[i-19:i+1])
+        values = (middle[i] + 2*dev, middle[i] - 2*dev, kc[i] + 1.5*atr[i], kc[i] - 1.5*atr[i])
+        bands.append(values)
+        flags.append(_bands_inside_keltner(*values))
+    sma = _sma_series(closes, period)
+    deltas = [None] * length
+    for i in range(period - 1, length):
+        window = rows[i-period+1:i+1]
+        midline = (max(row["high"] for row in window) + min(row["low"] for row in window)) / 2
+        deltas[i] = closes[i] - (midline + sma[i]) / 2
+    momentum = [None] * length
+    for i in range(period*2 - 2, length):
+        momentum[i] = _linear_regression_last(deltas[i-period+1:i+1])
+    days = 0
+    for flag in reversed(flags):
+        if not flag:
+            break
+        days += 1
+    reference = classify_ttm_state(
+        enabled=True, calculable=True, squeeze_on=flags[-1], previous_squeeze_on=flags[-2],
+        squeeze_days=days, momentum=momentum[-1], previous_momentum=momentum[-2],
+        close=closes[-1], min_bullish_days=3,
+    )
+    reference.bb_upper, reference.bb_lower, reference.kc_upper, reference.kc_lower = bands[-1]
+    assert asdict(calculate_ttm_squeeze(rows, config)) == asdict(reference)
+
+
 def _row(i: int, close: float = 10.0, *, high: float | None = None, low: float | None = None) -> dict:
     day = date(2026, 1, 1) + timedelta(days=i)
     return {

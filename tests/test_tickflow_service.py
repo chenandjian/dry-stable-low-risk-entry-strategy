@@ -1,4 +1,6 @@
 import pandas as pd
+import threading
+import pytest
 
 from scanner import db
 from tickflow_data.models import BatchFetchResult
@@ -69,6 +71,74 @@ def _save_existing(code, rows, *, source):
     )
 
 
+def test_update_classification_does_not_load_full_history_twice(tmp_path, monkeypatch):
+    _setup_db(tmp_path)
+    old = _rows(1, 4)
+    _save_existing("600519", old, source="tickflow")
+    client = _Client([BatchFetchResult(frames={"600519.SH": _frame(old)})])
+    original = db.get_ohlc
+    reads = []
+
+    def counted(code, max_rows=0):
+        reads.append(max_rows)
+        return original(code, max_rows=max_rows)
+
+    monkeypatch.setattr(db, "get_ohlc", counted)
+    result = TickFlowDailyUpdateService(client).run(
+        [{"code": "600519", "market": "SH"}], dry_run=False,
+    )
+    assert result.results[0].status == "success"
+    assert reads == [1, 0]
+
+
+def test_prefetch_overlaps_next_request_but_persists_in_caller_thread(tmp_path):
+    _setup_db(tmp_path)
+    stocks = [{"code": "600519"}, {"code": "601318"}, {"code": "600036"}]
+    next_started = threading.Event()
+    persisted = []
+    caller = threading.get_ident()
+
+    class Client(_Client):
+        def fetch(self, symbols, *, count):
+            self.calls.append(list(symbols))
+            if symbols == ["601318.SH"]:
+                next_started.set()
+            if symbols == ["600036.SH"]:
+                assert persisted  # No unbounded prefetch of the whole universe.
+            return BatchFetchResult(frames={symbols[0]: _frame(_rows())})
+
+    def on_result(item):
+        assert threading.get_ident() == caller
+        assert db.get_ohlc(item.code)
+        if item.code == "600519":
+            assert next_started.wait(2)
+        persisted.append(item.code)
+
+    client = Client([])
+    result = TickFlowDailyUpdateService(
+        client, request_chunk_size=1, prefetch_batches=True,
+    ).run(stocks, dry_run=False, on_result=on_result)
+    assert persisted == [item["code"] for item in stocks]
+    assert all(item.status == "success" for item in result.results)
+
+
+def test_prefetch_request_failure_does_not_skip_later_chunks(tmp_path):
+    _setup_db(tmp_path)
+
+    class Client(_Client):
+        def fetch(self, symbols, *, count):
+            if symbols == ["601318.SH"]:
+                raise RuntimeError("offline")
+            return BatchFetchResult(frames={symbols[0]: _frame(_rows())})
+
+    result = TickFlowDailyUpdateService(
+        Client([]), request_chunk_size=1, prefetch_batches=True,
+    ).run([{"code": code} for code in ("600519", "601318", "600036")], dry_run=False)
+    assert [item.status for item in result.results] == ["success", "failed", "success"]
+    assert "offline" in result.results[1].error
+    assert db.get_ohlc("601318") is None
+
+
 def test_full_backfill_replaces_non_tickflow_history(tmp_path):
     _setup_db(tmp_path)
     _save_existing("600519", _rows(1, 2), source="tencent")
@@ -90,7 +160,8 @@ def test_full_backfill_replaces_non_tickflow_history(tmp_path):
     assert metadata["repair_run_id"] == result.run_id
 
 
-def test_incremental_update_merges_overlap_and_preserves_history(tmp_path):
+@pytest.mark.parametrize("prefetch", [False, True])
+def test_incremental_update_merges_overlap_and_preserves_history(tmp_path, prefetch):
     _setup_db(tmp_path)
     existing = _rows(1, 4)
     _save_existing("600519", existing, source="tickflow")
@@ -98,7 +169,7 @@ def test_incremental_update_merges_overlap_and_preserves_history(tmp_path):
     client = _Client(
         [BatchFetchResult(frames={"600519.SH": _frame(overlap)})]
     )
-    service = TickFlowDailyUpdateService(client, history_days=1100, overlap_days=10)
+    service = TickFlowDailyUpdateService(client, history_days=1100, overlap_days=10, prefetch_batches=prefetch)
 
     result = service.run([{"code": "600519", "market": "SH"}], dry_run=False)
 
@@ -107,7 +178,8 @@ def test_incremental_update_merges_overlap_and_preserves_history(tmp_path):
     assert db.get_ohlc("600519") == [*existing, *_rows(5, 2)]
 
 
-def test_adjustment_change_upgrades_incremental_stock_to_full_refresh(tmp_path):
+@pytest.mark.parametrize("prefetch", [False, True])
+def test_adjustment_change_upgrades_incremental_stock_to_full_refresh(tmp_path, prefetch):
     _setup_db(tmp_path)
     existing = _rows(1, 4)
     _save_existing("600519", existing, source="tickflow")
@@ -119,7 +191,7 @@ def test_adjustment_change_upgrades_incremental_stock_to_full_refresh(tmp_path):
             BatchFetchResult(frames={"600519.SH": _frame(full)}),
         ]
     )
-    service = TickFlowDailyUpdateService(client, history_days=1100, overlap_days=10)
+    service = TickFlowDailyUpdateService(client, history_days=1100, overlap_days=10, prefetch_batches=prefetch)
 
     result = service.run([{"code": "600519", "market": "SH"}], dry_run=False)
 

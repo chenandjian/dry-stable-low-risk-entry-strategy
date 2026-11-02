@@ -218,6 +218,7 @@ def prepare_scan_daily_data(
                 history_days=history_days,
                 overlap_days=10,
                 request_chunk_size=100,
+                prefetch_batches=True,
             )
             try:
                 result = service.run(

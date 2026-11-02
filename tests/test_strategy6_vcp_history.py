@@ -22,6 +22,8 @@ class _FakeEngine:
         self.calls = calls
 
     def evaluate_at(self, rows, *, market_data_by_symbol, **kwargs):
+        assert kwargs.get("rows_normalized") is True
+        assert "prev_close" in rows[-1]
         evaluation_date = rows[-1]["date"]
         market_latest = {
             symbol: values[-1]["date"] if values else ""

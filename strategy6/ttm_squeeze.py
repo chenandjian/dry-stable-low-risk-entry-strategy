@@ -225,7 +225,9 @@ def calculate_ttm_squeeze(rows: list[dict], config: dict) -> Strategy6TtmSqueeze
     kc_upper: list[float | None] = [None] * len(rows)
     kc_lower: list[float | None] = [None] * len(rows)
     squeeze_flags: list[bool] = [False] * len(rows)
-    for index in range(len(rows)):
+    # Only the last two flags and the current uninterrupted squeeze are exposed.
+    # EMA/ATR above still use the complete history and their original seeds.
+    for index in range(len(rows) - 1, -1, -1):
         if bb_middle[index] is not None:
             window = closes[index - bb_period + 1:index + 1]
             deviation = _population_stddev(window)
@@ -241,17 +243,20 @@ def calculate_ttm_squeeze(rows: list[dict], config: dict) -> Strategy6TtmSqueeze
                 float(kc_upper[index]),
                 float(kc_lower[index]),
             )
+        if index <= len(rows) - 2 and (not squeeze_flags[-1] or not squeeze_flags[index]):
+            break
 
     sma_momentum = _sma_series(closes, momentum_period)
     deltas: list[float | None] = [None] * len(rows)
-    for index in range(momentum_period - 1, len(rows)):
+    # Two regression windows need only momentum_period + 1 trailing deltas.
+    for index in range(max(momentum_period - 1, len(rows) - momentum_period - 1), len(rows)):
         window_high = max(highs[index - momentum_period + 1:index + 1])
         window_low = min(lows[index - momentum_period + 1:index + 1])
         donchian_midline = (window_high + window_low) / 2.0
         deltas[index] = closes[index] - (donchian_midline + sma_momentum[index]) / 2.0
 
     momentum_values: list[float | None] = [None] * len(rows)
-    for index in range(momentum_period * 2 - 2, len(rows)):
+    for index in range(len(rows) - 2, len(rows)):
         window = deltas[index - momentum_period + 1:index + 1]
         if all(value is not None for value in window):
             momentum_values[index] = _linear_regression_last([float(value) for value in window])
