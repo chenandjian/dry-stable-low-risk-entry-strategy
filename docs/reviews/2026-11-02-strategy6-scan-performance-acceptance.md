@@ -72,7 +72,7 @@
 
 ```text
 python -m pytest tests/ -q --ignore=tests/test_akshare_hist.py --ignore=tests/test_tushare_hist.py
-1822 passed, 9 skipped，295.76秒（worktree）
+1822 passed, 9 skipped，295.76秒（worktree）；合并main后复验同样通过，351.02秒
 
 python -m compileall scanner strategy2 strategy6 tickflow_data server.py -q
 通过
@@ -85,6 +85,7 @@ npm --prefix web run build
 ```
 
 审核结论：本次修改未发现中高等级问题。不变更策略阈值、评分、候选分层、生命周期和数据源切换规则。
+代码提交为 `26671c4`；main代码合并提交为 `1db07ab`。
 
 ## 5. 使用与风险
 
