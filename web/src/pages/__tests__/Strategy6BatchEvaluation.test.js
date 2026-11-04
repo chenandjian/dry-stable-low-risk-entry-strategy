@@ -10,7 +10,9 @@ vi.mock('../../composables/useApi.js', () => ({ useApi: () => api }))
 const { downloadTradingViewWatchlist } = vi.hoisted(() => ({
   downloadTradingViewWatchlist: vi.fn(),
 }))
-vi.mock('../../utils/tradingViewExport.js', () => ({ downloadTradingViewWatchlist }))
+vi.mock('../../utils/tradingViewExport.js', async importOriginal => ({
+  ...await importOriginal(), downloadTradingViewWatchlist,
+}))
 
 import Strategy6BatchEvaluation from '../Strategy6BatchEvaluation.vue'
 
@@ -22,6 +24,39 @@ async function flushUi() {
 }
 
 describe('Strategy6BatchEvaluation', () => {
+  it('exports the deduplicated signal union from every page independently of table filters', async () => {
+    const rows = Array.from({ length: 30 }, (_, i) => ({ code: String(600000 + i) }))
+    rows[0].priceConvergence = { matched: true }
+    rows[0].emaCompression = { grade: 'S' }
+    rows[1].emaCompression = { grade: 'A+' }
+    rows[26].sellingExhaustion = { status: 'ULTRA' }
+    rows[29].klineCollectionPatterns = [{ code: 'SLOW_ROUNDED_BASE', grade: 'A' }]
+    api.evaluateStrategy6Batch.mockResolvedValue({ ok: true, results: rows })
+    const wrapper = mount(Strategy6BatchEvaluation)
+    await wrapper.get('[data-test="batch-submit"]').trigger('click')
+    await flushUi()
+    expect(wrapper.get('[data-test="export-tradingview-signals"]').text()).toContain('4')
+    await wrapper.get('[data-test="batch-page-next"]').trigger('click')
+    await wrapper.get('[data-test="filter-stock"]').setValue('不存在')
+    expect(wrapper.findAll('.score-row')).toHaveLength(0)
+    await wrapper.get('[data-test="export-tradingview-signals"]').trigger('click')
+    const request = downloadTradingViewWatchlist.mock.calls[0][0]
+    expect(request.rows.map(row => row.code)).toEqual(['600000', '600001', '600026', '600029'])
+    expect(request.filename).toMatch(/^strategy6-batch-signal-union-\d{8}-\d{6}\.txt$/)
+    expect(wrapper.get('[data-test="filter-stock"]').element.value).toBe('不存在')
+    expect(api.evaluateStrategy6Batch).toHaveBeenCalledTimes(1)
+    wrapper.unmount()
+  })
+
+  it('disables signal union export when none of the four groups match', async () => {
+    api.evaluateStrategy6Batch.mockResolvedValue({ ok: true, results: [{ code: '600001' }] })
+    const wrapper = mount(Strategy6BatchEvaluation)
+    await wrapper.get('[data-test="batch-submit"]').trigger('click')
+    await flushUi()
+    expect(wrapper.get('[data-test="export-tradingview-signals"]').element.disabled).toBe(true)
+    expect(downloadTradingViewWatchlist).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
   it('shows convergence independently and filters ratio, pending and unknown results', async () => {
     api.evaluateStrategy6Batch.mockResolvedValue({ ok: true, results: [
       { code: '603976', tailQualityScore: 18, totalScore: 80, priceConvergence: { matched: true, status: 'MATCHED', contractionPct: 42.39, supportPrice: 27.8, pressurePrice: 34.01, reasonText: '上下边界收敛' } },

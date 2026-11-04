@@ -60,6 +60,12 @@
         <div class="filter-summary">
           <small>显示 {{ results.length }} / {{ allResults.length }} · 尾部得分相同时按策略总分排序</small>
           <button
+            data-test="export-tradingview-signals"
+            class="clear-filter-button"
+            :disabled="!signalExportResults.length"
+            @click="exportSignalUnion"
+          >一键导出信号合集（{{ signalExportResults.length }}）</button>
+          <button
             data-test="export-tradingview-filtered"
             class="clear-filter-button"
             :disabled="!results.length"
@@ -73,6 +79,10 @@
           >清除筛选</button>
         </div>
       </div>
+      <p class="signal-export-hint" data-test="signal-export-hint">
+        信号合集：高低点收敛＝是 / EMA等级 S、A+、A / 跌不动强确认、极致确认 / K线集合等级 S、A；
+        满足任意一组即纳入，合并去重。使用本次全部评分结果，不受下方筛选与分页影响；等级条件不额外要求确认状态。
+      </p>
       <nav class="result-pagination" aria-label="评分结果分页">
         <span>共 {{ results.length }} 只 · 第 {{ resultPage }} / {{ resultPageCount }} 页 · 每页25只</span>
         <button class="clear-filter-button" :disabled="resultPage <= 1" @click="resultPage--">上一页</button>
@@ -346,6 +356,7 @@
 import { computed, reactive, ref, shallowRef, watch } from 'vue'
 import { useApi } from '../composables/useApi.js'
 import { downloadTradingViewWatchlist } from '../utils/tradingViewExport.js'
+import { selectBatchSignalExportRows } from '../utils/batchSignalExport.js'
 import { parseStockCodeInput } from '../utils/stockCodeInputParser.js'
 
 const api = useApi()
@@ -366,6 +377,7 @@ const tableFilters = reactive(createEmptyTableFilters())
 const parsedInput = computed(() => parseStockCodeInput(rawCodes.value))
 const parsedCodes = computed(() => parsedInput.value.codes)
 const allResults = computed(() => response.value?.results || [])
+const signalExportResults = computed(() => selectBatchSignalExportRows(allResults.value))
 const results = computed(() => allResults.value.filter(matchesTableFilters))
 const RESULT_PAGE_SIZE = 25
 const resultPage = ref(1)
@@ -587,6 +599,13 @@ function exportTradingView() {
     rows: results.value,
   })
 }
+function exportSignalUnion() {
+  if (!signalExportResults.value.length) return
+  downloadTradingViewWatchlist({
+    filename: `strategy6-batch-signal-union-${filenameTimestamp(new Date())}.txt`,
+    rows: signalExportResults.value,
+  })
+}
 function filenameTimestamp(value) {
   const pad = number => String(number).padStart(2, '0')
   return `${value.getFullYear()}${pad(value.getMonth() + 1)}${pad(value.getDate())}-${pad(value.getHours())}${pad(value.getMinutes())}${pad(value.getSeconds())}`
@@ -714,6 +733,9 @@ function collectionPatternWarningText(value) {
 </script>
 
 <style scoped>
+.signal-export-hint { margin: 0 0 12px; padding: 10px 0; color: var(--text-muted); font-size: 12px; line-height: 1.7; border-bottom: 1px solid var(--border); }
+.result-panel > .panel-title { flex-wrap: wrap; gap: 10px; }
+.result-panel .filter-summary { flex-wrap: wrap; }
 .result-pagination { display: flex; justify-content: flex-end; align-items: center; gap: 12px; margin-bottom: 12px; color: var(--text-muted); font-size: 12px; }
 .grade-toggle { width: 100%; padding: 6px 7px; color: var(--text-secondary); background: transparent; text-align: left; font: inherit; border-radius: 0; }
 .grade-toggle::before { content: '▸ '; }
