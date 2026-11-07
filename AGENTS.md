@@ -18,6 +18,11 @@ Bug 修复优先使用 TDD：先写能稳定复现问题的失败测试，再做
 
 ## Project
 
+美股研究扩展仅在显式 `US_RESEARCH_NO_INDEX` 画像执行（用户于2026-11-07批准），使用独立 `us_market.db` 和TickFlow免费端forward日线。
+允许明确关闭指数过滤的研究输出，但必须保留research_only与量价口径警告，不得称为正式候选，不得静默使用CN指数、A股涨停或ETF代理。
+估算成交额独立于实际成交额；历史as_of按日期截断；缺目标交易日失败，不伪造停牌或回退旧缓存生成当天结果。
+这些US研究例外不改变CN现有扫描、回测和默认配置规则；US API/页面不得切换scanner.db.DB_PATH，不新增美股自动定时任务。
+
 CupHandleScan 是 Python 3.10+ 的 A 股扫描系统，当前项目包含六套相互隔离的策略：
 
 - 策略1：杯柄/VCP 扫描，统一入口 `scanner/strategy_engine.py::CupHandleStrategyEngine.evaluate_at()`。

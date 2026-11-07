@@ -9,6 +9,7 @@ export const routes = [
   { path: '/strategy6/results', name: 'Strategy6Results', component: () => import('../pages/Strategy6Results.vue') },
   { path: '/strategy6/batch-evaluation', name: 'Strategy6BatchEvaluation', component: () => import('../pages/Strategy6BatchEvaluation.vue') },
   { path: '/market-breadth', name: 'MarketBreadth', component: () => import('../pages/MarketBreadth.vue') },
+  { path: '/us/strategy6/research', name: 'USStrategy6Research', component: () => import('../pages/USStrategy6Research.vue') },
   { path: '/:pathMatch(.*)*', redirect: '/strategy6/results' },
 ]
 

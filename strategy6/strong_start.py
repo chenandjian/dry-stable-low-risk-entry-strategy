@@ -10,7 +10,7 @@ PASSING_START_TYPES = {"NORMAL_STRONG_BREAKOUT", "VOLUME_LIMIT_UP", "LOW_VOLUME_
 
 
 def evaluate_strong_start(rows: list[dict], ind: Strategy6Indicators, config: dict, code: str) -> Strategy6Start:
-    best = Strategy6Start(limit_up_pct=get_limit_up_pct(code))
+    best = Strategy6Start(limit_up_pct=_limit_pct(code, config))
     start_idx = max(1, len(rows) - int(config["start_lookback_days"]) - 1)
     for idx in range(start_idx, len(rows)):
         candidate = _build_start_candidate(rows, idx, config, code)
@@ -36,7 +36,7 @@ def evaluate_strong_start(rows: list[dict], ind: Strategy6Indicators, config: di
                 start_grade="B",
                 start_low=row["low"],
                 days_since_start=len(rows) - momentum_index - 1,
-                limit_up_pct=get_limit_up_pct(code),
+                limit_up_pct=_limit_pct(code, config),
                 high_trigger=_high_trigger(ind, config),
             )
     return best
@@ -74,10 +74,11 @@ def _build_start_candidate(rows: list[dict], idx: int, config: dict, code: str) 
     volume_ratio = row["volume"] / v20 if v20 > 0 else 0.0
     close_position = _close_position(row)
     amount_yi = row["amount"] / 100_000_000
-    self_amount_percentile = _prior_amount_percentile(rows, idx, 60)
-    one_word = is_one_word_limit_up(code, prev["close"], row["open"], row["high"], row["low"], row["close"])
-    limit_up = is_limit_up_day(code, prev["close"], row["close"])
-    touched_failed = is_touched_limit_up_failed(code, prev["close"], row["high"], row["close"])
+    us_research = config.get("market_profile") == "US_RESEARCH_NO_INDEX"
+    self_amount_percentile = 0.0 if us_research else _prior_amount_percentile(rows, idx, 60)
+    one_word = False if us_research else is_one_word_limit_up(code, prev["close"], row["open"], row["high"], row["low"], row["close"])
+    limit_up = False if us_research else is_limit_up_day(code, prev["close"], row["close"])
+    touched_failed = False if us_research else is_touched_limit_up_failed(code, prev["close"], row["high"], row["close"])
     start_type = "NONE"
     if one_word:
         start_type = "ONE_WORD_LIMIT_UP"
@@ -107,13 +108,17 @@ def _build_start_candidate(rows: list[dict], idx: int, config: dict, code: str) 
         start_low=row["low"],
         is_limit_up=limit_up,
         is_one_word_limit_up=one_word,
-        limit_up_pct=get_limit_up_pct(code),
+        limit_up_pct=_limit_pct(code, config),
         days_since_start=len(rows) - idx - 1,
     )
     if start_type in PASSING_START_TYPES:
         _apply_event_quality(candidate, rows, idx, prev["close"])
         candidate.start_grade = _grade(candidate.event_quality_score)
     return candidate
+
+
+def _limit_pct(code: str, config: dict) -> float:
+    return 0.0 if config.get("market_profile") == "US_RESEARCH_NO_INDEX" else get_limit_up_pct(code)
 
 
 def _momentum_start(rows: list[dict], ind: Strategy6Indicators) -> tuple[str, int]:

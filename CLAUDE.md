@@ -4,6 +4,16 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
+美股研究入口为 `/us/strategy6/research`，API为 `/api/us/strategy6/research` 与 `/api/us/strategy6/tasks`。
+`us_market/` 独立存储在A股库同目录的 `us_market.db`，不得切换 `scanner.db.DB_PATH`。
+仅TickFlow免费端、forward和供应商原始volume；SDK实例认证Key在请求前清除，不能读取Key后自动切换认证。
+用户已批准无指数研究画像 `US_RESEARCH_NO_INDEX`：仍调用策略6同一引擎及ORIGINAL尾部，不使用A股涨停或指数，不能将结果称为正式候选。
+估算活动额为 `FORWARD_CLOSE_X_PROVIDER_VOLUME_V1`，实际成交额缺失仍为NULL；量价基准未独立验收，不能称为真实成交额或可交易收益。
+美股日历使用固定exchange-calendars的XNYS离线日历；10分钟确认延迟是工程参数，不代表供应商保证发布时间。
+显式历史as_of按日期截断，不能伪造当前时间或将旧数据当成今日信号。实际缺目标日必须进入失败列表，不猜停牌。
+研究页仅支持输入代码池，不代表普通股全市场分类与生产迁移已完成；不自动创建美股定时任务。
+开发/真实验证记录见 `docs/reviews/2026-11-07-us-market-research-scan-acceptance.md`。
+
 市场宽度新增独立强势收缩历史板块：`scanner/trend_squeeze_breadth.py` 与 `/api/market-breadth/trend-squeeze-history` 按本地真实指数日期重建当前股票池初筛数量和长期强势对照，复用 `strategy6/strong_trend_squeeze.py` 的指标数学与规则模型。仅展示，不进入策略评分、资格或生命周期。无当日K线不延用昨日信号，历史不足返回空值；覆盖率分母为已有250根历史资格的股票，并显式显示股票池与有本地历史的数量。可靠标准为覆盖90%、成功评估1000；MA及120日分位不能跨数据缺口。缓存文件为行情库旁的 `<database>.trend-breadth-cache.sqlite`，全OHLC指纹失效；首次重建较慢，前端独立加载与重试。规则及展示提示边界见 `docs/superpowers/specs/2026-10-09-trend-squeeze-breadth.md`。
 
 批量评分 `sellingExhaustion`（`strategy6/selling_exhaustion.py`）当前V3：仅展示与筛选，不参与正式策略评分、资格或排序。四因子原始分不变，保留V2的回调背景、离底和反弹排除及3日破位保护。新增反弹退出后至少两日持续承接且原始确认全部通过的回踩恢复路径；恢复必须补记反弹期间真实低点，再校验距离。五日收盘位置不足时，近3日均值>=0.55、比前2日提高>=0.10、最近两日各自>=普通阈值可补普通确认，但不加分或直接升级强/极致确认。评分等级与确认强度独立。配置为 `strategy6.selling_exhaustion`，缺省值在模块DEFAULTS；规则、真实历史匹配清单和局限见 `docs/reviews/2026-09-20-selling-exhaustion-v3.md`。

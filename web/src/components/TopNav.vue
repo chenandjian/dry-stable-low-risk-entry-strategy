@@ -15,12 +15,14 @@
       <router-link to="/data/kline-history" class="topnav-tab" :class="{ active: isActive('/data/kline-history') }">K线数据</router-link>
       <router-link to="/tasks" class="topnav-tab" :class="{ active: isActive('/tasks') }">任务中心</router-link>
       <router-link to="/config" class="topnav-tab" :class="{ active: isActive('/config') }">策略配置</router-link>
+      <router-link to="/us/strategy6/research" class="topnav-tab" :class="{ active: isActive('/us/') }">美股研究</router-link>
     </div>
-    <div class="topnav-right">
+    <div v-if="!route.path.startsWith('/us/')" class="topnav-right">
       <span class="market-indicator" :class="marketSessionClass">{{ marketSessionText }}</span>
       <span class="data-date">数据日 {{ latestTradeDate || '--' }}</span>
       <span class="last-scan">扫描 {{ lastScan || '--' }}</span>
     </div>
+    <div v-else class="topnav-right">美股研究 · 免费历史日线 · 非实时</div>
   </nav>
 </template>
 

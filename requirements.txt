@@ -7,3 +7,5 @@ apscheduler>=3.10.4
 matplotlib>=3.8.0
 pytest>=8.0.0
 tickflow[all]>=0.1.26
+exchange-calendars==4.13.2
+numpy>=1.26.4,<2; python_version < "3.13"

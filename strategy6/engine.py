@@ -50,8 +50,28 @@ from strategy6.vcp_observer import apply_vcp_base_filters, evaluate_vcp_observat
 class StrongVcpTailEngine:
     """Evaluate strong-start VCP/Cup-handle tail candidates."""
 
-    def __init__(self, config: dict | None = None):
+    def __init__(self, config: dict | None = None, *, market_profile: str = "CN",
+                 us_min_estimated_turnover_usd: float = 10_000_000):
         self.config = resolve_strategy6_config(config or {})
+        if market_profile not in {"CN", "US_RESEARCH_NO_INDEX"}:
+            raise ValueError("unsupported market profile")
+        self.market_profile = market_profile
+        if market_profile == "US_RESEARCH_NO_INDEX":
+            from math import isfinite
+            if isinstance(us_min_estimated_turnover_usd, bool) or not isfinite(us_min_estimated_turnover_usd) or us_min_estimated_turnover_usd <= 0:
+                raise ValueError("US estimated liquidity threshold must be positive and finite")
+            if self.config["decision_profile"] != "formal_original":
+                raise ValueError("US research currently reuses ORIGINAL tail only")
+            self.config.update(
+                market_profile=market_profile,
+                enable_market_filter=False,
+                min_avg_amount_60d_yi=us_min_estimated_turnover_usd / 100_000_000,
+                min_avg_amount_30d_yi=us_min_estimated_turnover_usd / 100_000_000,
+                min_avg_amount_10d_yi=us_min_estimated_turnover_usd / 100_000_000,
+                amount10_vs_30_min_ratio=0,
+                normal_start_min_amount_yi=0,
+                normal_start_self_amount_percentile=0,
+            )
 
     def evaluate_at(
         self,
@@ -67,6 +87,12 @@ class StrongVcpTailEngine:
         rows_normalized: bool = False,
         market_data_by_symbol: dict[str, list[dict]] | None = None,
     ) -> Strategy6Evaluation:
+        us_research = self.market_profile == "US_RESEARCH_NO_INDEX"
+        if us_research:
+            if market_data_by_symbol:
+                raise ValueError("US no-index research cannot consume CN or proxy indexes")
+            if not rows_normalized:
+                raise ValueError("US research requires explicit USD-normalized rows")
         rows, indicators = calculate_indicators(
             data,
             self.config,
@@ -81,6 +107,12 @@ class StrongVcpTailEngine:
             expected_trade_date=indicators.evaluation_date,
         )
         indicators.market_status = market_context["market_status"]
+        if us_research:
+            indicators.market_status = "UNAVAILABLE_US_RESEARCH"
+            indicators.warn_tags.extend([
+                "MARKET_FILTER_DISABLED_NO_INDEX", "VOLUME_BASIS_UNVERIFIED",
+                "ESTIMATED_TURNOVER_NOT_ACTUAL",
+            ])
         indicators.relative_strength_20_observed = has_relative_strength_20_market(
             market_data_by_symbol,
             expected_trade_date=indicators.evaluation_date,
@@ -239,6 +271,9 @@ class StrongVcpTailEngine:
             market_data_by_symbol=market_data_by_symbol,
             expected_trade_date=indicators.evaluation_date,
         )
+        if us_research:
+            selection_diagnostics.matched_market_symbol = ""
+            selection_diagnostics.matched_market_status = "UNAVAILABLE_US_RESEARCH"
         score = score_strategy6(
             indicators, start, phase, pattern, support, dry_tail, trade_plan, self.config,
             box_tail=box_tail,

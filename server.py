@@ -2718,6 +2718,77 @@ async def strategy5_candidate_detail(task_id: str, code: str):
 
 # ====== Strategy6 API ======
 
+_us_managers = {}
+_us_manager_lock = threading.Lock()
+
+
+def _get_us_manager():
+    from pathlib import Path
+    from us_market.repository import USRepository
+    from us_market.web_task import USResearchManager
+    config = load_config() or {}
+    cn_path = Path(config.get('data', {}).get('database_path', 'data/cuphandle.db')).resolve()
+    path = cn_path.with_name('us_market.db')
+    if path == cn_path:
+        raise ValueError('US database must be separate from CN database')
+    with _us_manager_lock:
+        if str(path) not in _us_managers:
+            _us_managers[str(path)] = USResearchManager(USRepository(path))
+        return _us_managers[str(path)]
+
+
+@app.post('/api/us/strategy6/research')
+async def start_us_strategy6_research(request: Request):
+    from scheduler.scheduler import _serial_scan_lock
+    try:
+        payload = await request.json()
+        if not isinstance(payload, dict):
+            raise ValueError('request must be a JSON object')
+        manager = _get_us_manager()
+        conflict = _scan_conflict_response()
+        if conflict:
+            return conflict
+        if not _serial_scan_lock.acquire(blocking=False):
+            return JSONResponse({'error': 'SCAN_ALREADY_RUNNING'}, status_code=409)
+        held = True
+        def release_serial():
+            nonlocal held
+            if held:
+                held = False
+                _serial_scan_lock.release()
+        try:
+            def finish():
+                _clear_running()
+                release_serial()
+            task_id = manager.start(
+                payload.get('symbols'), count=payload.get('count', 1100),
+                local_only=payload.get('local_only', False), force=payload.get('force', False),
+                retry_of=payload.get('retry_of'), as_of=payload.get('as_of'),
+                on_start=lambda task_id: _set_running(task_id, 'us_research', 'US_STRATEGY6_RESEARCH'),
+                on_finish=finish,
+            )
+        except Exception:
+            release_serial()
+            raise
+        return {'task_id': task_id, 'research_only': True, 'market_filter_enabled': False}
+    except (ValueError, TypeError) as exc:
+        return JSONResponse({'error': 'INVALID_US_REQUEST', 'message': str(exc)}, status_code=400)
+    except RuntimeError as exc:
+        return JSONResponse({'error': 'US_TASK_CONFLICT', 'message': str(exc)}, status_code=409)
+
+
+@app.get('/api/us/strategy6/tasks')
+def us_strategy6_tasks():
+    return {'tasks': _get_us_manager().tasks(), 'market': 'US', 'research_only': True}
+
+
+@app.get('/api/us/strategy6/tasks/{task_id}')
+def us_strategy6_task(task_id: str):
+    task = _get_us_manager().get(task_id)
+    if task is None:
+        return JSONResponse({'error': 'NOT_FOUND'}, status_code=404)
+    return {'task': task}
+
 @app.post("/api/strategy6/batch-evaluate")
 async def strategy6_batch_evaluate(request: Request):
     try:
