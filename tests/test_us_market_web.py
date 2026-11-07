@@ -64,9 +64,10 @@ def test_startup_storage_error_always_releases_task_lock(tmp_path, monkeypatch):
     repo = USRepository(tmp_path / 'us.db')
     manager = USResearchManager(repo)
     released = []
-    def fail(*args):
+    def fail(*args, **kwargs):
         raise OSError('disk write failed')
     monkeypatch.setattr(repo, 'save_run', fail)
+    monkeypatch.setattr(repo, 'initialize_job', fail)
     with pytest.raises(OSError):
         manager.start(['AAPL'], on_finish=lambda: released.append(True))
     assert not manager.lock.locked()

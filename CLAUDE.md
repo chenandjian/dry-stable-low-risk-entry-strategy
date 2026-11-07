@@ -11,7 +11,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 估算活动额为 `FORWARD_CLOSE_X_PROVIDER_VOLUME_V1`，实际成交额缺失仍为NULL；量价基准未独立验收，不能称为真实成交额或可交易收益。
 美股日历使用固定exchange-calendars的XNYS离线日历；10分钟确认延迟是工程参数，不代表供应商保证发布时间。
 显式历史as_of按日期截断，不能伪造当前时间或将旧数据当成今日信号。实际缺目标日必须进入失败列表，不猜停牌。
-研究页仅支持输入代码池，不代表普通股全市场分类与生产迁移已完成；不自动创建美股定时任务。
+研究页支持手工代码池与TickFlow免费 `US_Equity` 全池；供应商池包含混合证券，不能称为已核验纯普通股。
+全池任务冻结快照、日期及参数，20只逐批持久化，分页读逐股状态；停止后保留待处理，继续只处理未完成，重试只处理失败。
+不自动创建美股定时任务；指数搁置，研究版既有forward/volume/估算成交额口径不变。
+股票池阶段验收见 `docs/reviews/2026-11-07-us-universe-full-scan-acceptance.md`。
 开发/真实验证记录见 `docs/reviews/2026-11-07-us-market-research-scan-acceptance.md`。
 
 市场宽度新增独立强势收缩历史板块：`scanner/trend_squeeze_breadth.py` 与 `/api/market-breadth/trend-squeeze-history` 按本地真实指数日期重建当前股票池初筛数量和长期强势对照，复用 `strategy6/strong_trend_squeeze.py` 的指标数学与规则模型。仅展示，不进入策略评分、资格或生命周期。无当日K线不延用昨日信号，历史不足返回空值；覆盖率分母为已有250根历史资格的股票，并显式显示股票池与有本地历史的数量。可靠标准为覆盖90%、成功评估1000；MA及120日分位不能跨数据缺口。缓存文件为行情库旁的 `<database>.trend-breadth-cache.sqlite`，全OHLC指纹失效；首次重建较慢，前端独立加载与重试。规则及展示提示边界见 `docs/superpowers/specs/2026-10-09-trend-squeeze-breadth.md`。

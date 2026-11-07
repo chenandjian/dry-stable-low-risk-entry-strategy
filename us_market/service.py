@@ -33,7 +33,7 @@ def _run(kind, symbols, now, context):
 
 
 def acquire_batch(repository, symbols, *, count=1100, batch_size=20, force=False,
-                  sdk=None, now=None, as_of=None, progress=None):
+                  sdk=None, now=None, as_of=None, progress=None, before_request=None):
     symbols = _symbols(symbols)
     if isinstance(count, bool) or not isinstance(count, int) or not 1 <= count <= 5000:
         raise ValueError('count must be between 1 and 5000')
@@ -66,6 +66,8 @@ def acquire_batch(repository, symbols, *, count=1100, batch_size=20, force=False
             if progress:
                 progress({'phase': 'FETCHING', 'processed': len(run['stocks']), 'total': len(symbols), 'symbols': chunk})
             try:
+                if before_request:
+                    before_request()
                 frames = sdk.klines.batch(chunk, period='1d', count=count, adjust='forward',
                                           as_dataframe=True, batch_size=batch_size,
                                           max_workers=2, show_progress=False)

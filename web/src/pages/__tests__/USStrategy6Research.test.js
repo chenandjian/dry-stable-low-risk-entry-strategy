@@ -18,8 +18,9 @@ describe('USStrategy6Research', () => {
     await flushPromises()
     expect(wrapper.text()).toContain('未启用市场过滤')
     expect(wrapper.text()).toContain('估算成交额')
-    expect(fetch).toHaveBeenCalledTimes(1)
-    expect(fetch.mock.calls[0][0]).toBe('/api/us/strategy6/tasks')
+    expect(fetch).toHaveBeenCalledTimes(2)
+    expect(fetch.mock.calls.map(([url]) => url)).toContain('/api/us/strategy6/tasks')
+    expect(fetch.mock.calls.map(([url]) => url)).toContain('/api/us/data/universe')
     wrapper.unmount()
   })
 
@@ -54,12 +55,37 @@ describe('USStrategy6Research', () => {
     } }))
     const wrapper = mount(USStrategy6Research)
     await flushPromises()
-    await wrapper.get('select').setValue('new')
+    await wrapper.get('[data-test="task-select"]').setValue('new')
     await flushPromises()
     resolveOld({ task: { task_id: 'old', status: 'COMPLETED', stocks: [{ symbol: 'OLD.US' }] } })
     await flushPromises()
     expect(wrapper.text()).toContain('NEW.US')
     expect(wrapper.text()).not.toContain('OLD.US')
+    wrapper.unmount()
+  })
+
+  it('refreshes the explicit provider pool and starts universe scope without copying codes to textarea', async () => {
+    fetch.mockImplementation(async (url, options) => ({ ok: true, json: async () => {
+      if (url.includes('/universe')) return { universe: { usable_count: 12412, provider_count: 12412,
+        source: 'tickflow_free', universe_id: 'US_Equity', preview: ['AAPL.US'] } }
+      if (options?.method === 'POST') return { task_id: 'full-job' }
+      if (url.includes('/full-job')) return { task: { task_id: 'full-job', status: 'COMPLETED', stocks: [],
+        pagination: { page: 1, pages: 5, total: 245 } } }
+      return { tasks: [] }
+    } }))
+    const wrapper = mount(USStrategy6Research)
+    await flushPromises()
+    expect(wrapper.text()).toContain('12412')
+    await wrapper.get('[data-test="refresh-pool"]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-test="scope"]').setValue('universe')
+    await wrapper.get('[data-test="start"]').trigger('click')
+    await flushPromises()
+    const post = fetch.mock.calls.find(([url, options]) => url.endsWith('/research') && options?.method === 'POST')
+    expect(JSON.parse(post[1].body).scope).toBe('universe')
+    await wrapper.get('[data-test="next-page"]').trigger('click')
+    await flushPromises()
+    expect(fetch.mock.calls.some(([url]) => url.includes('page=2'))).toBe(true)
     wrapper.unmount()
   })
 })

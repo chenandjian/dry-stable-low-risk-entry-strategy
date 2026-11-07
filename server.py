@@ -2764,6 +2764,8 @@ async def start_us_strategy6_research(request: Request):
                 payload.get('symbols'), count=payload.get('count', 1100),
                 local_only=payload.get('local_only', False), force=payload.get('force', False),
                 retry_of=payload.get('retry_of'), as_of=payload.get('as_of'),
+                resume_of=payload.get('resume_of'), scope=payload.get('scope', 'manual'),
+                universe_snapshot_id=payload.get('universe_snapshot_id'),
                 on_start=lambda task_id: _set_running(task_id, 'us_research', 'US_STRATEGY6_RESEARCH'),
                 on_finish=finish,
             )
@@ -2783,11 +2785,37 @@ def us_strategy6_tasks():
 
 
 @app.get('/api/us/strategy6/tasks/{task_id}')
-def us_strategy6_task(task_id: str):
-    task = _get_us_manager().get(task_id)
+def us_strategy6_task(task_id: str, page: int = 1, page_size: int = 50, only_passed: bool = False):
+    try:
+        task = _get_us_manager().get_page(task_id, page=page, page_size=page_size, only_passed=only_passed)
+    except ValueError as exc:
+        return JSONResponse({'error': 'INVALID_PAGE', 'message': str(exc)}, status_code=400)
     if task is None:
         return JSONResponse({'error': 'NOT_FOUND'}, status_code=404)
     return {'task': task}
+
+
+@app.post('/api/us/strategy6/tasks/{task_id}/stop')
+def stop_us_strategy6_task(task_id: str):
+    stopped = _get_us_manager().stop(task_id)
+    return JSONResponse({'ok': stopped, 'task_id': task_id}, status_code=200 if stopped else 409)
+
+
+@app.get('/api/us/data/universe')
+def get_us_universe():
+    from us_market.universe import universe_summary
+    return {'universe': universe_summary(_get_us_manager().repository.latest_universe())}
+
+
+@app.post('/api/us/data/universe/refresh')
+async def refresh_us_universe():
+    from us_market.universe import refresh_universe, universe_summary
+    try:
+        snapshot = await asyncio.to_thread(refresh_universe, _get_us_manager().repository)
+        return {'universe': universe_summary(snapshot)}
+    except Exception as exc:
+        logger.warning('US universe refresh failed: %s', exc)
+        return JSONResponse({'error': 'US_UNIVERSE_REFRESH_FAILED', 'message': str(exc)}, status_code=502)
 
 @app.post("/api/strategy6/batch-evaluate")
 async def strategy6_batch_evaluate(request: Request):
