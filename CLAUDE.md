@@ -7,6 +7,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 美股研究入口为 `/us/strategy6/research`，API为 `/api/us/strategy6/research` 与 `/api/us/strategy6/tasks`。
 「K线数据」默认A股，可切换美股。美股历史 API `GET /api/us/data/{code}/kline-history` 只读本地独立库，不初始化扫描管理器或请求行情源。
 美股批量评分页 `/us/strategy6/batch-evaluation` 通过独立只读API按指定交易日评估，复用策略6批量诊断和筛选。美股近5日低量与极致缩量使用供应商volume，不用实际或估算成交额替代；代码TXT不猜交易所前缀。
+美股批量评分支持粘贴 TradingView CSV，以及从已完成的美股研究任务导入强势趋势收缩初筛名单并立即按来源日期评分。相同日期优先全池任务；单次导入最多200只并显示初筛总数。禁止跨市场读取 A 股初筛。
 `us_market/` 独立存储在A股库同目录的 `us_market.db`，不得切换 `scanner.db.DB_PATH`。
 仅TickFlow免费端、forward和供应商原始volume；SDK实例认证Key在请求前清除，不能读取Key后自动切换认证。
 用户已批准无指数研究画像 `US_RESEARCH_NO_INDEX`：仍调用策略6同一引擎及ORIGINAL尾部，不使用A股涨停或指数，不能将结果称为正式候选。
@@ -17,6 +18,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 全池任务冻结快照、日期及参数，20只逐批持久化，分页读逐股状态；停止后保留待处理，继续只处理未完成，重试只处理失败。
 不自动创建美股定时任务；指数搁置，研究版既有forward/volume/估算成交额口径不变。
 股票池阶段验收见 `docs/reviews/2026-11-07-us-universe-full-scan-acceptance.md`。
+真实全池使用隔离数据库验收；`python -m us_market.full_pool_audit <database> <task_id>` 只读核对股票池、任务终态和候选/VCP证据。全部进入终态不等于全部成功评估。
 
 美股研究新增候选和 VCP 持续观察页 `/us/strategy6/observations`。仅使用新完成任务的逐股本地评估证据，按日期和研究配置隔离；缺失评估不视为失效，VCP 观察仍要求历史候选资格。该页面不主动拉行情，不接正式调度。验收见 `docs/reviews/2026-11-07-us-vcp-observation-acceptance.md`。
 开发/真实验证记录见 `docs/reviews/2026-11-07-us-market-research-scan-acceptance.md`。

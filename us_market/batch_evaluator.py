@@ -1,6 +1,8 @@
 """Local-only batch diagnostics with the same engine profile as US research."""
 import logging
-from datetime import datetime, timezone
+import sqlite3
+from contextlib import closing
+from datetime import date, datetime, timezone
 
 from strategy6.batch_evaluator import batch_result, build_batch_summary
 from strategy6.engine import StrongVcpTailEngine
@@ -10,11 +12,48 @@ from .history import read_local_history
 from .service import ESTIMATION_METHOD, _symbols, research_rows
 
 logger = logging.getLogger(__name__)
+MAX_BATCH_SYMBOLS = 200
+
+
+def read_us_trend_squeeze_screen(path, *, as_of=None):
+    if as_of is not None and date.fromisoformat(as_of).isoformat() != as_of:
+        raise ValueError('评估日期必须为 YYYY-MM-DD')
+    empty = dict(taskId=None, evaluationDate=as_of, total=0, stocks=[])
+    if not path.is_file():
+        return empty
+    with closing(sqlite3.connect(path.as_uri() + '?mode=ro', uri=True, timeout=5)) as conn:
+        conn.execute('BEGIN')
+        source = conn.execute("""SELECT task_id, json_extract(payload, '$.context.target_trade_date') AS day
+            FROM us_runs WHERE json_extract(payload, '$.kind')='job'
+            AND json_extract(payload, '$.market')='US'
+            AND json_extract(payload, '$.research_only')=1
+            AND json_extract(payload, '$.stock_storage')='rows_v1'
+            AND json_extract(payload, '$.status') IN ('COMPLETED', 'COMPLETED_WITH_ERRORS')
+            AND json_extract(payload, '$.pending_count')=0
+            AND json_extract(payload, '$.evaluated_count')>0
+            AND (? IS NULL OR json_extract(payload, '$.context.target_trade_date')=?)
+            ORDER BY day DESC,
+                coalesce(json_extract(payload, '$.scope')='universe'
+                         AND json_extract(payload, '$.retry_of') IS NULL, 0) DESC,
+                json_extract(payload, '$.finished_at') DESC, rowid DESC LIMIT 1""", (as_of, as_of)).fetchone()
+        if not source:
+            return empty
+        task_id, day = source
+        rows = conn.execute("""SELECT symbol, count(*) OVER () FROM us_job_stocks
+            WHERE task_id=? AND status='EVALUATED'
+            AND json_extract(payload, '$.candidate.evaluation_date')=?
+            AND json_extract(payload, '$.candidate.market')='US'
+            AND json_extract(payload, '$.candidate.research_only')=1
+            AND json_extract(payload, '$.candidate.strong_trend_squeeze_pass')=1
+            ORDER BY json_extract(payload, '$.candidate.total_score') DESC, symbol LIMIT ?""",
+                            (task_id, day, MAX_BATCH_SYMBOLS)).fetchall()
+        return dict(taskId=task_id, evaluationDate=day, total=rows[0][1] if rows else 0,
+                    stocks=[dict(code=symbol) for symbol, _ in rows])
 
 
 def evaluate_us_batch(path, codes, *, as_of=None, now=None):
     codes = _symbols(codes)
-    if len(codes) > 200:
+    if len(codes) > MAX_BATCH_SYMBOLS:
         raise ValueError('单次最多评估200只美股')
     if as_of is not None and not isinstance(as_of, str):
         raise ValueError('评估日期必须为 YYYY-MM-DD')

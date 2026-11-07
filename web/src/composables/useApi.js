@@ -367,6 +367,14 @@ export function useApi() {
     return res.json().catch(() => ({ taskId: '', stocks: [], total: 0 }))
   }
 
+  async function getLatestUSStrategy6TrendSqueezeScreen(asOf) {
+    const query = asOf ? `?as_of=${encodeURIComponent(asOf)}` : ''
+    const res = await fetch(`${API_BASE}/us/strategy6/trend-squeeze-screen${query}`)
+    const data = await res.json()
+    if (!res.ok) throw new Error(data.message || `美股初筛读取失败：${res.status}`)
+    return data
+  }
+
   async function getStrategy6MarketSnapshot(taskId) {
     const res = await fetch(`${API_BASE}/strategy6/tasks/${encodeURIComponent(taskId)}/market-snapshot`)
     if (!res.ok) throw new Error(`strategy6 market snapshot failed: ${res.status}`)
@@ -544,7 +552,7 @@ export function useApi() {
     startStrategy5Scan, getStrategy5ScanStatus, getStrategy5Tasks,
     getStrategy5Candidates, getStrategy5Candidate,
     startStrategy6Scan, evaluateStrategy6Batch, evaluateUSStrategy6Batch, getStrategy6ScanStatus, getStrategy6Tasks,
-    getStrategy6Candidates, getStrategy6TrendSqueezeScreen, getLatestStrategy6TrendSqueezeScreen,
+    getStrategy6Candidates, getStrategy6TrendSqueezeScreen, getLatestStrategy6TrendSqueezeScreen, getLatestUSStrategy6TrendSqueezeScreen,
     getStrategy6MarketSnapshot, getMarketBreadthHistory, getTrendSqueezeBreadthHistory, getStrategy6Lifecycle, getStrategy6Candidate, downloadStrategy6Report,
     startStrategy2Backtest, getStrategy2BacktestStatus,
     getStrategy2BacktestTasks, getStrategy2BacktestTask,

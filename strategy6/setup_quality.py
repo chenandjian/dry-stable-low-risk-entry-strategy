@@ -30,7 +30,7 @@ def evaluate_setup_quality(
     score = (
         _retention_score(gain_retention)
         + _distribution_score(distribution_days)
-        + _volume_balance_score(up_down_ratio)
+        + (_volume_balance_score(up_down_ratio) if up_down_ratio is not None else 0)
         + _contraction_score(volatility_ratio)
         + {"IMPROVING": 3, "STABLE": 2, "MIXED": 1}.get(rs_trend, 0)
         + (2 if failed_breakouts == 0 else 1 if failed_breakouts == 1 else 0)
@@ -38,7 +38,7 @@ def evaluate_setup_quality(
     reasons = [
         f"gain_retention={gain_retention:.3f}",
         f"distribution_days={distribution_days}",
-        f"up_down_volume={up_down_ratio:.3f}",
+        f"up_down_volume={up_down_ratio:.3f}" if up_down_ratio is not None else "up_down_volume=unavailable",
         f"volatility_contraction={volatility_ratio:.3f}",
         f"failed_breakouts={failed_breakouts}",
         f"rs_trend={rs_trend}",
@@ -49,7 +49,9 @@ def evaluate_setup_quality(
         risks.append("START_GAIN_POORLY_RETAINED")
     if distribution_days >= 3:
         risks.append("DISTRIBUTION_PRESSURE_HIGH")
-    if setup_rows and up_down_ratio < 0.75:
+    if up_down_ratio is None:
+        risks.append("UP_DOWN_VOLUME_UNAVAILABLE")
+    elif setup_rows and up_down_ratio < 0.75:
         risks.append("DOWN_VOLUME_DOMINATES")
     if volatility_ratio > 1.0:
         risks.append("VOLATILITY_NOT_CONTRACTING")
@@ -61,7 +63,7 @@ def evaluate_setup_quality(
         score=max(0, min(25, int(score))),
         gain_retention_ratio=round(gain_retention, 6),
         distribution_day_count=distribution_days,
-        up_down_volume_ratio=round(up_down_ratio, 6),
+        up_down_volume_ratio=round(up_down_ratio, 6) if up_down_ratio is not None else 1.0,
         volatility_contraction_ratio=round(volatility_ratio, 6),
         failed_breakout_count=failed_breakouts,
         relative_strength_trend=rs_trend,
@@ -87,7 +89,7 @@ def _distribution_day_count(rows: list[dict], start: int, end: int) -> int:
     return count
 
 
-def _up_down_volume_ratio(rows: list[dict], start: int, end: int) -> float:
+def _up_down_volume_ratio(rows: list[dict], start: int, end: int) -> float | None:
     up: list[float] = []
     down: list[float] = []
     for index in range(max(1, start), end + 1):
@@ -100,9 +102,12 @@ def _up_down_volume_ratio(rows: list[dict], start: int, end: int) -> float:
             down.append(float(current["volume"]))
     if not down:
         return 2.0 if up else 1.0
+    down_total = sum(down)
+    if down_total <= 0:
+        return None
     if not up:
         return 0.0
-    return (sum(up) / len(up)) / (sum(down) / len(down))
+    return (sum(up) / len(up)) / (down_total / len(down))
 
 
 def _volatility_contraction_ratio(rows: list[dict], phase: Strategy6Phase) -> float:

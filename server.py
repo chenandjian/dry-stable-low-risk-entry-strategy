@@ -2857,6 +2857,15 @@ def us_strategy6_observations(view: str = 'candidates', as_of: str | None = None
         return JSONResponse({'error': 'INVALID_US_OBSERVATION_REQUEST', 'message': str(exc)}, status_code=400)
 
 
+@app.get('/api/us/strategy6/trend-squeeze-screen')
+def us_strategy6_trend_squeeze_screen(as_of: str | None = None):
+    from us_market.batch_evaluator import read_us_trend_squeeze_screen
+    try:
+        return read_us_trend_squeeze_screen(_us_database_path(), as_of=as_of)
+    except ValueError as exc:
+        return JSONResponse({'error': 'INVALID_US_SCREEN_REQUEST', 'message': str(exc)}, status_code=400)
+
+
 @app.post("/api/strategy6/batch-evaluate")
 async def strategy6_batch_evaluate(request: Request):
     try:

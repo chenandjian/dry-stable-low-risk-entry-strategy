@@ -6,6 +6,7 @@ const api = {
   evaluateStrategy6Batch: vi.fn(),
   evaluateUSStrategy6Batch: vi.fn(),
   getLatestStrategy6TrendSqueezeScreen: vi.fn(),
+  getLatestUSStrategy6TrendSqueezeScreen: vi.fn(),
 }
 vi.mock('../../composables/useApi.js', () => ({ useApi: () => api }))
 const { downloadTradingViewWatchlist, downloadTextWatchlist } = vi.hoisted(() => ({
@@ -32,7 +33,8 @@ describe('Strategy6BatchEvaluation', () => {
       { code: 'BRK.B.US', latestVolume5Min: false, latestVolume: 100 },
     ] })
     const wrapper = mount(Strategy6BatchEvaluation, { props: { market: 'US' } })
-    await wrapper.get('[data-test="batch-codes"]').setValue('aapl, AAPL.US\nBRK.B')
+    await wrapper.get('[data-test="batch-codes"]').setValue('描述,商品代码,价格\n"Apple, Inc.",NASDAQ:AAPL,230\nBerkshire,NYSE:BRK.B,500\nApple,AAPL.US,230')
+    expect(wrapper.get('[data-test="input-format-hint"]').text()).toContain('商品代码')
     await wrapper.get('[data-test="us-batch-as-of"]').setValue('2026-11-05')
     await wrapper.get('[data-test="batch-submit"]').trigger('click')
     await flushUi()
@@ -46,7 +48,19 @@ describe('Strategy6BatchEvaluation', () => {
     await wrapper.get('[data-test="export-tradingview-filtered"]').trigger('click')
     expect(downloadTextWatchlist).toHaveBeenCalledWith(expect.objectContaining({ content: 'AAPL' }))
     expect(downloadTradingViewWatchlist).not.toHaveBeenCalled()
-    expect(wrapper.find('[data-test="import-trend-squeeze-screen"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+  it('imports US screen codes and immediately scores the source date', async () => {
+    api.getLatestUSStrategy6TrendSqueezeScreen.mockResolvedValue({
+      taskId: 'us-job', evaluationDate: '2026-11-05', total: 223, stocks: [{ code: 'MSFT.US' }],
+    })
+    api.evaluateUSStrategy6Batch.mockResolvedValue({ ok: true, results: [{ code: 'MSFT.US' }] })
+    const wrapper = mount(Strategy6BatchEvaluation, { props: { market: 'US' } })
+    await wrapper.get('[data-test="import-trend-squeeze-screen"]').trigger('click')
+    await flushUi()
+    expect(api.evaluateUSStrategy6Batch).toHaveBeenLastCalledWith(['MSFT.US'], '2026-11-05')
+    expect(wrapper.text()).toContain('223')
+    expect(wrapper.text()).toContain('us-job')
     wrapper.unmount()
   })
   it('exports the deduplicated signal union from every page independently of table filters', async () => {

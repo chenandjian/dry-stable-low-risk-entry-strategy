@@ -51,7 +51,7 @@ function unique(values) {
   return [...new Set(values)]
 }
 
-export function parseStockCodeInput(input) {
+export function parseStockCodeInput(input, normalize = normalizeCode) {
   const text = String(input ?? '')
   const csvRows = parseCsvRows(text)
   const header = csvRows[0] || []
@@ -60,8 +60,8 @@ export function parseStockCodeInput(input) {
   if (codeColumnIndex >= 0) {
     const rawCodes = csvRows.slice(1).map(row => row[codeColumnIndex]?.trim()).filter(Boolean)
     return {
-      codes: unique(rawCodes.map(normalizeCode).filter(Boolean)),
-      invalidCodes: unique(rawCodes.filter(value => !normalizeCode(value))),
+      codes: unique(rawCodes.map(normalize).filter(Boolean)),
+      invalidCodes: unique(rawCodes.filter(value => !normalize(value))),
       format: 'csv',
       sourceColumn: header[codeColumnIndex].replace(/^\uFEFF/, '').trim(),
     }
@@ -69,8 +69,8 @@ export function parseStockCodeInput(input) {
 
   const rawCodes = text.split(/[\s,，;；]+/).map(value => value.trim()).filter(Boolean)
   return {
-    codes: unique(rawCodes.map(normalizeCode).filter(Boolean)),
-    invalidCodes: unique(rawCodes.filter(value => !normalizeCode(value))),
+    codes: unique(rawCodes.map(normalize).filter(Boolean)),
+    invalidCodes: unique(rawCodes.filter(value => !normalize(value))),
     format: 'plain',
     sourceColumn: '',
   }

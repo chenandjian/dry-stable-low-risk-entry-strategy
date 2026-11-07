@@ -19,7 +19,7 @@
     <section class="input-panel terminal-panel">
       <div class="panel-title">
         <div><span>01</span><strong>输入股票池</strong></div>
-        <small>{{ usMode ? '支持 AAPL、AAPL.US、BRK.B 等代码；自动去重，最多200只；独立记住上次输入' : '支持代码列表或带“商品代码/股票代码”的CSV；自动去重，最多200只；自动记住上次输入' }}</small>
+        <small>{{ usMode ? '支持 AAPL、BRK.B 或 TradingView CSV；自动去重，最多200只；独立记住上次输入' : '支持代码列表或带“商品代码/股票代码”的CSV；自动去重，最多200只；自动记住上次输入' }}</small>
       </div>
       <textarea
         v-model="rawCodes"
@@ -35,16 +35,15 @@
         </span>
         <div class="input-buttons">
           <label v-if="usMode">评估日（留空为最近完整交易日）
-            <input v-model="asOf" data-test="us-batch-as-of" type="date" :disabled="loading">
+            <input v-model="asOf" data-test="us-batch-as-of" type="date" :disabled="loading || importLoading">
           </label>
           <button
-            v-if="!usMode"
             data-test="import-trend-squeeze-screen"
             class="secondary-button"
             :disabled="importLoading || loading"
             @click="importTrendSqueezeScreen"
-          >{{ importLoading ? (loading ? '正在评分…' : '正在导入…') : '一键导入并评分' }}</button>
-          <button data-test="batch-submit" :disabled="loading" @click="runEvaluation">
+          >{{ importLoading ? (loading ? '正在评分…' : '正在导入…') : usMode ? '导入美股初筛并评分' : '一键导入并评分' }}</button>
+          <button data-test="batch-submit" :disabled="loading || importLoading" @click="runEvaluation">
             {{ loading ? '正在评分…' : '开始批量评分' }}
           </button>
         </div>
@@ -391,7 +390,7 @@ const resultColumnWidths = [55, 120, 115, 150, 150, 145, 110, 220, 260, 270, 270
 const expanded = reactive(new Set())
 const tableFilters = reactive(createEmptyTableFilters())
 
-const parsedInput = computed(() => usMode ? parseUSCodes(rawCodes.value) : parseStockCodeInput(rawCodes.value))
+const parsedInput = computed(() => parseStockCodeInput(rawCodes.value, usMode ? normalizeUSCode : undefined))
 const parsedCodes = computed(() => parsedInput.value.codes)
 const allResults = computed(() => response.value?.results || [])
 const signalExportResults = computed(() => selectBatchSignalExportRows(allResults.value))
@@ -489,15 +488,10 @@ async function runEvaluation() {
   }
 }
 
-function parseUSCodes(value) {
-  const codes = new Set()
-  const invalidCodes = []
-  for (const token of value.split(/[\s,，;；]+/).filter(Boolean)) {
-    const ticker = token.toUpperCase().replace(/\.US$/, '')
-    if (!/^[A-Z][A-Z0-9]*(?:[.-][A-Z0-9]+)?$/.test(ticker) || /\.(SH|SZ|HK|BJ|US)$/.test(ticker)) invalidCodes.push(token)
-    else codes.add(`${ticker}.US`)
-  }
-  return { codes: [...codes], invalidCodes, format: 'list' }
+function normalizeUSCode(value) {
+  const ticker = value.trim().toUpperCase().replace(/^(NASDAQ|NYSE|AMEX|NYSEARCA|CBOE|BATS):/, '').replace(/\.US$/, '')
+  if (!/^[A-Z][A-Z0-9]*(?:[.-][A-Z0-9]+)?$/.test(ticker) || /\.(SH|SZ|HK|BJ|US)$/.test(ticker)) return ''
+  return `${ticker}.US`
 }
 
 function createEmptyTableFilters() {
@@ -592,17 +586,20 @@ async function importTrendSqueezeScreen() {
   importMessage.value = ''
   importLoading.value = true
   try {
-    const data = await api.getLatestStrategy6TrendSqueezeScreen()
+    const data = await (usMode ? api.getLatestUSStrategy6TrendSqueezeScreen(asOf.value)
+      : api.getLatestStrategy6TrendSqueezeScreen())
     const stocks = Array.isArray(data.stocks) ? data.stocks : []
     if (!data.taskId || !stocks.length) {
-      throw new Error('暂无已完成任务的新初筛股票，请先重新扫描策略6')
+      throw new Error(usMode ? '所选日期暂无已完成任务的美股初筛股票' : '暂无已完成任务的新初筛股票，请先重新扫描策略6')
     }
+    if (usMode) asOf.value = data.evaluationDate
     rawCodes.value = stocks.map(item => item.code).filter(Boolean).join('\n')
-    importMessage.value = `来源任务 ${data.taskId} · 已导入 ${stocks.length} 只，正在评分`
+    const source = `来源任务 ${data.taskId}${usMode ? ` · ${data.evaluationDate} · 初筛共 ${data.total} 只` : ''}`
+    importMessage.value = `${source} · 已导入 ${stocks.length} 只，正在评分`
     const succeeded = await runEvaluation()
     importMessage.value = succeeded
-      ? `来源任务 ${data.taskId} · 已导入并完成评分 ${stocks.length} 只`
-      : `来源任务 ${data.taskId} · 已导入 ${stocks.length} 只，但评分失败`
+      ? `${source} · 已导入并完成评分 ${stocks.length} 只`
+      : `${source} · 已导入 ${stocks.length} 只，但评分失败`
   } catch (error) {
     errorMessage.value = error?.message || '新初筛股票导入失败'
   } finally {

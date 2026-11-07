@@ -6,6 +6,8 @@
 
 美股输入和A股分别记忆。结果按尾部质量、尾部通过、策略总分排序；保留已有形态、支撑、收敛、卖压衰竭、EMA、MA5等筛选。可导出筛选代码或信号合集TXT，不猜TradingView交易所前缀，也不调用A股初筛导入。
 
+后续补齐 TradingView CSV 粘贴和美股初筛一键导入评分。真实全池任务的 149 只初筛股票全部评分成功，见 `docs/reviews/2026-11-07-us-real-full-pool-acceptance.md`。
+
 ## 实现与口径
 
 - `us_market/batch_evaluator.py` 和 `server.py` 提供 `POST /api/us/strategy6/batch-evaluate`，只读本地US库，不触发拉取、初始化任务或写入候选。

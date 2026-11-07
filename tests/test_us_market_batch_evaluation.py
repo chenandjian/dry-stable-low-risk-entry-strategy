@@ -69,3 +69,38 @@ def test_zero_volume_is_displayed_but_not_confirmed_as_dry():
     assert metrics['latestVolume'] == 0
     assert metrics['latestVolume5Min'] is None
     assert metrics['latestVolumeBelowPrevious5Avg60'] is None
+
+
+def test_us_screen_import_uses_completed_research_and_limits_results(tmp_path, monkeypatch):
+    monkeypatch.setattr('us_market.batch_evaluator.MAX_BATCH_SYMBOLS', 1)
+    repo = USRepository(tmp_path / 'us.db')
+    monkeypatch.setattr(server, '_us_database_path', lambda: repo.path)
+    day = '2026-11-05'
+    for task_id, scope, status, symbol in [
+        ('full', 'universe', 'COMPLETED', 'AAPL.US'),
+        ('manual', 'manual', 'COMPLETED', 'MSFT.US'),
+        ('unfinished', 'universe', 'RUNNING', 'NVDA.US'),
+    ]:
+        symbols = [symbol, 'AMZN.US'] if task_id == 'full' else [symbol]
+        task = dict(task_id=task_id, kind='job', market='US', research_only=True,
+                    status='RUNNING', scope=scope, context={'target_trade_date': day},
+                    progress={}, symbols=symbols, stock_storage='rows_v1')
+        repo.initialize_job(task)
+        repo.complete_job_stocks(task, [dict(symbol=code, status='EVALUATED', evaluation_date=day,
+            candidate=dict(evaluation_date=day, market='US', research_only=True,
+                           strong_trend_squeeze_pass=True, total_score=70 if code == symbol else 60))
+            for code in symbols])
+        task['status'] = status
+        repo.finish_job(task)
+    client = TestClient(server.app)
+    response = client.get(f'/api/us/strategy6/trend-squeeze-screen?as_of={day}')
+    assert response.status_code == 200
+    assert response.json() == dict(taskId='full', evaluationDate=day, total=2, stocks=[dict(code='AAPL.US')])
+    assert client.get('/api/us/strategy6/trend-squeeze-screen?as_of=2026-11-04').json()['taskId'] is None
+
+
+def test_us_screen_import_does_not_create_database(batch_client):
+    client, path = batch_client
+    assert client.get('/api/us/strategy6/trend-squeeze-screen').json()['stocks'] == []
+    assert client.get('/api/us/strategy6/trend-squeeze-screen?as_of=2026-02-30').status_code == 400
+    assert not path.exists()

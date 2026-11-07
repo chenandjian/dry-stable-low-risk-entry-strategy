@@ -119,3 +119,16 @@ def test_setup_quality_does_not_invent_relative_strength_without_fresh_hs300():
 
     assert quality.relative_strength_trend == "UNKNOWN"
     assert "RS_TREND_UNAVAILABLE" in quality.reasons
+
+
+def test_zero_down_volume_does_not_crash_or_create_buying_pressure_points():
+    rows = [dict(close=close, high=close + 1, low=close - 1, volume=volume)
+            for close, volume in [(10, 100), (12, 100), (13, 200), (12.9, 0)]]
+    phase = Strategy6Phase(start_index=1, consolidation_start_index=2, tail_start_index=3, signal_index=3)
+    quality = evaluate_setup_quality(rows, Strategy6Start(), phase, None)
+    assert quality.up_down_volume_ratio == 1.0
+    assert 'UP_DOWN_VOLUME_UNAVAILABLE' in quality.risk_tags
+    assert 'up_down_volume=unavailable' in quality.reasons
+    rows[-1]['volume'] = 200
+    measured = evaluate_setup_quality(rows, Strategy6Start(), phase, None)
+    assert measured.score == quality.score + 2
