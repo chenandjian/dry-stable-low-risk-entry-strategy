@@ -119,6 +119,78 @@ def test_stop_resume_and_retry_keep_original_date_config_and_universe(tmp_path, 
     assert manager.get_page(third)['total_count'] == 1
 
 
+def test_online_prefetch_overlaps_evaluation_without_early_publication(tmp_path, monkeypatch):
+    repo = USRepository(tmp_path / 'us.db')
+    symbols = [f'T{i}.US' for i in range(41)]
+    snapshot = refresh_universe(repo, sdk=SimpleNamespace(universes=SimpleNamespace(get=lambda _: pool(symbols))))
+    second_fetch = threading.Event()
+    release = threading.Event()
+    requests = []
+
+    def acquire(repo, chunk, **kwargs):
+        requests.append(chunk[0])
+        if chunk[0] == 'T20.US':
+            second_fetch.set()
+        return {'task_id': chunk[0], 'stocks': [{'symbol': code, 'status': 'CACHED'} for code in chunk]}
+
+    def evaluate(repo, chunk, **kwargs):
+        if chunk[0] == 'T0.US' and not release.wait(5):
+            raise RuntimeError('first evaluation timed out')
+        return {'task_id': chunk[0], 'stocks': [{'symbol': code, 'status': 'EVALUATED',
+                'candidate': {'candidate_type': 'REJECTED'}} for code in chunk]}
+
+    monkeypatch.setattr('us_market.web_task._create_free_sdk', lambda: SimpleNamespace(close=lambda: None))
+    monkeypatch.setattr('us_market.web_task.acquire_batch', acquire)
+    monkeypatch.setattr('us_market.web_task.run_research', evaluate)
+    manager = USResearchManager(repo)
+    task_id = manager.start(None, scope='universe', universe_snapshot_id=snapshot['snapshot_id'])
+    try:
+        assert second_fetch.wait(2)
+        assert manager.get(task_id)['processed_count'] == 0
+        assert manager.stop(task_id)
+    finally:
+        release.set()
+        manager.join(10)
+    assert requests == ['T0.US', 'T20.US']
+    assert manager.get(task_id)['processed_count'] == 20
+    assert manager.get(task_id)['status'] == 'CANCELED'
+
+
+def test_stop_during_prefetch_throttle_does_not_mark_unrequested_batch_failed(tmp_path, monkeypatch):
+    repo = USRepository(tmp_path / 'us.db')
+    symbols = [f'T{i}.US' for i in range(40)]
+    refresh_universe(repo, sdk=SimpleNamespace(universes=SimpleNamespace(get=lambda _: pool(symbols))))
+    awaiting_second, release = threading.Event(), threading.Event()
+    requests = []
+    save_run = repo.save_run
+
+    def save(task):
+        save_run(task)
+        if task.get('progress', {}).get('phase') == 'FETCHING' and task.get('processed_count') == 20:
+            awaiting_second.set()
+
+    def fetch(chunk, **kwargs):
+        requests.append(chunk)
+        return {}
+
+    monkeypatch.setattr(repo, 'save_run', save)
+    monkeypatch.setattr('us_market.web_task.monotonic', lambda: 0)
+    monkeypatch.setattr('us_market.web_task.sleep', lambda _: release.wait(5))
+    monkeypatch.setattr('us_market.web_task._create_free_sdk', lambda: SimpleNamespace(
+        klines=SimpleNamespace(batch=fetch), close=lambda: None))
+    manager = USResearchManager(repo)
+    task_id = manager.start(None, scope='universe')
+    try:
+        assert awaiting_second.wait(3)
+        assert manager.stop(task_id)
+    finally:
+        release.set()
+        manager.join(10)
+    result = manager.get(task_id)
+    assert requests == [symbols[:20]]
+    assert (result['status'], result['failed_count'], result['pending_count']) == ('CANCELED', 20, 20)
+
+
 def test_manual_limit_remains_and_universe_must_exist(tmp_path):
     manager = USResearchManager(USRepository(tmp_path / 'us.db'))
     with pytest.raises(ValueError):

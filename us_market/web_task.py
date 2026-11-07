@@ -1,22 +1,26 @@
 """Persistent, single-worker research tasks for the isolated US page."""
 import logging
 import threading
+from concurrent.futures import CancelledError, ProcessPoolExecutor, ThreadPoolExecutor
 from datetime import datetime, timezone
-from time import monotonic, sleep
+from time import monotonic, perf_counter, sleep
 from uuid import uuid4
 
-from .service import WARNINGS, _symbols, acquire_batch, run_research
+from .service import WARNINGS, _symbols, acquire_batch, run_local_research_batch, run_research
 from .calendar import evaluation_context
 from .daily_data import _create_free_sdk
 
+LOCAL_PARALLEL_MIN_SYMBOLS = 500
+
 
 class USResearchManager:
-    def __init__(self, repository):
+    def __init__(self, repository, *, local_workers=1):
         self.repository = repository
         self.lock = threading.Lock()
         self.thread = None
         self.cancel = threading.Event()
         self.active_task_id = None
+        self.local_workers = local_workers
         for task in repository.list_runs(10000, status='RUNNING'):
             if task['status'] == 'RUNNING':
                 task.update(status='INTERRUPTED', error='Server restarted; task was not silently resumed')
@@ -110,12 +114,26 @@ class USResearchManager:
 
     def _execute(self, task, on_finish):
         sdk = None
+        fetch_pool = None
+        score_pool = None
+        started = perf_counter()
+        timings = task['timings'] = dict(acquisition_seconds=0.0, history_seconds=0.0,
+                                         scoring_seconds=0.0, vcp_seconds=0.0, commit_seconds=0.0,
+                                         provider_seconds=0.0, provider_requests=0)
         try:
+            last_progress_write = -float('inf')
+            last_progress_phase = None
             def progress(event):
+                nonlocal last_progress_phase, last_progress_write
                 task['progress'] = dict(event, processed=task['processed_count'], total=task['total_count'],
                                         batch_processed=event.get('processed', 0))
                 task['cancel_requested'] = self.cancel.is_set()
-                self.repository.save_run(task)
+                now = perf_counter()
+                if (event['phase'] != 'EVALUATING' or event['phase'] != last_progress_phase
+                        or now - last_progress_write >= 1):
+                    self.repository.save_run(task)
+                    last_progress_phase = event['phase']
+                    last_progress_write = now
             pending = self.repository.job_symbols(task['task_id'], 'PENDING')
             next_request = 0.0
             def throttle():
@@ -123,31 +141,93 @@ class USResearchManager:
                 delay = next_request - monotonic()
                 if delay > 0:
                     sleep(delay)
+                if self.cancel.is_set():
+                    raise CancelledError()
                 next_request = monotonic() + 1.1
 
+            def fetch(chunk, report_progress=None):
+                nonlocal sdk
+                if self.cancel.is_set():
+                    return None, 0.0
+                start = perf_counter()
+                if sdk is None:
+                    sdk = _create_free_sdk()
+                try:
+                    result = acquire_batch(self.repository, chunk, count=task['count'],
+                                           force=task['force'], as_of=task['as_of'], progress=report_progress,
+                                           sdk=sdk, before_request=throttle if task['scope'] == 'universe' else None,
+                                           retain_histories=True)
+                except CancelledError:
+                    if not self.cancel.is_set():
+                        raise
+                    return None, 0.0
+                return result, perf_counter() - start
+
+            if task['scope'] == 'universe' and not task['local_only']:
+                fetch_pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix='us-market-fetch')
+            scoring = {}
+            if task['local_only'] and self.local_workers > 1 and len(pending) >= LOCAL_PARALLEL_MIN_SYMBOLS:
+                score_pool = ProcessPoolExecutor(max_workers=self.local_workers)
+
+            def schedule_score(offset):
+                scoring[offset] = score_pool.submit(run_local_research_batch, self.repository.path,
+                                                    pending[offset:offset+20], task['as_of'], task['config'])
+
+            if score_pool:
+                for offset in range(0, min(len(pending), 20 * self.local_workers), 20):
+                    if self.cancel.is_set():
+                        break
+                    schedule_score(offset)
+            future = None
             for offset in range(0, len(pending), 20):
                 if self.cancel.is_set():
                     break
                 chunk = pending[offset:offset+20]
                 ready, failures = chunk, []
+                histories = None
                 if not task['local_only']:
-                    if sdk is None:
-                        sdk = _create_free_sdk()
-                    acquisition = acquire_batch(self.repository, chunk, count=task['count'],
-                                                force=task['force'], as_of=task['as_of'], progress=progress,
-                                                sdk=sdk, before_request=throttle if task['scope'] == 'universe' else None)
+                    if fetch_pool is None:
+                        acquisition, elapsed = fetch(chunk, progress)
+                    else:
+                        if future is None or not future.done():
+                            progress({'phase': 'FETCHING', 'symbols': chunk})
+                        if future is None:
+                            future = fetch_pool.submit(fetch, chunk)
+                        acquisition, elapsed = future.result()
+                        future = None
+                    if acquisition is None:
+                        break
+                    timings['acquisition_seconds'] += elapsed
+                    timings['provider_seconds'] += acquisition.get('provider_seconds', 0.0)
+                    timings['provider_requests'] += acquisition.get('provider_requests', 0)
                     task['acquisition_task_id'] = acquisition['task_id']
+                    histories = acquisition.get('histories')
                     failures = [stock for stock in acquisition['stocks'] if stock['status'] == 'FAILED']
                     ready = [stock['symbol'] for stock in acquisition['stocks'] if stock['status'] != 'FAILED']
+                    if fetch_pool and offset + 20 < len(pending) and not self.cancel.is_set():
+                        future = fetch_pool.submit(fetch, pending[offset+20:offset+40])
                 results = failures
                 if ready:
-                    result = run_research(self.repository, ready, as_of=task['as_of'], config=task['config'], progress=progress)
+                    if score_pool:
+                        progress({'phase': 'EVALUATING', 'symbols': ready})
+                        result = scoring.pop(offset).result()
+                        self.repository.save_run(result)
+                        next_offset = offset + 20 * self.local_workers
+                        if next_offset < len(pending) and not self.cancel.is_set():
+                            schedule_score(next_offset)
+                    else:
+                        result = run_research(self.repository, ready, as_of=task['as_of'], config=task['config'],
+                                              progress=progress, histories=histories, batch_commit=True)
+                    for key, seconds in result.get('timings', {}).items():
+                        timings[key] += seconds
                     task['evaluation_task_id'] = result['task_id']
                     results = failures + result['stocks']
                 if len(results) != len(chunk) or {stock['symbol'] for stock in results} != set(chunk):
                     raise RuntimeError('batch terminal results do not match frozen task symbols')
+                task['progress'] = {'phase': 'BATCH_COMPLETED', 'symbols': chunk}
+                start = perf_counter()
                 self.repository.complete_job_stocks(task, results)
-                progress({'phase': 'BATCH_COMPLETED', 'symbols': chunk})
+                timings['commit_seconds'] += perf_counter() - start
             task['status'] = ('CANCELED' if self.cancel.is_set() and task['pending_count'] else
                               'COMPLETED_WITH_ERRORS' if task['failed_count'] else 'COMPLETED')
             task['progress'] = {'phase': task['status'], 'processed': task['processed_count'], 'total': task['total_count'], 'symbols': []}
@@ -155,6 +235,10 @@ class USResearchManager:
             logging.getLogger(__name__).exception('US research task failed')
             task.update(status='FAILED', error=str(exc))
         finally:
+            if score_pool is not None:
+                score_pool.shutdown(wait=True, cancel_futures=True)
+            if fetch_pool is not None:
+                fetch_pool.shutdown(wait=True, cancel_futures=True)
             if sdk is not None:
                 try:
                     sdk.close()
@@ -162,6 +246,7 @@ class USResearchManager:
                     logging.getLogger(__name__).exception('US TickFlow client close failed')
             task['finished_at'] = datetime.now(timezone.utc).isoformat()
             try:
+                timings['elapsed_before_publish_seconds'] = perf_counter() - started
                 self.repository.finish_job(task)
             except Exception as exc:
                 logging.getLogger(__name__).exception('US task publication failed')

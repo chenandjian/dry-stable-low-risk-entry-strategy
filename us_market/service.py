@@ -2,8 +2,10 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from concurrent.futures import CancelledError
 from datetime import datetime, timezone
 import logging
+from time import perf_counter
 from uuid import uuid4
 
 from .calendar import freshness, evaluation_context
@@ -33,7 +35,8 @@ def _run(kind, symbols, now, context):
 
 
 def acquire_batch(repository, symbols, *, count=1100, batch_size=20, force=False,
-                  sdk=None, now=None, as_of=None, progress=None, before_request=None):
+                  sdk=None, now=None, as_of=None, progress=None, before_request=None,
+                  retain_histories=False):
     symbols = _symbols(symbols)
     if isinstance(count, bool) or not isinstance(count, int) or not 1 <= count <= 5000:
         raise ValueError('count must be between 1 and 5000')
@@ -46,8 +49,13 @@ def acquire_batch(repository, symbols, *, count=1100, batch_size=20, force=False
                estimation_method=ESTIMATION_METHOD, succeeded=0, failed=0, cached=0)
     repository.save_run(run)
     pending = []
+    histories = {}
+    records = repository.history_records(symbols) if retain_histories and not force else {}
     for symbol in symbols:
-        history = repository.get_history(symbol)
+        history = None
+        if not force:
+            history = (repository.decode_history(records.pop(symbol, None))
+                       if retain_histories else repository.get_history(symbol))
         if not force and history and history['metadata']['requested_count'] >= count and any(
             row['date'] == context['target_trade_date'] for row in history['rows']
         ) and freshness(
@@ -55,6 +63,8 @@ def acquire_batch(repository, symbols, *, count=1100, batch_size=20, force=False
         ):
             run['stocks'].append({'symbol': symbol, 'status': 'CACHED', 'latest_date': history['rows'][-1]['date']})
             run['cached'] += 1
+            if retain_histories:
+                histories[symbol] = history
         else:
             pending.append(symbol)
     owned = sdk is None
@@ -68,12 +78,19 @@ def acquire_batch(repository, symbols, *, count=1100, batch_size=20, force=False
             try:
                 if before_request:
                     before_request()
-                frames = sdk.klines.batch(chunk, period='1d', count=count, adjust='forward',
-                                          as_dataframe=True, batch_size=batch_size,
-                                          max_workers=2, show_progress=False)
+                start = perf_counter()
+                try:
+                    frames = sdk.klines.batch(chunk, period='1d', count=count, adjust='forward',
+                                              as_dataframe=True, batch_size=batch_size,
+                                              max_workers=2, show_progress=False)
+                finally:
+                    run['provider_requests'] = run.get('provider_requests', 0) + 1
+                    run['provider_seconds'] = run.get('provider_seconds', 0.0) + perf_counter() - start
                 if not isinstance(frames, Mapping) or set(frames) - set(chunk):
                     raise ValueError('unexpected batch symbols or response type')
                 error = None
+            except CancelledError:
+                raise
             except Exception as exc:
                 frames, error = {}, str(exc)
             for symbol in chunk:
@@ -95,7 +112,9 @@ def acquire_batch(repository, symbols, *, count=1100, batch_size=20, force=False
                                 'price_basis': 'PROVIDER_FORWARD', 'volume_basis': 'PROVIDER_UNVERIFIED',
                                 'estimation_method': ESTIMATION_METHOD, 'currency': 'USD',
                                 'fetched_at': now.isoformat(), 'requested_count': count}
-                    repository.save_history(symbol, rows, metadata)
+                    metadata = repository.save_history(symbol, rows, metadata)
+                    if retain_histories:
+                        histories[symbol] = {'metadata': metadata, 'rows': rows}
                     run['stocks'].append({'symbol': symbol, 'status': 'FETCHED', 'latest_date': rows[-1]['date'], 'rows': len(rows)})
                     run['succeeded'] += 1
                 except Exception as exc:
@@ -105,6 +124,10 @@ def acquire_batch(repository, symbols, *, count=1100, batch_size=20, force=False
             repository.save_run(run)
             if progress:
                 progress({'phase': 'SAVED', 'processed': len(run['stocks']), 'total': len(symbols), 'symbols': chunk})
+    except CancelledError:
+        run.update(status='CANCELED', finished_at=datetime.now(timezone.utc).isoformat())
+        repository.save_run(run)
+        raise
     except Exception as exc:
         for symbol in pending:
             if not any(stock['symbol'] == symbol for stock in run['stocks']):
@@ -116,6 +139,8 @@ def acquire_batch(repository, symbols, *, count=1100, batch_size=20, force=False
     run['status'] = 'COMPLETED_WITH_ERRORS' if run['failed'] else 'COMPLETED'
     run['finished_at'] = datetime.now(timezone.utc).isoformat()
     repository.save_run(run)
+    if retain_histories:
+        run['histories'] = histories
     return run
 
 
@@ -169,7 +194,8 @@ def _review_vcp(evaluation, rows, symbol, engine):
             vcp.risk_tags.append('VCP_QUALITY_FAILED')
 
 
-def run_research(repository, symbols, *, now=None, as_of=None, config=None, progress=None):
+def run_research(repository, symbols, *, now=None, as_of=None, config=None, progress=None,
+                 histories=None, batch_commit=False, persist=True):
     from strategy6.engine import StrongVcpTailEngine
     symbols = _symbols(symbols)
     now = now or datetime.now(timezone.utc)
@@ -177,14 +203,37 @@ def run_research(repository, symbols, *, now=None, as_of=None, config=None, prog
     run = _run('research', symbols, now, context)
     engine = StrongVcpTailEngine(config, market_profile='US_RESEARCH_NO_INDEX')
     run.update(config=engine.config, evaluated=0, failed=0, candidates=0)
-    repository.save_run(run)
+    timings = dict(history_seconds=0.0, scoring_seconds=0.0, vcp_seconds=0.0)
+    start = perf_counter()
+    batched_read = batch_commit or not persist
+    records = repository.history_records(symbols) if histories is None and batched_read else {}
+    timings['history_seconds'] += perf_counter() - start
+    if persist and not batch_commit:
+        repository.save_run(run)
     for symbol in symbols:
         try:
-            history = repository.get_history(symbol)
-            rows = research_rows(history, context)
-            evaluation = engine.evaluate_at(rows, code=symbol, rows_normalized=True,
-                                             data_source='tickflow_free', kline_fetched_at=history['metadata']['fetched_at'])
-            _review_vcp(evaluation, rows, symbol, engine)
+            start = perf_counter()
+            try:
+                if histories is not None:
+                    history = histories.get(symbol)
+                elif batched_read:
+                    history = repository.decode_history(records.pop(symbol, None))
+                else:
+                    history = repository.get_history(symbol)
+                rows = research_rows(history, context)
+            finally:
+                timings['history_seconds'] += perf_counter() - start
+            start = perf_counter()
+            try:
+                evaluation = engine.evaluate_at(rows, code=symbol, rows_normalized=True,
+                                                 data_source='tickflow_free', kline_fetched_at=history['metadata']['fetched_at'])
+            finally:
+                timings['scoring_seconds'] += perf_counter() - start
+            start = perf_counter()
+            try:
+                _review_vcp(evaluation, rows, symbol, engine)
+            finally:
+                timings['vcp_seconds'] += perf_counter() - start
             candidate = evaluation.to_candidate_dict()
             candidate.update(market='US', research_only=True, formal_scan_allowed=False,
                              currency='USD', market_profile='US_RESEARCH_NO_INDEX',
@@ -203,10 +252,19 @@ def run_research(repository, symbols, *, now=None, as_of=None, config=None, prog
             logger.warning('US research failed %s: %s', symbol, exc)
             run['stocks'].append({'symbol': symbol, 'status': 'FAILED', 'error': str(exc)})
             run['failed'] += 1
-        repository.save_run(run)
+        if persist and not batch_commit:
+            repository.save_run(run)
         if progress:
             progress({'phase': 'EVALUATING', 'processed': len(run['stocks']), 'total': len(symbols), 'symbols': [symbol]})
     run['status'] = 'COMPLETED_WITH_ERRORS' if run['failed'] else 'COMPLETED'
     run['finished_at'] = datetime.now(timezone.utc).isoformat()
-    repository.save_run(run)
+    run['timings'] = timings
+    if persist:
+        repository.save_run(run)
     return run
+
+
+def run_local_research_batch(path, symbols, as_of, config):
+    from .repository import USRepository
+    return run_research(USRepository(path, read_only=True), symbols, as_of=as_of,
+                        config=config, persist=False)

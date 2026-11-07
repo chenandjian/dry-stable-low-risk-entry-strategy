@@ -79,7 +79,7 @@ def test_batch_saves_each_chunk_before_next_request_and_tracks_failures(tmp_path
     assert repo.get_run(result['task_id']) == result
 
 
-def test_successful_cache_reused_but_failure_retried(tmp_path):
+def test_successful_cache_reused_but_failure_retried(tmp_path, monkeypatch):
     repo = USRepository(tmp_path / 'us.db')
     def batch(symbols, **kw):
         return {symbol: bars() for symbol in symbols if symbol == 'AAPL.US'}
@@ -88,10 +88,20 @@ def test_successful_cache_reused_but_failure_retried(tmp_path):
     first = acquire_batch(repo, ['AAPL', 'BAD'], count=30, sdk=sdk, now=now)
     requested = []
     sdk.klines.batch = lambda symbols, **kw: requested.extend(symbols) or {symbol: bars() for symbol in symbols}
-    second = acquire_batch(repo, ['AAPL', 'BAD'], count=30, sdk=sdk, now=now)
+    second = acquire_batch(repo, ['AAPL', 'BAD'], count=30, sdk=sdk, now=now, retain_histories=True)
     assert requested == ['BAD.US']
     assert second['cached'] == 1 and second['failed'] == 0
     assert first['failed'] == 1
+    assert set(second['histories']) == {'AAPL.US', 'BAD.US'}
+    assert 'histories' not in repo.get_run(second['task_id'])
+
+    def forbidden(*args):
+        raise AssertionError('prefetched histories must not be read again')
+
+    monkeypatch.setattr(repo, 'get_history', forbidden)
+    monkeypatch.setattr(repo, 'history_records', forbidden)
+    evaluated = run_research(repo, ['AAPL', 'BAD'], now=now, histories=second['histories'], batch_commit=True)
+    assert evaluated['evaluated'] == 2
 
 
 def test_stale_response_does_not_overwrite_good_history_or_get_evaluated(tmp_path):

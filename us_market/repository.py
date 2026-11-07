@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import hashlib
 import sqlite3
+from time import perf_counter
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -14,8 +15,11 @@ from .observations import init_observations, publish_observations
 class USRepository:
     """Explicit US store; no process-global DB or shared connection."""
 
-    def __init__(self, path: str | Path):
+    def __init__(self, path: str | Path, *, read_only=False):
         self.path = Path(path).resolve()
+        self.read_only = read_only
+        if read_only:
+            return
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with self.connection() as conn:
             tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
@@ -51,7 +55,8 @@ class USRepository:
 
     @contextmanager
     def connection(self):
-        conn = sqlite3.connect(self.path, timeout=30)
+        target = self.path.as_uri() + '?mode=ro' if self.read_only else self.path
+        conn = sqlite3.connect(target, uri=self.read_only, timeout=30)
         try:
             with conn:
                 yield conn
@@ -84,7 +89,7 @@ class USRepository:
                                (snapshot_id,)).fetchone()
         return json.loads(row[0]) if row else None
 
-    def save_history(self, symbol: str, rows: list[dict], metadata: dict) -> None:
+    def save_history(self, symbol: str, rows: list[dict], metadata: dict) -> dict:
         symbol = provider_symbol(symbol)
         normalize_bars(rows)
         if metadata.get('adjustment') != 'forward' or metadata.get('source') != 'tickflow_free':
@@ -104,12 +109,28 @@ class USRepository:
                     raise ValueError('history shortened or latest date regressed; previous data preserved')
             conn.execute('INSERT OR REPLACE INTO us_stock_history VALUES (?, ?, ?, ?)',
                          (symbol, 'forward', meta, payload))
+        return metadata
+
+    def history_records(self, symbols):
+        records = {}
+        with self.connection() as conn:
+            for offset in range(0, len(symbols), 200):
+                batch = symbols[offset:offset + 200]
+                placeholders = ','.join('?' for _ in batch)
+                records.update((symbol, (meta, rows)) for symbol, meta, rows in conn.execute(
+                    f"SELECT symbol, metadata, rows_json FROM us_stock_history "
+                    f"WHERE adjustment='forward' AND symbol IN ({placeholders})", batch))
+        return records
 
     def get_history(self, symbol: str) -> dict | None:
         symbol = provider_symbol(symbol)
         with self.connection() as conn:
             row = conn.execute('SELECT metadata, rows_json FROM us_stock_history WHERE symbol=? AND adjustment=?',
                                (symbol, 'forward')).fetchone()
+        return self.decode_history(row)
+
+    @staticmethod
+    def decode_history(row):
         return {'metadata': json.loads(row[0]), 'rows': json.loads(row[1])} if row else None
 
     def save_run(self, result: dict) -> None:
@@ -125,9 +146,12 @@ class USRepository:
         return json.loads(row[0]) if row else None
 
     def finish_job(self, task):
+        start = perf_counter()
         with self.connection() as conn:
             conn.execute('BEGIN IMMEDIATE')
             publish_observations(conn, task)
+            if 'timings' in task:
+                task['timings']['publish_seconds'] = perf_counter() - start
             conn.execute('UPDATE us_runs SET payload=? WHERE task_id=?',
                          (json.dumps(task, allow_nan=False), task['task_id']))
 
@@ -199,6 +223,8 @@ class USRepository:
                 if changed != 1:
                     raise ValueError('unknown or already completed job stock')
             self._job_counts(conn, task)
+            if task.get('progress', {}).get('phase') == 'BATCH_COMPLETED':
+                task['progress'].update(processed=task['processed_count'], total=task['total_count'])
             conn.execute('UPDATE us_runs SET payload=? WHERE task_id=?', (json.dumps(task, allow_nan=False), task['task_id']))
 
     def job_symbols(self, task_id, status=None):

@@ -16,6 +16,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 显式历史as_of按日期截断，不能伪造当前时间或将旧数据当成今日信号。实际缺目标日必须进入失败列表，不猜停牌。
 研究页支持手工代码池与TickFlow免费 `US_Equity` 全池；供应商池包含混合证券，不能称为已核验纯普通股。
 全池任务冻结快照、日期及参数，20只逐批持久化，分页读逐股状态；停止后保留待处理，继续只处理未完成，重试只处理失败。
+美股在线全池最多预取下一批，单拉取线程与评分重叠，不改变 TickFlow 请求并发或最小间隔；本地复扫至少500只待评估时使用最多2个只读评分进程，任务线程按批次顺序落库。已预取但尚未提交结果的股票仍为待处理，不因停止而变成失败。
 不自动创建美股定时任务；指数搁置，研究版既有forward/volume/估算成交额口径不变。
 股票池阶段验收见 `docs/reviews/2026-11-07-us-universe-full-scan-acceptance.md`。
 真实全池使用隔离数据库验收；`python -m us_market.full_pool_audit <database> <task_id>` 只读核对股票池、任务终态和候选/VCP证据。全部进入终态不等于全部成功评估。

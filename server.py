@@ -2733,12 +2733,13 @@ def _us_database_path():
 
 
 def _get_us_manager():
+    from os import cpu_count
     from us_market.repository import USRepository
     from us_market.web_task import USResearchManager
     path = _us_database_path()
     with _us_manager_lock:
         if str(path) not in _us_managers:
-            _us_managers[str(path)] = USResearchManager(USRepository(path))
+            _us_managers[str(path)] = USResearchManager(USRepository(path), local_workers=min(2, cpu_count() or 1))
         return _us_managers[str(path)]
 
 
