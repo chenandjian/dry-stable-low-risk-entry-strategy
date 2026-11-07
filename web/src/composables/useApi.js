@@ -43,16 +43,19 @@ export function useApi() {
     return { ...body, ok: res.ok, statusCode: res.status }
   }
 
-  async function getKlineHistory(params = {}) {
+  async function queryKlineHistory(path, params) {
     const { code, ...query } = params
     const cleanQuery = Object.fromEntries(
       Object.entries(query).filter(([, value]) => value !== '' && value !== null && value !== undefined)
     )
     const qs = new URLSearchParams(cleanQuery).toString()
-    const res = await fetch(`${API_BASE}/stock/${encodeURIComponent(code)}/kline-history${qs ? '?' + qs : ''}`)
+    const res = await fetch(`${API_BASE}/${path}/${encodeURIComponent(code)}/kline-history${qs ? '?' + qs : ''}`)
     const body = await res.json().catch(() => ({}))
     return { ...body, ok: res.ok, statusCode: res.status }
   }
+
+  const getKlineHistory = (params = {}) => queryKlineHistory('stock', params)
+  const getUSKlineHistory = (params = {}) => queryKlineHistory('us/data', params)
 
   async function retryFailedStocks(taskId) {
     const res = await fetch(`${API_BASE}/scan/tasks/${taskId}/retry-failed`, { method: 'POST' })
@@ -521,7 +524,7 @@ export function useApi() {
 
   return {
     startScan, getScanStatus, getCandidates, getCandidate, getScanTasks,
-    getSchedulerLogs, getKlineHistory, analyzeCleanK, getKlineHealth, refreshKlineData, refreshKlineHealth,
+    getSchedulerLogs, getKlineHistory, getUSKlineHistory, analyzeCleanK, getKlineHealth, refreshKlineData, refreshKlineHealth,
     startTickFlowFullRefresh, getTickFlowFullRefreshStatus, checkTickFlowFreshness,
     getTaskStocks, retryFailedStocks, reEvaluateTask, getConfig, updateConfig,
     runCupHandleBacktest,

@@ -2722,15 +2722,20 @@ _us_managers = {}
 _us_manager_lock = threading.Lock()
 
 
-def _get_us_manager():
+def _us_database_path():
     from pathlib import Path
-    from us_market.repository import USRepository
-    from us_market.web_task import USResearchManager
     config = load_config() or {}
     cn_path = Path(config.get('data', {}).get('database_path', 'data/cuphandle.db')).resolve()
-    path = cn_path.with_name('us_market.db')
+    path = cn_path.with_name('us_market.db').resolve()
     if path == cn_path:
         raise ValueError('US database must be separate from CN database')
+    return path
+
+
+def _get_us_manager():
+    from us_market.repository import USRepository
+    from us_market.web_task import USResearchManager
+    path = _us_database_path()
     with _us_manager_lock:
         if str(path) not in _us_managers:
             _us_managers[str(path)] = USResearchManager(USRepository(path))
@@ -2805,6 +2810,17 @@ def stop_us_strategy6_task(task_id: str):
 def get_us_universe():
     from us_market.universe import universe_summary
     return {'universe': universe_summary(_get_us_manager().repository.latest_universe())}
+
+
+@app.get('/api/us/data/{code}/kline-history')
+def get_us_kline_history(code: str, start_date: str = '', end_date: str = '',
+                         page: int = 1, page_size: int = 50):
+    from us_market.history import history_page
+    try:
+        return history_page(_us_database_path(), code, start_date=start_date, end_date=end_date,
+                            page=page, page_size=page_size)
+    except ValueError as exc:
+        return JSONResponse({'error': 'INVALID_US_HISTORY_REQUEST', 'message': str(exc)}, status_code=400)
 
 
 @app.post('/api/us/data/universe/refresh')

@@ -4,6 +4,7 @@ import { nextTick } from 'vue'
 
 const api = {
   getKlineHistory: vi.fn(),
+  getUSKlineHistory: vi.fn(),
   analyzeCleanK: vi.fn(),
   getKlineHealth: vi.fn(),
   refreshKlineData: vi.fn(),
@@ -89,6 +90,33 @@ function healthResponse(overrides = {}) {
 }
 
 describe('KlineHistory', () => {
+  it('switches to read-only US bars without changing A-share queries', async () => {
+    api.getUSKlineHistory.mockResolvedValue({
+      ok: true, symbol: 'AAPL.US', total: 51, page: 1, page_size: 50,
+      summary: { row_count: 1100, latest_kline_date: '2026-11-05', target_trade_date: '2026-11-06' },
+      metadata: { source: 'tickflow_free', adjustment: 'forward' },
+      rows: [{ date: '2026-11-05', open: 350, high: 355, low: 340, close: 344.17,
+        volume: 1234, turnover: null, turnover_estimated_usd: 424705.78 }],
+    })
+    const wrapper = mount(KlineHistory)
+    await flushUi()
+    const cnCalls = api.getKlineHistory.mock.calls.length
+    expect(api.getUSKlineHistory).not.toHaveBeenCalled()
+    await wrapper.get('[data-test="kline-market-us"]').trigger('click')
+    expect(wrapper.get('[data-test="kline-cn-content"]').element.style.display).toBe('none')
+    await wrapper.get('[data-test="us-kline-code"]').setValue('AAPL')
+    await wrapper.get('[data-test="us-kline-query"]').trigger('submit')
+    await flushUi()
+    expect(wrapper.get('[data-test="us-kline-results"]').text()).toContain('344.17')
+    expect(wrapper.get('[data-test="us-kline-results"]').text()).toContain('缺失')
+    await wrapper.get('[data-test="us-kline-next"]').trigger('click')
+    expect(api.getUSKlineHistory).toHaveBeenLastCalledWith(expect.objectContaining({ code: 'AAPL', page: 2 }))
+    await wrapper.get('[data-test="kline-market-cn"]').trigger('click')
+    expect(wrapper.get('[data-test="kline-market-cn"]').attributes('aria-pressed')).toBe('true')
+    expect(wrapper.get('[data-test="kline-cn-content"]').element.style.display).not.toBe('none')
+    expect(api.getKlineHistory).toHaveBeenCalledTimes(cnCalls)
+    wrapper.unmount()
+  })
   beforeEach(() => {
     vi.clearAllMocks()
     api.getKlineHistory.mockResolvedValue(freshResponse())

@@ -1,5 +1,11 @@
 <template>
   <div class="kline-page">
+    <nav class="market-switch" aria-label="K线数据市场">
+      <button type="button" data-test="kline-market-cn" :aria-pressed="market === 'CN'" @click="market = 'CN'">A 股</button>
+      <button type="button" data-test="kline-market-us" :aria-pressed="market === 'US'" @click="market = 'US'">美股</button>
+    </nav>
+    <KeepAlive><USKlineHistory v-if="market === 'US'" /></KeepAlive>
+    <div v-show="market === 'CN'" data-test="kline-cn-content">
     <section class="panel hero">
       <div>
         <p class="eyebrow">本地数据诊断</p>
@@ -484,12 +490,16 @@
         本地没有该股票 K 线数据
       </div>
     </section>
+    </div>
   </div>
 </template>
 
 <script setup>
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { useApi } from '../composables/useApi.js'
+import USKlineHistory from './USKlineHistory.vue'
+
+const market = ref('CN')
 
 const {
   getKlineHistory,
@@ -946,6 +956,8 @@ onBeforeUnmount(clearTickFlowPoll)
 </script>
 
 <style scoped>
+.market-switch { display: flex; gap: 8px; margin-bottom: 12px; }
+.market-switch button[aria-pressed="true"] { border-color: var(--gold); color: var(--gold); }
 .kline-page {
   padding: 22px 24px 40px;
   max-width: 1600px;
