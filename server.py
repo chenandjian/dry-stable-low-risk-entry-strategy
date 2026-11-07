@@ -2833,6 +2833,19 @@ async def refresh_us_universe():
         logger.warning('US universe refresh failed: %s', exc)
         return JSONResponse({'error': 'US_UNIVERSE_REFRESH_FAILED', 'message': str(exc)}, status_code=502)
 
+@app.post('/api/us/strategy6/batch-evaluate')
+async def us_strategy6_batch_evaluate(request: Request):
+    from us_market.batch_evaluator import evaluate_us_batch
+    try:
+        payload = await request.json()
+        if not isinstance(payload, dict):
+            raise ValueError('请求必须为 JSON 对象')
+        return await asyncio.to_thread(evaluate_us_batch, _us_database_path(),
+                                       payload.get('codes'), as_of=payload.get('as_of'))
+    except ValueError as exc:
+        return JSONResponse({'error': 'INVALID_US_BATCH_REQUEST', 'message': str(exc)}, status_code=400)
+
+
 @app.post("/api/strategy6/batch-evaluate")
 async def strategy6_batch_evaluate(request: Request):
     try:

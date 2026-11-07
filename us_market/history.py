@@ -9,6 +9,17 @@ from .calendar import freshness, target_session
 from .instruments import provider_symbol
 
 
+def read_local_history(path: Path, symbol: str) -> dict | None:
+    if not path.is_file():
+        return None
+    with closing(sqlite3.connect(path.as_uri() + '?mode=ro', uri=True, timeout=5)) as conn:
+        stored = conn.execute(
+            "SELECT metadata, rows_json FROM us_stock_history WHERE symbol=? AND adjustment='forward'",
+            (symbol,),
+        ).fetchone()
+    return {'metadata': json.loads(stored[0]), 'rows': json.loads(stored[1])} if stored else None
+
+
 def history_page(path: Path, code: str, *, start_date: str = '', end_date: str = '',
                  page: int = 1, page_size: int = 50) -> dict:
     symbol = provider_symbol(code)
@@ -20,14 +31,8 @@ def history_page(path: Path, code: str, *, start_date: str = '', end_date: str =
     if not 1 <= page <= 50000 or not 1 <= page_size <= 100:
         raise ValueError('invalid page or page size')
 
-    stored = None
-    if path.is_file():
-        with closing(sqlite3.connect(path.as_uri() + '?mode=ro', uri=True, timeout=5)) as conn:
-            stored = conn.execute(
-                "SELECT metadata, rows_json FROM us_stock_history WHERE symbol=? AND adjustment='forward'",
-                (symbol,),
-            ).fetchone()
-    metadata, rows = (json.loads(stored[0]), json.loads(stored[1])) if stored else ({}, [])
+    history = read_local_history(path, symbol)
+    metadata, rows = (history['metadata'], history['rows']) if history else ({}, [])
     rows.sort(key=lambda row: row['date'], reverse=True)
     context = target_session()
     target = context['target_trade_date']

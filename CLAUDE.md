@@ -6,6 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 美股研究入口为 `/us/strategy6/research`，API为 `/api/us/strategy6/research` 与 `/api/us/strategy6/tasks`。
 「K线数据」默认A股，可切换美股。美股历史 API `GET /api/us/data/{code}/kline-history` 只读本地独立库，不初始化扫描管理器或请求行情源。
+美股批量评分页 `/us/strategy6/batch-evaluation` 通过独立只读API按指定交易日评估，复用策略6批量诊断和筛选。美股近5日低量与极致缩量使用供应商volume，不用实际或估算成交额替代；代码TXT不猜交易所前缀。
 `us_market/` 独立存储在A股库同目录的 `us_market.db`，不得切换 `scanner.db.DB_PATH`。
 仅TickFlow免费端、forward和供应商原始volume；SDK实例认证Key在请求前清除，不能读取Key后自动切换认证。
 用户已批准无指数研究画像 `US_RESEARCH_NO_INDEX`：仍调用策略6同一引擎及ORIGINAL尾部，不使用A股涨停或指数，不能将结果称为正式候选。

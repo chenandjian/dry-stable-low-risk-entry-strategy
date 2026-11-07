@@ -119,6 +119,22 @@ def acquire_batch(repository, symbols, *, count=1100, batch_size=20, force=False
     return run
 
 
+def research_rows(history, context):
+    if not history or not history['rows'] or not freshness(
+        history['rows'][-1]['date'], history['metadata']['fetched_at'], context
+    ):
+        raise ValueError('MISSING_OR_STALE_HISTORY')
+    rows, previous = [], 0.0
+    for row in history['rows']:
+        if row['date'] > context['target_trade_date']:
+            continue
+        rows.append(dict(row, amount=row['turnover_estimated_usd'], prev_close=previous))
+        previous = row['close']
+    if not rows or rows[-1]['date'] != context['target_trade_date']:
+        raise ValueError('MISSING_TARGET_SESSION')
+    return rows
+
+
 def run_research(repository, symbols, *, now=None, as_of=None, config=None, progress=None):
     from strategy6.engine import StrongVcpTailEngine
     symbols = _symbols(symbols)
@@ -131,16 +147,7 @@ def run_research(repository, symbols, *, now=None, as_of=None, config=None, prog
     for symbol in symbols:
         try:
             history = repository.get_history(symbol)
-            if not history or not freshness(history['rows'][-1]['date'], history['metadata']['fetched_at'], context):
-                raise ValueError('MISSING_OR_STALE_HISTORY')
-            rows, previous = [], 0.0
-            for row in history['rows']:
-                if row['date'] > context['target_trade_date']:
-                    continue
-                rows.append(dict(row, amount=row['turnover_estimated_usd'], prev_close=previous))
-                previous = row['close']
-            if not rows or rows[-1]['date'] != context['target_trade_date']:
-                raise ValueError('MISSING_TARGET_SESSION')
+            rows = research_rows(history, context)
             evaluation = engine.evaluate_at(rows, code=symbol, rows_normalized=True,
                                              data_source='tickflow_free', kline_fetched_at=history['metadata']['fetched_at'])
             candidate = evaluation.to_candidate_dict()

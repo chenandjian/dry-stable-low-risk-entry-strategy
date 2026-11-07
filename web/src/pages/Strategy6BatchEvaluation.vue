@@ -3,8 +3,11 @@
     <header class="page-header">
       <div>
         <p class="eyebrow">STRATEGY 6 · LOCAL EVALUATION</p>
-        <h1>强势股批量评分</h1>
-        <p>复用策略6当前正式评价体系，只读本地前复权日线；结果按尾部评分优先、总分次优排列。</p>
+        <h1>{{ usMode ? '美股批量评分（研究）' : '强势股批量评分' }}</h1>
+        <p v-if="usMode">只读美股本地前复权日线，不拉取行情。未启用指数过滤，评分不代表正式候选或买入信号。</p>
+        <p v-else>复用策略6当前正式评价体系，只读本地前复权日线；结果按尾部评分优先、总分次优排列。</p>
+        <a v-if="usMode" href="/strategy6/batch-evaluation">切换到 A 股批量评分</a>
+        <a v-else href="/us/strategy6/batch-evaluation">切换到美股批量评分</a>
       </div>
       <div class="tail-priority">
         <span>排序规则</span>
@@ -16,14 +19,14 @@
     <section class="input-panel terminal-panel">
       <div class="panel-title">
         <div><span>01</span><strong>输入股票池</strong></div>
-        <small>支持代码列表或带“商品代码/股票代码”的CSV；自动去重，最多200只；自动记住上次输入</small>
+        <small>{{ usMode ? '支持 AAPL、AAPL.US、BRK.B 等代码；自动去重，最多200只；独立记住上次输入' : '支持代码列表或带“商品代码/股票代码”的CSV；自动去重，最多200只；自动记住上次输入' }}</small>
       </div>
       <textarea
         v-model="rawCodes"
         data-test="batch-codes"
         rows="8"
         spellcheck="false"
-        placeholder="601857&#10;601899&#10;002371"
+        :placeholder="usMode ? 'AAPL\nMSFT\nBRK.B' : '601857\n601899\n002371'"
       />
       <div class="input-actions">
         <span>
@@ -31,7 +34,11 @@
           <small v-if="parsedInput.format === 'csv'" data-test="input-format-hint">· CSV 股票池 · 从“{{ parsedInput.sourceColumn }}”列提取</small>
         </span>
         <div class="input-buttons">
+          <label v-if="usMode">评估日（留空为最近完整交易日）
+            <input v-model="asOf" data-test="us-batch-as-of" type="date" :disabled="loading">
+          </label>
           <button
+            v-if="!usMode"
             data-test="import-trend-squeeze-screen"
             class="secondary-button"
             :disabled="importLoading || loading"
@@ -53,6 +60,8 @@
       <div><span>数据异常</span><strong>{{ response.errorCount || 0 }}</strong></div>
       <div><span>数据模式</span><strong>仅本地</strong></div>
     </section>
+    <p v-if="usMode && response">评估日 {{ response.targetTradeDate }} · 最近完整交易日 {{ response.liveTargetTradeDate }}
+      <strong v-if="response.historicalEvaluation"> · 历史研究，非当前信号</strong></p>
 
     <section v-if="allResults.length" class="terminal-panel result-panel">
       <div class="panel-title">
@@ -70,7 +79,7 @@
             class="clear-filter-button"
             :disabled="!results.length"
             @click="exportTradingView"
-          >导出筛选结果（{{ results.length }}）</button>
+          >{{ usMode ? '导出筛选代码' : '导出筛选结果' }}（{{ results.length }}）</button>
           <button
             data-test="clear-table-filters"
             class="clear-filter-button"
@@ -83,6 +92,7 @@
         信号合集：高低点收敛＝是 / EMA等级 S、A+、A / 跌不动强确认、极致确认 / K线集合等级 S、A；
         满足任意一组即纳入，合并去重。使用本次全部评分结果，不受下方筛选与分页影响；等级条件不额外要求确认状态。
       </p>
+      <p v-if="usMode" class="signal-export-hint">美股导出为代码 TXT，不包含未核验的交易所前缀。实际成交额和美元估算值分列，缩量指标仅使用成交量。</p>
       <nav class="result-pagination" aria-label="评分结果分页">
         <span>共 {{ results.length }} 只 · 第 {{ resultPage }} / {{ resultPageCount }} 页 · 每页25只</span>
         <button class="clear-filter-button" :disabled="resultPage <= 1" @click="resultPage--">上一页</button>
@@ -96,7 +106,7 @@
           <thead>
             <tr>
               <th>排名</th><th>股票</th><th>评价日</th><th>尾部质量</th><th>尾部结论</th><th>量比</th>
-              <th>量能趋势</th><th>低点抬高（支撑）</th><th>高低点收敛</th><th>跌不动（卖压衰竭）</th><th>EMA极致缠绕</th><th>5日成交额最低</th><th>收盘低于MA5</th><th>5日收盘波动</th><th>最新交易日K线形态</th><th>K线集合形态</th><th>策略总分</th>
+              <th>量能趋势</th><th>低点抬高（支撑）</th><th>高低点收敛</th><th>跌不动（卖压衰竭）</th><th>EMA极致缠绕</th><th>{{ usMode ? '5日成交量最低' : '5日成交额最低' }}</th><th>收盘低于MA5</th><th>5日收盘波动</th><th>最新交易日K线形态</th><th>K线集合形态</th><th>策略总分</th>
             </tr>
             <tr class="filter-row">
               <th></th>
@@ -213,10 +223,14 @@
                   <small>评分 {{ item.emaCompression?.score ?? '--' }} / 100 · {{ item.emaCompression?.grade || '--' }}</small>
                   <small>5日均宽 {{ emaNumber(item.emaCompression?.metrics?.spreadMean5) }}% · 连续 {{ item.emaCompression?.metrics?.compressionStreak ?? '--' }}日</small>
                 </td>
-                <td :data-test="`turnover-min-${item.code}`" :class="{ 'requirement-hit': item.latestTurnover5Min === true }">
-                  <strong>5日最低 {{ flagText(item.latestTurnover5Min) }}</strong>
-                  <small>{{ amountText(item.latestTurnover) }}</small>
-                  <small :data-test="`turnover-extreme-${item.code}`" :class="{ 'requirement-hit': item.latestTurnoverBelowPrevious5Avg60 === true }">今日/前5日均 {{ turnoverRatioText(item.latestToPrevious5TurnoverRatio) }} · 极致缩量 {{ flagText(item.latestTurnoverBelowPrevious5Avg60) }}</small>
+                <td :data-test="`turnover-min-${item.code}`" :class="{ 'requirement-hit': activityMin(item) === true }">
+                  <strong>5日最低 {{ flagText(activityMin(item)) }}</strong>
+                  <template v-if="usMode">
+                    <small>成交量 {{ volumeText(item.latestVolume) }}</small>
+                    <small>实际 {{ usdText(item.latestTurnoverActual) }} · 估算 {{ usdText(item.latestTurnoverEstimatedUsd) }}</small>
+                  </template>
+                  <small v-else>{{ amountText(item.latestTurnover) }}</small>
+                  <small :data-test="`turnover-extreme-${item.code}`" :class="{ 'requirement-hit': activityExtreme(item) === true }">今日/前5日均 {{ turnoverRatioText(usMode ? item.latestToPrevious5VolumeRatio : item.latestToPrevious5TurnoverRatio) }} · 极致缩量 {{ flagText(activityExtreme(item)) }}</small>
                 </td>
                 <td :data-test="`below-ma5-${item.code}`" :class="{ 'requirement-hit': item.closeBelowMa5 === true }"><strong>{{ flagText(item.closeBelowMa5) }}</strong><small>{{ ma5Text(item) }}</small></td>
                 <td>{{ pct(item.closeRange5) }}</td>
@@ -355,13 +369,16 @@
 <script setup>
 import { computed, reactive, ref, shallowRef, watch } from 'vue'
 import { useApi } from '../composables/useApi.js'
-import { downloadTradingViewWatchlist } from '../utils/tradingViewExport.js'
+import { downloadTextWatchlist, downloadTradingViewWatchlist } from '../utils/tradingViewExport.js'
 import { selectBatchSignalExportRows } from '../utils/batchSignalExport.js'
 import { parseStockCodeInput } from '../utils/stockCodeInputParser.js'
 
 const api = useApi()
-const STOCK_POOL_STORAGE_KEY = 'strategy6.batchEvaluation.stockPool.v1'
-const DEFAULT_STOCK_POOL = '601857\n601899\n002371\n688072\n601898\n300604\n601872\n002353\n002493\n688120\n688361\n000977\n000938\n603296\n002648\n688702\n601958'
+const props = defineProps({ market: { type: String, default: 'CN' } })
+const usMode = props.market === 'US'
+const asOf = ref('')
+const STOCK_POOL_STORAGE_KEY = usMode ? 'strategy6.usBatchEvaluation.stockPool.v1' : 'strategy6.batchEvaluation.stockPool.v1'
+const DEFAULT_STOCK_POOL = usMode ? '' : '601857\n601899\n002371\n688072\n601898\n300604\n601872\n002353\n002493\n688120\n688361\n000977\n000938\n603296\n002648\n688702\n601958'
 const rawCodes = ref(loadSavedStockPool())
 const loading = ref(false)
 const importLoading = ref(false)
@@ -374,7 +391,7 @@ const resultColumnWidths = [55, 120, 115, 150, 150, 145, 110, 220, 260, 270, 270
 const expanded = reactive(new Set())
 const tableFilters = reactive(createEmptyTableFilters())
 
-const parsedInput = computed(() => parseStockCodeInput(rawCodes.value))
+const parsedInput = computed(() => usMode ? parseUSCodes(rawCodes.value) : parseStockCodeInput(rawCodes.value))
 const parsedCodes = computed(() => parsedInput.value.codes)
 const allResults = computed(() => response.value?.results || [])
 const signalExportResults = computed(() => selectBatchSignalExportRows(allResults.value))
@@ -431,6 +448,7 @@ function loadSavedStockPool() {
 }
 
 async function runEvaluation() {
+  if (loading.value) return false
   errorMessage.value = ''
   copiedCode.value = ''
   response.value = null
@@ -440,6 +458,10 @@ async function runEvaluation() {
   exhaustionFiltersOpen.value = false
   clearTableFilters()
   const invalid = parsedInput.value.invalidCodes
+  if (usMode && invalid.length) {
+    errorMessage.value = `无效美股代码：${invalid.join('、')}`
+    return false
+  }
   if (!parsedCodes.value.length) {
     errorMessage.value = '请至少输入一个股票代码'
     return false
@@ -454,7 +476,8 @@ async function runEvaluation() {
   }
   loading.value = true
   try {
-    const data = await api.evaluateStrategy6Batch(parsedCodes.value)
+    const data = await (usMode ? api.evaluateUSStrategy6Batch(parsedCodes.value, asOf.value)
+      : api.evaluateStrategy6Batch(parsedCodes.value))
     if (!data.ok) throw new Error(data.message || '批量评分失败')
     response.value = data
     return true
@@ -464,6 +487,17 @@ async function runEvaluation() {
   } finally {
     loading.value = false
   }
+}
+
+function parseUSCodes(value) {
+  const codes = new Set()
+  const invalidCodes = []
+  for (const token of value.split(/[\s,，;；]+/).filter(Boolean)) {
+    const ticker = token.toUpperCase().replace(/\.US$/, '')
+    if (!/^[A-Z][A-Z0-9]*(?:[.-][A-Z0-9]+)?$/.test(ticker) || /\.(SH|SZ|HK|BJ|US)$/.test(ticker)) invalidCodes.push(token)
+    else codes.add(`${ticker}.US`)
+  }
+  return { codes: [...codes], invalidCodes, format: 'list' }
 }
 
 function createEmptyTableFilters() {
@@ -523,8 +557,8 @@ function matchesTableFilters(item) {
   if (!matchesNumberRange(item.tailVolumeRatio, tableFilters.volumeRatioMin, tableFilters.volumeRatioMax)) return false
   if (tableFilters.volumeTrend === 'shrinking' && !(Number(item.volumeSlope10) < 0)) return false
   if (tableFilters.volumeTrend === 'not_shrinking' && Number(item.volumeSlope10) < 0) return false
-  if (!matchesBooleanFilter(item.latestTurnover5Min, tableFilters.turnoverMin)) return false
-  if (!matchesBooleanFilter(item.latestTurnoverBelowPrevious5Avg60, tableFilters.turnoverExtreme)) return false
+  if (!matchesBooleanFilter(activityMin(item), tableFilters.turnoverMin)) return false
+  if (!matchesBooleanFilter(activityExtreme(item), tableFilters.turnoverExtreme)) return false
   if (!matchesBooleanFilter(item.closeBelowMa5, tableFilters.belowMa5)) return false
   if (!matchesNumberRange(item.closeRange5, tableFilters.closeRangeMin, tableFilters.closeRangeMax, 100)) return false
   if (tableFilters.latestPattern === 'matched' && !hasMatchedLatestBarPattern(item)) return false
@@ -594,6 +628,7 @@ async function copyCode(code) {
   }
 }
 function exportTradingView() {
+  if (usMode) return exportUSCodes(results.value, 'filtered')
   downloadTradingViewWatchlist({
     filename: `strategy6-batch-filtered-${filenameTimestamp(new Date())}.txt`,
     rows: results.value,
@@ -601,9 +636,16 @@ function exportTradingView() {
 }
 function exportSignalUnion() {
   if (!signalExportResults.value.length) return
+  if (usMode) return exportUSCodes(signalExportResults.value, 'signal-union')
   downloadTradingViewWatchlist({
     filename: `strategy6-batch-signal-union-${filenameTimestamp(new Date())}.txt`,
     rows: signalExportResults.value,
+  })
+}
+function exportUSCodes(rows, kind) {
+  return downloadTextWatchlist({
+    filename: `strategy6-us-batch-${kind}-${filenameTimestamp(new Date())}.txt`,
+    content: [...new Set(rows.map(row => row.code.replace(/\.US$/, '')))].join('\n'),
   })
 }
 function filenameTimestamp(value) {
@@ -619,6 +661,10 @@ function nullablePct(value) { return value == null ? '--' : signedPct(value) }
 function scoreClass(value) { return value >= 18 ? 'excellent' : value >= 14 ? 'good' : 'weak' }
 function flagText(value) { return value == null ? '数据不足' : value ? '是' : '否' }
 function amountText(value) { return value == null ? '--' : `${(Number(value) / 100000000).toFixed(2)}亿` }
+const activityMin = item => usMode ? item.latestVolume5Min : item.latestTurnover5Min
+const activityExtreme = item => usMode ? item.latestVolumeBelowPrevious5Avg60 : item.latestTurnoverBelowPrevious5Avg60
+const volumeText = value => value == null ? '缺失' : Number(value).toLocaleString('en-US')
+const usdText = value => value == null ? '缺失' : `${Number(value).toLocaleString('en-US', { maximumFractionDigits: 2 })} USD`
 function turnoverRatioText(value) { return value == null ? '--' : `${(Number(value) * 100).toFixed(1)}%` }
 function ma5Text(item) { return item.ma5 == null ? '--' : `${price(item.latestClose)} / ${price(item.ma5)}` }
 function phaseText(value) {
@@ -651,7 +697,7 @@ function trendReasonText(value) {
   return {
     TREND_SQUEEZE_HISTORY_LT_250: '有效历史不足250个交易日',
     TREND_SQUEEZE_DATA_INSUFFICIENT: '初筛指标无法计算',
-    CLOSE_LE_10: '股价不高于10元', CLOSE_LT_52W_LOW_1_30: '未高于52周最低价30%',
+    CLOSE_LE_10: usMode ? '股价不高于10美元' : '股价不高于10元', CLOSE_LT_52W_LOW_1_30: '未高于52周最低价30%',
     CLOSE_LT_52W_HIGH_0_70: '低于52周最高价70%', CLOSE_GT_52W_HIGH: '收盘价异常高于52周最高价',
     EMA150_LE_EMA200: 'EMA150不高于EMA200', CLOSE_LE_EMA150: '收盘价不高于EMA150',
     CLOSE_LE_EMA200: '收盘价不高于EMA200', BB_NOT_INSIDE_KC: '布林带未完全进入肯特纳通道',

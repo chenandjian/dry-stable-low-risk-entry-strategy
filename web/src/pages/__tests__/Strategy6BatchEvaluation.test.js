@@ -4,14 +4,15 @@ import { nextTick } from 'vue'
 
 const api = {
   evaluateStrategy6Batch: vi.fn(),
+  evaluateUSStrategy6Batch: vi.fn(),
   getLatestStrategy6TrendSqueezeScreen: vi.fn(),
 }
 vi.mock('../../composables/useApi.js', () => ({ useApi: () => api }))
-const { downloadTradingViewWatchlist } = vi.hoisted(() => ({
-  downloadTradingViewWatchlist: vi.fn(),
+const { downloadTradingViewWatchlist, downloadTextWatchlist } = vi.hoisted(() => ({
+  downloadTradingViewWatchlist: vi.fn(), downloadTextWatchlist: vi.fn(),
 }))
 vi.mock('../../utils/tradingViewExport.js', async importOriginal => ({
-  ...await importOriginal(), downloadTradingViewWatchlist,
+  ...await importOriginal(), downloadTradingViewWatchlist, downloadTextWatchlist,
 }))
 
 import Strategy6BatchEvaluation from '../Strategy6BatchEvaluation.vue'
@@ -24,6 +25,30 @@ async function flushUi() {
 }
 
 describe('Strategy6BatchEvaluation', () => {
+  it('uses US codes, date and volume filters without calling A-share scoring', async () => {
+    api.evaluateUSStrategy6Batch.mockResolvedValue({ ok: true, results: [
+      { code: 'AAPL.US', latestVolume5Min: true, latestVolume: 60, latestToPrevious5VolumeRatio: 0.6,
+        latestVolumeBelowPrevious5Avg60: true, latestTurnoverActual: null, latestTurnoverEstimatedUsd: 660 },
+      { code: 'BRK.B.US', latestVolume5Min: false, latestVolume: 100 },
+    ] })
+    const wrapper = mount(Strategy6BatchEvaluation, { props: { market: 'US' } })
+    await wrapper.get('[data-test="batch-codes"]').setValue('aapl, AAPL.US\nBRK.B')
+    await wrapper.get('[data-test="us-batch-as-of"]').setValue('2026-11-05')
+    await wrapper.get('[data-test="batch-submit"]').trigger('click')
+    await flushUi()
+    expect(api.evaluateUSStrategy6Batch).toHaveBeenCalledWith(['AAPL.US', 'BRK.B.US'], '2026-11-05')
+    expect(api.evaluateStrategy6Batch).not.toHaveBeenCalled()
+    expect(wrapper.text()).toContain('5日成交量最低')
+    expect(wrapper.text()).toContain('估算 660')
+    await wrapper.get('[data-test="filter-turnover-extreme"]').setValue('yes')
+    expect(wrapper.findAll('.score-row')).toHaveLength(1)
+    expect(wrapper.find('.score-row').text()).toContain('AAPL.US')
+    await wrapper.get('[data-test="export-tradingview-filtered"]').trigger('click')
+    expect(downloadTextWatchlist).toHaveBeenCalledWith(expect.objectContaining({ content: 'AAPL' }))
+    expect(downloadTradingViewWatchlist).not.toHaveBeenCalled()
+    expect(wrapper.find('[data-test="import-trend-squeeze-screen"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
   it('exports the deduplicated signal union from every page independently of table filters', async () => {
     const rows = Array.from({ length: 30 }, (_, i) => ({ code: String(600000 + i) }))
     rows[0].priceConvergence = { matched: true }

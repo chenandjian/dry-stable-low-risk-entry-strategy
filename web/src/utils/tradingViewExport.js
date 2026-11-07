@@ -15,7 +15,10 @@ export function buildTradingViewWatchlist(rows) {
 }
 
 export function downloadTradingViewWatchlist({ filename, rows }) {
-  const content = buildTradingViewWatchlist(rows)
+  return downloadTextWatchlist({ filename, content: buildTradingViewWatchlist(rows) })
+}
+
+export function downloadTextWatchlist({ filename, content }) {
   if (!content) return false
   const blob = new Blob([content], { type: 'text/plain;charset=utf-8' })
   const url = URL.createObjectURL(blob)

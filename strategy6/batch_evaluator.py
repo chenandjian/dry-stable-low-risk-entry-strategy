@@ -46,14 +46,23 @@ def evaluate_strategy6_batch(codes: list[str], config: dict) -> dict:
         except Exception as exc:
             errors.append(_error(code, name, "EVALUATION_FAILED", str(exc)))
             continue
-        summary = _summarize(evaluation, metadata, _batch_display_metrics(rows))
-        summary["klineCollectionPatterns"] = evaluate_collection_patterns(rows)
-        summary["emaCompression"] = evaluate_ema_compression(rows, config.get("strategy6", {}).get("ema_compression"))
-        summary["sellingExhaustion"] = evaluate_selling_exhaustion(rows, config.get("strategy6", {}).get("selling_exhaustion"))
-        summary["risingSupport"] = evaluate_rising_support(rows)
-        summary["priceConvergence"] = evaluate_price_convergence(rows)
-        results.append(summary)
+        results.append(build_batch_summary(evaluation, rows, metadata, config.get("strategy6")))
 
+    return batch_result(results, errors)
+
+
+def build_batch_summary(evaluation, rows, metadata, config=None, *, use_volume=False):
+    config = config or {}
+    summary = _summarize(evaluation, metadata, _batch_display_metrics(rows, use_volume=use_volume))
+    summary["klineCollectionPatterns"] = evaluate_collection_patterns(rows)
+    summary["emaCompression"] = evaluate_ema_compression(rows, config.get("ema_compression"))
+    summary["sellingExhaustion"] = evaluate_selling_exhaustion(rows, config.get("selling_exhaustion"))
+    summary["risingSupport"] = evaluate_rising_support(rows)
+    summary["priceConvergence"] = evaluate_price_convergence(rows)
+    return summary
+
+
+def batch_result(results, errors):
     results.sort(
         key=lambda item: (
             -item["tailQualityScore"],
@@ -160,14 +169,13 @@ def _summarize(evaluation, metadata: dict, display_metrics: dict | None = None) 
     }
 
 
-def _batch_display_metrics(rows: list[dict]) -> dict:
+def _batch_display_metrics(rows: list[dict], *, use_volume=False) -> dict:
     selected = rows[-5:]
     previous_five = rows[-6:-1]
-    amounts = [_positive_number(row.get("amount", row.get("turnover"))) for row in selected]
-    previous_amounts = [
-        _positive_number(row.get("amount", row.get("turnover")))
-        for row in previous_five
-    ]
+    def activity(row):
+        return _positive_number(row.get("volume") if use_volume else row.get("amount", row.get("turnover")))
+    amounts = [activity(row) for row in selected]
+    previous_amounts = [activity(row) for row in previous_five]
     closes = [_positive_number(row.get("close")) for row in selected]
     latest_amount = amounts[-1] if amounts else None
     latest_close = closes[-1] if closes else None
@@ -185,13 +193,14 @@ def _batch_display_metrics(rows: list[dict]) -> dict:
         else None
     )
     ma5 = sum(closes) / 5 if close_ready else None
+    key = "Volume" if use_volume else "Turnover"
     return {
-        "latestTurnover": latest_amount,
-        "turnover5Min": minimum_amount,
-        "latestTurnover5Min": latest_amount <= minimum_amount if amount_ready else None,
-        "previous5TurnoverAverage": round(previous_average, 6) if previous_average is not None else None,
-        "latestToPrevious5TurnoverRatio": round(latest_to_previous_average, 6) if latest_to_previous_average is not None else None,
-        "latestTurnoverBelowPrevious5Avg60": latest_to_previous_average <= 0.60 if latest_to_previous_average is not None else None,
+        f"latest{key}": rows[-1].get("volume") if use_volume and rows else latest_amount,
+        f"{key.lower()}5Min": minimum_amount,
+        f"latest{key}5Min": latest_amount <= minimum_amount if amount_ready else None,
+        f"previous5{key}Average": round(previous_average, 6) if previous_average is not None else None,
+        f"latestToPrevious5{key}Ratio": round(latest_to_previous_average, 6) if latest_to_previous_average is not None else None,
+        f"latest{key}BelowPrevious5Avg60": latest_to_previous_average <= 0.60 if latest_to_previous_average is not None else None,
         "latestClose": latest_close,
         "ma5": round(ma5, 6) if ma5 is not None else None,
         "closeBelowMa5": latest_close < ma5 if close_ready else None,
