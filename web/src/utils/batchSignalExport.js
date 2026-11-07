@@ -1,9 +1,9 @@
 import { toTradingViewSymbol } from './tradingViewExport.js'
 
-export function selectBatchSignalExportRows(rows = []) {
+export function selectBatchSignalExportRows(rows = [], normalizeCode = toTradingViewSymbol) {
   const seen = new Set()
   return rows.filter(item => {
-    const symbol = toTradingViewSymbol(item?.code)
+    const symbol = normalizeCode(item?.code)
     if (!symbol || seen.has(symbol)) return false
     const matched = item.priceConvergence?.matched === true
       || ['S', 'A+', 'A'].includes(item.emaCompression?.grade)

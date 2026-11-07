@@ -8,6 +8,8 @@
 
 后续补齐 TradingView CSV 粘贴和美股初筛一键导入评分。真实全池任务的 149 只初筛股票全部评分成功，见 `docs/reviews/2026-11-07-us-real-full-pool-acceptance.md`。
 
+信号合集导出修复：原选择器先按 A 股六位代码校验，导致命中条件的美股被丢弃。现在按当前市场校验并去重，仍取整批评分中四组条件的并集，不受筛选或分页影响。美股 TXT 每行一个代码，去掉供应商 `.US` 后缀，保留 `BRK.B` 等股类标记，不猜交易所前缀。新增页面回归覆盖四组信号、重复代码、跨页与实际下载内容；前端 214 项通过，生产构建通过。
+
 ## 实现与口径
 
 - `us_market/batch_evaluator.py` 和 `server.py` 提供 `POST /api/us/strategy6/batch-evaluate`，只读本地US库，不触发拉取、初始化任务或写入候选。

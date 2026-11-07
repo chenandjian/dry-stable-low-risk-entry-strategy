@@ -50,6 +50,32 @@ describe('Strategy6BatchEvaluation', () => {
     expect(downloadTradingViewWatchlist).not.toHaveBeenCalled()
     wrapper.unmount()
   })
+  it('exports the US signal union across pages, deduplicating codes and ignoring table filters', async () => {
+    const rows = Array.from({ length: 30 }, (_, i) => ({ code: `T${i}.US` }))
+    rows[0] = { code: 'AAPL.US', priceConvergence: { matched: true }, emaCompression: { grade: 'S' } }
+    rows[1] = { code: 'aapl', sellingExhaustion: { status: 'STRONG' } }
+    rows[2] = { code: 'NVDA.US', emaCompression: { grade: 'A+' } }
+    rows[25] = { code: 'MSFT.US', sellingExhaustion: { status: 'ULTRA' } }
+    rows[26] = { code: 'BRK.B.US', klineCollectionPatterns: [{ code: 'SLOW_ROUNDED_BASE', grade: 'A' }] }
+    rows[27] = { code: '600001', priceConvergence: { matched: true } }
+    api.evaluateUSStrategy6Batch.mockResolvedValue({ ok: true, results: rows })
+    const wrapper = mount(Strategy6BatchEvaluation, { props: { market: 'US' } })
+    await wrapper.get('[data-test="batch-codes"]').setValue('AAPL')
+    await wrapper.get('[data-test="batch-submit"]').trigger('click')
+    await flushUi()
+    const button = wrapper.get('[data-test="export-tradingview-signals"]')
+    expect(button.element.disabled).toBe(false)
+    expect(button.text()).toContain('（4）')
+    await wrapper.get('[data-test="batch-page-next"]').trigger('click')
+    await wrapper.get('[data-test="filter-stock"]').setValue('不存在')
+    await button.trigger('click')
+    expect(downloadTextWatchlist).toHaveBeenLastCalledWith({
+      filename: expect.stringMatching(/^strategy6-us-batch-signal-union-\d{8}-\d{6}\.txt$/),
+      content: 'AAPL\nNVDA\nMSFT\nBRK.B',
+    })
+    expect(downloadTradingViewWatchlist).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
   it('imports US screen codes and immediately scores the source date', async () => {
     api.getLatestUSStrategy6TrendSqueezeScreen.mockResolvedValue({
       taskId: 'us-job', evaluationDate: '2026-11-05', total: 223, stocks: [{ code: 'MSFT.US' }],

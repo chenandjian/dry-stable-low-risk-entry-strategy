@@ -393,7 +393,7 @@ const tableFilters = reactive(createEmptyTableFilters())
 const parsedInput = computed(() => parseStockCodeInput(rawCodes.value, usMode ? normalizeUSCode : undefined))
 const parsedCodes = computed(() => parsedInput.value.codes)
 const allResults = computed(() => response.value?.results || [])
-const signalExportResults = computed(() => selectBatchSignalExportRows(allResults.value))
+const signalExportResults = computed(() => selectBatchSignalExportRows(allResults.value, usMode ? normalizeUSCode : undefined))
 const results = computed(() => allResults.value.filter(matchesTableFilters))
 const RESULT_PAGE_SIZE = 25
 const resultPage = ref(1)
@@ -489,7 +489,7 @@ async function runEvaluation() {
 }
 
 function normalizeUSCode(value) {
-  const ticker = value.trim().toUpperCase().replace(/^(NASDAQ|NYSE|AMEX|NYSEARCA|CBOE|BATS):/, '').replace(/\.US$/, '')
+  const ticker = String(value ?? '').trim().toUpperCase().replace(/^(NASDAQ|NYSE|AMEX|NYSEARCA|CBOE|BATS):/, '').replace(/\.US$/, '')
   if (!/^[A-Z][A-Z0-9]*(?:[.-][A-Z0-9]+)?$/.test(ticker) || /\.(SH|SZ|HK|BJ|US)$/.test(ticker)) return ''
   return `${ticker}.US`
 }
@@ -642,7 +642,7 @@ function exportSignalUnion() {
 function exportUSCodes(rows, kind) {
   return downloadTextWatchlist({
     filename: `strategy6-us-batch-${kind}-${filenameTimestamp(new Date())}.txt`,
-    content: [...new Set(rows.map(row => row.code.replace(/\.US$/, '')))].join('\n'),
+    content: [...new Set(rows.map(row => normalizeUSCode(row?.code).slice(0, -3)).filter(Boolean))].join('\n'),
   })
 }
 function filenameTimestamp(value) {
