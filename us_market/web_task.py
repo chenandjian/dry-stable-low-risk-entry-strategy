@@ -162,6 +162,10 @@ class USResearchManager:
                     logging.getLogger(__name__).exception('US TickFlow client close failed')
             task['finished_at'] = datetime.now(timezone.utc).isoformat()
             try:
+                self.repository.finish_job(task)
+            except Exception as exc:
+                logging.getLogger(__name__).exception('US task publication failed')
+                task.update(status='FAILED', error=str(exc))
                 self.repository.save_run(task)
             finally:
                 self.active_task_id = None

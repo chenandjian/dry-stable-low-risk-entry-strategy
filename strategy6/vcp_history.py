@@ -27,6 +27,7 @@ def evaluate_vcp_candidate_history(
     evaluation_date: str,
     pattern_start_date: str = "",
     engine_factory: Callable[[dict], object] | None = None,
+    rows_normalized: bool = False,
 ) -> Strategy6VcpCandidateHistory:
     """Find the latest formal candidate in the current VCP lifecycle."""
     origin = str(origin_start_date or "")
@@ -38,7 +39,8 @@ def evaluate_vcp_candidate_history(
     from strategy6.indicators import normalize_rows
 
     # Prefixes retain identical prev_close/amount values; normalize once per replay.
-    rows = normalize_rows(rows)
+    if not rows_normalized:
+        rows = normalize_rows(rows)
 
     config = copy.deepcopy(strategy_config)
     config["vcp_observer_enabled"] = False

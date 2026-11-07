@@ -2846,6 +2846,17 @@ async def us_strategy6_batch_evaluate(request: Request):
         return JSONResponse({'error': 'INVALID_US_BATCH_REQUEST', 'message': str(exc)}, status_code=400)
 
 
+@app.get('/api/us/strategy6/observations')
+def us_strategy6_observations(view: str = 'candidates', as_of: str | None = None,
+                              symbol: str | None = None, page: int = 1, page_size: int = 50):
+    from us_market.observations import pool_view
+    try:
+        return pool_view(_us_database_path(), view=view, as_of=as_of, symbol=symbol,
+                         page=page, page_size=page_size)
+    except ValueError as exc:
+        return JSONResponse({'error': 'INVALID_US_OBSERVATION_REQUEST', 'message': str(exc)}, status_code=400)
+
+
 @app.post("/api/strategy6/batch-evaluate")
 async def strategy6_batch_evaluate(request: Request):
     try:

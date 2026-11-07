@@ -135,6 +135,40 @@ def research_rows(history, context):
     return rows
 
 
+def _review_vcp(evaluation, rows, symbol, engine):
+    from strategy6.engine import StrongVcpTailEngine
+    from strategy6.vcp_history import evaluate_vcp_candidate_history
+    from strategy6.vcp_quality import evaluate_vcp_quality
+
+    vcp = evaluation.vcp_observation
+    if not vcp.eligible:
+        return
+    try:
+        replay = evaluate_vcp_candidate_history(
+            rows=rows, rows_normalized=True, market_data_by_symbol={},
+            strategy_config=engine.config, code=symbol, name='',
+            origin_start_date=vcp.origin_start_date, evaluation_date=rows[-1]['date'],
+            pattern_start_date=vcp.pattern_start_date,
+            engine_factory=lambda cfg: StrongVcpTailEngine(cfg, market_profile='US_RESEARCH_NO_INDEX'),
+        )
+    except Exception:
+        logger.exception('US VCP history replay failed for %s', symbol)
+        vcp.risk_tags.append('VCP_REPLAY_FAILED')
+        return
+    vcp.history_qualified = replay.qualified
+    vcp.history_candidate_date = replay.candidate_date
+    vcp.history_candidate_type = replay.candidate_type
+    vcp.history_candidate_score = replay.candidate_score
+    vcp.history_source = replay.source
+    vcp.history_origin_start_date = replay.origin_start_date
+    if replay.qualified:
+        try:
+            vcp.quality = evaluate_vcp_quality(rows, vcp)
+        except Exception:
+            logger.exception('US VCP quality diagnostics failed for %s', symbol)
+            vcp.risk_tags.append('VCP_QUALITY_FAILED')
+
+
 def run_research(repository, symbols, *, now=None, as_of=None, config=None, progress=None):
     from strategy6.engine import StrongVcpTailEngine
     symbols = _symbols(symbols)
@@ -150,6 +184,7 @@ def run_research(repository, symbols, *, now=None, as_of=None, config=None, prog
             rows = research_rows(history, context)
             evaluation = engine.evaluate_at(rows, code=symbol, rows_normalized=True,
                                              data_source='tickflow_free', kline_fetched_at=history['metadata']['fetched_at'])
+            _review_vcp(evaluation, rows, symbol, engine)
             candidate = evaluation.to_candidate_dict()
             candidate.update(market='US', research_only=True, formal_scan_allowed=False,
                              currency='USD', market_profile='US_RESEARCH_NO_INDEX',
@@ -159,7 +194,8 @@ def run_research(repository, symbols, *, now=None, as_of=None, config=None, prog
                              latest_turnover_estimated_usd=rows[-1]['turnover_estimated_usd'],
                              latest_volume=rows[-1]['volume'])
             run['stocks'].append({'symbol': symbol, 'status': 'EVALUATED',
-                                  'evaluation_date': rows[-1]['date'], 'data_hash': history['metadata']['data_hash'],
+                                  'evaluation_date': rows[-1]['date'], 'evaluated_at': datetime.now(timezone.utc).isoformat(),
+                                  'data_hash': history['metadata']['data_hash'],
                                   'metadata': history['metadata'], 'candidate': candidate})
             run['evaluated'] += 1
             run['candidates'] += int(evaluation.passed)

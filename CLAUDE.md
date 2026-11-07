@@ -17,6 +17,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 全池任务冻结快照、日期及参数，20只逐批持久化，分页读逐股状态；停止后保留待处理，继续只处理未完成，重试只处理失败。
 不自动创建美股定时任务；指数搁置，研究版既有forward/volume/估算成交额口径不变。
 股票池阶段验收见 `docs/reviews/2026-11-07-us-universe-full-scan-acceptance.md`。
+
+美股研究新增候选和 VCP 持续观察页 `/us/strategy6/observations`。仅使用新完成任务的逐股本地评估证据，按日期和研究配置隔离；缺失评估不视为失效，VCP 观察仍要求历史候选资格。该页面不主动拉行情，不接正式调度。验收见 `docs/reviews/2026-11-07-us-vcp-observation-acceptance.md`。
 开发/真实验证记录见 `docs/reviews/2026-11-07-us-market-research-scan-acceptance.md`。
 
 市场宽度新增独立强势收缩历史板块：`scanner/trend_squeeze_breadth.py` 与 `/api/market-breadth/trend-squeeze-history` 按本地真实指数日期重建当前股票池初筛数量和长期强势对照，复用 `strategy6/strong_trend_squeeze.py` 的指标数学与规则模型。仅展示，不进入策略评分、资格或生命周期。无当日K线不延用昨日信号，历史不足返回空值；覆盖率分母为已有250根历史资格的股票，并显式显示股票池与有本地历史的数量。可靠标准为覆盖90%、成功评估1000；MA及120日分位不能跨数据缺口。缓存文件为行情库旁的 `<database>.trend-breadth-cache.sqlite`，全OHLC指纹失效；首次重建较慢，前端独立加载与重试。规则及展示提示边界见 `docs/superpowers/specs/2026-10-09-trend-squeeze-breadth.md`。

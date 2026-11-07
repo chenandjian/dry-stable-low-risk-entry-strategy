@@ -8,6 +8,7 @@ from pathlib import Path
 
 from .daily_data import normalize_bars
 from .instruments import provider_symbol
+from .observations import init_observations, publish_observations
 
 
 class USRepository:
@@ -18,7 +19,7 @@ class USRepository:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with self.connection() as conn:
             tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
-            if tables - {"us_diagnostic_snapshots", "us_stock_history", "us_runs", "us_universes", "us_job_stocks"}:
+            if tables - {"us_diagnostic_snapshots", "us_stock_history", "us_runs", "us_universes", "us_job_stocks", "us_research_daily"}:
                 raise ValueError("refusing a non-US diagnostic database")
             conn.execute("PRAGMA journal_mode=WAL")
             conn.execute("""CREATE TABLE IF NOT EXISTS us_diagnostic_snapshots (
@@ -46,6 +47,7 @@ class USRepository:
             conn.execute('CREATE INDEX IF NOT EXISTS us_job_stocks_page ON us_job_stocks(task_id, position)')
             conn.execute('CREATE INDEX IF NOT EXISTS us_job_stocks_status ON us_job_stocks(task_id, status)')
             conn.execute('CREATE INDEX IF NOT EXISTS us_job_stocks_counts ON us_job_stocks(task_id, status, passed)')
+            init_observations(conn)
 
     @contextmanager
     def connection(self):
@@ -121,6 +123,13 @@ class USRepository:
         with self.connection() as conn:
             row = conn.execute('SELECT payload FROM us_runs WHERE task_id=?', (task_id,)).fetchone()
         return json.loads(row[0]) if row else None
+
+    def finish_job(self, task):
+        with self.connection() as conn:
+            conn.execute('BEGIN IMMEDIATE')
+            publish_observations(conn, task)
+            conn.execute('UPDATE us_runs SET payload=? WHERE task_id=?',
+                         (json.dumps(task, allow_nan=False), task['task_id']))
 
     def list_runs(self, limit: int = 20, *, kind=None, status=None, summary=False) -> list[dict]:
         filters, values = [], []

@@ -2,7 +2,8 @@
   <main class="us-research">
     <header><small>STRATEGY 6 · US RESEARCH</small><h1>美股策略6研究</h1>
       <p>TickFlow免费端 · forward前复权 · 原始volume · 独立美股数据库</p>
-      <a href="/us/strategy6/batch-evaluation">美股批量评分</a></header>
+      <a href="/us/strategy6/batch-evaluation">美股批量评分</a> ·
+      <a href="/us/strategy6/observations">候选与 VCP 持续观察</a></header>
     <aside class="warning"><strong>研究模式：未启用市场过滤，不是正式候选或买入建议。</strong>
       <p>成交量拆股口径尚未独立核验。估算成交额＝前复权收盘价 × 供应商成交量，不等于真实成交额；参数未完成美股收益调优。</p>
       <p>免费日线可能延迟发布。缺少目标交易日时明确失败，不冒充停牌或用旧数据生成当天结果。</p></aside>

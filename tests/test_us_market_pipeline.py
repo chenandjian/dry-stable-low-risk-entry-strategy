@@ -167,3 +167,34 @@ def test_research_calls_single_engine_and_persists_explicit_warnings(tmp_path, m
     assert 'MARKET_FILTER_DISABLED_NO_INDEX' in result['warnings']
     assert result['stocks'][0]['evaluation_date'] == '2026-11-05'
     assert repo.get_run(result['task_id']) == result
+
+
+@pytest.mark.parametrize('replay_fails', [False, True])
+def test_us_vcp_replay_uses_normalized_history_without_rejecting_core_evaluation(tmp_path, monkeypatch, replay_fails):
+    from strategy6.vcp_history import Strategy6VcpCandidateHistory
+    repo = USRepository(tmp_path / 'us.db')
+    sdk = SimpleNamespace(klines=SimpleNamespace(batch=lambda *a, **k: {'AAPL.US': bars(500)}))
+    now = datetime(2026, 11, 6, 15, tzinfo=timezone.utc)
+    acquire_batch(repo, ['AAPL'], count=500, sdk=sdk, now=now)
+    original = StrongVcpTailEngine.evaluate_at
+    def evaluate(self, rows, **kwargs):
+        result = original(self, rows, **kwargs)
+        result.vcp_observation.eligible = True
+        result.vcp_observation.origin_start_date = '2026-10-01'
+        result.vcp_observation.pattern_start_date = '2026-10-09'
+        return result
+    def replay(**kwargs):
+        assert kwargs['rows_normalized'] is True
+        assert kwargs['rows'][-1]['amount'] == 20_000_000
+        assert kwargs['rows'][-1]['date'] == '2026-11-05'
+        assert kwargs['market_data_by_symbol'] == {}
+        assert kwargs['engine_factory'](kwargs['strategy_config']).market_profile == 'US_RESEARCH_NO_INDEX'
+        if replay_fails:
+            raise RuntimeError('diagnostic error')
+        return Strategy6VcpCandidateHistory(qualified=True, candidate_date='2026-11-04', candidate_type='WATCH_CANDIDATE')
+    monkeypatch.setattr(StrongVcpTailEngine, 'evaluate_at', evaluate)
+    monkeypatch.setattr('strategy6.vcp_history.evaluate_vcp_candidate_history', replay)
+    stock = run_research(repo, ['AAPL'], now=now)['stocks'][0]
+    assert stock['status'] == 'EVALUATED'
+    assert stock['candidate']['vcp_history_qualified'] is not replay_fails
+    assert ('VCP_REPLAY_FAILED' in stock['candidate']['vcp_observation_risk_tags']) is replay_fails
