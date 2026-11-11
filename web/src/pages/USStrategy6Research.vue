@@ -19,7 +19,7 @@
       <p>直接查询供应商日线，同时只读本地最新日期作对照。不入库，也不启动扫描。</p>
       <p v-if="probeError" class="error" role="alert">{{ probeError }}</p>
       <div v-if="probeResult" data-test="probe-result" role="status">
-        <p><strong>{{ probeResult.symbol }} · {{ probeLabels[probeResult.status] }}</strong></p>
+        <p><strong>{{ probeResult.symbol }} · <span class="probe-status" :data-status="probeResult.status">{{ probeLabels[probeResult.status] }}</span></strong></p>
         <p>目标完整交易日 {{ probeResult.target_trade_date }} · 供应商最新日线 {{ probeResult.latest_date || '无' }}
           · 供应商最近完整日线 {{ probeResult.latest_completed_date || '无' }}</p>
         <p><strong>本地最新日线</strong> {{ probeResult.local_history_error ? '读取失败' : probeResult.local_latest_date || '无本地数据' }}</p>
@@ -67,7 +67,7 @@
         <button :disabled="running || starting || !failedCount" @click="start(task.task_id)">仅重试失败股票</button>
         <button v-if="running" :disabled="stopping" @click="stopTask">{{ stopping ? '等待当前批次结束…' : '停止扫描' }}</button>
         <button v-if="!running && task.pending_count > 0" :disabled="starting" @click="start(null, task.task_id)">继续未完成股票</button></div>
-      <div class="task-bar"><span>结果 {{ task.pagination?.total ?? visibleStocks.length }} 条 · 第 {{ page }} / {{ task.pagination?.pages || 1 }} 页 · 每页50条</span>
+      <div class="task-bar"><span>结果 {{ task.pagination?.total ?? visibleStocks.length }} 条 · 第 {{ page }} / {{ task.pagination?.pages || 1 }} 页 · 每页{{ PAGE_SIZE }}条</span>
         <button :disabled="page <= 1" @click="page--">上一页</button><button data-test="next-page" :disabled="page >= (task.pagination?.pages || 1)" @click="page++">下一页</button></div>
       <div class="table-scroll"><table><thead><tr><th>代码（点击复制）</th><th>评估日</th><th>收盘 USD</th><th>评分</th><th>原始尾部分</th><th>尾段量比</th><th>研究分层</th><th>排除 / 失败原因</th></tr></thead>
         <tbody><tr v-for="stock in visibleStocks" :key="stock.symbol">
@@ -98,6 +98,7 @@ const refreshingForScan = ref(false)
 const probeSymbol = ref('AAPL'), probing = ref(false), probeResult = ref(null), probeError = ref('')
 const probeLabels = { UPDATED: '目标日已更新', TARGET_MISSING: '未覆盖目标日', NO_DATA: '供应商未返回日线' }
 const page = ref(1), stopping = ref(false)
+const PAGE_SIZE = 10
 const tasks = ref([]), selectedId = ref(String(route.query.task || '')), task = ref(null)
 const starting = ref(false), error = ref(''), copied = ref(''), onlyPassed = ref(false)
 const running = computed(() => task.value?.status === 'RUNNING')
@@ -149,7 +150,7 @@ async function loadPool(refreshPool = false) {
 }
 async function loadTask(id, token) {
   try {
-    const query = page.value !== 1 || onlyPassed.value ? `?page=${page.value}&page_size=50&only_passed=${onlyPassed.value}` : ''
+    const query = `?page=${page.value}&page_size=${PAGE_SIZE}&only_passed=${onlyPassed.value}`
     const data = await request(`/api/us/strategy6/tasks/${encodeURIComponent(id)}${query}`)
     if (stopped || token !== generation || id !== selectedId.value) return
     task.value = data.task
@@ -252,6 +253,10 @@ textarea { width: 100%; box-sizing: border-box; font-family: monospace; }
 button { cursor: pointer; color: #e7c572; }
 button:disabled { opacity: .4; cursor: default; }
 .error { color: #f37676; }
+.probe-status { display: inline-block; padding: 0 7px; border: 1px solid currentColor; border-radius: 4px; }
+.probe-status[data-status="UPDATED"] { color: #70ddb1; }
+.probe-status[data-status="TARGET_MISSING"] { color: #f4c66e; }
+.probe-status[data-status="NO_DATA"] { color: #aebdd1; }
 .table-scroll { overflow-x: auto; }
 table { border-collapse: collapse; width: 100%; font-size: 12px; }
 th, td { padding: 12px 9px; text-align: left; border-bottom: 1px solid #273443; }

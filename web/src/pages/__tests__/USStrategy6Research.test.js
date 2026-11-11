@@ -47,6 +47,7 @@ describe('USStrategy6Research', () => {
       method: 'POST', body: JSON.stringify({ symbol: 'BRK.B' }),
     }))
     expect(wrapper.get('[data-test="probe-result"]').text()).toContain('未覆盖目标日')
+    expect(wrapper.get('.probe-status').attributes('data-status')).toBe('TARGET_MISSING')
     expect(wrapper.get('[data-test="probe-result"]').text()).toContain('2026-11-05')
     expect(wrapper.get('[data-test="probe-result"]').text()).toContain('本地最新日线 2026-11-04')
     wrapper.unmount()
@@ -55,7 +56,7 @@ describe('USStrategy6Research', () => {
   it('starts free-only research, shows failure details and saves input separately', async () => {
     fetch.mockImplementation(async (url, options) => ({ ok: true, json: async () => {
       if (options?.method === 'POST') return { task_id: 'us-job' }
-      if (url.endsWith('/us-job')) return { task: { task_id: 'us-job', status: 'COMPLETED_WITH_ERRORS',
+      if (url.split('?')[0].endsWith('/us-job')) return { task: { task_id: 'us-job', status: 'COMPLETED_WITH_ERRORS',
         context: { target_trade_date: '2026-11-05' },
         progress: { phase: 'FINISHED', processed: 1, total: 1 },
         stocks: [{ symbol: 'AAPL.US', status: 'FAILED', error: 'STALE_OR_UNPUBLISHED' }] } }
@@ -79,7 +80,7 @@ describe('USStrategy6Research', () => {
     let resolveOld
     fetch.mockImplementation(async url => ({ ok: true, json: async () => {
       if (url.endsWith('/tasks')) return { tasks: [{ task_id: 'old' }, { task_id: 'new' }] }
-      if (url.endsWith('/old')) return await new Promise(resolve => { resolveOld = resolve })
+      if (url.split('?')[0].endsWith('/old')) return await new Promise(resolve => { resolveOld = resolve })
       return { task: { task_id: 'new', status: 'COMPLETED', stocks: [{ symbol: 'NEW.US', status: 'FAILED', error: 'new failure' }] } }
     } }))
     const wrapper = mount(USStrategy6Research)
@@ -100,7 +101,7 @@ describe('USStrategy6Research', () => {
         source: 'tickflow_free', universe_id: 'US_Equity', preview: ['AAPL.US'] } }
       if (options?.method === 'POST') return { task_id: 'full-job' }
       if (url.includes('/full-job')) return { task: { task_id: 'full-job', status: 'COMPLETED', stocks: [],
-        pagination: { page: 1, pages: 5, total: 245 } } }
+        pagination: { page: 1, pages: 25, total: 245 } } }
       return { tasks: [] }
     } }))
     const wrapper = mount(USStrategy6Research)
@@ -114,9 +115,11 @@ describe('USStrategy6Research', () => {
     expect(JSON.parse(post[1].body).scope).toBe('universe')
     expect(JSON.parse(post[1].body).universe_snapshot_id).toBeNull()
     expect(fetch.mock.calls.filter(([url]) => url.endsWith('/universe/refresh'))).toHaveLength(1)
+    expect(wrapper.text()).toContain('第 1 / 25 页 · 每页10条')
+    expect(fetch.mock.calls.some(([url]) => url.includes('/full-job?page=1&page_size=10'))).toBe(true)
     await wrapper.get('[data-test="next-page"]').trigger('click')
     await flushPromises()
-    expect(fetch.mock.calls.some(([url]) => url.includes('page=2'))).toBe(true)
+    expect(fetch.mock.calls.some(([url]) => url.includes('/full-job?page=2&page_size=10'))).toBe(true)
     wrapper.unmount()
   })
 })
