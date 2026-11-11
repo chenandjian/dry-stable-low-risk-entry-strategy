@@ -11,6 +11,21 @@
       <p>成交量拆股口径尚未独立核验。估算成交额＝前复权收盘价 × 供应商成交量，不等于真实成交额；参数未完成美股收益调优。</p>
       <p>免费日线可能延迟发布。缺少目标交易日时明确失败，不冒充停牌或用旧数据生成当天结果。</p></aside>
     <section>
+      <form class="task-bar" @submit.prevent="probeProvider">
+        <strong>个股数据更新探测</strong>
+        <label>美股代码<input v-model.trim="probeSymbol" data-test="probe-symbol" placeholder="AAPL / BRK.B" :disabled="probing"></label>
+        <button data-test="probe-provider" :disabled="probing || !probeSymbol">{{ probing ? '正在探测…' : '探测 TickFlow 免费端' }}</button>
+      </form>
+      <p>只查询指定个股的供应商日线，不读取本地缓存、不入库，也不启动扫描。</p>
+      <p v-if="probeError" class="error" role="alert">{{ probeError }}</p>
+      <div v-if="probeResult" data-test="probe-result" role="status">
+        <p><strong>{{ probeResult.symbol }} · {{ probeLabels[probeResult.status] }}</strong></p>
+        <p>目标完整交易日 {{ probeResult.target_trade_date }} · 供应商最新日线 {{ probeResult.latest_date || '无' }}
+          · 最近完整日线 {{ probeResult.latest_completed_date || '无' }}</p>
+        <p v-if="probeResult.target_bar">目标日收盘价 {{ format(probeResult.target_bar.close) }} USD · 成交量 {{ probeResult.target_bar.volume }}</p>
+      </div>
+    </section>
+    <section>
       <div class="task-bar"><strong>TickFlow美股股票池</strong>
         <button data-test="refresh-pool" :disabled="poolLoading || starting" @click="loadPool(true)">{{ poolLoading ? '获取中…' : '更新股票池（免费端）' }}</button></div>
       <p v-if="universe">来源 {{ universe.source }} / {{ universe.universe_id }} · 供应商 {{ universe.provider_count }} ·
@@ -79,6 +94,8 @@ const symbolsText = ref(localStorage.getItem('strategy6-us-research-symbols') ||
 const count = ref(1100), asOf = ref(''), localOnly = ref(false), force = ref(false)
 const scope = ref('universe'), universe = ref(null), poolLoading = ref(false), poolError = ref('')
 const refreshingForScan = ref(false)
+const probeSymbol = ref('AAPL'), probing = ref(false), probeResult = ref(null), probeError = ref('')
+const probeLabels = { UPDATED: '目标日已更新', TARGET_MISSING: '未覆盖目标日', NO_DATA: '供应商未返回日线' }
 const page = ref(1), stopping = ref(false)
 const tasks = ref([]), selectedId = ref(String(route.query.task || '')), task = ref(null)
 const starting = ref(false), error = ref(''), copied = ref(''), onlyPassed = ref(false)
@@ -94,6 +111,24 @@ async function request(url, options) {
   if (!response.ok) throw new Error(data.message || data.error || `HTTP ${response.status}`)
   return data
 }
+async function probeProvider() {
+  if (probing.value || !probeSymbol.value) return
+  probing.value = true
+  probeResult.value = null
+  probeError.value = ''
+  try {
+    const result = await request('/api/us/data/provider-freshness', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ symbol: probeSymbol.value }),
+    })
+    if (!stopped) probeResult.value = result
+  } catch (e) {
+    if (!stopped) probeError.value = e.message
+  } finally {
+    probing.value = false
+  }
+}
+
 async function loadTasks() {
   try {
     const data = await request('/api/us/strategy6/tasks')

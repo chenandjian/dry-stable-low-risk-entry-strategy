@@ -31,6 +31,25 @@ describe('USStrategy6Research', () => {
     wrapper.unmount()
   })
 
+  it('probes one explicitly selected symbol and shows provider coverage', async () => {
+    const wrapper = mount(USStrategy6Research)
+    await flushPromises()
+    expect(fetch.mock.calls.some(([url]) => url.endsWith('/provider-freshness'))).toBe(false)
+    fetch.mockResolvedValueOnce({ ok: true, json: async () => ({
+      symbol: 'BRK.B.US', status: 'TARGET_MISSING', target_trade_date: '2026-11-06', latest_date: '2026-11-05',
+    }) })
+    expect(wrapper.get('[data-test="probe-symbol"]').element.value).toBe('AAPL')
+    await wrapper.get('[data-test="probe-symbol"]').setValue('BRK.B')
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+    expect(fetch).toHaveBeenLastCalledWith('/api/us/data/provider-freshness', expect.objectContaining({
+      method: 'POST', body: JSON.stringify({ symbol: 'BRK.B' }),
+    }))
+    expect(wrapper.get('[data-test="probe-result"]').text()).toContain('未覆盖目标日')
+    expect(wrapper.get('[data-test="probe-result"]').text()).toContain('2026-11-05')
+    wrapper.unmount()
+  })
+
   it('starts free-only research, shows failure details and saves input separately', async () => {
     fetch.mockImplementation(async (url, options) => ({ ok: true, json: async () => {
       if (options?.method === 'POST') return { task_id: 'us-job' }

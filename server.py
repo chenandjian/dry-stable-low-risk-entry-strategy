@@ -2844,6 +2844,28 @@ def get_us_universe():
     return {'universe': universe_summary(_get_us_manager().repository.latest_universe())}
 
 
+@app.post('/api/us/data/provider-freshness')
+def us_provider_freshness(payload: dict):
+    from us_market.daily_data import probe_provider_daily
+    from us_market.instruments import provider_symbol
+
+    try:
+        raw_symbol = payload.get('symbol')
+        if not isinstance(raw_symbol, str):
+            raise ValueError()
+        symbol = provider_symbol(raw_symbol)
+    except ValueError:
+        return JSONResponse({'error': 'INVALID_US_SYMBOL', 'message': '请输入有效的美股代码，例如 AAPL 或 BRK.B。'},
+                            status_code=400)
+    try:
+        return probe_provider_daily(symbol)
+    except Exception as exc:
+        logger.warning('US provider probe failed for %s: %s', symbol, exc)
+        return JSONResponse({'error': 'US_PROVIDER_PROBE_FAILED',
+                             'message': 'TickFlow 免费端查询失败或返回数据异常，暂无法确认是否更新。'},
+                            status_code=502)
+
+
 @app.get('/api/us/data/{code}/kline-history')
 def get_us_kline_history(code: str, start_date: str = '', end_date: str = '',
                          page: int = 1, page_size: int = 50):

@@ -63,18 +63,7 @@ def diagnose(repository, symbol: str, *, count: int = 1100, adjustment: str = "f
         raise ValueError("count must be between 1 and 5000")
     if adjustment not in {"none", "forward", "forward_additive"}:
         raise ValueError("unsupported adjustment")
-    sdk = _create_free_sdk()
-    try:
-        frame = sdk.klines.get(symbol, period="1d", count=count, adjust=adjustment, as_dataframe=True)
-        raw = frame.to_dict("records") if hasattr(frame, "to_dict") else frame
-        if not isinstance(raw, list):
-            raise ValueError("unexpected daily response")
-        for item in raw:
-            if "symbol" in item and item["symbol"] != symbol:
-                raise ValueError("response symbol does not match request")
-        rows = normalize_bars(raw)
-    finally:
-        sdk.close()
+    rows = _fetch_daily(symbol, count, adjustment)
     snapshot = {
         "snapshot_id": uuid4().hex, "symbol": symbol, "source": "tickflow_free",
         "currency": "USD", "adjustment": adjustment,
@@ -89,3 +78,37 @@ def diagnose(repository, symbol: str, *, count: int = 1100, adjustment: str = "f
     }
     repository.save_snapshot(snapshot)
     return snapshot
+
+
+def _fetch_daily(symbol, count, adjustment, *, allow_empty=False):
+    sdk = _create_free_sdk()
+    try:
+        frame = sdk.klines.get(symbol, period="1d", count=count, adjust=adjustment, as_dataframe=True)
+        raw = frame.to_dict("records") if hasattr(frame, "to_dict") else frame
+        if not isinstance(raw, list):
+            raise ValueError("unexpected daily response")
+        for item in raw:
+            if "symbol" in item and item["symbol"] != symbol:
+                raise ValueError("response symbol does not match request")
+        return [] if allow_empty and not raw else normalize_bars(raw)
+    finally:
+        sdk.close()
+
+
+def probe_provider_daily(symbol: str, *, now: datetime | None = None) -> dict:
+    """Read the free provider directly without touching a local repository."""
+    from .calendar import target_session
+
+    symbol = provider_symbol(symbol)
+    rows = _fetch_daily(symbol, 5, "forward", allow_empty=True)
+    checked_at = now or datetime.now(timezone.utc)
+    target = target_session(checked_at)["target_trade_date"]
+    target_bar = next((row for row in rows if row["date"] == target), None)
+    latest_completed = next((row for row in reversed(rows) if row["date"] <= target), None)
+    return {
+        "symbol": symbol, "source": "tickflow_free", "checked_at": checked_at.isoformat(),
+        "target_trade_date": target, "latest_date": rows[-1]["date"] if rows else None,
+        "latest_completed_date": latest_completed["date"] if latest_completed else None,
+        "target_bar": target_bar,
+        "status": "UPDATED" if target_bar else "TARGET_MISSING" if rows else "NO_DATA",
+    }

@@ -5,6 +5,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Project
 
 美股研究入口为 `/us/strategy6/research`，API为 `/api/us/strategy6/research` 与 `/api/us/strategy6/tasks`。
+美股研究页的个股更新探测默认 AAPL，可手动改代码。仅点击后向 TickFlow 免费端查最近 5 根日线，不访问行情库，不创建任务，以目标完整交易日是否存在为准。
 「K线数据」默认A股，可切换美股。美股历史 API `GET /api/us/data/{code}/kline-history` 只读本地独立库，不初始化扫描管理器或请求行情源。
 美股批量评分页 `/us/strategy6/batch-evaluation` 通过独立只读API按指定交易日评估，复用策略6批量诊断和筛选。美股近5日低量与极致缩量使用供应商volume，不用实际或估算成交额替代；代码TXT不猜交易所前缀。
 美股批量评分支持粘贴 TradingView CSV，以及从已完成的美股研究任务导入强势趋势收缩初筛名单并立即按来源日期评分。相同日期优先全池任务；单次导入最多200只并显示初筛总数。禁止跨市场读取 A 股初筛。
