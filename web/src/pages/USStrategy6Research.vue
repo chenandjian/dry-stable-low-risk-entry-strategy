@@ -255,7 +255,7 @@ button:disabled { opacity: .4; cursor: default; }
 .error { color: #f37676; }
 .probe-status { display: inline-block; padding: 0 7px; border: 1px solid currentColor; border-radius: 4px; }
 .probe-status[data-status="UPDATED"] { color: #70ddb1; }
-.probe-status[data-status="TARGET_MISSING"] { color: #f4c66e; }
+.probe-status[data-status="TARGET_MISSING"] { color: #8bbaff; }
 .probe-status[data-status="NO_DATA"] { color: #aebdd1; }
 .table-scroll { overflow-x: auto; }
 table { border-collapse: collapse; width: 100%; font-size: 12px; }
