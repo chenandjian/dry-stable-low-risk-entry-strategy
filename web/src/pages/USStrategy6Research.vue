@@ -16,12 +16,13 @@
         <label>美股代码<input v-model.trim="probeSymbol" data-test="probe-symbol" placeholder="AAPL / BRK.B" :disabled="probing"></label>
         <button data-test="probe-provider" :disabled="probing || !probeSymbol">{{ probing ? '正在探测…' : '探测 TickFlow 免费端' }}</button>
       </form>
-      <p>只查询指定个股的供应商日线，不读取本地缓存、不入库，也不启动扫描。</p>
+      <p>直接查询供应商日线，同时只读本地最新日期作对照。不入库，也不启动扫描。</p>
       <p v-if="probeError" class="error" role="alert">{{ probeError }}</p>
       <div v-if="probeResult" data-test="probe-result" role="status">
         <p><strong>{{ probeResult.symbol }} · {{ probeLabels[probeResult.status] }}</strong></p>
         <p>目标完整交易日 {{ probeResult.target_trade_date }} · 供应商最新日线 {{ probeResult.latest_date || '无' }}
-          · 最近完整日线 {{ probeResult.latest_completed_date || '无' }}</p>
+          · 供应商最近完整日线 {{ probeResult.latest_completed_date || '无' }}</p>
+        <p><strong>本地最新日线</strong> {{ probeResult.local_history_error ? '读取失败' : probeResult.local_latest_date || '无本地数据' }}</p>
         <p v-if="probeResult.target_bar">目标日收盘价 {{ format(probeResult.target_bar.close) }} USD · 成交量 {{ probeResult.target_bar.volume }}</p>
       </div>
     </section>

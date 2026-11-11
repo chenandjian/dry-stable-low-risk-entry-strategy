@@ -37,6 +37,7 @@ describe('USStrategy6Research', () => {
     expect(fetch.mock.calls.some(([url]) => url.endsWith('/provider-freshness'))).toBe(false)
     fetch.mockResolvedValueOnce({ ok: true, json: async () => ({
       symbol: 'BRK.B.US', status: 'TARGET_MISSING', target_trade_date: '2026-11-06', latest_date: '2026-11-05',
+      local_latest_date: '2026-11-04',
     }) })
     expect(wrapper.get('[data-test="probe-symbol"]').element.value).toBe('AAPL')
     await wrapper.get('[data-test="probe-symbol"]').setValue('BRK.B')
@@ -47,6 +48,7 @@ describe('USStrategy6Research', () => {
     }))
     expect(wrapper.get('[data-test="probe-result"]').text()).toContain('未覆盖目标日')
     expect(wrapper.get('[data-test="probe-result"]').text()).toContain('2026-11-05')
+    expect(wrapper.get('[data-test="probe-result"]').text()).toContain('本地最新日线 2026-11-04')
     wrapper.unmount()
   })
 

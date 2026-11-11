@@ -40,3 +40,23 @@ def test_provider_probe_failure_is_not_reported_as_stale(monkeypatch):
     response = client.post('/api/us/data/provider-freshness', json={'symbol': 'BRK.B'})
     assert response.status_code == 502
     assert response.json()['error'] == 'US_PROVIDER_PROBE_FAILED'
+
+
+def test_probe_reports_local_date_separately_without_creating_database(tmp_path, monkeypatch):
+    from us_market.repository import USRepository
+
+    path = tmp_path / 'us_market.db'
+    monkeypatch.setattr(server, '_us_database_path', lambda: path)
+    monkeypatch.setattr('us_market.daily_data.probe_provider_daily', lambda symbol: {
+        'symbol': symbol, 'status': 'UPDATED', 'latest_date': '2026-11-10',
+    })
+    client = TestClient(server.app)
+    endpoint = '/api/us/data/provider-freshness'
+    assert client.post(endpoint, json={'symbol': 'AAPL'}).json()['local_latest_date'] is None
+    assert not path.exists()
+    USRepository(path).save_history('AAPL', [
+        dict(date='2026-11-09', open=10, high=11, low=9, close=10, volume=100),
+    ], dict(source='tickflow_free', adjustment='forward'))
+    result = client.post(endpoint, json={'symbol': 'AAPL'}).json()
+    assert result['latest_date'] == '2026-11-10'
+    assert result['local_latest_date'] == '2026-11-09'

@@ -2847,6 +2847,7 @@ def get_us_universe():
 @app.post('/api/us/data/provider-freshness')
 def us_provider_freshness(payload: dict):
     from us_market.daily_data import probe_provider_daily
+    from us_market.history import read_local_history
     from us_market.instruments import provider_symbol
 
     try:
@@ -2858,12 +2859,21 @@ def us_provider_freshness(payload: dict):
         return JSONResponse({'error': 'INVALID_US_SYMBOL', 'message': '请输入有效的美股代码，例如 AAPL 或 BRK.B。'},
                             status_code=400)
     try:
-        return probe_provider_daily(symbol)
+        result = probe_provider_daily(symbol)
     except Exception as exc:
         logger.warning('US provider probe failed for %s: %s', symbol, exc)
         return JSONResponse({'error': 'US_PROVIDER_PROBE_FAILED',
                              'message': 'TickFlow 免费端查询失败或返回数据异常，暂无法确认是否更新。'},
                             status_code=502)
+    result.update(local_latest_date=None, local_history_error=False)
+    try:
+        history = read_local_history(_us_database_path(), symbol)
+        if history and history['rows']:
+            result['local_latest_date'] = history['rows'][-1]['date']
+    except Exception as exc:
+        logger.warning('US probe local history read failed for %s: %s', symbol, exc)
+        result['local_history_error'] = True
+    return result
 
 
 @app.get('/api/us/data/{code}/kline-history')
