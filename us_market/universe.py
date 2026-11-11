@@ -22,10 +22,11 @@ def refresh_universe(repository, *, sdk=None):
     if not isinstance(values, list) or not values or len(values) > 50000 or any(not isinstance(s, str) for s in values):
         raise ValueError('empty or invalid universe; previous snapshot preserved')
     count = raw.get('symbol_count')
-    if isinstance(count, bool) or count != len(values) or len(set(values)) != len(values):
-        raise ValueError('inconsistent universe count or duplicate symbols')
+    if isinstance(count, bool) or count != len(values):
+        raise ValueError('inconsistent universe count')
+    unique_values = list(dict.fromkeys(values))
     symbols, rejected = [], []
-    for value in values:
+    for value in unique_values:
         try:
             if not value.endswith('.US') or provider_symbol(value) != value:
                 raise ValueError('not a canonical US provider symbol')
@@ -37,6 +38,7 @@ def refresh_universe(repository, *, sdk=None):
     snapshot = {'snapshot_id': uuid4().hex, 'source': 'tickflow_free', 'universe_id': 'US_Equity',
                 'fetched_at': datetime.now(timezone.utc).isoformat(), 'provider_count': count,
                 'usable_count': len(symbols), 'symbols': symbols, 'rejected': rejected,
+                'duplicate_count': count - len(unique_values),
                 'security_classification': 'PROVIDER_POOL_MIXED_UNVERIFIED',
                 'warnings': ['POOL_MAY_INCLUDE_ETF_ADR_PREFERRED_WARRANTS', 'NOT_CERTIFIED_COMMON_STOCK_UNIVERSE'],
                 'data_hash': hashlib.sha256(json.dumps(values).encode()).hexdigest()}

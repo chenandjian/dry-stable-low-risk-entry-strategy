@@ -30,7 +30,9 @@
       <div class="task-bar"><strong>TickFlow美股股票池</strong>
         <button data-test="refresh-pool" :disabled="poolLoading || starting" @click="loadPool(true)">{{ poolLoading ? '获取中…' : '更新股票池（免费端）' }}</button></div>
       <p v-if="universe">来源 {{ universe.source }} / {{ universe.universe_id }} · 供应商 {{ universe.provider_count }} ·
-        可扫描 {{ universe.usable_count }} · 代码待核查 {{ universe.rejected_count || 0 }} · 更新 {{ universe.fetched_at || '—' }}</p>
+        可扫描 {{ universe.usable_count }} · 代码待核查 {{ universe.rejected_count || 0 }}
+        <template v-if="universe.duplicate_count"> · 重复去除 {{ universe.duplicate_count }}</template>
+        · 更新 {{ universe.fetched_at || '—' }}</p>
       <p v-else>尚无本地股票池。可开始在线全池扫描，或手动更新名单后仅使用本地数据。</p>
       <p>更新股票池只获取代码名单，不拉取日线。新建在线全池扫描会先更新名单；仅使用本地数据时不会更新。</p>
       <p>该池可能包含ETF、ADR及其他证券，不是已核验的纯普通股池；全池扫描仅用于研究。</p>

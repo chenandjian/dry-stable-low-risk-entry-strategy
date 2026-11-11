@@ -15,13 +15,14 @@ def pool(symbols):
 
 def test_free_universe_is_atomic_immutable_and_not_certified_common_stock(tmp_path):
     repo = USRepository(tmp_path / 'us.db')
-    sdk = SimpleNamespace(universes=SimpleNamespace(get=lambda name: pool(['AAPL.US', 'BRK.B.US', 'SPY.US'])))
+    sdk = SimpleNamespace(universes=SimpleNamespace(get=lambda name: pool(['AAPL.US', 'BRK.B.US', 'AAPL.US', 'SPY.US'])))
     snapshot = refresh_universe(repo, sdk=sdk)
     assert snapshot['symbols'] == ['AAPL.US', 'BRK.B.US', 'SPY.US']
+    assert (snapshot['provider_count'], snapshot['duplicate_count'], snapshot['usable_count']) == (4, 1, 3)
     assert snapshot['source'] == 'tickflow_free'
     assert snapshot['security_classification'] == 'PROVIDER_POOL_MIXED_UNVERIFIED'
     assert repo.latest_universe() == snapshot
-    for bad in [pool([]), pool(['AAPL.US', 'AAPL.US']), pool(['600000.SH']),
+    for bad in [pool([]), pool(['600000.SH']),
                 dict(pool(['AAPL.US']), symbol_count=100)]:
         sdk.universes.get = lambda name: bad
         with pytest.raises(ValueError):
