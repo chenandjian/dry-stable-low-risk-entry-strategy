@@ -2,8 +2,11 @@
   <main class="us-research">
     <header><small>STRATEGY 6 · US RESEARCH</small><h1>美股策略6研究</h1>
       <p>TickFlow免费端 · forward前复权 · 原始volume · 独立美股数据库</p>
-      <a href="/us/strategy6/batch-evaluation">美股批量评分</a> ·
-      <a href="/us/strategy6/observations">候选与 VCP 持续观察</a></header>
+      <nav class="research-actions" aria-label="美股研究快捷入口">
+        <a class="primary-action" href="/us/strategy6/batch-evaluation">进入美股批量评分</a>
+        <a class="secondary-action" href="/us/strategy6/observations">候选与 VCP 持续观察</a>
+      </nav>
+    </header>
     <aside class="warning"><strong>研究模式：未启用市场过滤，不是正式候选或买入建议。</strong>
       <p>成交量拆股口径尚未独立核验。估算成交额＝前复权收盘价 × 供应商成交量，不等于真实成交额；参数未完成美股收益调优。</p>
       <p>免费日线可能延迟发布。缺少目标交易日时明确失败，不冒充停牌或用旧数据生成当天结果。</p></aside>
@@ -187,6 +190,13 @@ onUnmounted(() => { stopped = true; generation++; clearTimeout(timer) })
 small { color: var(--gold, #d6a84a); letter-spacing: .1em; }
 h1 { margin: 8px 0; font-size: 24px; }
 p { line-height: 1.7; font-size: 13px; }
+.research-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin-top: 16px; }
+.research-actions a { display: inline-flex; align-items: center; min-height: 44px; padding: 0 16px; border-radius: 4px; text-decoration: none; }
+.research-actions a:focus-visible { outline: 2px solid #f3d58f; outline-offset: 3px; }
+.primary-action { background: #e7b95e; color: #17130a; font-size: 15px; font-weight: 700; }
+.primary-action:hover { background: #f3d58f; }
+.secondary-action { border: 1px solid #304258; color: #ccd8e8; font-size: 13px; }
+.secondary-action:hover { background: #111d2b; }
 section, aside { border: 1px solid var(--border, #283444); background: var(--bg-panel, #0d1520); padding: 18px; margin-top: 18px; }
 .warning { border-left: 3px solid #d6a84a; color: #e8c77f; }
 .inputs, .controls, .task-bar, .summary { display: flex; gap: 18px; flex-wrap: wrap; align-items: center; }

@@ -18,6 +18,11 @@ describe('USStrategy6Research', () => {
     await flushPromises()
     expect(wrapper.text()).toContain('未启用市场过滤')
     expect(wrapper.text()).toContain('估算成交额')
+    const links = wrapper.get('[aria-label="美股研究快捷入口"]').findAll('a')
+    expect(links.map(link => link.attributes('href'))).toEqual([
+      '/us/strategy6/batch-evaluation', '/us/strategy6/observations',
+    ])
+    expect(links[0].classes()).toContain('primary-action')
     expect(wrapper.get('[data-test="scope"]').element.value).toBe('universe')
     expect(wrapper.get('[data-test="start"]').element.disabled).toBe(true)
     expect(fetch).toHaveBeenCalledTimes(2)
