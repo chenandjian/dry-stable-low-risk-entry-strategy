@@ -2745,9 +2745,21 @@ def _get_us_manager():
 
 @app.post('/api/us/strategy6/research')
 async def start_us_strategy6_research(request: Request):
-    from scheduler.scheduler import _serial_scan_lock
     try:
         payload = await request.json()
+    except ValueError:
+        payload = None
+    return await asyncio.to_thread(_start_us_strategy6_research, payload)
+
+
+def _start_us_strategy6_research(payload):
+    from scheduler.scheduler import _serial_scan_lock
+    from us_market.universe import refresh_universe, universe_summary
+
+    class UniverseRefreshFailed(Exception):
+        pass
+
+    try:
         if not isinstance(payload, dict):
             raise ValueError('request must be a JSON object')
         manager = _get_us_manager()
@@ -2763,6 +2775,17 @@ async def start_us_strategy6_research(request: Request):
                 held = False
                 _serial_scan_lock.release()
         try:
+            refreshed = None
+
+            def refresh():
+                nonlocal refreshed
+                try:
+                    refreshed = refresh_universe(manager.repository)
+                    return refreshed
+                except Exception as exc:
+                    logger.warning('US pre-scan universe refresh failed: %s', exc)
+                    raise UniverseRefreshFailed() from exc
+
             def finish():
                 _clear_running()
                 release_serial()
@@ -2772,13 +2795,21 @@ async def start_us_strategy6_research(request: Request):
                 retry_of=payload.get('retry_of'), as_of=payload.get('as_of'),
                 resume_of=payload.get('resume_of'), scope=payload.get('scope', 'manual'),
                 universe_snapshot_id=payload.get('universe_snapshot_id'),
+                refresh_online_universe=refresh,
                 on_start=lambda task_id: _set_running(task_id, 'us_research', 'US_STRATEGY6_RESEARCH'),
                 on_finish=finish,
             )
         except Exception:
             release_serial()
             raise
-        return {'task_id': task_id, 'research_only': True, 'market_filter_enabled': False}
+        result = {'task_id': task_id, 'research_only': True, 'market_filter_enabled': False}
+        if refreshed is not None:
+            result['universe'] = universe_summary(refreshed)
+        return result
+    except UniverseRefreshFailed:
+        return JSONResponse({'error': 'US_UNIVERSE_REFRESH_FAILED',
+                             'message': '股票池更新失败，本次未启动扫描；保留上次成功的名单，请重试。'},
+                            status_code=502)
     except (ValueError, TypeError) as exc:
         return JSONResponse({'error': 'INVALID_US_REQUEST', 'message': str(exc)}, status_code=400)
     except RuntimeError as exc:

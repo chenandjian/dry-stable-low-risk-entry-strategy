@@ -12,11 +12,11 @@
       <p>免费日线可能延迟发布。缺少目标交易日时明确失败，不冒充停牌或用旧数据生成当天结果。</p></aside>
     <section>
       <div class="task-bar"><strong>TickFlow美股股票池</strong>
-        <button data-test="refresh-pool" :disabled="poolLoading" @click="loadPool(true)">{{ poolLoading ? '获取中…' : '更新股票池（免费端）' }}</button></div>
+        <button data-test="refresh-pool" :disabled="poolLoading || starting" @click="loadPool(true)">{{ poolLoading ? '获取中…' : '更新股票池（免费端）' }}</button></div>
       <p v-if="universe">来源 {{ universe.source }} / {{ universe.universe_id }} · 供应商 {{ universe.provider_count }} ·
         可扫描 {{ universe.usable_count }} · 代码待核查 {{ universe.rejected_count || 0 }} · 更新 {{ universe.fetched_at || '—' }}</p>
-      <p v-else>尚无本地股票池，请先更新。打开页面不会自动请求外部行情。</p>
-      <p>更新股票池只获取可扫描的代码名单，不拉取日线。开始全池扫描使用当前名单，不会自动更新股票池。</p>
+      <p v-else>尚无本地股票池。可开始在线全池扫描，或手动更新名单后仅使用本地数据。</p>
+      <p>更新股票池只获取代码名单，不拉取日线。新建在线全池扫描会先更新名单；仅使用本地数据时不会更新。</p>
       <p>该池可能包含ETF、ADR及其他证券，不是已核验的纯普通股池；全池扫描仅用于研究。</p>
       <p>首次全池拉取可能耗时较长并占用较大磁盘空间；可以停止，当前批次结束后保存断点。</p>
       <p v-if="poolError" class="error">{{ poolError }}（保留上次成功股票池）</p>
@@ -29,7 +29,8 @@
         <label>评估日期（留空＝最近完整交易日）<input v-model="asOf" type="date"></label>
         <label><input v-model="localOnly" type="checkbox">仅使用本地数据，不请求网络</label>
         <label><input v-model="force" type="checkbox" :disabled="localOnly">强制重新拉取</label>
-        <button data-test="start" :disabled="starting || running || poolLoading || (scope === 'manual' ? !symbolsText.trim() : !universe?.usable_count)" @click="start()">{{ starting ? '提交中…' : scope === 'universe' ? '开始全池研究扫描' : '开始美股研究扫描' }}</button>
+        <button data-test="start" :disabled="starting || running || poolLoading || (scope === 'manual' ? !symbolsText.trim() : localOnly && !universe?.usable_count)" @click="start()">{{ refreshingForScan ? '正在更新股票池…' : starting ? '提交中…' : scope === 'universe' ? '开始全池研究扫描' : '开始美股研究扫描' }}</button>
+        <span v-if="refreshingForScan" role="status">名单更新成功后将自动开始扫描。</span>
       </div>
     </section>
     <p v-if="error" role="alert" class="error">{{ error }}</p>
@@ -77,6 +78,7 @@ const route = useRoute(), router = useRouter()
 const symbolsText = ref(localStorage.getItem('strategy6-us-research-symbols') || '')
 const count = ref(1100), asOf = ref(''), localOnly = ref(false), force = ref(false)
 const scope = ref('universe'), universe = ref(null), poolLoading = ref(false), poolError = ref('')
+const refreshingForScan = ref(false)
 const page = ref(1), stopping = ref(false)
 const tasks = ref([]), selectedId = ref(String(route.query.task || '')), task = ref(null)
 const starting = ref(false), error = ref(''), copied = ref(''), onlyPassed = ref(false)
@@ -149,6 +151,7 @@ watch(() => route.query.task, id => { if (String(id || '') !== selectedId.value)
 async function start(retryOf, resumeOf) {
   if (starting.value) return
   starting.value = true
+  refreshingForScan.value = scope.value === 'universe' && !localOnly.value && !retryOf && !resumeOf
   error.value = ''
   localStorage.setItem('strategy6-us-research-symbols', symbolsText.value)
   try {
@@ -157,14 +160,18 @@ async function start(retryOf, resumeOf) {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ symbols, count: (retryOf || resumeOf) ? task.value?.count || 1100 : count.value,
         scope: scope.value, as_of: asOf.value || null, local_only: localOnly.value,
-        universe_snapshot_id: scope.value === 'universe' ? universe.value?.snapshot_id : null,
+        universe_snapshot_id: scope.value === 'universe' && localOnly.value ? universe.value?.snapshot_id : null,
         force: force.value, retry_of: retryOf || null, resume_of: resumeOf || null }),
     })
     if (stopped) return
+    if (data.universe) {
+      universe.value = data.universe
+      poolError.value = ''
+    }
     selectedId.value = data.task_id
     await loadTasks()
   } catch (e) { if (!stopped) error.value = e.message }
-  finally { starting.value = false }
+  finally { starting.value = false; refreshingForScan.value = false }
 }
 async function stopTask() {
   const id = selectedId.value

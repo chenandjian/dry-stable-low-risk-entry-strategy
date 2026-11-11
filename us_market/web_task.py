@@ -38,7 +38,7 @@ class USResearchManager:
 
     def start(self, symbols, *, count=1100, local_only=False, force=False,
               retry_of=None, resume_of=None, scope='manual', universe_snapshot_id=None,
-              as_of=None, on_start=None, on_finish=None):
+              as_of=None, on_start=None, on_finish=None, refresh_online_universe=None):
         if isinstance(count, bool) or not isinstance(count, int) or not 500 <= count <= 3000:
             raise ValueError('research count must be between 500 and 3000')
         if not isinstance(local_only, bool) or not isinstance(force, bool):
@@ -47,6 +47,7 @@ class USResearchManager:
             raise ValueError('invalid scope or conflicting retry/resume')
         parent_id = retry_of or resume_of
         snapshot_id = None
+        context = None
         if parent_id:
             if not isinstance(parent_id, str):
                 raise ValueError('parent must be a task ID')
@@ -68,8 +69,12 @@ class USResearchManager:
         elif scope == 'universe':
             if universe_snapshot_id is not None and not isinstance(universe_snapshot_id, str):
                 raise ValueError('universe_snapshot_id must be a string')
-            snapshot = (self.repository.get_universe(universe_snapshot_id) if universe_snapshot_id
-                        else self.repository.latest_universe())
+            if refresh_online_universe is not None and not local_only:
+                context = evaluation_context(datetime.now(timezone.utc), as_of)
+                snapshot = refresh_online_universe()
+            else:
+                snapshot = (self.repository.get_universe(universe_snapshot_id) if universe_snapshot_id
+                            else self.repository.latest_universe())
             if snapshot is None:
                 raise ValueError('refresh and save TickFlow US_Equity pool before full-pool scanning')
             symbols, snapshot_id = snapshot['symbols'], snapshot['snapshot_id']
@@ -77,7 +82,7 @@ class USResearchManager:
         config = StrongVcpTailEngine(parent['config'] if parent_id else None,
                                     market_profile='US_RESEARCH_NO_INDEX').config
         symbols = _symbols(symbols)
-        context = evaluation_context(datetime.now(timezone.utc), as_of)
+        context = context or evaluation_context(datetime.now(timezone.utc), as_of)
         if len(symbols) > 200 and scope == 'manual' and not parent_id:
             raise ValueError('at most 200 symbols per research task')
         if not self.lock.acquire(blocking=False):

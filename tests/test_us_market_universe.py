@@ -239,7 +239,7 @@ def test_large_pool_sql_pagination_without_unbounded_json_results(tmp_path, monk
     assert 'symbols' not in manager.tasks()[0]
 
 
-def test_universe_api_uses_cached_pool_and_paginates_over_200(tmp_path, monkeypatch):
+def test_universe_api_refreshes_online_and_keeps_cached_pool_for_local_scan(tmp_path, monkeypatch):
     from fastapi.testclient import TestClient
     import server
     repo = USRepository(tmp_path / 'us.db')
@@ -255,11 +255,27 @@ def test_universe_api_uses_cached_pool_and_paginates_over_200(tmp_path, monkeypa
     client = TestClient(server.app)
     response = client.get('/api/us/data/universe').json()['universe']
     assert response['usable_count'] == 245 and 'symbols' not in response
+    def offline(repo):
+        raise OSError('offline')
+
+    monkeypatch.setattr('us_market.universe.refresh_universe', offline)
+    failed = client.post('/api/us/strategy6/research', json={'scope': 'universe'})
+    assert failed.status_code == 502
+    assert manager.tasks() == []
+    assert repo.latest_universe()['snapshot_id'] == snapshot['snapshot_id']
+    local = client.post('/api/us/strategy6/research', json={'scope': 'universe', 'local_only': True})
+    assert local.status_code == 200
+    manager.join(10)
+    assert manager.get(local.json()['task_id'])['universe_snapshot_id'] == snapshot['snapshot_id']
+    original_refresh = refresh_universe
+    monkeypatch.setattr('us_market.universe.refresh_universe', lambda repo: original_refresh(repo, sdk=sdk))
     response = client.post('/api/us/strategy6/research', json={'scope': 'universe', 'universe_snapshot_id': snapshot['snapshot_id']})
     assert response.status_code == 200
     task_id = response.json()['task_id']
     manager.join(10)
     page = client.get(f'/api/us/strategy6/tasks/{task_id}?page=2&page_size=50').json()['task']
+    assert page['universe_snapshot_id'] != snapshot['snapshot_id']
+    assert page['universe_snapshot_id'] == response.json()['universe']['snapshot_id']
     assert page['stocks'][0]['symbol'] == 'T50.US' and len(page['stocks']) == 50
     assert page['failed_count'] == 245
     assert client.get(f'/api/us/strategy6/tasks/{task_id}?page=0').status_code == 400
