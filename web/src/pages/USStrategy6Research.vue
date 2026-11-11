@@ -13,12 +13,13 @@
       <p v-if="universe">来源 {{ universe.source }} / {{ universe.universe_id }} · 供应商 {{ universe.provider_count }} ·
         可扫描 {{ universe.usable_count }} · 代码待核查 {{ universe.rejected_count || 0 }} · 更新 {{ universe.fetched_at || '—' }}</p>
       <p v-else>尚无本地股票池，请先更新。打开页面不会自动请求外部行情。</p>
+      <p>更新股票池只获取可扫描的代码名单，不拉取日线。开始全池扫描使用当前名单，不会自动更新股票池。</p>
       <p>该池可能包含ETF、ADR及其他证券，不是已核验的纯普通股池；全池扫描仅用于研究。</p>
       <p>首次全池拉取可能耗时较长并占用较大磁盘空间；可以停止，当前批次结束后保存断点。</p>
       <p v-if="poolError" class="error">{{ poolError }}（保留上次成功股票池）</p>
     </section>
     <section class="inputs">
-      <label>扫描范围<select data-test="scope" v-model="scope"><option value="manual">手工代码池（最多200只）</option><option value="universe">TickFlow全股票池</option></select></label>
+      <label>扫描范围<select data-test="scope" v-model="scope"><option value="universe">TickFlow全股票池</option><option value="manual">手工代码池（最多200只）</option></select></label>
       <label v-if="scope === 'manual'">股票代码（最多200只）<textarea v-model="symbolsText" rows="4" placeholder="AAPL&#10;MSFT&#10;BRK.B" /></label>
       <div class="controls">
         <label>请求日线根数<input v-model.number="count" type="number" min="500" max="3000"></label>
@@ -72,7 +73,7 @@ import { useRoute, useRouter } from 'vue-router'
 const route = useRoute(), router = useRouter()
 const symbolsText = ref(localStorage.getItem('strategy6-us-research-symbols') || '')
 const count = ref(1100), asOf = ref(''), localOnly = ref(false), force = ref(false)
-const scope = ref('manual'), universe = ref(null), poolLoading = ref(false), poolError = ref('')
+const scope = ref('universe'), universe = ref(null), poolLoading = ref(false), poolError = ref('')
 const page = ref(1), stopping = ref(false)
 const tasks = ref([]), selectedId = ref(String(route.query.task || '')), task = ref(null)
 const starting = ref(false), error = ref(''), copied = ref(''), onlyPassed = ref(false)
